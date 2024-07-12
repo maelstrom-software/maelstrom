@@ -554,7 +554,7 @@ fn tty_socket_writer_main(
         let message = job_input_receiver.recv()?;
 
         if sigwinch_pending.swap(false, Ordering::SeqCst) {
-            match linux::ioctl_tiocgwinsz(Fd::STDIN) {
+            match linux::ioctl_tiocgwinsz(&Fd::STDIN) {
                 Err(err) => {
                     sender.send(TtyMainMessage::Error(
                         Error::new(err).context("ioctl(TIOCGWINSZ) on stdin"),
@@ -628,7 +628,7 @@ fn tty_main(
     escape_char: EscapeChar,
     mut job_spec: JobSpec,
 ) -> Result<ExitCode> {
-    let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
+    let (rows, columns) = linux::ioctl_tiocgwinsz(&Fd::STDIN)?;
     let (sock, addr) = linux::autobound_unix_listener(Default::default(), 1)?;
     job_spec.allocate_tty = Some(JobTty::new(&addr, WindowSize::new(rows, columns)));
 

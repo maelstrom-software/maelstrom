@@ -55,6 +55,10 @@ impl AcceptFlags {
     pub const NONBLOCK: Self = Self(libc::SOCK_NONBLOCK);
 }
 
+pub trait AsFd {
+    fn fd(&self) -> Fd;
+}
+
 #[derive(Clone)]
 #[repr(transparent)]
 pub struct CloneArgs(libc::clone_args);
@@ -268,6 +272,7 @@ impl ExitCode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(transparent)]
 pub struct Fd(c_int);
 
 impl Fd {
@@ -290,6 +295,12 @@ impl Fd {
 
     pub fn as_c_int(self) -> c_int {
         self.0
+    }
+}
+
+impl AsFd for Fd {
+    fn fd(&self) -> Fd {
+        *self
     }
 }
 
@@ -432,6 +443,12 @@ impl OwnedFd {
         let raw_fd = self.0;
         mem::forget(self);
         raw_fd
+    }
+}
+
+impl AsFd for OwnedFd {
+    fn fd(&self) -> Fd {
+        self.0
     }
 }
 
@@ -953,7 +970,8 @@ pub fn access(path: &CStr, mode: AccessMode) -> Result<(), Errno> {
     Errno::result(unsafe { libc::access(path_ptr, mode.0) }).map(drop)
 }
 
-pub fn accept(fd: Fd, flags: AcceptFlags) -> Result<(OwnedFd, SockaddrStorage), Errno> {
+pub fn accept(fd: &impl AsFd, flags: AcceptFlags) -> Result<(OwnedFd, SockaddrStorage), Errno> {
+    let fd = fd.fd();
     let mut sockaddr = SockaddrStorage::default();
     let (addr_ptr, len_ptr) = unsafe { sockaddr.as_mut_parts() };
     let fd = Errno::result(unsafe { libc::accept4(fd.0, addr_ptr, len_ptr, flags.0) })
@@ -971,9 +989,9 @@ pub fn autobound_unix_listener(
         SocketType::STREAM | socket_flags,
         Default::default(),
     )?;
-    bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
-    listen(sock.as_fd(), backlog)?;
-    let addr = getsockname(sock.as_fd())?
+    bind(&sock, &SockaddrUnStorage::new_autobind())?;
+    listen(&sock, backlog)?;
+    let addr = getsockname(&sock)?
         .as_sockaddr_un()
         .unwrap()
         .path()
@@ -982,7 +1000,8 @@ pub fn autobound_unix_listener(
     Ok((sock, addr))
 }
 
-pub fn bind(fd: Fd, sockaddr: &Sockaddr) -> Result<(), Errno> {
+pub fn bind(fd: &impl AsFd, sockaddr: &Sockaddr) -> Result<(), Errno> {
+    let fd = fd.fd();
     let (addr, len) = sockaddr.as_parts();
     Errno::result(unsafe { libc::bind(fd.0, addr, len) }).map(drop)
 }
@@ -1062,12 +1081,15 @@ pub fn close_range(
     Errno::result(unsafe { libc::close_range(first, last, flags) }).map(drop)
 }
 
-pub fn connect(fd: Fd, sockaddr: &Sockaddr) -> Result<(), Errno> {
+pub fn connect(fd: &impl AsFd, sockaddr: &Sockaddr) -> Result<(), Errno> {
+    let fd = fd.fd();
     let (addr, len) = sockaddr.as_parts();
     Errno::result(unsafe { libc::connect(fd.0, addr, len) }).map(drop)
 }
 
-pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
+pub fn dup2(from: &impl AsFd, to: &impl AsFd) -> Result<Fd, Errno> {
+    let from = from.fd();
+    let to = to.fd();
     Errno::result(unsafe { libc::dup2(from.0, to.0) }).map(Fd)
 }
 
@@ -1082,15 +1104,18 @@ pub fn _exit(status: ExitCode) -> ! {
     unsafe { libc::_exit(status.0) };
 }
 
-pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
+pub fn fcntl_setfl(fd: &impl AsFd, flags: OpenFlags) -> Result<(), Errno> {
+    let fd = fd.fd();
     Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL, flags.0) }).map(drop)
 }
 
-pub fn fcntl_getpipe_sz(fd: Fd) -> Result<usize, Errno> {
+pub fn fcntl_getpipe_sz(fd: &impl AsFd) -> Result<usize, Errno> {
+    let fd = fd.fd();
     Errno::result(unsafe { libc::fcntl(fd.0, libc::F_GETPIPE_SZ) }).map(|sz| sz as usize)
 }
 
-pub fn fcntl_setpipe_sz(fd: Fd, size: usize) -> Result<(), Errno> {
+pub fn fcntl_setpipe_sz(fd: &impl AsFd, size: usize) -> Result<(), Errno> {
+    let fd = fd.fd();
     Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETPIPE_SZ, i32::try_from(size).unwrap()) })
         .map(drop)
 }
@@ -1100,12 +1125,13 @@ pub fn fork() -> Result<Option<Pid>, Errno> {
 }
 
 pub fn fsconfig(
-    fd: Fd,
+    fd: &impl AsFd,
     command: FsconfigCommand,
     key: Option<&CStr>,
     value: Option<&u8>,
     aux: Option<i32>,
 ) -> Result<(), Errno> {
+    let fd = fd.fd();
     let key_ptr = key.map(|key| key.as_ptr()).unwrap_or(ptr::null());
     let value_ptr = value.map(|value| value as *const u8).unwrap_or(ptr::null());
     let aux = aux.unwrap_or(0);
@@ -1115,7 +1141,12 @@ pub fn fsconfig(
     .map(drop)
 }
 
-pub fn fsmount(fsfd: Fd, flags: FsmountFlags, mount_attrs: MountAttrs) -> Result<OwnedFd, Errno> {
+pub fn fsmount(
+    fsfd: &impl AsFd,
+    flags: FsmountFlags,
+    mount_attrs: MountAttrs,
+) -> Result<OwnedFd, Errno> {
+    let fsfd = fsfd.fd();
     Errno::result(unsafe { libc::syscall(libc::SYS_fsmount, fsfd.0, flags.0, mount_attrs.0) })
         .map(Fd::from_c_long)
         .map(OwnedFd)
@@ -1136,7 +1167,8 @@ pub fn getpid() -> Pid {
     Pid(unsafe { libc::getpid() })
 }
 
-pub fn getsockname(fd: Fd) -> Result<SockaddrStorage, Errno> {
+pub fn getsockname(fd: &impl AsFd) -> Result<SockaddrStorage, Errno> {
+    let fd = fd.fd();
     let mut sockaddr = SockaddrStorage::default();
     let (addr_ptr, len_ptr) = unsafe { sockaddr.as_mut_parts() };
     Errno::result(unsafe { libc::getsockname(fd.0, addr_ptr, len_ptr) })?;
@@ -1147,21 +1179,25 @@ pub fn getuid() -> Uid {
     Uid(unsafe { libc::getuid() })
 }
 
-pub fn grantpt(fd: Fd) -> Result<(), Errno> {
+pub fn grantpt(fd: &impl AsFd) -> Result<(), Errno> {
+    let fd = fd.fd();
     Errno::result(unsafe { libc::grantpt(fd.0) }).map(drop)
 }
 
-pub fn ioctl_tiocsctty(fd: Fd, arg: i32) -> Result<(), Errno> {
+pub fn ioctl_tiocsctty(fd: &impl AsFd, arg: i32) -> Result<(), Errno> {
+    let fd = fd.fd();
     Errno::result(unsafe { libc::ioctl(fd.0, libc::TIOCSCTTY, arg as c_int) }).map(drop)
 }
 
-pub fn ioctl_tiocgwinsz(fd: Fd) -> Result<(u16, u16), Errno> {
+pub fn ioctl_tiocgwinsz(fd: &impl AsFd) -> Result<(u16, u16), Errno> {
+    let fd = fd.fd();
     let mut winsize: libc::winsize = unsafe { mem::zeroed() };
     Errno::result(unsafe { libc::ioctl(fd.0, libc::TIOCGWINSZ, &mut winsize) }).map(drop)?;
     Ok((winsize.ws_row, winsize.ws_col))
 }
 
-pub fn ioctl_tiocswinsz(fd: Fd, rows: u16, columns: u16) -> Result<(), Errno> {
+pub fn ioctl_tiocswinsz(fd: &impl AsFd, rows: u16, columns: u16) -> Result<(), Errno> {
+    let fd = fd.fd();
     let winsize = libc::winsize {
         ws_row: rows,
         ws_col: columns,
@@ -1175,11 +1211,13 @@ pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
     Errno::result(unsafe { libc::kill(pid.0, signal.0) }).map(drop)
 }
 
-pub fn listen(fd: Fd, backlog: u32) -> Result<(), Errno> {
+pub fn listen(fd: &impl AsFd, backlog: u32) -> Result<(), Errno> {
+    let fd = fd.fd();
     Errno::result(unsafe { libc::listen(fd.0, backlog as c_int) }).map(drop)
 }
 
-pub fn lseek(fd: Fd, offset: i64, whence: Whence) -> Result<i64, Errno> {
+pub fn lseek(fd: &impl AsFd, offset: i64, whence: Whence) -> Result<i64, Errno> {
+    let fd = fd.fd();
     Errno::result(unsafe { libc::lseek(fd.0, offset, whence.as_i32()) })
 }
 
@@ -1204,12 +1242,14 @@ pub fn mount(
 }
 
 pub fn move_mount(
-    from_dirfd: Fd,
+    from_dirfd: &impl AsFd,
     from_path: &CStr,
-    to_dirfd: Fd,
+    to_dirfd: &impl AsFd,
     to_path: &CStr,
     flags: MoveMountFlags,
 ) -> Result<(), Errno> {
+    let from_dirfd = from_dirfd.fd();
+    let to_dirfd = to_dirfd.fd();
     let from_path_ptr = from_path.as_ptr();
     let to_path_ptr = to_path.as_ptr();
     Errno::result(unsafe {
@@ -1233,7 +1273,8 @@ pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<OwnedFd, Er
     Ok(fd)
 }
 
-pub fn open_tree(dirfd: Fd, path: &CStr, flags: OpenTreeFlags) -> Result<OwnedFd, Errno> {
+pub fn open_tree(dirfd: &impl AsFd, path: &CStr, flags: OpenTreeFlags) -> Result<OwnedFd, Errno> {
+    let dirfd = dirfd.fd();
     let path_ptr = path.as_ptr();
     Errno::result(unsafe { libc::syscall(libc::SYS_open_tree, dirfd.0, path_ptr, flags.0) })
         .map(Fd::from_c_long)
@@ -1251,7 +1292,8 @@ pub fn pidfd_open(pid: Pid) -> Result<OwnedFd, Errno> {
         .map(OwnedFd)
 }
 
-pub fn pidfd_send_signal(pidfd: Fd, signal: Signal) -> Result<(), Errno> {
+pub fn pidfd_send_signal(pidfd: &impl AsFd, signal: Signal) -> Result<(), Errno> {
+    let pidfd = pidfd.fd();
     let info: *const siginfo_t = ptr::null();
     let flags = 0 as c_uint;
     Errno::result(unsafe {
@@ -1300,7 +1342,8 @@ pub fn pthread_sigmask(how: SigprocmaskHow, set: Option<&SignalSet>) -> Result<S
     Ok(SignalSet(unsafe { oldset.assume_init() }))
 }
 
-pub fn ptsname(fd: Fd, name: &mut [u8]) -> Result<(), Errno> {
+pub fn ptsname(fd: &impl AsFd, name: &mut [u8]) -> Result<(), Errno> {
+    let fd = fd.fd();
     let buf_ptr = name.as_mut_ptr() as *mut c_char;
     let buf_len = name.len();
     Errno::result(unsafe { libc::ptsname_r(fd.0, buf_ptr, buf_len) }).map(drop)
@@ -1310,7 +1353,8 @@ pub fn raise(signal: Signal) -> Result<(), Errno> {
     Errno::result(unsafe { libc::raise(signal.0) }).map(drop)
 }
 
-pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
+pub fn read(fd: &impl AsFd, buf: &mut [u8]) -> Result<usize, Errno> {
+    let fd = fd.fd();
     let buf_ptr = buf.as_mut_ptr() as *mut c_void;
     let buf_len = buf.len();
     Errno::result(unsafe { libc::read(fd.0, buf_ptr, buf_len) }).map(|ret| ret as usize)
@@ -1348,7 +1392,8 @@ pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
     Errno::result(unsafe { libc::umount2(path_ptr, flags.0) }).map(drop)
 }
 
-pub fn unlockpt(fd: Fd) -> Result<(), Errno> {
+pub fn unlockpt(fd: &impl AsFd) -> Result<(), Errno> {
+    let fd = fd.fd();
     Errno::result(unsafe { libc::unlockpt(fd.0) }).map(drop)
 }
 
@@ -1393,7 +1438,8 @@ pub fn waitpid(pid: Pid) -> Result<WaitStatus, Errno> {
     Errno::result(inner(&mut status)).map(|_| extract_wait_status(status))
 }
 
-pub fn waitid(pidfd: Fd) -> Result<WaitStatus, Errno> {
+pub fn waitid(pidfd: &impl AsFd) -> Result<WaitStatus, Errno> {
+    let pidfd = pidfd.fd();
     let inner = |siginfo: &mut siginfo_t| {
         let idtype = libc::P_PIDFD as idtype_t;
         let id = pidfd.0 as id_t;
@@ -1405,7 +1451,8 @@ pub fn waitid(pidfd: Fd) -> Result<WaitStatus, Errno> {
     Errno::result(inner(&mut siginfo)).map(|_| extract_wait_status_from_siginfo(siginfo))
 }
 
-pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
+pub fn write(fd: &impl AsFd, buf: &[u8]) -> Result<usize, Errno> {
+    let fd = fd.fd();
     let buf_ptr = buf.as_ptr() as *const c_void;
     let buf_len = buf.len();
     Errno::result(unsafe { libc::write(fd.0, buf_ptr, buf_len) }).map(|ret| ret as usize)
@@ -1563,12 +1610,14 @@ impl UnixStream {
 }
 
 pub fn splice(
-    fd_in: Fd,
+    fd_in: &impl AsFd,
     off_in: Option<u64>,
-    fd_out: Fd,
+    fd_out: &impl AsFd,
     off_out: Option<u64>,
     length: usize,
 ) -> Result<usize, Errno> {
+    let fd_in = fd_in.fd();
+    let fd_out = fd_out.fd();
     let off_in = off_in.map(|v| i64::try_from(v).unwrap());
     let off_out = off_out.map(|v| i64::try_from(v).unwrap());
 

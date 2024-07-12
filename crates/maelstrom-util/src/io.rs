@@ -912,7 +912,7 @@ impl Splicer {
         let (pipe_out, pipe_in) = linux::pipe()?;
         let pipe_max_s = std::fs::read_to_string("/proc/sys/fs/pipe-max-size")?;
         let pipe_size = pipe_max_s.trim().parse().unwrap();
-        linux::fcntl_setpipe_sz(pipe_in.as_fd(), pipe_size)?;
+        linux::fcntl_setpipe_sz(&pipe_in, pipe_size)?;
         Ok(Self {
             pipe_in,
             pipe_out,
@@ -926,7 +926,7 @@ impl Splicer {
             self.written + bytes.len() <= self.pipe_size,
             "attempt to write more than pipe can hold"
         );
-        linux::write(self.pipe_in.as_fd(), bytes)?;
+        linux::write(&self.pipe_in, bytes)?;
         self.written += bytes.len();
         Ok(())
     }
@@ -941,13 +941,13 @@ impl Splicer {
             self.written + length <= self.pipe_size,
             "attempt to write more than pipe can hold"
         );
-        let written = linux::splice(fd, offset, self.pipe_in.as_fd(), None, length)?;
+        let written = linux::splice(&fd, offset, &self.pipe_in, None, length)?;
         self.written += written;
         Ok(written)
     }
 
     pub fn copy_to_fd(&mut self, fd: linux::Fd, offset: Option<u64>) -> io::Result<()> {
-        let copied = linux::splice(self.pipe_out.as_fd(), None, fd, offset, self.written)?;
+        let copied = linux::splice(&self.pipe_out, None, &fd, offset, self.written)?;
         if copied != self.written {
             // If we get a short write, it means we are out of space.
             return Err(linux::Errno::ENOSPC.into());
@@ -960,7 +960,7 @@ impl Splicer {
         (self.pipe_out, self.pipe_in) = linux::pipe()?;
         let pipe_max_s = std::fs::read_to_string("/proc/sys/fs/pipe-max-size")?;
         let pipe_size = pipe_max_s.trim().parse().unwrap();
-        linux::fcntl_setpipe_sz(self.pipe_in.as_fd(), pipe_size)?;
+        linux::fcntl_setpipe_sz(&self.pipe_in, pipe_size)?;
         self.written = 0;
         self.pipe_size = pipe_size;
         Ok(())
@@ -998,7 +998,7 @@ impl SlowWriter {
         length: usize,
     ) -> io::Result<usize> {
         let (pipe_out, pipe_in) = linux::pipe()?;
-        let pipe_size = linux::fcntl_getpipe_sz(pipe_in.as_fd())?;
+        let pipe_size = linux::fcntl_getpipe_sz(&pipe_in)?;
         let chunk_size = std::cmp::min(self.chunk_size, pipe_size);
 
         let mut remaining = length;
@@ -1006,10 +1006,10 @@ impl SlowWriter {
             let end = self.buffer.len();
             let to_read = std::cmp::min(chunk_size, remaining);
             self.buffer.resize(end + to_read, 0);
-            let in_pipe = linux::splice(fd, Some(offset), pipe_in.as_fd(), None, to_read)?;
+            let in_pipe = linux::splice(&fd, Some(offset), &pipe_in, None, to_read)?;
             offset += in_pipe as u64;
 
-            let in_buffer = linux::read(pipe_out.as_fd(), &mut self.buffer[end..])?;
+            let in_buffer = linux::read(&pipe_out, &mut self.buffer[end..])?;
             assert_eq!(in_pipe, in_buffer);
             remaining -= in_buffer;
             self.buffer.resize(end + in_buffer, 0);
@@ -1035,7 +1035,7 @@ impl SlowWriter {
             let end = self.buffer.len();
             let to_read = std::cmp::min(self.chunk_size, remaining);
             self.buffer.resize(end + to_read, 0);
-            let read = linux::read(fd, &mut self.buffer[end..])?;
+            let read = linux::read(&fd, &mut self.buffer[end..])?;
             remaining -= read;
             self.buffer.resize(end + read, 0);
             if read == 0 {
@@ -1047,10 +1047,10 @@ impl SlowWriter {
 
     pub fn copy_to_fd(&mut self, fd: linux::Fd, offset: Option<u64>) -> io::Result<()> {
         if let Some(offset) = offset {
-            linux::lseek(fd, i64::try_from(offset).unwrap(), linux::Whence::SeekSet)?;
+            linux::lseek(&fd, i64::try_from(offset).unwrap(), linux::Whence::SeekSet)?;
         }
 
-        let written = linux::write(fd, &self.buffer[..])?;
+        let written = linux::write(&fd, &self.buffer[..])?;
         assert_eq!(written, self.buffer.len());
         self.buffer = vec![];
 

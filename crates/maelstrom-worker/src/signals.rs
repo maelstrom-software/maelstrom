@@ -127,8 +127,8 @@ fn fake_fork(test: &str) -> ForkResult {
             Default::default(),
         )
         .unwrap();
-        linux::bind(sock.as_fd(), &linux::SockaddrUnStorage::new_autobind()).unwrap();
-        linux::listen(sock.as_fd(), 1).unwrap();
+        linux::bind(&sock, &linux::SockaddrUnStorage::new_autobind()).unwrap();
+        linux::listen(&sock, 1).unwrap();
         let listener = UnixListener::from(sock);
         let local_addr = listener.local_addr().unwrap();
         let address_bytes = local_addr.as_abstract_name().unwrap();

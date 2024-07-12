@@ -132,12 +132,12 @@ impl<'clock, ClockT> Executor<'clock, ClockT> {
             // This would be a really weird scenario. Somehow we got the read end of the pipe to
             // not be fd 0, but the write end is. We can just dup the read end onto fd 0 and be
             // done.
-            linux::dup2(stdin_read_fd.as_fd(), Fd::STDIN)?;
+            linux::dup2(&stdin_read_fd, &Fd::STDIN)?;
             mem::forget(stdin_read_fd);
             mem::forget(stdin_write_fd);
         } else {
             // This is the normal case where neither fd is fd 0.
-            linux::dup2(stdin_read_fd.as_fd(), Fd::STDIN)?;
+            linux::dup2(&stdin_read_fd, &Fd::STDIN)?;
         }
 
         struct OverlayFsUpperDir;
@@ -235,7 +235,7 @@ async fn wait_for_child(
             },
         }
     }
-    Ok(match linux::waitid(async_fd.into_inner().as_fd())? {
+    Ok(match linux::waitid(&async_fd.into_inner())? {
         WaitStatus::Exited(code) => JobStatus::Exited(code.as_u8()),
         WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.as_u8()),
     })
@@ -245,7 +245,7 @@ async fn wait_for_child(
 async fn output_reader(fd: OwnedFd, inline_limit: InlineLimit) -> Result<JobOutputResult> {
     let mut buf = Vec::<u8>::new();
     // Make the read side of the pipe non-blocking so that we can use it with Tokio.
-    linux::fcntl_setfl(fd.as_fd(), OpenFlags::NONBLOCK).map_err(Error::from)?;
+    linux::fcntl_setfl(&fd, OpenFlags::NONBLOCK).map_err(Error::from)?;
     let stream = AsyncFile::new(fd)?;
     let mut take = stream.take(inline_limit.as_bytes());
     take.read_to_end(&mut buf).await?;
@@ -389,7 +389,7 @@ impl<'bump> Drop for ChildProcess<'bump> {
 
             // This should never fail, but if it does, it means that the process doesn't exist so
             // we're free to continue and drop the stack.
-            let _ = linux::waitid(child_pidfd.as_fd());
+            let _ = linux::waitid(child_pidfd);
         }
     }
 }
@@ -1269,21 +1269,21 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 )
                 .map_err(syserr)?;
                 let sockaddr = SockaddrUnStorage::new(socket_address.as_slice()).map_err(syserr)?;
-                linux::connect(socket.as_fd(), &sockaddr).map_err(syserr)?;
+                linux::connect(&socket, &sockaddr).map_err(syserr)?;
 
                 // Open the master.
                 let master =
                     linux::posix_openpt(OpenFlags::RDWR | OpenFlags::NOCTTY | OpenFlags::NONBLOCK)
                         .context("posix_openpt")
                         .map_err(syserr)?;
-                linux::ioctl_tiocswinsz(master.as_fd(), window_size.rows, window_size.columns)
+                linux::ioctl_tiocswinsz(&master, window_size.rows, window_size.columns)
                     .map_err(syserr)?;
-                linux::grantpt(master.as_fd()).map_err(syserr)?;
-                linux::unlockpt(master.as_fd()).map_err(syserr)?;
+                linux::grantpt(&master).map_err(syserr)?;
+                linux::unlockpt(&master).map_err(syserr)?;
 
                 // Open the slave.
                 let mut slave_name = [0u8; 100];
-                linux::ptsname(master.as_fd(), slave_name.as_mut_slice()).map_err(syserr)?;
+                linux::ptsname(&master, slave_name.as_mut_slice()).map_err(syserr)?;
                 let slave_name =
                     CStr::from_bytes_until_nul(slave_name.as_slice()).map_err(syserr)?;
                 let slave = linux::open(
@@ -1555,7 +1555,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                                         rows,
                                         columns,
                                     }) => {
-                                        let _ = linux::ioctl_tiocswinsz(master_fd, rows, columns);
+                                        let _ = linux::ioctl_tiocswinsz(&master_fd, rows, columns);
                                     }
                                     DecodeInputChunk::Remainder(new_remainder) => {
                                         remainder = new_remainder;

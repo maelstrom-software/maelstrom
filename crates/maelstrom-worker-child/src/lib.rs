@@ -58,6 +58,12 @@ impl<'a> FdSlot<'a> {
     }
 }
 
+impl<'a> linux::AsFd for FdSlot<'a> {
+    fn fd(&self) -> Fd {
+        self.get()
+    }
+}
+
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
 pub enum Syscall<'a> {
@@ -181,10 +187,10 @@ pub enum Syscall<'a> {
 impl<'a> Syscall<'a> {
     fn call(&mut self, write_sock: &linux::UnixStream) -> result::Result<(), Errno> {
         match self {
-            Syscall::Bind { fd, addr } => linux::bind(fd.get(), addr),
+            Syscall::Bind { fd, addr } => linux::bind(fd, addr),
             Syscall::Chdir { path } => linux::chdir(path),
             Syscall::CloseRange { first, last, flags } => linux::close_range(*first, *last, *flags),
-            Syscall::Dup2 { from, to } => linux::dup2(*from, *to).map(drop),
+            Syscall::Dup2 { from, to } => linux::dup2(&*from, &*to).map(drop),
             Syscall::Execve { path, argv, envp } => linux::execve(path, argv, envp),
             Syscall::ExecveList {
                 paths,
@@ -205,7 +211,7 @@ impl<'a> Syscall<'a> {
                 mount_attrs,
                 out,
             } => {
-                out.set(linux::fsmount(fd.get(), *flags, *mount_attrs).map(OwnedFd::into_fd)?);
+                out.set(linux::fsmount(fd, *flags, *mount_attrs).map(OwnedFd::into_fd)?);
                 Ok(())
             }
             Syscall::Fsopen { fsname, flags, out } => {
@@ -218,7 +224,7 @@ impl<'a> Syscall<'a> {
                 key,
                 value,
                 aux,
-            } => linux::fsconfig(fd.get(), *command, *key, *value, *aux),
+            } => linux::fsconfig(fd, *command, *key, *value, *aux),
             Syscall::FuseMount {
                 source,
                 target,
@@ -242,7 +248,7 @@ impl<'a> Syscall<'a> {
                 let fstype = Some(c"fuse");
                 linux::mount(source, target, fstype, *flags, Some(options.as_slice()))
             }
-            Syscall::IoctlTiocsctty { fd, arg } => linux::ioctl_tiocsctty(*fd, *arg),
+            Syscall::IoctlTiocsctty { fd, arg } => linux::ioctl_tiocsctty(fd, *arg),
             Syscall::Mkdir { path, mode } => linux::mkdir(path, *mode),
             Syscall::Mount {
                 source,
@@ -257,7 +263,7 @@ impl<'a> Syscall<'a> {
                 to_dirfd,
                 to_path,
                 flags,
-            } => linux::move_mount(from_dirfd.get(), from_path, *to_dirfd, to_path, *flags),
+            } => linux::move_mount(from_dirfd, from_path, to_dirfd, to_path, *flags),
             Syscall::Open {
                 path,
                 flags,
@@ -273,11 +279,11 @@ impl<'a> Syscall<'a> {
                 flags,
                 out,
             } => {
-                out.set(linux::open_tree(*dirfd, path, *flags).map(OwnedFd::into_fd)?);
+                out.set(linux::open_tree(dirfd, path, *flags).map(OwnedFd::into_fd)?);
                 Ok(())
             }
             Syscall::PivotRoot { new_root, put_old } => linux::pivot_root(new_root, put_old),
-            Syscall::Read { fd, buf } => linux::read(fd.get(), buf).map(drop),
+            Syscall::Read { fd, buf } => linux::read(fd, buf).map(drop),
             Syscall::SendMsg { buf, fd_to_send } => {
                 let count = write_sock.send_with_fd(buf, fd_to_send.get())?;
                 assert_eq!(count, buf.len());
@@ -294,7 +300,7 @@ impl<'a> Syscall<'a> {
                 Ok(())
             }
             Syscall::Umount2 { path, flags } => linux::umount2(path, *flags),
-            Syscall::Write { fd, buf } => linux::write(fd.get(), buf).map(drop),
+            Syscall::Write { fd, buf } => linux::write(fd, buf).map(drop),
         }
     }
 }
