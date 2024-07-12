@@ -1086,6 +1086,15 @@ pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
     Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL, flags.0) }).map(drop)
 }
 
+pub fn fcntl_getpipe_sz(fd: Fd) -> Result<usize, Errno> {
+    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_GETPIPE_SZ) }).map(|sz| sz as usize)
+}
+
+pub fn fcntl_setpipe_sz(fd: Fd, size: usize) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETPIPE_SZ, i32::try_from(size).unwrap()) })
+        .map(drop)
+}
+
 pub fn fork() -> Result<Option<Pid>, Errno> {
     Errno::result(unsafe { libc::fork() }).map(|p| (p != 0).then_some(Pid(p)))
 }
@@ -1578,15 +1587,6 @@ pub fn splice(
         )
     };
     inner(&off_in, &off_out)
-}
-
-pub fn set_pipe_size(fd: Fd, size: usize) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETPIPE_SZ, i32::try_from(size).unwrap()) })
-        .map(drop)
-}
-
-pub fn get_pipe_size(fd: Fd) -> Result<usize, Errno> {
-    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_GETPIPE_SZ) }).map(|sz| sz as usize)
 }
 
 #[cfg(test)]

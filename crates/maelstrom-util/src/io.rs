@@ -912,7 +912,7 @@ impl Splicer {
         let (pipe_out, pipe_in) = linux::pipe()?;
         let pipe_max_s = std::fs::read_to_string("/proc/sys/fs/pipe-max-size")?;
         let pipe_size = pipe_max_s.trim().parse().unwrap();
-        linux::set_pipe_size(pipe_in.as_fd(), pipe_size)?;
+        linux::fcntl_setpipe_sz(pipe_in.as_fd(), pipe_size)?;
         Ok(Self {
             pipe_in,
             pipe_out,
@@ -960,7 +960,7 @@ impl Splicer {
         (self.pipe_out, self.pipe_in) = linux::pipe()?;
         let pipe_max_s = std::fs::read_to_string("/proc/sys/fs/pipe-max-size")?;
         let pipe_size = pipe_max_s.trim().parse().unwrap();
-        linux::set_pipe_size(self.pipe_in.as_fd(), pipe_size)?;
+        linux::fcntl_setpipe_sz(self.pipe_in.as_fd(), pipe_size)?;
         self.written = 0;
         self.pipe_size = pipe_size;
         Ok(())
@@ -998,7 +998,7 @@ impl SlowWriter {
         length: usize,
     ) -> io::Result<usize> {
         let (pipe_out, pipe_in) = linux::pipe()?;
-        let pipe_size = linux::get_pipe_size(pipe_in.as_fd())?;
+        let pipe_size = linux::fcntl_getpipe_sz(pipe_in.as_fd())?;
         let chunk_size = std::cmp::min(self.chunk_size, pipe_size);
 
         let mut remaining = length;
