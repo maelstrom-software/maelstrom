@@ -25,6 +25,7 @@ use maelstrom_util::{
 };
 use pattern::ArtifactKind;
 use std::path::Path;
+use std::process::ChildStdout;
 use std::str::FromStr;
 use std::{fmt, io};
 
@@ -84,11 +85,11 @@ impl DefaultMainAppDeps {
             inline_limit,
             slots,
             accept_invalid_remote_container_tls_certs,
-            log,
+            log.clone(),
         )?;
         Ok(Self {
             client,
-            test_collector: CargoTestCollector,
+            test_collector: CargoTestCollector { log },
             target_dir: target_dir.as_ref().to_owned(),
         })
     }
@@ -209,7 +210,9 @@ struct CargoOptions {
     manifest_options: cargo::ManifestOptions,
 }
 
-struct CargoTestCollector;
+struct CargoTestCollector {
+    log: slog::Logger,
+}
 
 #[derive(Debug)]
 struct CargoTestArtifact(cargo_metadata::Artifact);
@@ -282,7 +285,7 @@ impl TestArtifact for CargoTestArtifact {
     }
 }
 
-struct CargoTestArtifactStream(cargo::TestArtifactStream);
+struct CargoTestArtifactStream(cargo::TestArtifactStream<ChildStdout>);
 
 impl Iterator for CargoTestArtifactStream {
     type Item = Result<CargoTestArtifact>;
@@ -344,6 +347,7 @@ impl CollectTests for CargoTestCollector {
             &options.manifest_options,
             packages,
             ui.clone(),
+            self.log.clone(),
         )?;
         Ok((handle, CargoTestArtifactStream(stream)))
     }

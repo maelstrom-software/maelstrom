@@ -1,18 +1,18 @@
 use anyhow::{bail, Context as _, Result};
 use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
-    Metadata as CargoMetadata, Package as CargoPackage,
+    Metadata as CargoMetadata, Package as CargoPackage, PackageId as CargoPackageId,
 };
-
 use maelstrom_macro::Config;
 use maelstrom_test_runner::ui::UiSender;
 use maelstrom_util::process::ExitCode;
 use regex::Regex;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::process::ExitStatusExt as _;
 use std::{
     ffi::OsString,
     fmt,
-    io::{BufRead as _, BufReader},
+    io::{self, BufRead as _, BufReader},
     iter,
     path::{Path, PathBuf},
     process::{Child, ChildStdout, Command, Stdio},
@@ -62,28 +62,132 @@ impl WaitHandle {
     }
 }
 
-pub struct TestArtifactStream {
-    stream: CargoMessageIter<BufReader<ChildStdout>>,
+#[derive(Debug)]
+struct PackageToBuild {
+    unbuilt_non_test_binaries: HashSet<String>,
+    built_tests: Vec<CargoArtifact>,
 }
 
-impl Iterator for TestArtifactStream {
+impl PackageToBuild {
+    fn new(p: &CargoPackage) -> Self {
+        Self {
+            unbuilt_non_test_binaries: p
+                .targets
+                .iter()
+                .filter(|t| t.is_bin())
+                .map(|t| t.name.clone())
+                .collect(),
+            built_tests: vec![],
+        }
+    }
+}
+
+pub struct TestArtifactStream<StreamT> {
+    log: slog::Logger,
+    packages: HashMap<CargoPackageId, PackageToBuild>,
+    ready: Vec<CargoArtifact>,
+    stream: CargoMessageIter<BufReader<StreamT>>,
+    build_done: bool,
+}
+
+impl<StreamT: io::Read> TestArtifactStream<StreamT> {
+    fn new(
+        log: slog::Logger,
+        packages: HashMap<CargoPackageId, PackageToBuild>,
+        stream: CargoMessageIter<BufReader<StreamT>>,
+    ) -> Self {
+        slog::debug!(log, "cargo test artifact stream packages"; "packages" => ?packages);
+
+        Self {
+            log,
+            packages,
+            ready: vec![],
+            stream,
+            build_done: false,
+        }
+    }
+
+    fn receive_built_artifact(&mut self, artifact: CargoArtifact) -> Result<()> {
+        if artifact.target.kind.iter().any(|kind| kind == "proc-macro") {
+            return Ok(());
+        }
+        let Some(pkg) = self.packages.get_mut(&artifact.package_id) else {
+            return Ok(());
+        };
+        if artifact.target.is_test() {
+            pkg.built_tests.push(artifact);
+        } else if artifact.target.is_bin() && !artifact.profile.test {
+            if !pkg.unbuilt_non_test_binaries.remove(&artifact.target.name) {
+                bail!(
+                    "unexpected binary {} built for package {}. expected {:?}",
+                    &artifact.target.name,
+                    &artifact.package_id,
+                    &pkg.unbuilt_non_test_binaries
+                )
+            }
+        } else if artifact.executable.is_some() && artifact.profile.test {
+            self.ready.push(artifact);
+        }
+
+        if pkg.unbuilt_non_test_binaries.is_empty() {
+            self.ready.extend(std::mem::take(&mut pkg.built_tests));
+        }
+
+        Ok(())
+    }
+
+    fn build_completed(&mut self) {
+        assert!(!self.build_done);
+        self.build_done = true;
+
+        for (id, pkg) in &mut self.packages {
+            if !pkg.built_tests.is_empty() {
+                assert!(!pkg.unbuilt_non_test_binaries.is_empty());
+                for b in &pkg.unbuilt_non_test_binaries {
+                    slog::warn!(
+                        self.log,
+                        "didn't receive build notification for {id:?} binary {b:?}"
+                    );
+                }
+                self.ready.extend(std::mem::take(&mut pkg.built_tests));
+            }
+        }
+    }
+
+    fn read_next_artifact(&mut self) -> Result<()> {
+        match self.stream.next() {
+            Some(Err(e)) => Err(e.into()),
+            Some(Ok(CargoMessage::CompilerArtifact(artifact))) => {
+                self.receive_built_artifact(artifact)
+            }
+            Some(_) => Ok(()),
+            None => {
+                self.build_completed();
+                Ok(())
+            }
+        }
+    }
+}
+
+impl<StreamT: io::Read> Iterator for TestArtifactStream<StreamT> {
     type Item = Result<CargoArtifact>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.stream.next()? {
-                Err(e) => return Some(Err(e.into())),
-                Ok(CargoMessage::CompilerArtifact(artifact)) => {
-                    if artifact.target.kind.iter().any(|kind| kind == "proc-macro") {
-                        continue;
-                    }
-                    if artifact.executable.is_some() && artifact.profile.test {
-                        return Some(Ok(artifact));
-                    }
-                }
-                _ => continue,
+        if let Some(a) = self.ready.pop() {
+            return Some(Ok(a));
+        }
+
+        while !self.build_done {
+            if let Err(e) = self.read_next_artifact() {
+                return Some(Err(e));
+            }
+
+            if let Some(a) = self.ready.pop() {
+                return Some(Ok(a));
             }
         }
+
+        None
     }
 }
 
@@ -94,7 +198,8 @@ pub fn run_cargo_test(
     manifest_options: &ManifestOptions,
     packages: Vec<&CargoPackage>,
     ui: UiSender,
-) -> Result<(WaitHandle, TestArtifactStream)> {
+    log: slog::Logger,
+) -> Result<(WaitHandle, TestArtifactStream<ChildStdout>)> {
     let mut cmd = Command::new("cargo");
     cmd.arg("test")
         .arg("--no-run")
@@ -109,12 +214,9 @@ pub fn run_cargo_test(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let package_ids: Vec<_> = packages
-        .into_iter()
-        .map(|p| format!("{}@{}", &p.name, &p.version))
-        .collect();
-    for package_id in package_ids {
-        cmd.arg("--package").arg(package_id);
+    for p in &packages {
+        cmd.arg("--package")
+            .arg(format!("{}@{}", &p.name, &p.version));
     }
 
     let mut child = cmd.spawn()?;
@@ -132,14 +234,21 @@ pub fn run_cargo_test(
         Ok(stderr_string)
     });
 
+    let packages = packages
+        .into_iter()
+        .map(|p| (p.id.clone(), PackageToBuild::new(p)))
+        .collect();
+
     Ok((
         WaitHandle {
             child,
             stderr_handle,
         },
-        TestArtifactStream {
-            stream: CargoMessage::parse_stream(BufReader::new(stdout)),
-        },
+        TestArtifactStream::new(
+            log,
+            packages,
+            CargoMessage::parse_stream(BufReader::new(stdout)),
+        ),
     ))
 }
 
@@ -268,6 +377,269 @@ impl ManifestOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use maplit::{hashmap, hashset};
+    use serde_json::json;
+
+    fn integration_test(package_id: &str, name: &str) -> serde_json::Value {
+        let profile = json!({
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": false,
+            "overflow_checks": false,
+            "test": true
+        });
+
+        json!({
+            "reason":"compiler-artifact",
+            "package_id": package_id,
+            "manifest_path":"/wherever",
+            "target": {
+                "kind": ["test"],
+                "crate_types": ["bin"],
+                "name": name,
+                "src_path":"wherever.rs",
+                "edition":"2021",
+                "doc":false,
+                "doctest":false,
+                "test":true
+            },
+            "profile": profile,
+            "features": [],
+            "filenames": [],
+            "executable": "integration_test-f00dd00d",
+            "fresh": false
+        })
+    }
+
+    fn package_test_binary(package_id: &str, name: &str) -> serde_json::Value {
+        let profile = json!({
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": false,
+            "overflow_checks": false,
+            "test": true
+        });
+
+        json!({
+            "reason": "compiler-artifact",
+            "package_id": package_id,
+            "manifest_path": "wherever",
+            "target": {
+                "kind": ["bin"],
+                "crate_types": ["bin"],
+                "name": name,
+                "src_path": "wherever.rs",
+                "edition": "2021",
+                "doc": true,
+                "doctest": false,
+                "test": true
+            },
+            "profile": profile,
+            "features": [],
+            "filenames": [],
+            "executable": "whatever-bin",
+            "fresh": false
+        })
+    }
+
+    fn package_binary(package_id: &str, name: &str) -> serde_json::Value {
+        let profile = json!({
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": false,
+            "overflow_checks": false,
+            "test": false
+        });
+
+        json!({
+            "reason": "compiler-artifact",
+            "package_id": package_id,
+            "manifest_path": "wherever",
+            "target": {
+                "kind": ["bin"],
+                "crate_types": ["bin"],
+                "name": name,
+                "src_path": "wherever.rs",
+                "edition": "2021",
+                "doc": true,
+                "doctest": false,
+                "test": true
+            },
+            "profile": profile,
+            "features": [],
+            "filenames": [],
+            "executable": "whatever-bin",
+            "fresh": false
+        })
+    }
+
+    fn build_test_artifact_stream(
+        packages: HashMap<&str, HashSet<&str>>,
+        messages: Vec<serde_json::Value>,
+    ) -> TestArtifactStream<io::Cursor<Vec<u8>>> {
+        let log = maelstrom_util::log::test_logger();
+        let packages = packages
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    CargoPackageId { repr: k.into() },
+                    PackageToBuild {
+                        unbuilt_non_test_binaries: v.into_iter().map(|b| b.into()).collect(),
+                        built_tests: vec![],
+                    },
+                )
+            })
+            .collect();
+        let mut messages_as_bytes = vec![];
+        for m in &messages {
+            serde_json::to_writer(&mut messages_as_bytes, m).unwrap();
+            messages_as_bytes.push(b'\n');
+        }
+        let inner_stream =
+            CargoMessage::parse_stream(BufReader::new(io::Cursor::new(messages_as_bytes)));
+        let stream = TestArtifactStream::new(log, packages, inner_stream);
+        assert_eq!(&stream.ready, &[]);
+        stream
+    }
+
+    fn assert_num_reads(
+        stream: &mut TestArtifactStream<io::Cursor<Vec<u8>>>,
+        num_reads: usize,
+        expected_ready: usize,
+    ) {
+        for _ in 0..num_reads {
+            stream.read_next_artifact().unwrap();
+            assert_eq!(stream.ready.len(), expected_ready, "{:?}", &stream.ready);
+            assert!(!stream.build_done);
+        }
+    }
+
+    #[test]
+    fn test_artifact_stream_integration_test_before_required_binary() {
+        let mut stream = build_test_artifact_stream(
+            hashmap! { "foo" => hashset! { "foo-bin" } },
+            vec![
+                integration_test("foo", "int"),
+                package_binary("foo", "foo-bin"),
+            ],
+        );
+        assert_num_reads(&mut stream, 1 /* reads */, 0 /* num_ready */);
+        assert_num_reads(&mut stream, 1 /* reads */, 1 /* num_ready */); // int
+
+        stream.read_next_artifact().unwrap();
+        assert!(stream.build_done);
+    }
+
+    #[test]
+    fn test_artifact_stream_integration_test_after_required_binary() {
+        let mut stream = build_test_artifact_stream(
+            hashmap! { "foo" => hashset! { "foo-bin" } },
+            vec![
+                package_binary("foo", "foo-bin"),
+                integration_test("foo", "int"),
+            ],
+        );
+        assert_num_reads(&mut stream, 1 /* reads */, 0 /* num_ready */);
+        assert_num_reads(&mut stream, 1 /* reads */, 1 /* num_ready */); // int
+
+        stream.read_next_artifact().unwrap();
+        assert!(stream.build_done);
+    }
+
+    #[test]
+    fn test_artifact_stream_integration_test_between_required_binaries() {
+        let mut stream = build_test_artifact_stream(
+            hashmap! { "foo" => hashset! { "foo-bin", "foo-bin2" } },
+            vec![
+                package_binary("foo", "foo-bin2"),
+                integration_test("foo", "int"),
+                package_binary("foo", "foo-bin"),
+            ],
+        );
+        assert_num_reads(&mut stream, 2 /* reads */, 0 /* num_ready */);
+        assert_num_reads(&mut stream, 1 /* reads */, 1 /* num_ready */); // int
+
+        stream.read_next_artifact().unwrap();
+        assert!(stream.build_done);
+    }
+
+    #[test]
+    fn test_artifact_stream_multiple_integration_tests_between_required_binaries() {
+        let mut stream = build_test_artifact_stream(
+            hashmap! { "foo" => hashset! { "foo-bin", "foo-bin2" } },
+            vec![
+                package_binary("foo", "foo-bin2"),
+                integration_test("foo", "int1"),
+                package_binary("foo", "foo-bin"),
+                integration_test("foo", "int2"),
+            ],
+        );
+        assert_num_reads(&mut stream, 2 /* reads */, 0 /* num_ready */);
+        assert_num_reads(&mut stream, 1 /* reads */, 1 /* num_ready */); // int1
+        assert_num_reads(&mut stream, 1 /* reads */, 2 /* num_ready */); // int1, int2
+
+        stream.read_next_artifact().unwrap();
+        assert!(stream.build_done);
+    }
+
+    #[test]
+    fn test_artifact_stream_test_binaries_immediately_forwarded() {
+        let mut stream = build_test_artifact_stream(
+            hashmap! { "foo" => hashset! { "foo-bin", "foo-bin2" } },
+            vec![
+                package_test_binary("foo", "test1"),
+                integration_test("foo", "int1"),
+                package_test_binary("foo", "test2"),
+                package_binary("foo", "foo-bin2"),
+                package_binary("foo", "foo-bin"),
+            ],
+        );
+        assert_num_reads(&mut stream, 2 /* reads */, 1 /* num_ready */); // test1
+        assert_num_reads(&mut stream, 2 /* reads */, 2 /* num_ready */); // test1, test2
+        assert_num_reads(&mut stream, 1 /* reads */, 3 /* num_ready */); // test1, test2, int1
+
+        stream.read_next_artifact().unwrap();
+        assert!(stream.build_done);
+    }
+
+    #[test]
+    fn test_artifact_stream_missing_binary() {
+        let mut stream = build_test_artifact_stream(
+            hashmap! { "foo" => hashset! { "foo-bin" } },
+            vec![
+                integration_test("foo", "int1"),
+                integration_test("foo", "int2"),
+            ],
+        );
+        assert_num_reads(&mut stream, 2 /* reads */, 0 /* num_ready */);
+
+        // we get them when the build finishes
+        stream.read_next_artifact().unwrap();
+        assert!(stream.build_done);
+        assert_eq!(stream.ready.len(), 2, "{:?}", &stream.ready);
+    }
+
+    #[test]
+    fn test_artifact_stream_unknown_binary_errors() {
+        let mut stream = build_test_artifact_stream(
+            hashmap! { "foo" => hashset! { "foo-bin" } },
+            vec![package_binary("foo", "foo-bin-unknown")],
+        );
+        stream.read_next_artifact().unwrap_err();
+    }
+
+    #[test]
+    fn test_artifact_stream_unknown_package_ignored() {
+        let mut stream = build_test_artifact_stream(
+            hashmap! { "foo" => hashset! { "foo-bin" } },
+            vec![
+                package_binary("bar", "foo-bin"),
+                integration_test("foo", "int"),
+            ],
+        );
+
+        assert_num_reads(&mut stream, 2 /* reads */, 0 /* num_ready */);
+    }
 
     #[test]
     fn feature_selection_options_iter_default() {

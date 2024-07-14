@@ -37,6 +37,7 @@ xdg.workspace = true
 assert_matches.workspace = true
 enum-map.workspace = true
 indoc.workspace = true
+maplit.workspace = true
 maelstrom-broker.workspace = true
 maelstrom-test.workspace = true
 maelstrom-worker.workspace = true
