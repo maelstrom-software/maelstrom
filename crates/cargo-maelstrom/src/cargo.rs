@@ -1,7 +1,7 @@
 use anyhow::{bail, Context as _, Result};
 use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
-    Metadata as CargoMetadata,
+    Metadata as CargoMetadata, Package as CargoPackage,
 };
 
 use maelstrom_macro::Config;
@@ -92,7 +92,7 @@ pub fn run_cargo_test(
     feature_selection_options: &FeatureSelectionOptions,
     compilation_options: &CompilationOptions,
     manifest_options: &ManifestOptions,
-    packages: Vec<String>,
+    packages: Vec<&CargoPackage>,
     ui: UiSender,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     let mut cmd = Command::new("cargo");
@@ -109,8 +109,12 @@ pub fn run_cargo_test(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    for package in packages {
-        cmd.arg("--package").arg(package);
+    let package_ids: Vec<_> = packages
+        .into_iter()
+        .map(|p| format!("{}@{}", &p.name, &p.version))
+        .collect();
+    for package_id in package_ids {
+        cmd.arg("--package").arg(package_id);
     }
 
     let mut child = cmd.spawn()?;

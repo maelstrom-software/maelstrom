@@ -299,12 +299,6 @@ impl Iterator for CargoTestArtifactStream {
 #[derive(Clone, Debug)]
 struct CargoPackage(cargo_metadata::Package);
 
-impl CargoPackage {
-    fn version(&self) -> &impl fmt::Display {
-        &self.0.version
-    }
-}
-
 impl TestPackage for CargoPackage {
     type PackageId = CargoPackageId;
     type ArtifactKey = CargoArtifactKey;
@@ -342,11 +336,7 @@ impl CollectTests for CargoTestCollector {
         packages: Vec<&CargoPackage>,
         ui: &UiSender,
     ) -> Result<(cargo::WaitHandle, CargoTestArtifactStream)> {
-        let packages: Vec<_> = packages
-            .into_iter()
-            .map(|p| format!("{}@{}", p.name(), p.version()))
-            .collect();
-
+        let packages: Vec<_> = packages.into_iter().map(|p| &p.0).collect();
         let (handle, stream) = cargo::run_cargo_test(
             color,
             &options.feature_selection_options,
