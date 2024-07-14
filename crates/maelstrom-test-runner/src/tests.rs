@@ -1,20 +1,23 @@
+mod fake_test_framework;
+
 use crate::{
     config::Quiet,
     introspect_driver::IntrospectDriver,
-    metadata::TestMetadata,
-    test_listing::{TestListing, TestListingStore},
+    test_listing::TestListingStore,
     ui::{self, Ui as _},
-    BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainApp,
-    MainAppDeps, MainAppState, NoCaseMetadata, SimpleFilter, StringArtifactKey, TestArtifact,
-    TestLayers, TestPackage, TestPackageId, Wait,
+    BuildDir, ClientTrait, EnqueueResult, ListAction, LoggingOutput, MainApp, MainAppDeps,
+    MainAppState,
 };
 use anyhow::Result;
+use fake_test_framework::{
+    BinDir, FakeTestBinary, FakeTestCase, FakeTests, TestCollector, TestOptions,
+};
 use indicatif::InMemoryTerm;
 use indoc::indoc;
 use maelstrom_base::{
     stats::{JobState, JobStateCounts},
     ArtifactType, ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutcomeResult,
-    JobOutputResult, JobStatus, Sha256Digest, Utf8PathBuf,
+    JobOutputResult, JobStatus, Sha256Digest,
 };
 use maelstrom_client::{
     spec::{JobSpec, Layer},
@@ -30,189 +33,87 @@ use maelstrom_util::{
 use pretty_assertions::assert_eq;
 use std::{
     cell::RefCell,
-    collections::HashSet,
-    path::{Path, PathBuf},
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering},
     time::Duration,
 };
 use tempfile::tempdir;
 
-#[derive(Clone)]
-struct FakeTestCase {
-    name: String,
-    ignored: bool,
-    desired_state: JobState,
-    expected_estimated_duration: Option<Duration>,
-    outcome: JobOutcome,
+struct TmpDir;
+
+struct TestMainAppDeps {
+    client: TestClient,
+    test_collector: TestCollector,
 }
 
-impl FakeTestCase {
-    fn timing(&self) -> Duration {
-        let (JobOutcome::TimedOut(JobEffects { duration, .. })
-        | JobOutcome::Completed(JobCompleted {
-            effects: JobEffects { duration, .. },
-            ..
-        })) = self.outcome;
-        duration
-    }
-}
-
-impl Default for FakeTestCase {
-    fn default() -> Self {
+impl TestMainAppDeps {
+    fn new(tests: FakeTests, bin_path: RootBuf<BinDir>, target_dir: RootBuf<BuildDir>) -> Self {
         Self {
-            name: "".into(),
-            ignored: false,
-            desired_state: JobState::Complete,
-            expected_estimated_duration: None,
-            outcome: JobOutcome::Completed(JobCompleted {
-                status: JobStatus::Exited(0),
-                effects: JobEffects {
-                    stdout: JobOutputResult::None,
-                    stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
-                    duration: Duration::from_secs(1),
-                },
-            }),
+            client: TestClient {
+                next_job_id: AtomicU32::new(1),
+                tests: tests.clone(),
+            },
+            test_collector: TestCollector {
+                tests,
+                bin_path,
+                target_dir,
+            },
         }
     }
 }
 
-#[derive(Clone, Default)]
-struct FakeTestBinary {
-    name: String,
-    tests: Vec<FakeTestCase>,
+struct TestClient {
+    next_job_id: AtomicU32,
+    tests: FakeTests,
 }
 
-impl FakeTestBinary {
-    fn artifact_key(&self) -> StringArtifactKey {
-        self.name.as_str().into()
-    }
-}
-
-#[derive(Clone)]
-struct FakeTests {
-    test_binaries: Vec<FakeTestBinary>,
-}
-
-impl FakeTests {
-    fn create_binaries(&self, fs: &Fs, bin_path: &Path) {
-        for bin in &self.test_binaries {
-            let dest = bin_path.join(&bin.name);
-            if !fs.exists(&dest) {
-                fs.symlink("/proc/self/exe", dest).unwrap();
-            }
-        }
+impl ClientTrait for TestClient {
+    fn add_layer(&self, _layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        Ok((digest!(42), ArtifactType::Manifest))
     }
 
-    fn update_listing(&self, listing: &mut TestListing<StringArtifactKey, NoCaseMetadata>) {
-        listing.retain_packages_and_artifacts(
-            self.test_binaries
-                .iter()
-                .map(|binary| (binary.name.as_str(), [binary.artifact_key()])),
-        );
-        for binary in &self.test_binaries {
-            listing.update_artifact_cases(
-                &binary.name,
-                binary.artifact_key(),
-                binary
-                    .tests
-                    .iter()
-                    .map(|case| (case.name.clone(), NoCaseMetadata)),
-            );
-            for case in &binary.tests {
-                listing.add_timing(
-                    &binary.name,
-                    binary.artifact_key(),
-                    &case.name,
-                    case.timing(),
-                );
-            }
-        }
+    fn introspect(&self) -> Result<IntrospectResponse> {
+        todo!()
     }
 
-    fn listing(&self) -> TestListing<StringArtifactKey, NoCaseMetadata> {
-        let mut listing = TestListing::default();
-        self.update_listing(&mut listing);
-        listing
-    }
-
-    fn packages(&self) -> Vec<FakeTestPackage> {
-        self.test_binaries
-            .iter()
-            .map(|b| FakeTestPackage {
-                name: b.name.clone(),
-                artifacts: vec![StringArtifactKey::from(b.name.as_ref())],
-                id: FakePackageId(format!("{} 1.0.0", b.name)),
-            })
-            .collect()
-    }
-
-    fn artifacts(
+    fn add_job(
         &self,
-        bin_path: &Path,
-        packages: Vec<&FakeTestPackage>,
-    ) -> Vec<Result<FakeTestArtifact>> {
-        let packages: HashSet<_> = packages.iter().map(|p| p.name()).collect();
-        self.test_binaries
-            .iter()
-            .filter_map(|b| {
-                if !packages.contains(b.name.as_str()) {
-                    return None;
-                }
+        spec: JobSpec,
+        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
+    ) -> Result<()> {
+        let cjid = ClientJobId::from_u32(self.next_job_id.fetch_add(1, Ordering::AcqRel));
+        if let Some(outcome) = self.tests.find_outcome(spec) {
+            handler(Ok((cjid, Ok(outcome))));
+        }
+        Ok(())
+    }
+}
 
-                let exe = bin_path.join(&b.name);
-                Some(Ok(FakeTestArtifact {
-                    name: b.name.clone(),
-                    tests: self.cases(&exe),
-                    ignored_tests: self.ignored_cases(&exe),
-                    path: exe,
-                    package: FakePackageId(format!("{} 1.0.0", b.name)),
-                }))
-            })
-            .collect()
+impl MainAppDeps for TestMainAppDeps {
+    type Client = TestClient;
+
+    fn client(&self) -> &TestClient {
+        &self.client
     }
 
-    fn cases(&self, binary: &Path) -> Vec<String> {
-        let binary_name = binary.file_name().unwrap().to_str().unwrap();
-        let binary = self.find_binary(binary_name);
-        binary.tests.iter().map(|t| t.name.to_owned()).collect()
+    type TestCollector = TestCollector;
+    fn test_collector(&self) -> &TestCollector {
+        &self.test_collector
     }
 
-    fn ignored_cases(&self, binary: &Path) -> Vec<String> {
-        let binary_name = binary.file_name().unwrap().to_str().unwrap();
-        let binary = self.find_binary(binary_name);
-        binary
-            .tests
-            .iter()
-            .filter(|&t| t.ignored)
-            .map(|t| t.name.to_owned())
-            .collect()
+    fn get_template_vars(&self, _options: &TestOptions) -> Result<TemplateVars> {
+        Ok(TemplateVars::new())
     }
 
-    fn find_outcome(&self, spec: JobSpec) -> Option<JobOutcome> {
-        let binary_name = spec.program.file_name().unwrap();
-        let binary = self.find_binary(binary_name);
-        let case_name = spec
-            .arguments
-            .iter()
-            .find(|a| !a.starts_with("--"))
-            .unwrap();
-        let case = binary.tests.iter().find(|c| &c.name == case_name).unwrap();
-        assert_eq!(&spec.estimated_duration, &case.expected_estimated_duration);
-        (case.desired_state == JobState::Complete).then(|| case.outcome.clone())
-    }
+    const MAELSTROM_TEST_TOML: &'static str = "maelstrom-test.toml";
+}
 
-    fn find_binary(&self, binary_name: &str) -> &FakeTestBinary {
-        self.test_binaries
-            .iter()
-            .find(|b| b.name == binary_name)
-            .unwrap_or_else(|| panic!("binary {binary_name} not found"))
+fn counts_from_states(states: &[JobState]) -> JobStateCounts {
+    let mut counts = JobStateCounts::default();
+    for state in states {
+        counts[*state] += 1;
     }
-
-    fn find_case(&self, binary_name: &str, case: &str) -> &FakeTestCase {
-        let binary = self.find_binary(binary_name);
-        binary.tests.iter().find(|c| &c.name == case).unwrap()
-    }
+    counts
 }
 
 #[derive(Default, Clone)]
@@ -244,232 +145,6 @@ impl<'scope> TestIntrospectDriver<'scope> {
         };
         (self.update_func.borrow_mut().as_mut().unwrap())(resp)
     }
-}
-
-struct WaitForNothing;
-
-impl Wait for WaitForNothing {
-    fn wait(self) -> Result<()> {
-        Ok(())
-    }
-}
-
-struct BinDir;
-struct TmpDir;
-
-struct TestMainAppDeps {
-    client: TestClient,
-    test_collector: TestCollector,
-}
-
-impl TestMainAppDeps {
-    fn new(tests: FakeTests, bin_path: RootBuf<BinDir>, target_dir: RootBuf<BuildDir>) -> Self {
-        Self {
-            client: TestClient {
-                next_job_id: AtomicU32::new(1),
-                tests: tests.clone(),
-            },
-            test_collector: TestCollector {
-                tests,
-                bin_path,
-                target_dir,
-            },
-        }
-    }
-}
-
-struct TestOptions;
-
-struct TestClient {
-    next_job_id: AtomicU32,
-    tests: FakeTests,
-}
-
-impl ClientTrait for TestClient {
-    fn add_layer(&self, _layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        Ok((digest!(42), ArtifactType::Manifest))
-    }
-
-    fn introspect(&self) -> Result<IntrospectResponse> {
-        todo!()
-    }
-
-    fn add_job(
-        &self,
-        spec: JobSpec,
-        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
-    ) -> Result<()> {
-        let cjid = ClientJobId::from_u32(self.next_job_id.fetch_add(1, Ordering::AcqRel));
-        if let Some(outcome) = self.tests.find_outcome(spec) {
-            handler(Ok((cjid, Ok(outcome))));
-        }
-        Ok(())
-    }
-}
-
-struct TestCollector {
-    tests: FakeTests,
-    bin_path: RootBuf<BinDir>,
-    target_dir: RootBuf<BuildDir>,
-}
-
-#[derive(Clone, Debug)]
-struct FakeTestArtifact {
-    name: String,
-    tests: Vec<String>,
-    ignored_tests: Vec<String>,
-    path: PathBuf,
-    package: FakePackageId,
-}
-
-#[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
-struct FakePackageId(String);
-
-impl TestPackageId for FakePackageId {}
-
-impl TestArtifact for FakeTestArtifact {
-    type ArtifactKey = StringArtifactKey;
-    type PackageId = FakePackageId;
-    type CaseMetadata = NoCaseMetadata;
-
-    fn package(&self) -> FakePackageId {
-        self.package.clone()
-    }
-
-    fn to_key(&self) -> StringArtifactKey {
-        StringArtifactKey::from(self.name.as_ref())
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-
-    fn list_tests(&self) -> Result<Vec<(String, NoCaseMetadata)>> {
-        Ok(self
-            .tests
-            .iter()
-            .map(|name| (name.clone(), NoCaseMetadata))
-            .collect())
-    }
-
-    fn list_ignored_tests(&self) -> Result<Vec<String>> {
-        Ok(self.ignored_tests.clone())
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn build_command(
-        &self,
-        case_name: &str,
-        _case_metadata: &NoCaseMetadata,
-    ) -> (Utf8PathBuf, Vec<String>) {
-        let binary_name = self.path().file_name().unwrap().to_str().unwrap();
-        (format!("/{binary_name}").into(), vec![case_name.into()])
-    }
-
-    fn format_case(
-        &self,
-        package_name: &str,
-        case_name: &str,
-        _case_metadata: &NoCaseMetadata,
-    ) -> String {
-        format!("{package_name} {case_name}")
-    }
-}
-
-#[derive(Clone, Debug)]
-struct FakeTestPackage {
-    name: String,
-    artifacts: Vec<StringArtifactKey>,
-    id: FakePackageId,
-}
-
-impl TestPackage for FakeTestPackage {
-    type PackageId = FakePackageId;
-    type ArtifactKey = StringArtifactKey;
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn artifacts(&self) -> Vec<Self::ArtifactKey> {
-        self.artifacts.clone()
-    }
-
-    fn id(&self) -> Self::PackageId {
-        self.id.clone()
-    }
-}
-
-impl CollectTests for TestCollector {
-    const ENQUEUE_MESSAGE: &'static str = "building artifacts...";
-
-    type BuildHandle = WaitForNothing;
-    type Artifact = FakeTestArtifact;
-    type ArtifactStream = std::vec::IntoIter<Result<FakeTestArtifact>>;
-    type Options = TestOptions;
-    type TestFilter = SimpleFilter;
-    type ArtifactKey = StringArtifactKey;
-    type PackageId = FakePackageId;
-    type Package = FakeTestPackage;
-    type CaseMetadata = NoCaseMetadata;
-
-    fn start(
-        &self,
-        _color: bool,
-        _options: &TestOptions,
-        packages: Vec<&FakeTestPackage>,
-        _ui: &ui::UiSender,
-    ) -> Result<(Self::BuildHandle, Self::ArtifactStream)> {
-        let fs = Fs::new();
-        fs.create_dir_all(&self.target_dir).unwrap();
-        fs.write((**self.target_dir).join("test_run"), "").unwrap();
-
-        let artifacts: Vec<_> = self.tests.artifacts(&self.bin_path, packages);
-        Ok((WaitForNothing, artifacts.into_iter()))
-    }
-
-    fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &ui::UiSender) -> Result<TestLayers> {
-        Ok(TestLayers::GenerateForBinary)
-    }
-
-    fn remove_fixture_output(case_str: &str, lines: Vec<String>) -> Vec<String> {
-        lines
-            .into_iter()
-            .filter(|line| {
-                !(line.starts_with("fixture") || line.starts_with(&format!("{case_str} FAILED")))
-            })
-            .collect()
-    }
-}
-
-impl MainAppDeps for TestMainAppDeps {
-    type Client = TestClient;
-
-    fn client(&self) -> &TestClient {
-        &self.client
-    }
-
-    type TestCollector = TestCollector;
-    fn test_collector(&self) -> &TestCollector {
-        &self.test_collector
-    }
-
-    fn get_template_vars(&self, _options: &TestOptions) -> Result<TemplateVars> {
-        Ok(TemplateVars::new())
-    }
-
-    const MAELSTROM_TEST_TOML: &'static str = "maelstrom-test.toml";
-}
-
-fn counts_from_states(states: &[JobState]) -> JobStateCounts {
-    let mut counts = JobStateCounts::default();
-    for state in states {
-        counts[*state] += 1;
-    }
-    counts
 }
 
 #[allow(clippy::too_many_arguments)]
