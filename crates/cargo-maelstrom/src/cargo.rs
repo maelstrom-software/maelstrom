@@ -1,7 +1,9 @@
-use anyhow::Result;
+use anyhow::{bail, Context as _, Result};
 use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
+    Metadata as CargoMetadata,
 };
+
 use maelstrom_macro::Config;
 use maelstrom_test_runner::ui::UiSender;
 use maelstrom_util::process::ExitCode;
@@ -461,4 +463,26 @@ mod tests {
             ]),
         );
     }
+}
+
+pub fn read_metadata(
+    cargo_feature_selection_options: &FeatureSelectionOptions,
+    cargo_manifest_options: &ManifestOptions,
+) -> Result<CargoMetadata> {
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--format-version=1"])
+        .args(cargo_feature_selection_options.iter())
+        .args(cargo_manifest_options.iter())
+        .output()
+        .context("getting cargo metadata")?;
+    if !output.status.success() {
+        bail!(String::from_utf8(output.stderr)
+            .context("reading stderr")?
+            .trim_end()
+            .trim_start_matches("error: ")
+            .to_owned());
+    }
+    let cargo_metadata: CargoMetadata =
+        serde_json::from_slice(&output.stdout).context("parsing cargo metadata")?;
+    Ok(cargo_metadata)
 }

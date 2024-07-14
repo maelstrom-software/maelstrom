@@ -4,8 +4,8 @@ pub mod cli;
 pub mod config;
 pub mod pattern;
 
-use anyhow::{anyhow, bail, Context as _, Result};
-use cargo_metadata::{Metadata as CargoMetadata, Target as CargoTarget};
+use anyhow::{anyhow, Result};
+use cargo_metadata::Target as CargoTarget;
 use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
@@ -491,23 +491,12 @@ fn maybe_print_build_error(res: Result<ExitCode>) -> Result<ExitCode> {
     res
 }
 
-pub fn read_cargo_metadata(config: &config::Config) -> Result<CargoMetadata> {
-    let output = std::process::Command::new("cargo")
-        .args(["metadata", "--format-version=1"])
-        .args(config.cargo_feature_selection_options.iter())
-        .args(config.cargo_manifest_options.iter())
-        .output()
-        .context("getting cargo metadata")?;
-    if !output.status.success() {
-        bail!(String::from_utf8(output.stderr)
-            .context("reading stderr")?
-            .trim_end()
-            .trim_start_matches("error: ")
-            .to_owned());
-    }
-    let cargo_metadata: CargoMetadata =
-        serde_json::from_slice(&output.stdout).context("parsing cargo metadata")?;
-    Ok(cargo_metadata)
+pub fn get_project_dir(config: &config::Config) -> Result<Utf8PathBuf> {
+    Ok(cargo::read_metadata(
+        &config.cargo_feature_selection_options,
+        &config.cargo_manifest_options,
+    )?
+    .workspace_root)
 }
 
 pub fn main(
@@ -518,8 +507,14 @@ pub fn main(
     stderr_is_tty: bool,
     ui: impl Ui,
 ) -> Result<ExitCode> {
+    let get_metadata = || {
+        cargo::read_metadata(
+            &config.cargo_feature_selection_options,
+            &config.cargo_manifest_options,
+        )
+    };
     if extra_options.list.packages {
-        let cargo_metadata = read_cargo_metadata(&config)?;
+        let cargo_metadata = get_metadata()?;
         alternative_mains::list_packages(
             &cargo_metadata.workspace_packages(),
             &extra_options.parent.include,
@@ -527,7 +522,7 @@ pub fn main(
             &mut io::stdout().lock(),
         )
     } else if extra_options.list.binaries {
-        let cargo_metadata = read_cargo_metadata(&config)?;
+        let cargo_metadata = get_metadata()?;
         alternative_mains::list_binaries(
             &cargo_metadata.workspace_packages(),
             &extra_options.parent.include,
@@ -535,7 +530,7 @@ pub fn main(
             &mut io::stdout().lock(),
         )
     } else {
-        let cargo_metadata = read_cargo_metadata(&config)?;
+        let cargo_metadata = get_metadata()?;
         let workspace_dir = Root::<ProjectDir>::new(cargo_metadata.workspace_root.as_std_path());
         let logging_output = LoggingOutput::default();
         let log = logger.build(logging_output.clone());
