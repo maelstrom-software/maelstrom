@@ -309,6 +309,11 @@ where
             .as_ref()
             .join::<MaelstromTestTomlFile>("maelstrom-test.toml");
         if let Some(contents) = Fs::new().read_to_string_if_exists(&path2)? {
+            slog::warn!(
+                log,
+                "use of `maelstrom-test.toml` file is deprecated and support will \
+                be removed in future releases. Please rename it to `{maelstrom_test_toml}`."
+            );
             return Self::from_str(&contents)
                 .with_context(|| format!("parsing {}", path2.display()));
         }
@@ -329,8 +334,108 @@ mod tests {
     use anyhow::Error;
     use maelstrom_base::{enum_set, JobDevice};
     use maelstrom_test::{tar_layer, utf8_path_buf};
+    use maelstrom_util::root::RootBuf;
     use maplit::btreemap;
+    use slog::Drain as _;
+    use std::io;
+    use std::sync::{Arc, Mutex};
     use toml::de::Error as TomlError;
+
+    #[derive(Clone, Default)]
+    struct InMemoryLogOutput(Arc<Mutex<Vec<u8>>>);
+
+    impl InMemoryLogOutput {
+        fn lines(&self) -> Vec<serde_json::Value> {
+            String::from_utf8(self.0.lock().unwrap().clone())
+                .unwrap()
+                .split('\n')
+                .into_iter()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect()
+        }
+    }
+
+    impl io::Write for InMemoryLogOutput {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn load_test(t: &tempfile::TempDir) -> (AllMetadata<SimpleFilter>, Vec<serde_json::Value>) {
+        let project_dir = RootBuf::<ProjectDir>::new(t.path().to_path_buf());
+        let log_output = InMemoryLogOutput::default();
+        let log = slog::Logger::root(
+            Mutex::new(slog_json::Json::default(log_output.clone())).map(slog::Fuse),
+            slog::o!(),
+        );
+        let res = AllMetadata::<SimpleFilter>::load(log, &project_dir, "simple-test.toml").unwrap();
+
+        let log_lines = log_output.lines();
+
+        (res, log_lines)
+    }
+
+    #[test]
+    fn load_no_file_found() {
+        let t = tempfile::tempdir().unwrap();
+        let (res, log_lines) = load_test(&t);
+
+        assert_eq!(res, AllMetadata::default());
+
+        assert_eq!(log_lines.len(), 1, "{log_lines:?}");
+        assert_eq!(
+            log_lines[0]["msg"],
+            "no test metadata configuration found, using default"
+        );
+        assert_eq!(log_lines[0]["level"], "DEBG");
+    }
+
+    #[test]
+    fn load_expected_file() {
+        let fs = Fs::new();
+        let t = tempfile::tempdir().unwrap();
+        fs.write(t.path().join("simple-test.toml"), "[[directives]]")
+            .unwrap();
+
+        let (res, log_lines) = load_test(&t);
+
+        assert_eq!(
+            res,
+            AllMetadata {
+                directives: vec![TestDirective::default()]
+            }
+        );
+        assert_eq!(log_lines.len(), 0, "{log_lines:?}");
+    }
+
+    #[test]
+    fn load_deprecated_file() {
+        let fs = Fs::new();
+        let t = tempfile::tempdir().unwrap();
+        fs.write(t.path().join("maelstrom-test.toml"), "[[directives]]")
+            .unwrap();
+
+        let (res, log_lines) = load_test(&t);
+
+        assert_eq!(
+            res,
+            AllMetadata {
+                directives: vec![TestDirective::default()]
+            }
+        );
+        assert_eq!(log_lines.len(), 1, "{log_lines:?}");
+        assert_eq!(
+            log_lines[0]["msg"],
+            "use of `maelstrom-test.toml` file is deprecated and support will be removed in \
+            future releases. Please rename it to `simple-test.toml`."
+        );
+        assert_eq!(log_lines[0]["level"], "WARN");
+    }
 
     #[test]
     fn default() {

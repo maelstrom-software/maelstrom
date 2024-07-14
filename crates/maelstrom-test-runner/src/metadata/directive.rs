@@ -9,7 +9,7 @@ use std::{
     str::{self, FromStr},
 };
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct TestDirective<TestFilterT> {
     pub filter: Option<TestFilterT>,
     // This will be Some if any of the other fields are Some(AllMetadata::Image).
@@ -27,6 +27,29 @@ pub struct TestDirective<TestFilterT> {
     pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
     pub added_environment: BTreeMap<String, String>,
     pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
+}
+
+// The derived Default will put a TestFilterT: Default bound on the implementaion
+impl<TestFilterT> Default for TestDirective<TestFilterT> {
+    fn default() -> Self {
+        Self {
+            filter: None,
+            image: None,
+            include_shared_libraries: None,
+            network: None,
+            enable_writable_file_system: None,
+            user: None,
+            group: None,
+            timeout: None,
+            layers: None,
+            added_layers: Default::default(),
+            mounts: None,
+            added_mounts: Default::default(),
+            environment: None,
+            added_environment: Default::default(),
+            working_directory: None,
+        }
+    }
 }
 
 #[derive(Deserialize)]

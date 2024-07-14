@@ -1,0 +1,144 @@
+[[directives]]
+filter = "package.equals(maelstrom-worker) && name.starts_with(executor::)"
+layers = [
+    { stubs = [ "/proc/", "/sys/", "/tmp/", "dev/{full,fuse,null,pts/,random,tty,urandom,zero}" ] },
+    { symlinks = [ { link = "/dev/ptmx", target = "/dev/pts/ptmx" } ] },
+]
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
+    { type = "devpts", mount_point = "/dev/pts" },
+    { type = "devices", devices = ["full", "fuse", "null", "random", "tty", "urandom", "zero"] },
+]
+
+[[directives]]
+filter = "package.equals(maelstrom-worker) && name.equals(executor::tests::local_network)"
+network = "loopback"
+
+[[directives]]
+filter = "package.equals(maelstrom-worker) && name.starts_with(signals::)"
+layers = [
+    { stubs = ["/proc/", "/dev/null"] }
+]
+mounts = [
+    { type = "proc", mount_point = "/proc" },
+    { type = "devices", devices = ["null"] }
+]
+
+[[directives]]
+filter = """
+(package.equals(maelstrom-broker) && name.starts_with(artifact_fetcher::tests)) ||
+package.equals(maelstrom-test-runner)"""
+layers = [{ stubs = ["/proc/", "/tmp/"] }]
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+]
+
+[[directives]]
+filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
+layers = [
+    { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
+    { paths = ["<build-dir>/maelstrom-client"], canonicalize = true }
+]
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "devices", devices = ["null", "fuse"] },
+]
+environment = { HOME = "/tmp" }
+
+[[directives]]
+filter = "package.equals(maelstrom-pytest) && test.equals(integration_test)"
+include_shared_libraries = true
+image = "docker://python:3.11-slim"
+added_layers = [
+    { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
+    { paths = ["crates/maelstrom-pytest/src/python.tar"], canonicalize = true },
+    { paths = ["<build-dir>/maelstrom-pytest"], canonicalize = true }
+]
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "devices", devices = ["null", "fuse"] },
+]
+network = "local"
+enable_writable_file_system = true
+
+[[directives]]
+filter = "package.equals(maelstrom-go-test) && test.equals(integration_test)"
+include_shared_libraries = true
+image = "docker://golang"
+added_layers = [
+    { stubs = ["/{proc,sys,tmp}/", "/dev/{full,fuse,urandom,random,null,zero}"] },
+    { paths = ["<build-dir>/maelstrom-go-test"], canonicalize = true }
+]
+added_environment = { GOCACHE = "/tmp/" }
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
+    { type = "devices", devices = ["full", "fuse", "urandom", "random", "null", "zero"] },
+]
+
+[[directives]]
+filter = """
+package.equals(maelstrom-client-process) ||
+package.equals(maelstrom-fuse) ||
+package.equals(maelstrom-util)"""
+layers = [{ stubs = ["/tmp/"] }]
+mounts = [{ type = "tmp", mount_point = "/tmp" }]
+
+[[directives]]
+filter = "package.equals(maelstrom-container)"
+network = "loopback"
+layers = [{ stubs = ["/tmp/"] }, { paths = ["crates/maelstrom-container/src/busybox.tar"], canonicalize = true }]
+mounts = [{ type = "tmp", mount_point = "/tmp" }]
+
+[[directives]]
+filter = "package.equals(maelstrom-util) && name.equals(io::splicer)"
+added_mounts = [
+    { type = "proc", mount_point = "/proc" },
+]
+added_layers = [{ stubs = [ "proc/" ] }]
+
+[[directives]]
+filter = """
+package.equals(maelstrom-util) && (
+    name.equals(config::common::tests::broker_addr_deserialize_from_hostname_string) ||
+    name.equals(config::common::tests::broker_addr_from_str)
+)"""
+[[directives.added_layers]]
+paths = [ "crates/maelstrom-util/src/config/hosts" ]
+strip_prefix = "crates/maelstrom-util/src/config/"
+prepend_prefix = "/etc/"
+
+[[directives]]
+filter = "package.equals(maelstrom-fuse) || package.equals(maelstrom-layer-fs)"
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "devices", devices = ["null", "fuse"] },
+]
+working_directory = "/root"
+added_layers = [{ stubs = [ "root/", "proc/", "tmp/", "dev/fuse", "dev/null" ] }]
+
+[[directives]]
+filter = "package.equals(cargo-maelstrom) && test.equals(integration_test)"
+include_shared_libraries = true
+image = "docker://rust:alpine"
+added_layers = [
+    { stubs = ["/dev/{full,fuse,null,urandom,random,zero}"] },
+    { paths = ["<build-dir>/cargo-maelstrom"], canonicalize = true }
+]
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "tmp", mount_point = "/root" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
+    { type = "devices", devices = ["full", "fuse", "null", "urandom", "random", "zero"] },
+]
+
+[[directives]]
+added_environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}" }
