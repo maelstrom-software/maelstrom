@@ -13,6 +13,7 @@
   python311Packages,
   mypy,
   black,
+  zola,
   version ? null
 }:
 
@@ -56,6 +57,7 @@ let
       python311Packages.types-protobuf
       python311Packages.xdg-base-dirs
       mdbook
+      zola
     ];
 
     buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];
