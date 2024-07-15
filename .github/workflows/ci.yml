@@ -84,10 +84,10 @@ jobs:
           cd doc/book
           ./build-all-versions.sh ../../website/doc/book
       - name: Install Zola
-      - uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2
         with:
           tool: zola@0.19.1
-      - name: Build Website With Zola
+      - name: Build Website with Zola
         run: |
           cd website2
           zola build
