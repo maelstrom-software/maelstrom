@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### General
+
+#### Removed
+- The `devices` field of job specifications, both in clients and in the
+  protobuf types, has been removed. This was deprecated in the last release.
+  Use devices layers instead.
+  \[[321](https://github.com/maelstrom-software/maelstrom/issues/321)\]
+- `image` specifications in clients no longer need to provide a `use` field. If
+  one is not provided, `layers` and `environment` will be used. Also, the name
+  can be specified directly as a string, like `"image = \"docker:foo\""`.
+  \[[329](https://github.com/maelstrom-software/maelstrom/issues/329)\]
+- Changed the default for `include_shared_libraries` in test runners when it
+  isn't explicitly specified.
+  \[[329](https://github.com/maelstrom-software/maelstrom/issues/329)\]
+- `maelstrom-test.toml` is now deprecated.
+
 ## [0.10.0] - 2024-07-03
 ### High-Level
 This release contains three big new things. The new Python test runner, the new `--tty` mode for
