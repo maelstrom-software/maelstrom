@@ -1,4 +1,4 @@
-# maelstrom-broker
+# `maelstrom-broker`
 
 The `maelstrom-broker` is the coordinator for a Maelstrom cluster. it is
 responsible for scheduling work onto nodes in the cluster. The broker must be

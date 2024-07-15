@@ -26,27 +26,28 @@ mounts = [{ type = "tmp", mount_point = "/tmp" }]
 
 ## `image`
 
-To use `maelstrom-pytest`, your tests' containers will need a python
-interpreter. The best way to provide one is to to build their containers from
-an OCI container image.
+Sometimes it makes sense to build your test's container from an OCI container
+image. For example, when we do integration tests of `cargo-maelstrom`, we want
+to run in an environment with `cargo` installed.
 
 This is what the `image` field is for. It is used to set the job spec's
 [`image`](../../spec.md#image) field.
 
 ```toml
 [[directives]]
-image.name = "docker://python:3.11-slim"
+filter = "package.equals(cargo-maelstrom)"
+image.name = "docker://rust"
 image.use = ["layers", "environment"]
-
-[[directives]]
-filter = "package.equals(foo)"
-image = { name = "docker://python:3.11", use = ["layers", "environment"] }
 ```
 
-In the example above, we specified a TOML table in two different, equivalent
-ways for illustrative purposes.
+The `image` field may either be a string or a table. If it's a string, then
+it's assumed to be the URI of the image to use, as documented
+[here](../container-images.html#container-image-uris). In this case, the job
+spec will have [`use_layers`](../../spec.md#use_layers) and
+[`use_environment`](../../spec.md#use_environment) both set to `true`.
 
-The `image` field must be a table with two subfields: `name` and `use`.
+If the `image` field is a table, then it must have a `name` subfield and
+optionally may have a `use` subfield.
 
 The `name` sub-field specifies the name of the image. It must be a string. It
 specifies the URI of the image to use, as documented
@@ -62,6 +63,35 @@ container image to use for the job spec. It must contain a non-empty subset of:
   - `working_directory`: This sets the
 	[`use_working_directory`](../../spec.md#use_working_directory) field in the job spec's
 	image value.
+
+If the `use` sub-field isn't specified, then the job spec will have
+[`use_layers`](../../spec.md#use_layers) and
+[`use_environment`](../../spec.md#use_environment) both set to `true`.
+
+For example, the following directives all have semantically equivalent `image` fields:
+
+```toml
+[[directives]]
+filter = "package.equals(package-1)"
+image.name = "docker://rust"
+image.use = ["layers", "environment"]
+
+[[directives]]
+filter = "package.equals(package-2)"
+image = { name = "docker://rust", use = ["layers", "environment"] }
+
+[[directives]]
+filter = "package.equals(package-3)"
+image.name = "docker://rust"
+
+[[directives]]
+filter = "package.equals(package-4)"
+image = { name = "docker://rust" }
+
+[[directives]]
+filter = "package.equals(package-5)"
+image = "docker://rust"
+```
 
 ## `layers`
 
@@ -153,7 +183,7 @@ environment = {
 This field sets the [`environment`](../../spec.md#environment) field of
 the job spec. It must be a table with string values. It supports two forms of
 `$` expansion within those string values:
-  - `$env{FOO}` evaluates to the value of `maelstrom-pytest`'s `FOO` environment variable.
+  - `$env{FOO}` evaluates to the value of `maelstrom-go-test`'s `FOO` environment variable.
   - `$prev{FOO}` evaluates to the previous value of `FOO` for the job spec.
 
 It is an error if the referenced variable doesn't exist. However, you can use
@@ -163,8 +193,8 @@ It is an error if the referenced variable doesn't exist. However, you can use
 FOO = "$env{FOO:-bar}"
 ```
 
-This will set `FOO` to whatever `maelstrom-pytest`'s `FOO` environment variable
-is, or to `"bar"` if `maelstrom-pytest` doesn't have a `FOO` environment
+This will set `FOO` to whatever `maelstrom-go-test`'s `FOO` environment variable
+is, or to `"bar"` if `maelstrom-go-test` doesn't have a `FOO` environment
 variable.
 
 This field can't be set in the same directive as `image` if the `image.use`

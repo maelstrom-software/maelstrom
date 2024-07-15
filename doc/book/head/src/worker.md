@@ -1,4 +1,4 @@
-# maelstrom-worker
+# `maelstrom-worker`
 
 The `maelstrom-worker` is used to execute jobs in a Maelstrom cluster. In order
 to do any work, a cluster must have at least one worker.

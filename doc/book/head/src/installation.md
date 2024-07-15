@@ -3,9 +3,9 @@
 Maelstrom consists of a number of different programs. These are covered in more
 depth in [this chapter](programs.md). If you just want to give Maelstrom
 test-ride, you'll probably just want to install a test runner like
-[`cargo-maelstrom`](cargo-maelstrom.md) or
+[`cargo-maelstrom`](cargo-maelstrom.md),
+[`maelstrom-go-test`](go-test.md), or
 [`maelstrom-pytest`](pytest.md).
-
 
 The installation process is virtual identical for all programs. We'll
 demonstrate how to install all the binaries in the following sections. You can
@@ -22,6 +22,7 @@ you to pick and choose the binaries you want to install:
 ```bash
 cargo binstall maelstrom-run
 cargo binstall cargo-maelstrom
+cargo binstall maelstrom-go-test
 cargo binstall maelstrom-pytest
 cargo binstall maelstrom-broker
 cargo binstall maelstrom-worker
@@ -57,6 +58,7 @@ install`](https://doc.rust-lang.org/cargo/commands/cargo-install.html):
 ```bash
 cargo install maelstrom-run
 cargo install cargo-maelstrom
+cargo install maelstrom-go-test
 cargo install maelstrom-pytest
 cargo install maelstrom-worker
 ```

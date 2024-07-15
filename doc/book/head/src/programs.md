@@ -5,8 +5,9 @@ categories: clients and daemons.
 
 ## Clients
 
-Clients include the test runners like [`cargo-maelstrom`](cargo-maelstrom.md)
-and [`maelstrom-pytest`](pytest.md), and also the CLI tool
+Clients include the test runners &mdash;
+[`cargo-maelstrom`](cargo-maelstrom.md), [`maelstrom-go-test`](go-test.md), and
+[`maelstrom-pytest`](pytest.md) &mdash; plus the CLI tool
 [`maelstrom-run`](run.md).
 
 ### Test Runners

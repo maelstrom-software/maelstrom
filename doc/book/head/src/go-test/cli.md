@@ -2,7 +2,7 @@
 
 In addition the command-line options for used to specify [configuration
 values](../config.md) described in the [previous chapter](config.md),
-`maelstrom-pytest` supports these command-line options:
+`maelstrom-go-test` supports these command-line options:
 
 Option                                                      | Short Alias | Argument             | Description
 ------------------------------------------------------------|-------------|----------------------|------------
@@ -18,7 +18,7 @@ Option                                                      | Short Alias | Argu
 ## `--include` and `--exclude` {#include-and-exclude}
 
 The `--include` (`-i`) and `--exclude` (`-x`) command-line options control which tests
-`maelstrom-pytest` runs or lists.
+`maelstrom-go-test` runs or lists.
 
 These options take a [test filter pattern](filter.md). The `--include` option
 includes any test that matches the pattern. Similarly, `--exclude` pattern
@@ -29,18 +29,18 @@ The tests that are selected are the set which match any `--include` pattern but
 don't match any `--exclude` pattern. In other words, `--exclude`s have precedence
 over `--include`s, regardless of the order they are specified.
 
-If no `--include` option is provided, `maelstrom-pytest` acts as if an
+If no `--include` option is provided, `maelstrom-go-test` acts as if an
 `--include all` option was provided.
 
 ## `--init`
 
 The `--init` command-line option is used to create a starter
-`maelstrom-pytest.toml` file. See [here](spec/initializing.html) for more
+`maelstrom-go-test.toml` file. See [here](spec/initializing.html) for more
 information.
 
 ## `--list`
 
-The `--list` command-line option causes `maelstrom-pytest`
+The `--list` command-line option causes `maelstrom-go-test`
 to print the tests that would normally
 be run, without actually running them.
 
@@ -50,8 +50,8 @@ This option can be combined with [`--include` and `--exclude`](#include-and-excl
 
 As discussed [here](filter.md#abbreviations), unambiguous prefixes can be used
 in patterns. This can come in handy when doing one-offs on the command line.
-For example, to run all tests in package `foo` with the marker `mark`:
+For example, to run all tests in package `foo` with a name that includes `bar`:
 
 ```bash
-maelstrom-pytest -i 'p.eq(foo) & m.c(mark)'
+maelstrom-go-test -i 'p.eq(foo) & n.c(bar)'
 ```

@@ -1,4 +1,4 @@
-# Getting Started
+# `maelstrom-pytest`
 
 ## Choosing a Python Image
 Before we start running tests, we need to choose a python image.

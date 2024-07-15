@@ -8,7 +8,7 @@ The project directory is used to resolve [local](spec-layers.md#glob)
 [relative](spec-layers.md#paths) paths. It's also where the client will put the
 [container tags lock file](container-images.md#lock-file).
 
-For `maelstrom-pytest` and `maelstrom-run`, the project
+For `maelstrom-pytest`, `maelstrom-go-test`, and `maelstrom-run`, the project
 directory is just the current working directory.
 
 For `cargo-maelstrom`, the Maelstrom project directory is the is same as the
@@ -47,9 +47,10 @@ value](run/config.md#state-root) to specify this directory, falling back on the
 XDG specification if that's not specified.
 
 `cargo-maelstrom` uses `maelstrom/state` in the target subdirectory of the
-project, while `maelstrom-pytest` uses `.maelstrom-pytest/state` in the current
-directory. The idea is that this state is project- and client-specific, so it
-should be stored within the project.
+project, while `maelstrom-go-test` uses `.maelstrom-go-test/state` and
+`maelstrom-pytest` uses `.maelstrom-pytest/state` in the current directory. The
+idea is that this state is project- and client-specific, so it should be stored
+within the project.
 
 ## Cache Directory
 
@@ -71,6 +72,7 @@ value](run/config.md#cache-root) to specify this directory, falling back on the
 XDG specification if that's not specified.
 
 `cargo-maelstrom` uses a `maelstrom/cache` directory in the target subdirectory
-of the project. `maelstrom-pytest` uses `.maelstrom-pytest/cache` in the
-current directory. The idea is that this cache is project-specific,
-so it should be stored within the project.
+of the project. `maelstrom-go-test` uses `.maelstrom-go-test/cache` in the
+curent directory and `maelstrom-pytest` uses `.maelstrom-pytest/cache` in the
+current directory. The idea is that this cache is project-specific, so it
+should be stored within the project.

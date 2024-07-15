@@ -87,13 +87,14 @@ Finally, the program looks for a file named `config.toml` in these directories.
 
 More concretely, these are where Maelstrom programs will look for configuration files:
 
-Program          | Configuration File
------------------|-----------------------------------------------------
-cargo-maelstrom  | `<xdg-config-dir>/maelstrom/cargo-maelstrom/config.toml`
-maelstrom-pytest | `<xdg-config-dir>/maelstrom/pytest/config.toml`
-maelstrom-run    | `<xdg-config-dir>/maelstrom/run/config.toml`
-maelstrom-broker | `<xdg-config-dir>/maelstrom/broker/config.toml`
-maelstrom-worker | `<xdg-config-dir>/maelstrom/worker/config.toml`
+Program           | Configuration File
+------------------|---------------------------------------------------------
+cargo-maelstrom   | `<xdg-config-dir>/maelstrom/cargo-maelstrom/config.toml`
+maelstrom-go-test | `<xdg-config-dir>/maelstrom/go-test/config.toml`
+maelstrom-pytest  | `<xdg-config-dir>/maelstrom/pytest/config.toml`
+maelstrom-run     | `<xdg-config-dir>/maelstrom/run/config.toml`
+maelstrom-broker  | `<xdg-config-dir>/maelstrom/broker/config.toml`
+maelstrom-worker  | `<xdg-config-dir>/maelstrom/worker/config.toml`
 
 For example, if neither `XDG_CONFIG_HOME` nor `XDG_CONFIG_DIRS` is set, then
 `cargo-maelstrom` will look for two configuration files:
