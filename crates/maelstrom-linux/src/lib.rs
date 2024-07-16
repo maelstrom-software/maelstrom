@@ -407,7 +407,7 @@ impl MoveMountFlags {
     pub const T_EMPTY_PATH: Self = Self(libc::MOVE_MOUNT_T_EMPTY_PATH);
 }
 
-#[derive(BitOr, Clone, Copy, Default)]
+#[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
 pub struct OpenFlags(c_int);
 
 impl OpenFlags {

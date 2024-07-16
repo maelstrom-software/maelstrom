@@ -1,6 +1,6 @@
 //! Easily start and stop processes.
 
-use anyhow::{anyhow, Context as _, Error, Result};
+use anyhow::{anyhow, Error, Result};
 use bumpalo::{
     collections::{CollectIn as _, String as BumpString, Vec as BumpVec},
     Bump,
@@ -22,6 +22,7 @@ use maelstrom_util::{
     root::RootBuf,
     sync::EventReceiver,
     time::{Clock, ClockInstant as _},
+    tty::open_pseudoterminal,
 };
 use maelstrom_worker_child::{FdSlot, Syscall};
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -1271,27 +1272,9 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 let sockaddr = SockaddrUnStorage::new(socket_address.as_slice()).map_err(syserr)?;
                 linux::connect(&socket, &sockaddr).map_err(syserr)?;
 
-                // Open the master.
-                let master =
-                    linux::posix_openpt(OpenFlags::RDWR | OpenFlags::NOCTTY | OpenFlags::NONBLOCK)
-                        .context("posix_openpt")
-                        .map_err(syserr)?;
-                linux::ioctl_tiocswinsz(&master, window_size.rows, window_size.columns)
-                    .map_err(syserr)?;
-                linux::grantpt(&master).map_err(syserr)?;
-                linux::unlockpt(&master).map_err(syserr)?;
-
-                // Open the slave.
-                let mut slave_name = [0u8; 100];
-                linux::ptsname(&master, slave_name.as_mut_slice()).map_err(syserr)?;
-                let slave_name =
-                    CStr::from_bytes_until_nul(slave_name.as_slice()).map_err(syserr)?;
-                let slave = linux::open(
-                    slave_name,
-                    OpenFlags::RDWR | OpenFlags::NOCTTY,
-                    Default::default(),
-                )
-                .map_err(syserr)?;
+                // Open pseudoterminal device
+                let (master, slave) =
+                    open_pseudoterminal(window_size, true /* master nonblock */).map_err(syserr)?;
 
                 Stdio::Pty {
                     master,
