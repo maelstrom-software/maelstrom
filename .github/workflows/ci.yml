@@ -80,24 +80,23 @@ jobs:
           echo `pwd`/mdbook >> $GITHUB_PATH
       - name: Build Documentation
         run: |
-          mkdir -p website/doc/book
+          mkdir -p website/static/doc/book
           cd doc/book
-          ./build-all-versions.sh ../../website/doc/book
+          ./build-all-versions.sh ../../website/static/doc/book
       - name: Install Zola
         uses: taiki-e/install-action@v2
         with:
           tool: zola@0.19.1
       - name: Build Website with Zola
         run: |
-          cd website2
+          cd website
           zola build
-          mv public ../website/new
       - name: Set up Pages
         uses: actions/configure-pages@v4
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v2
         with:
-          path: 'website'
+          path: 'website/public'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v1
