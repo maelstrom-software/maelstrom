@@ -11,4 +11,4 @@ result*
 **/.DS_Store
 /crates/maelstrom-web/target
 /**/__pycache__
-/website2/public
+/website/public
