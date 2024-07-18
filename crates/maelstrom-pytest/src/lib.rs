@@ -282,7 +282,6 @@ impl<'client> PytestTestCollector<'client> {
                             .ok_or_else(|| anyhow!("non-UTF8 path"))?
                     ),
                 ])
-                .working_directory("/")
                 .image(image_spec)
                 .network(JobNetwork::Local)
                 .root_overlay(JobRootOverlay::Local {

@@ -33,7 +33,6 @@ use std::{
     fmt::Write as _,
     mem,
     os::unix::{ffi::OsStrExt as _, fs::MetadataExt},
-    path::Path,
     result,
 };
 use tokio::{
@@ -61,9 +60,9 @@ pub struct JobSpec {
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
     pub root_overlay: JobRootOverlay,
-    pub working_directory: Utf8PathBuf,
-    pub user: UserId,
-    pub group: GroupId,
+    pub working_directory: Option<Utf8PathBuf>,
+    pub user: Option<UserId>,
+    pub group: Option<GroupId>,
     pub allocate_tty: Option<JobTty>,
 }
 
@@ -559,7 +558,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
         // This first set of syscalls sets up the uid mapping.
         let mut uid_map_contents = BumpString::with_capacity_in(24, bump);
-        writeln!(uid_map_contents, "{} {} 1", spec.user, self.user).map_err(syserr)?;
+        writeln!(
+            uid_map_contents,
+            "{} {} 1",
+            spec.user.unwrap_or(0.into()),
+            self.user,
+        )
+        .map_err(syserr)?;
         builder.push(
             Syscall::Open {
                 path: c"/proc/self/uid_map",
@@ -594,7 +599,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
         // Finally, we set up the gid mapping.
         let mut gid_map_contents = BumpString::with_capacity_in(24, bump);
-        writeln!(gid_map_contents, "{} {} 1", spec.group, self.group).map_err(syserr)?;
+        writeln!(
+            gid_map_contents,
+            "{} {} 1",
+            spec.group.unwrap_or(0.into()),
+            self.group,
+        )
+        .map_err(syserr)?;
         builder.push(
             Syscall::Open {
                 path: c"/proc/self/gid_map",
@@ -643,8 +654,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 target: new_root_path,
                 flags: MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
                 root_mode: self.root_mode,
-                uid: Uid::from_u32(spec.user.as_u32()),
-                gid: Gid::from_u32(spec.group.as_u32()),
+                uid: Uid::from_u32(spec.user.unwrap_or(UserId::new(0)).as_u32()),
+                gid: Gid::from_u32(spec.group.unwrap_or(GroupId::new(0)).as_u32()),
                 fuse_fd: fd,
             },
             &|err| syserr(anyhow!("fuse mount: {err}")),
@@ -1142,9 +1153,9 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         builder: &mut ScriptBuilder<'bump>,
     ) -> JobResult<(), Error> {
         // Change to the working directory, if it's not "/".
-        if spec.working_directory != Path::new("/") {
+        if let Some(working_directory) = &spec.working_directory {
             let working_directory =
-                bump_c_str_from_bytes(bump, spec.working_directory.as_os_str().as_bytes())
+                bump_c_str_from_bytes(bump, working_directory.as_os_str().as_bytes())
                     .map_err(syserr)?;
             builder.push(
                 Syscall::Chdir {
@@ -2012,8 +2023,8 @@ mod tests {
                 print('uid:', os.getuid())
                 print('gid:', os.getgid())
             "#})
-            .user(UserId::from(43))
-            .group(GroupId::from(100)),
+            .user(Some(43))
+            .group(Some(100)),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(indoc! {b"
             uid: 43
@@ -2719,7 +2730,7 @@ mod tests {
 
     #[tokio::test]
     async fn working_directory_not_root() {
-        Test::new(bash_spec("pwd").working_directory("/usr/bin"))
+        Test::new(bash_spec("pwd").working_directory(Some("/usr/bin")))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"/usr/bin\n")))
             .run()
             .await;
@@ -2739,7 +2750,7 @@ mod tests {
 
     #[tokio::test]
     async fn bad_working_directory_is_an_execution_error() {
-        assert_execution_error(test_spec("/bin/cat").working_directory("/dev/null")).await;
+        assert_execution_error(test_spec("/bin/cat").working_directory(Some("/dev/null"))).await;
     }
 
     async fn expect(mut socket: impl AsyncRead + Unpin, expected: &[u8]) {

@@ -582,9 +582,7 @@ impl Client {
             bail!("can't provide both `working_directory` and `image.use_working_directory`");
         }
 
-        let working_directory = image_working_directory
-            .or(spec.working_directory)
-            .ok_or_else(|| anyhow!("no working_directory provided"))?;
+        let working_directory = image_working_directory.or(spec.working_directory);
 
         let spec = maelstrom_base::JobSpec {
             program: spec.program,

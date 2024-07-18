@@ -180,8 +180,8 @@ pub struct JobSpec {
     pub network: JobNetwork,
     pub root_overlay: JobRootOverlay,
     pub working_directory: Option<Utf8PathBuf>,
-    pub user: UserId,
-    pub group: GroupId,
+    pub user: Option<UserId>,
+    pub group: Option<GroupId>,
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
     pub allocate_tty: Option<JobTty>,
@@ -202,8 +202,8 @@ impl JobSpec {
             network: Default::default(),
             root_overlay: Default::default(),
             working_directory: None,
-            user: UserId::from(0),
-            group: GroupId::from(0),
+            user: None,
+            group: None,
             timeout: None,
             estimated_duration: None,
             allocate_tty: None,
@@ -244,23 +244,23 @@ impl JobSpec {
         self
     }
 
-    pub fn working_directory(mut self, working_directory: impl Into<Utf8PathBuf>) -> Self {
-        self.working_directory = Some(working_directory.into());
+    pub fn working_directory(mut self, working_directory: Option<impl Into<Utf8PathBuf>>) -> Self {
+        self.working_directory = working_directory.map(Into::into);
         self
     }
 
-    pub fn user(mut self, user: impl Into<UserId>) -> Self {
-        self.user = user.into();
+    pub fn user(mut self, user: Option<impl Into<UserId>>) -> Self {
+        self.user = user.map(Into::into);
         self
     }
 
-    pub fn group(mut self, group: impl Into<GroupId>) -> Self {
-        self.group = group.into();
+    pub fn group(mut self, group: Option<impl Into<GroupId>>) -> Self {
+        self.group = group.map(Into::into);
         self
     }
 
-    pub fn timeout(mut self, timeout: impl Into<Option<Timeout>>) -> Self {
-        self.timeout = timeout.into();
+    pub fn timeout(mut self, timeout: Option<impl Into<Timeout>>) -> Self {
+        self.timeout = timeout.map(Into::into);
         self
     }
 }

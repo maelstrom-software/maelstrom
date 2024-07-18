@@ -309,9 +309,9 @@ pub struct JobSpec {
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
     pub root_overlay: JobRootOverlay,
-    pub working_directory: Utf8PathBuf,
-    pub user: UserId,
-    pub group: GroupId,
+    pub working_directory: Option<Utf8PathBuf>,
+    pub user: Option<UserId>,
+    pub group: Option<GroupId>,
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
     pub allocate_tty: Option<JobTty>,
@@ -330,9 +330,9 @@ impl JobSpec {
             mounts: Default::default(),
             network: Default::default(),
             root_overlay: Default::default(),
-            working_directory: Utf8PathBuf::from("/"),
-            user: UserId::from(0),
-            group: GroupId::from(0),
+            working_directory: None,
+            user: None,
+            group: None,
             timeout: None,
             estimated_duration: None,
             allocate_tty: None,
@@ -372,33 +372,33 @@ impl JobSpec {
         self
     }
 
-    pub fn working_directory(mut self, working_directory: impl Into<Utf8PathBuf>) -> Self {
-        self.working_directory = working_directory.into();
+    pub fn working_directory(mut self, working_directory: Option<impl Into<Utf8PathBuf>>) -> Self {
+        self.working_directory = working_directory.map(Into::into);
         self
     }
 
-    pub fn user(mut self, user: impl Into<UserId>) -> Self {
-        self.user = user.into();
+    pub fn user(mut self, user: Option<impl Into<UserId>>) -> Self {
+        self.user = user.map(Into::into);
         self
     }
 
-    pub fn group(mut self, group: impl Into<GroupId>) -> Self {
-        self.group = group.into();
+    pub fn group(mut self, group: Option<impl Into<GroupId>>) -> Self {
+        self.group = group.map(Into::into);
         self
     }
 
-    pub fn timeout(mut self, timeout: impl Into<Option<Timeout>>) -> Self {
-        self.timeout = timeout.into();
+    pub fn timeout(mut self, timeout: Option<impl Into<Timeout>>) -> Self {
+        self.timeout = timeout.map(Into::into);
         self
     }
 
-    pub fn estimated_duration(mut self, estimated_duration: impl Into<Option<Duration>>) -> Self {
-        self.estimated_duration = estimated_duration.into();
+    pub fn estimated_duration(mut self, estimated_duration: Option<impl Into<Duration>>) -> Self {
+        self.estimated_duration = estimated_duration.map(Into::into);
         self
     }
 
-    pub fn allocate_tty(mut self, allocate_tty: impl Into<Option<JobTty>>) -> Self {
-        self.allocate_tty = allocate_tty.into();
+    pub fn allocate_tty(mut self, allocate_tty: Option<impl Into<JobTty>>) -> Self {
+        self.allocate_tty = allocate_tty.map(Into::into);
         self
     }
 
@@ -933,7 +933,7 @@ mod tests {
         let spec = spec.allocate_tty(Some(JobTty::new(b"\0abcde", WindowSize::new(20, 80))));
         assert_eq!(spec.must_be_run_locally(), true);
 
-        let spec = spec.allocate_tty(None);
+        let spec = spec.allocate_tty(None::<JobTty>);
         assert_eq!(spec.must_be_run_locally(), false);
     }
 

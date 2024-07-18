@@ -98,37 +98,19 @@ fn all_metadata_default_matches_default_file() {
     assert_eq!(parsed_default_file, AllMetadata::default());
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Default, Eq, PartialEq)]
 pub struct TestMetadata {
     include_shared_libraries: Option<bool>,
     pub image: Option<ImageSpec>,
     pub network: JobNetwork,
     pub enable_writable_file_system: bool,
     pub working_directory: Option<Utf8PathBuf>,
-    pub user: UserId,
-    pub group: GroupId,
+    pub user: Option<UserId>,
+    pub group: Option<GroupId>,
     pub timeout: Option<Timeout>,
     pub layers: Vec<Layer>,
     pub environment: Vec<EnvironmentSpec>,
     pub mounts: Vec<JobMount>,
-}
-
-impl Default for TestMetadata {
-    fn default() -> Self {
-        Self {
-            image: None,
-            include_shared_libraries: Default::default(),
-            network: Default::default(),
-            enable_writable_file_system: Default::default(),
-            working_directory: Some(Utf8PathBuf::from("/")),
-            user: UserId::from(0),
-            group: GroupId::from(0),
-            timeout: None,
-            layers: Default::default(),
-            environment: Default::default(),
-            mounts: Default::default(),
-        }
-    }
 }
 
 impl TestMetadata {
@@ -177,8 +159,8 @@ impl TestMetadata {
         self.network = network.unwrap_or(self.network);
         self.enable_writable_file_system =
             enable_writable_file_system.unwrap_or(self.enable_writable_file_system);
-        self.user = user.unwrap_or(self.user);
-        self.group = group.unwrap_or(self.group);
+        self.user = user.or(self.user);
+        self.group = group.or(self.group);
         self.timeout = timeout.unwrap_or(self.timeout);
 
         match layers {
@@ -632,7 +614,7 @@ mod tests {
             all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .working_directory,
-            Some(utf8_path_buf!("/"))
+            None,
         );
     }
 
@@ -654,19 +636,19 @@ mod tests {
             all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .user,
-            UserId::from(202)
+            Some(UserId::from(202)),
         );
         assert_eq!(
             all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .user,
-            UserId::from(101)
+            Some(UserId::from(101)),
         );
         assert_eq!(
             all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .user,
-            UserId::from(0)
+            None,
         );
     }
 
@@ -688,19 +670,19 @@ mod tests {
             all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .group,
-            GroupId::from(202)
+            Some(GroupId::from(202)),
         );
         assert_eq!(
             all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .group,
-            GroupId::from(101)
+            Some(GroupId::from(101)),
         );
         assert_eq!(
             all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .group,
-            GroupId::from(0)
+            None,
         );
     }
 

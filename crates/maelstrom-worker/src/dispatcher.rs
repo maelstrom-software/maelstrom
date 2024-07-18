@@ -1054,11 +1054,11 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/b")),
         };
-        Broker(EnqueueJob(jid!(3), spec!(3, Tar).estimated_duration(millis!(10)))) => {
+        Broker(EnqueueJob(jid!(3), spec!(3, Tar).estimated_duration(Some(millis!(10))))) => {
             CacheGetArtifact(Blob, digest!(3), jid!(3)),
             CacheGetArtifact(BottomFsLayer, digest!(3), jid!(3)),
         };
-        Broker(EnqueueJob(jid!(4), spec!(4, Tar).estimated_duration(millis!(100)))) => {
+        Broker(EnqueueJob(jid!(4), spec!(4, Tar).estimated_duration(Some(millis!(100))))) => {
             CacheGetArtifact(Blob, digest!(4), jid!(4)),
             CacheGetArtifact(BottomFsLayer, digest!(4), jid!(4)),
         };
@@ -1082,7 +1082,7 @@ mod tests {
         Message::JobCompleted(jid!(2), Ok(completed!(1))) => {
             CacheDecrementRefCount(Blob, digest!(2)),
             CacheDecrementRefCount(BottomFsLayer, digest!(2)),
-            StartJob(jid!(4), spec!(4, Tar).estimated_duration(millis!(100)), path_buf!("/d")),
+            StartJob(jid!(4), spec!(4, Tar).estimated_duration(Some(millis!(100))), path_buf!("/d")),
         };
 
         Broker(CancelJob(jid!(5))) => {
@@ -1091,7 +1091,7 @@ mod tests {
         Message::JobCompleted(jid!(5), Ok(completed!(1))) => {
             CacheDecrementRefCount(Blob, digest!(5)),
             CacheDecrementRefCount(BottomFsLayer, digest!(5)),
-            StartJob(jid!(3), spec!(3, Tar).estimated_duration(millis!(10)), path_buf!("/c")),
+            StartJob(jid!(3), spec!(3, Tar).estimated_duration(Some(millis!(10))), path_buf!("/c")),
         };
     }
 
@@ -1353,7 +1353,7 @@ mod tests {
             CacheGetArtifact(Blob, digest!(2), jid!(2)),
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
         };
-        Broker(EnqueueJob(jid!(3), spec!(3, Tar).estimated_duration(millis!(10)))) => {
+        Broker(EnqueueJob(jid!(3), spec!(3, Tar).estimated_duration(Some(millis!(10))))) => {
             CacheGetArtifact(Blob, digest!(3), jid!(3)),
             CacheGetArtifact(BottomFsLayer, digest!(3), jid!(3)),
         };
@@ -1371,7 +1371,7 @@ mod tests {
             CacheDecrementRefCount(Blob, digest!(2)),
             CacheDecrementRefCount(BottomFsLayer, digest!(2)),
             JobHandleDropped(jid!(2)),
-            StartJob(jid!(3), spec!(3, Tar).estimated_duration(millis!(10)), path_buf!("/c")),
+            StartJob(jid!(3), spec!(3, Tar).estimated_duration(Some(millis!(10))), path_buf!("/c")),
         };
     }
 
