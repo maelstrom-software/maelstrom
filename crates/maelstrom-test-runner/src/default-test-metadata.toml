@@ -4,17 +4,25 @@
 # Don't bother enabling the network. We can set to "loopback" to run on the
 # cluster using only the loopback network, or to "local" to only run on the
 # local machine but with full network access.
-network = "disabled"
+#
+# This is the default value:
+# network = "disabled"
 
 # Don't bother creating a writable container for our test. It can still write to /tmp .
-enable_writable_file_system = false
+#
+# This is the default value:
+# enable_writable_file_system = false
 
 # Have our tests run with root as a working directory.
-working_directory = "/"
+#
+# This is the default value:
+# working_directory = "/"
 
 # Run our test as root.
-user = 0
-group = 0
+#
+# These are the default values:
+# user = 0
+# group = 0
 
 # This layer just includes files and directories for mounting the following
 # file-systems and devices.

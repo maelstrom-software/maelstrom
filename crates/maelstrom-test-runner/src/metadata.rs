@@ -37,11 +37,11 @@ impl<TestFilterT> Default for AllMetadata<TestFilterT> {
         let single_directive = TestDirective {
             filter: None,
             include_shared_libraries: None,
-            network: Some(JobNetwork::Disabled),
-            enable_writable_file_system: Some(false),
-            working_directory: Some(PossiblyImage::Explicit(Utf8PathBuf::from("/"))),
-            user: Some(UserId::from(0)),
-            group: Some(GroupId::from(0)),
+            network: None,
+            enable_writable_file_system: None,
+            working_directory: None,
+            user: None,
+            group: None,
             timeout: None,
             // Create directories and files for mounting special file-systems and device files
             layers: Some(PossiblyImage::Explicit(vec![Layer::Stubs {
