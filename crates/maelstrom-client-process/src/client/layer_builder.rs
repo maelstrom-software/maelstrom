@@ -793,6 +793,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stub_expanded_file_with_empty_test() {
+        stubs_test(
+            "/foo/{bar,baz,}",
+            vec![
+                ExpectedManifestEntry::new(
+                    "/foo/bar",
+                    0o444,
+                    ManifestEntryData::File(ManifestFileData::Empty),
+                ),
+                ExpectedManifestEntry::new(
+                    "/foo/baz",
+                    0o444,
+                    ManifestEntryData::File(ManifestFileData::Empty),
+                ),
+                ExpectedManifestEntry::new(
+                    "/foo/",
+                    0o555,
+                    ManifestEntryData::Directory { opaque: false },
+                ),
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn stub_dir_test() {
         stubs_test(
             "/foo/",
