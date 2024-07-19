@@ -62,6 +62,7 @@ pub struct UiJobResult {
 
 pub enum UiMessage {
     BuildOutputLine(String),
+    BuildOutputChunk(Vec<u8>),
     LogMessage(String),
     List(String),
     JobFinished(UiJobResult),
@@ -97,6 +98,10 @@ impl UiSender {
 
     pub fn build_output_line(&self, line: String) {
         let _ = self.send.send(UiMessage::BuildOutputLine(line));
+    }
+
+    pub fn build_output_chunk(&self, chunk: &[u8]) {
+        let _ = self.send.send(UiMessage::BuildOutputChunk(chunk.into()));
     }
 
     pub fn log_message(&self, line: String) {

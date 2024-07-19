@@ -129,7 +129,8 @@ filter = "package.equals(cargo-maelstrom) && test.equals(integration_test)"
 include_shared_libraries = true
 image = "docker://rust:alpine"
 added_layers = [
-    { stubs = ["/dev/{full,fuse,null,urandom,random,zero}"] },
+    { stubs = ["/dev/{full,fuse,null,ptmx,pts/,random,tty,urandom,zero}"] },
+    { symlinks = [ { link = "/dev/ptmx", target = "/dev/pts/ptmx" } ] },
     { paths = ["<build-dir>/cargo-maelstrom"], canonicalize = true }
 ]
 mounts = [
@@ -137,7 +138,8 @@ mounts = [
     { type = "tmp", mount_point = "/root" },
     { type = "proc", mount_point = "/proc" },
     { type = "sys", mount_point = "/sys" },
-    { type = "devices", devices = ["full", "fuse", "null", "urandom", "random", "zero"] },
+    { type = "devpts", mount_point = "/dev/pts" },
+    { type = "devices", devices = ["full", "fuse", "null", "random", "tty", "urandom", "zero"] },
 ]
 
 [[directives]]

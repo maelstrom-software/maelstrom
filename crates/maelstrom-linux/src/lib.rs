@@ -1100,6 +1100,13 @@ pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result
     Errno::result(unsafe { libc::execve(path_ptr, argv_ptr, envp_ptr) }).map(drop)
 }
 
+pub fn execvpe(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
+    let path_ptr = path.as_ptr();
+    let argv_ptr = argv.as_ptr() as *const *const c_char;
+    let envp_ptr = envp.as_ptr() as *const *const c_char;
+    Errno::result(unsafe { libc::execvpe(path_ptr, argv_ptr, envp_ptr) }).map(drop)
+}
+
 pub fn _exit(status: ExitCode) -> ! {
     unsafe { libc::_exit(status.0) };
 }

@@ -3,19 +3,20 @@ use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
     Metadata as CargoMetadata, Package as CargoPackage, PackageId as CargoPackageId,
 };
+use maelstrom_base::WindowSize;
+use maelstrom_linux as linux;
 use maelstrom_macro::Config;
 use maelstrom_test_runner::ui::UiSender;
-use maelstrom_util::process::ExitCode;
+use maelstrom_util::{process::ExitCode, tty::open_pseudoterminal};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
-use std::os::unix::process::ExitStatusExt as _;
+use std::process::Command;
 use std::{
-    ffi::OsString,
+    ffi::{CString, OsString},
     fmt,
-    io::{self, BufRead as _, BufReader},
+    io::{self, BufReader, Read as _},
     iter,
     path::{Path, PathBuf},
-    process::{Child, ChildStdout, Command, Stdio},
     str, thread,
 };
 
@@ -44,20 +45,12 @@ pub struct WaitHandle {
 
 impl WaitHandle {
     pub fn wait(mut self) -> Result<()> {
-        let exit_status = self.child.wait()?;
-        if exit_status.success() {
+        let exit_code = self.child.wait()?;
+        if exit_code == ExitCode::SUCCESS {
             Ok(())
         } else {
             let stderr = self.stderr_handle.join().unwrap()?;
-            // Do like bash does and encode the signal in the exit code
-            let exit_code = exit_status
-                .code()
-                .unwrap_or_else(|| 128 + exit_status.signal().unwrap());
-            Err(CargoBuildError {
-                stderr,
-                exit_code: ExitCode::from(exit_code as u8),
-            }
-            .into())
+            Err(CargoBuildError { stderr, exit_code }.into())
         }
     }
 }
@@ -82,7 +75,9 @@ impl PackageToBuild {
     }
 }
 
-pub struct TestArtifactStream<StreamT> {
+pub type TestArtifactStream = GenericTestArtifactStream<ChildStdout>;
+
+pub struct GenericTestArtifactStream<StreamT> {
     log: slog::Logger,
     packages: HashMap<CargoPackageId, PackageToBuild>,
     ready: Vec<CargoArtifact>,
@@ -90,7 +85,7 @@ pub struct TestArtifactStream<StreamT> {
     build_done: bool,
 }
 
-impl<StreamT: io::Read> TestArtifactStream<StreamT> {
+impl<StreamT: io::Read> GenericTestArtifactStream<StreamT> {
     fn new(
         log: slog::Logger,
         packages: HashMap<CargoPackageId, PackageToBuild>,
@@ -169,7 +164,7 @@ impl<StreamT: io::Read> TestArtifactStream<StreamT> {
     }
 }
 
-impl<StreamT: io::Read> Iterator for TestArtifactStream<StreamT> {
+impl<StreamT: io::Read> Iterator for GenericTestArtifactStream<StreamT> {
     type Item = Result<CargoArtifact>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -191,6 +186,133 @@ impl<StreamT: io::Read> Iterator for TestArtifactStream<StreamT> {
     }
 }
 
+pub struct TtyReader {
+    fd: linux::OwnedFd,
+}
+
+impl io::Read for TtyReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match linux::read(&self.fd, buf) {
+            Err(err) => {
+                // EIO is what we get from the slave TTY when it has shutdown.
+                if err == linux::Errno::EIO {
+                    Ok(0)
+                } else {
+                    Err(err.into())
+                }
+            }
+            Ok(c) => Ok(c),
+        }
+    }
+}
+
+pub struct ChildStdout {
+    fd: linux::OwnedFd,
+}
+
+impl io::Read for ChildStdout {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let count = linux::read(&self.fd, buf)?;
+        Ok(count)
+    }
+}
+
+struct Child {
+    pid: linux::Pid,
+    tty: Option<linux::OwnedFd>,
+    stdout: Option<ChildStdout>,
+}
+
+impl Child {
+    fn wait(&mut self) -> Result<ExitCode> {
+        Ok(match linux::waitpid(self.pid)? {
+            linux::WaitStatus::Exited(code) => code.as_u8(),
+            linux::WaitStatus::Signaled(signal) => {
+                // Do like bash does and encode the signal in the exit code
+                128 + signal.as_u8()
+            }
+        }
+        .into())
+    }
+}
+
+fn spawn_cargo(args: Vec<OsString>) -> Result<Child> {
+    let window_size = WindowSize {
+        columns: 200,
+        rows: 3,
+    };
+    let (master_tty, slave_tty) =
+        open_pseudoterminal(window_size, false /* master non-block */)?;
+
+    let (stdout_read, stdout_write) = linux::pipe()?;
+
+    let path = c"cargo";
+    let args: Vec<_> = args
+        .into_iter()
+        .map(|a| CString::new(a.into_encoded_bytes()).unwrap())
+        .collect();
+
+    let mut argv = vec![Some(&c"cargo".to_bytes_with_nul()[0])];
+    argv.extend(args.iter().map(|a| Some(&a.as_bytes_with_nul()[0])));
+    argv.push(None);
+
+    let env: Vec<_> = std::env::vars()
+        .map(|(k, v)| CString::new(format!("{k}={v}")).unwrap())
+        .collect();
+    let mut envp: Vec<_> = env
+        .iter()
+        .map(|a| Some(&a.as_bytes_with_nul()[0]))
+        .collect();
+    envp.push(None);
+
+    if let Some(child_pid) = linux::fork()? {
+        Ok(Child {
+            pid: child_pid,
+            tty: Some(master_tty),
+            stdout: Some(ChildStdout { fd: stdout_read }),
+        })
+    } else {
+        // in the child
+        drop((master_tty, stdout_read));
+
+        linux::setsid().unwrap();
+
+        linux::dup2(&slave_tty, &linux::Fd::STDIN).unwrap();
+        linux::dup2(&slave_tty, &linux::Fd::STDERR).unwrap();
+        linux::dup2(&stdout_write, &linux::Fd::STDOUT).unwrap();
+        linux::ioctl_tiocsctty(&linux::Fd::STDIN, 0).unwrap();
+        drop((slave_tty, stdout_write));
+
+        linux::execvpe(path, &argv[..], &envp[..]).unwrap();
+
+        unreachable!()
+    }
+}
+
+fn handle_cargo_tty_inner(tty: linux::OwnedFd, ui: UiSender) -> Result<String> {
+    let mut stderr_string = String::new();
+    let mut input = TtyReader { fd: tty };
+
+    let mut buf = [0; 1024];
+    loop {
+        let num_read = input.read(&mut buf)?;
+        if num_read == 0 {
+            break;
+        }
+        let read_data = &buf[0..num_read];
+        stderr_string += &String::from_utf8_lossy(read_data);
+        ui.build_output_chunk(read_data);
+    }
+
+    Ok(stderr_string)
+}
+
+fn handle_cargo_tty(tty: linux::OwnedFd, ui: UiSender) -> Result<String> {
+    let res = handle_cargo_tty_inner(tty, ui.clone());
+    ui.done_building();
+    res
+}
+
 pub fn run_cargo_test(
     color: bool,
     feature_selection_options: &FeatureSelectionOptions,
@@ -199,40 +321,26 @@ pub fn run_cargo_test(
     packages: Vec<&CargoPackage>,
     ui: UiSender,
     log: slog::Logger,
-) -> Result<(WaitHandle, TestArtifactStream<ChildStdout>)> {
-    let mut cmd = Command::new("cargo");
-    cmd.arg("test")
-        .arg("--no-run")
-        .arg("--message-format=json-render-diagnostics")
-        .arg(&format!(
-            "--color={}",
-            if color { "always" } else { "never" }
-        ))
-        .args(feature_selection_options.iter())
-        .args(compilation_options.iter())
-        .args(manifest_options.iter())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+) -> Result<(WaitHandle, TestArtifactStream)> {
+    let mut args = vec![
+        "test".into(),
+        "--no-run".into(),
+        "--message-format=json-render-diagnostics".into(),
+        format!("--color={}", if color { "always" } else { "never" }).into(),
+    ];
+    args.extend(feature_selection_options.iter().map(|a| a.into()));
+    args.extend(compilation_options.iter());
+    args.extend(manifest_options.iter());
 
     for p in &packages {
-        cmd.arg("--package")
-            .arg(format!("{}@{}", &p.name, &p.version));
+        args.push("--package".into());
+        args.push(format!("{}@{}", &p.name, &p.version).into());
     }
 
-    let mut child = cmd.spawn()?;
+    let mut child = spawn_cargo(args)?;
     let stdout = child.stdout.take().unwrap();
-    let stderr = BufReader::new(child.stderr.take().unwrap());
-    let stderr_handle = thread::spawn(move || {
-        let mut stderr_string = String::new();
-        for line in stderr.lines() {
-            let line = line?;
-            stderr_string += &line;
-            stderr_string += "\n";
-            ui.build_output_line(line);
-        }
-        ui.done_building();
-        Ok(stderr_string)
-    });
+    let tty = child.tty.take().unwrap();
+    let stderr_handle = thread::spawn(move || handle_cargo_tty(tty, ui));
 
     let packages = packages
         .into_iter()
@@ -244,7 +352,7 @@ pub fn run_cargo_test(
             child,
             stderr_handle,
         },
-        TestArtifactStream::new(
+        GenericTestArtifactStream::new(
             log,
             packages,
             CargoMessage::parse_stream(BufReader::new(stdout)),
@@ -476,7 +584,7 @@ mod tests {
     fn build_test_artifact_stream(
         packages: HashMap<&str, HashSet<&str>>,
         messages: Vec<serde_json::Value>,
-    ) -> TestArtifactStream<io::Cursor<Vec<u8>>> {
+    ) -> GenericTestArtifactStream<io::Cursor<Vec<u8>>> {
         let log = maelstrom_util::log::test_logger();
         let packages = packages
             .into_iter()
@@ -497,13 +605,13 @@ mod tests {
         }
         let inner_stream =
             CargoMessage::parse_stream(BufReader::new(io::Cursor::new(messages_as_bytes)));
-        let stream = TestArtifactStream::new(log, packages, inner_stream);
+        let stream = GenericTestArtifactStream::new(log, packages, inner_stream);
         assert_eq!(&stream.ready, &[]);
         stream
     }
 
     fn assert_num_reads(
-        stream: &mut TestArtifactStream<io::Cursor<Vec<u8>>>,
+        stream: &mut GenericTestArtifactStream<io::Cursor<Vec<u8>>>,
         num_reads: usize,
         expected_ready: usize,
     ) {

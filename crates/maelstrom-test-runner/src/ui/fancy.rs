@@ -187,6 +187,10 @@ impl Ui for FancyUi {
                         self.build_output.process(b"\r\n");
                         self.producing_build_output = true;
                     }
+                    UiMessage::BuildOutputChunk(chunk) => {
+                        self.build_output.process(&chunk);
+                        self.producing_build_output = true;
+                    }
                     UiMessage::List(_) => {}
                     UiMessage::JobFinished(res) => {
                         self.jobs_completed += 1;
@@ -442,7 +446,7 @@ impl Widget for &mut FancyUi {
                 ));
             }
             if self.producing_build_output {
-                sections.push((Constraint::Length(4), FancyUi::render_build_output as _));
+                sections.push((Constraint::Length(5), FancyUi::render_build_output as _));
             }
             if self.enqueue_status.is_some() {
                 sections.push((Constraint::Length(1), FancyUi::render_enqueue_status as _));

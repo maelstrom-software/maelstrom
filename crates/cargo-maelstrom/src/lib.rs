@@ -25,7 +25,6 @@ use maelstrom_util::{
 };
 use pattern::ArtifactKind;
 use std::path::Path;
-use std::process::ChildStdout;
 use std::str::FromStr;
 use std::{fmt, io};
 
@@ -285,7 +284,7 @@ impl TestArtifact for CargoTestArtifact {
     }
 }
 
-struct CargoTestArtifactStream(cargo::TestArtifactStream<ChildStdout>);
+struct CargoTestArtifactStream(cargo::TestArtifactStream);
 
 impl Iterator for CargoTestArtifactStream {
     type Item = Result<CargoTestArtifact>;
