@@ -189,6 +189,23 @@ pub struct FileAttributes {
     pub mtime: UnixTimestamp,
 }
 
+#[test]
+fn file_attributes_encoding_size_remains_same() {
+    use maelstrom_base::proto;
+
+    let mut a = FileAttributes {
+        size: 1,
+        mode: Mode(1),
+        mtime: UnixTimestamp(1),
+    };
+    let start_size = proto::fixint_serialized_size(&a).unwrap();
+    a.size = u64::MAX;
+    a.mode = Mode(u32::MAX);
+    a.mtime = UnixTimestamp(i64::MAX);
+    let end_size = proto::fixint_serialized_size(&a).unwrap();
+    assert_eq!(start_size, end_size);
+}
+
 /// The data for a file
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum FileData {
@@ -221,7 +238,7 @@ pub async fn decode<T: DeserializeOwned>(mut stream: impl AsyncRead + Unpin) -> 
     }
     let mut buffer = vec![0; len as usize];
     stream.read_exact(&mut buffer).await?;
-    Ok(maelstrom_base::proto::deserialize(&buffer)?)
+    Ok(maelstrom_base::proto::fixint_deserialize(&buffer)?)
 }
 
 /// Decode from a stream where we can get the path so we can include it in the error message
@@ -240,7 +257,7 @@ pub async fn decode_with_rich_error<T: DeserializeOwned>(
 
 pub async fn encode<T: Serialize>(mut stream: impl AsyncWrite + Unpin, t: &T) -> Result<()> {
     let mut buffer = vec![0; 8];
-    maelstrom_base::proto::serialize_into(&mut buffer, t).unwrap();
+    maelstrom_base::proto::fixint_serialize_into(&mut buffer, t).unwrap();
     let len = buffer.len() as u64 - 8;
     if len > MAX_ENCODE_SIZE {
         bail!("item to encode too large {len} > {MAX_ENCODE_SIZE}");

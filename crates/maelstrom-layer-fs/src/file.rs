@@ -222,12 +222,26 @@ impl FileMetadataWriter {
             .seek(SeekFrom::Start(self.file_table_start + id.offset_u64() - 1))
             .await?;
         let entry: FileTableEntry = decode_with_rich_error(&mut self.file_table).await?;
-        self.attr_table
-            .seek(SeekFrom::Start(
-                self.attr_table_start + entry.attr_id.offset() - 1,
-            ))
-            .await?;
+        let attr_offset = self.attr_table_start + entry.attr_id.offset() - 1;
+        self.attr_table.seek(SeekFrom::Start(attr_offset)).await?;
+
+        #[cfg(debug_assertions)]
+        let old_len = {
+            use tokio::io::AsyncReadExt as _;
+            let old_len = self.attr_table.read_u64().await?;
+            self.attr_table.seek(SeekFrom::Start(attr_offset)).await?;
+            old_len
+        };
+
         encode_with_rich_error(&mut self.attr_table, &attrs).await?;
+
+        #[cfg(debug_assertions)]
+        {
+            use tokio::io::AsyncReadExt as _;
+            self.attr_table.seek(SeekFrom::Start(attr_offset)).await?;
+            let new_len = self.attr_table.read_u64().await?;
+            assert_eq!(old_len, new_len);
+        }
 
         self.file_table
             .seek(SeekFrom::Start(old_file_table_pos))

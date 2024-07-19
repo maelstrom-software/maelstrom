@@ -22,17 +22,17 @@ impl AvlPtr {
 
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct FlatAvlPtrOption([u8; 8]);
+pub struct FlatAvlPtrOption(u64);
 
 impl From<Option<AvlPtr>> for FlatAvlPtrOption {
     fn from(o: Option<AvlPtr>) -> Self {
-        Self(o.map(|v| v.as_u64()).unwrap_or(0).to_be_bytes())
+        Self(o.map(|v| v.as_u64()).unwrap_or(0))
     }
 }
 
 impl From<FlatAvlPtrOption> for Option<AvlPtr> {
     fn from(p: FlatAvlPtrOption) -> Self {
-        AvlPtr::new(u64::from_be_bytes(p.0))
+        AvlPtr::new(p.0)
     }
 }
 
@@ -67,11 +67,11 @@ fn avl_node_encoding_size_remains_same() {
     use maelstrom_base::proto;
 
     let mut n = AvlNode::new(12, 13);
-    let start_size = proto::serialized_size(&n).unwrap();
-    n.left = Some(AvlPtr::new(77).unwrap());
-    n.right = Some(AvlPtr::new(254).unwrap());
-    n.height = 100;
-    let end_size = proto::serialized_size(&n).unwrap();
+    let start_size = proto::fixint_serialized_size(&n).unwrap();
+    n.left = Some(AvlPtr::new(u64::MAX).unwrap());
+    n.right = Some(AvlPtr::new(u64::MAX).unwrap());
+    n.height = u32::MAX;
+    let end_size = proto::fixint_serialized_size(&n).unwrap();
     assert_eq!(start_size, end_size);
 }
 
