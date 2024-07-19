@@ -1,6 +1,6 @@
 pub use maelstrom_fuse::FileType;
 
-use anyhow::{Context as _, Result};
+use anyhow::{bail, Context as _, Result};
 use derive_more::{From, Into};
 use maelstrom_base::{
     manifest::{Mode, UnixTimestamp},
@@ -212,8 +212,13 @@ pub struct FileTableEntry {
     pub attr_id: AttributesId,
 }
 
+const MAX_ENCODE_SIZE: u64 = 1024 * 1024 * 1024; // 1 GiB
+
 pub async fn decode<T: DeserializeOwned>(mut stream: impl AsyncRead + Unpin) -> Result<T> {
     let len = stream.read_u64().await?;
+    if len > MAX_ENCODE_SIZE {
+        bail!("item to decode too large {len} > {MAX_ENCODE_SIZE}");
+    }
     let mut buffer = vec![0; len as usize];
     stream.read_exact(&mut buffer).await?;
     Ok(maelstrom_base::proto::deserialize(&buffer)?)
@@ -237,6 +242,9 @@ pub async fn encode<T: Serialize>(mut stream: impl AsyncWrite + Unpin, t: &T) ->
     let mut buffer = vec![0; 8];
     maelstrom_base::proto::serialize_into(&mut buffer, t).unwrap();
     let len = buffer.len() as u64 - 8;
+    if len > MAX_ENCODE_SIZE {
+        bail!("item to encode too large {len} > {MAX_ENCODE_SIZE}");
+    }
     std::io::Cursor::new(&mut buffer[..8])
         .write_u64(len)
         .await
