@@ -36,7 +36,7 @@ use std::{
     },
 };
 use test_listing::TestListingStore;
-use ui::{Ui, UiSender, UiSenderWriteAdapter};
+use ui::{Ui, UiSender, UiSlogDrain};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -643,9 +643,7 @@ where
         introspect_driver.drive(state.deps.client(), ui.clone());
         ui.update_length(state.queuing_state.expected_job_count);
 
-        state
-            .logging_output
-            .update(UiSenderWriteAdapter::new(ui.clone()));
+        state.logging_output.update(ui.clone());
         slog::debug!(state.log, "main app created");
 
         let queuing = JobQueuing::new(
@@ -701,9 +699,20 @@ where
     }
 }
 
-#[derive(Default)]
-struct LoggingOutputInner {
-    ui: Option<Box<dyn io::Write + Send + Sync + 'static>>,
+type TermDrain = slog::Fuse<slog_async::Async>;
+
+enum LoggingOutputInner {
+    Ui(UiSlogDrain),
+    Term(TermDrain),
+}
+
+impl Default for LoggingOutputInner {
+    fn default() -> Self {
+        let decorator = slog_term::TermDecorator::new().stdout().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        Self::Term(drain)
+    }
 }
 
 #[derive(Clone, Default)]
@@ -712,28 +721,23 @@ pub struct LoggingOutput {
 }
 
 impl LoggingOutput {
-    fn update(&self, ui: impl io::Write + Send + Sync + 'static) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.ui = Some(Box::new(ui));
+    fn update(&self, ui: UiSender) {
+        *self.inner.lock().unwrap() = LoggingOutputInner::Ui(UiSlogDrain::new(ui));
     }
 }
 
-impl io::Write for LoggingOutput {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut inner = self.inner.lock().unwrap();
-        if let Some(ui) = &mut inner.ui {
-            ui.write(buf)
-        } else {
-            io::stdout().write(buf)
-        }
-    }
+impl slog::Drain for LoggingOutput {
+    type Ok = ();
+    type Err = <TermDrain as slog::Drain>::Err;
 
-    fn flush(&mut self) -> io::Result<()> {
-        let mut inner = self.inner.lock().unwrap();
-        if let Some(ui) = &mut inner.ui {
-            ui.flush()
-        } else {
-            io::stdout().flush()
+    fn log(
+        &self,
+        record: &slog::Record<'_>,
+        values: &slog::OwnedKVList,
+    ) -> Result<Self::Ok, Self::Err> {
+        match &mut *self.inner.lock().unwrap() {
+            LoggingOutputInner::Ui(d) => d.log(record, values),
+            LoggingOutputInner::Term(d) => d.log(record, values),
         }
     }
 }
@@ -747,10 +751,7 @@ impl Logger {
     pub fn build(&self, out: LoggingOutput) -> slog::Logger {
         match self {
             Self::DefaultLogger(level) => {
-                let decorator = slog_term::PlainDecorator::new(out);
-                let drain = slog_term::FullFormat::new(decorator).build().fuse();
-                let drain = slog_async::Async::new(drain).build().fuse();
-                let drain = slog::LevelFilter::new(drain, level.as_slog_level()).fuse();
+                let drain = slog::LevelFilter::new(out, level.as_slog_level()).fuse();
                 slog::Logger::root(drain, slog::o!())
             }
             Self::GivenLogger(logger) => logger.clone(),

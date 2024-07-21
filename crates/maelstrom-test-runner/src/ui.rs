@@ -7,7 +7,7 @@ use maelstrom_client::IntrospectResponse;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use std::{fmt, io, str};
+use std::{fmt, str};
 
 pub use simple::SimpleUi;
 
@@ -63,7 +63,7 @@ pub struct UiJobResult {
 pub enum UiMessage {
     BuildOutputLine(String),
     BuildOutputChunk(Vec<u8>),
-    LogMessage(String),
+    SlogRecord(slog_async::AsyncRecord),
     List(String),
     JobFinished(UiJobResult),
     UpdatePendingJobsCount(u64),
@@ -104,8 +104,8 @@ impl UiSender {
         let _ = self.send.send(UiMessage::BuildOutputChunk(chunk.into()));
     }
 
-    pub fn log_message(&self, line: String) {
-        let _ = self.send.send(UiMessage::LogMessage(line));
+    pub fn slog_record(&self, r: slog_async::AsyncRecord) {
+        let _ = self.send.send(UiMessage::SlogRecord(r));
     }
 
     pub fn list(&self, line: String) {
@@ -144,32 +144,25 @@ impl UiSender {
     }
 }
 
-pub struct UiSenderWriteAdapter {
-    send: UiSender,
-    line: String,
-}
+pub struct UiSlogDrain(UiSender);
 
-impl UiSenderWriteAdapter {
-    pub fn new(send: UiSender) -> Self {
-        Self {
-            send,
-            line: String::new(),
-        }
+impl UiSlogDrain {
+    pub fn new(ui: UiSender) -> Self {
+        Self(ui)
     }
 }
 
-impl io::Write for UiSenderWriteAdapter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.line += &String::from_utf8_lossy(buf);
-        if let Some(p) = self.line.bytes().position(|b| b == b'\n') {
-            let remaining = self.line.split_off(p);
-            let line = std::mem::replace(&mut self.line, remaining[1..].into());
-            self.send.log_message(line);
-        }
-        Ok(buf.len())
-    }
+impl slog::Drain for UiSlogDrain {
+    type Ok = ();
+    type Err = <slog::Fuse<slog_async::Async> as slog::Drain>::Err;
 
-    fn flush(&mut self) -> io::Result<()> {
+    fn log(
+        &self,
+        record: &slog::Record<'_>,
+        values: &slog::OwnedKVList,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.0
+            .slog_record(slog_async::AsyncRecord::from(record, values));
         Ok(())
     }
 }

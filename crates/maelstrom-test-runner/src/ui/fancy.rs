@@ -20,17 +20,198 @@ use ratatui::{
         ExecutableCommand as _,
     },
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{palette::tailwind, Stylize as _},
+    style::{palette::tailwind, Color, Modifier, Style, Stylize as _},
     terminal::{Terminal, Viewport},
     text::{Line, Span, Text},
-    widgets::{Block, Cell, Gauge, Paragraph, Row, Table, Widget},
+    widgets::{Block, Cell, Gauge, Paragraph, Row, Table, Widget, Wrap},
     TerminalOptions,
 };
+use slog::Drain as _;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::io::stdout;
+use std::io::{self, stdout};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr as _;
+
+enum SlogEntry {
+    Style(Style),
+    EndStyle,
+    String(String),
+}
+
+struct SlogLine {
+    entries: Vec<SlogEntry>,
+}
+
+impl SlogLine {
+    fn empty() -> Self {
+        Self { entries: vec![] }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+impl From<SlogLine> for Line<'static> {
+    fn from(s: SlogLine) -> Self {
+        let mut l = Line::default();
+        let mut span = None;
+        for entry in s.entries {
+            match entry {
+                SlogEntry::Style(style) => {
+                    if let Some(span) = span.take() {
+                        l.spans.push(span);
+                    }
+                    span = Some(Span::default().style(style));
+                }
+                SlogEntry::EndStyle => {
+                    if let Some(span) = span.take() {
+                        l.spans.push(span);
+                    }
+                }
+                SlogEntry::String(s) => {
+                    if let Some(span) = &mut span {
+                        span.content = format!("{}{}", span.content, s).into();
+                    } else {
+                        span = Some(Span::from(s));
+                    }
+                }
+            }
+        }
+        l
+    }
+}
+
+#[derive(Default)]
+struct SlogLines {
+    lines: Vec<SlogLine>,
+}
+
+impl SlogLines {
+    fn pop_lines(&mut self) -> Vec<Line<'static>> {
+        std::mem::take(&mut self.lines)
+            .into_iter()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.into())
+            .collect()
+    }
+
+    fn write_to_line(&mut self, s: &str) {
+        self.push_entry(SlogEntry::String(s.into()));
+    }
+
+    fn push_entry(&mut self, entry: SlogEntry) {
+        if self.lines.is_empty() {
+            self.next();
+        }
+        let line = self.lines.last_mut().unwrap();
+        line.entries.push(entry);
+    }
+
+    fn next(&mut self) {
+        self.lines.push(SlogLine::empty());
+    }
+}
+
+struct UiSlogRecordDecorator<'lines> {
+    level: slog::Level,
+    lines: &'lines mut SlogLines,
+}
+
+impl<'lines> UiSlogRecordDecorator<'lines> {
+    pub fn new(level: slog::Level, lines: &'lines mut SlogLines) -> Self {
+        Self { level, lines }
+    }
+}
+
+impl<'lines> io::Write for UiSlogRecordDecorator<'lines> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut buf = buf.to_owned();
+        let total_len = buf.len();
+
+        while let Some(p) = buf.iter().position(|&b| b == b'\n') {
+            let remaining = buf.split_off(p + 1);
+            self.lines
+                .write_to_line(&String::from_utf8_lossy(&buf[..(buf.len() - 1)]));
+            self.lines.next();
+
+            buf = remaining;
+        }
+        if !buf.is_empty() {
+            self.lines.write_to_line(&String::from_utf8_lossy(&buf));
+        }
+
+        Ok(total_len)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'lines> slog_term::RecordDecorator for UiSlogRecordDecorator<'lines> {
+    fn reset(&mut self) -> io::Result<()> {
+        self.lines.push_entry(SlogEntry::EndStyle);
+        Ok(())
+    }
+
+    fn start_level(&mut self) -> io::Result<()> {
+        let color = match self.level {
+            slog::Level::Critical => Color::Magenta,
+            slog::Level::Error => Color::Red,
+            slog::Level::Warning => Color::Yellow,
+            slog::Level::Info => Color::Green,
+            slog::Level::Debug => Color::Cyan,
+            slog::Level::Trace => Color::Blue,
+        };
+
+        self.lines
+            .push_entry(SlogEntry::Style(Style::default().fg(color)));
+        Ok(())
+    }
+
+    fn start_key(&mut self) -> io::Result<()> {
+        self.lines.push_entry(SlogEntry::Style(
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        Ok(())
+    }
+
+    fn start_msg(&mut self) -> io::Result<()> {
+        self.lines.push_entry(SlogEntry::Style(
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        Ok(())
+    }
+}
+
+struct UiSlogDecorator<'lines> {
+    lines: &'lines RefCell<SlogLines>,
+}
+
+impl<'lines> UiSlogDecorator<'lines> {
+    fn new(lines: &'lines RefCell<SlogLines>) -> Self {
+        Self { lines }
+    }
+}
+
+impl<'lines> slog_term::Decorator for UiSlogDecorator<'lines> {
+    fn with_record<F>(
+        &self,
+        record: &slog::Record,
+        _logger_values: &slog::OwnedKVList,
+        f: F,
+    ) -> io::Result<()>
+    where
+        F: FnOnce(&mut dyn slog_term::RecordDecorator) -> io::Result<()>,
+    {
+        let mut lines = self.lines.borrow_mut();
+        let mut d = UiSlogRecordDecorator::new(record.level(), &mut lines);
+        f(&mut d)
+    }
+}
 
 fn format_finished(res: UiJobResult) -> Vec<PrintAbove> {
     let result_span: Span = match &res.status {
@@ -89,6 +270,15 @@ enum PrintAbove {
     Output(Line<'static>),
 }
 
+impl PrintAbove {
+    fn height(&self, width: u16) -> u16 {
+        match self {
+            Self::StatusLine(_) => 1,
+            Self::Output(l) => (l.width() as u16).div_ceil(width),
+        }
+    }
+}
+
 impl Widget for PrintAbove {
     fn render(self, area: Rect, buf: &mut Buffer) {
         match self {
@@ -101,7 +291,9 @@ impl Widget for PrintAbove {
                 ],
             )
             .render(area, buf),
-            Self::Output(l) => l.render(area, buf),
+            Self::Output(l) => Paragraph::new(l)
+                .wrap(Wrap { trim: true })
+                .render(area, buf),
         }
     }
 }
@@ -166,6 +358,10 @@ impl Ui for FancyUi {
 
         let mut terminal = init_terminal()?;
 
+        let log_lines = RefCell::new(SlogLines::default());
+        let slog_dec = UiSlogDecorator::new(&log_lines);
+        let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
+
         let mut last_tick = Instant::now();
         terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
         loop {
@@ -178,8 +374,11 @@ impl Ui for FancyUi {
 
                 if !self.print_above.is_empty() {
                     let rows = std::mem::take(&mut self.print_above);
+                    let term_width = terminal.backend().size()?.width;
                     for t in rows {
-                        terminal.insert_before(1, move |buf| t.render(buf.area, buf))?;
+                        terminal.insert_before(t.height(term_width), move |buf| {
+                            t.render(buf.area, buf)
+                        })?;
                     }
                 }
                 self.throbber_state.calc_next();
@@ -189,8 +388,15 @@ impl Ui for FancyUi {
 
             match recv.recv_timeout(Duration::from_millis(33)) {
                 Ok(msg) => match msg {
-                    UiMessage::LogMessage(line) => {
-                        self.print_above.push(Line::from(line).into());
+                    UiMessage::SlogRecord(r) => {
+                        let _ = r.log_to(&slog_drain);
+                        self.print_above.extend(
+                            log_lines
+                                .borrow_mut()
+                                .pop_lines()
+                                .into_iter()
+                                .map(|l| l.into()),
+                        );
                     }
                     UiMessage::BuildOutputLine(line) => {
                         self.build_output.process(line.as_bytes());
@@ -475,7 +681,7 @@ impl Widget for &mut FancyUi {
     }
 }
 
-fn init_terminal() -> Result<Terminal<impl Backend>> {
+fn init_terminal() -> Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
     enable_raw_mode()?;
     let backend = CrosstermBackend::new(stdout());
     let height = backend.size()?.height;

@@ -10,6 +10,8 @@ use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressPrinter as _, QuietNoBar,
     QuietProgressBar, TestListingProgress, TestListingProgressNoSpinner,
 };
+use slog::Drain as _;
+use std::io::{self, Write as _};
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
@@ -24,13 +26,18 @@ impl<TermT> Terminal for TermT where
 }
 
 #[derive(From)]
-pub enum SimpleUi<TermT> {
+enum ProgressImpl<TermT> {
     TestListingProgress(TestListingProgress<TermT>),
     TestListingProgressNoSpinner(TestListingProgressNoSpinner<TermT>),
     QuietProgressBar(QuietProgressBar<TermT>),
     MultipleProgressBars(MultipleProgressBars<TermT>),
     QuietNoBar(QuietNoBar<TermT>),
     NoBar(NoBar<TermT>),
+}
+
+pub struct SimpleUi<TermT> {
+    prog_impl: ProgressImpl<TermT>,
+    stdout_is_tty: bool,
 }
 
 impl<TermT> SimpleUi<TermT>
@@ -41,7 +48,7 @@ where
     where
         TermT: Terminal,
     {
-        if list {
+        let prog_impl = if list {
             if stdout_is_tty {
                 TestListingProgress::new(term, "starting...").into()
             } else {
@@ -54,6 +61,10 @@ where
                 (false, true) => QuietNoBar::new(term).into(),
                 (false, false) => NoBar::new(term).into(),
             }
+        };
+        Self {
+            prog_impl,
+            stdout_is_tty,
         }
     }
 }
@@ -63,13 +74,15 @@ where
     TermT: Terminal,
 {
     fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {
-        match self {
-            Self::TestListingProgress(p) => run_simple_ui(p, recv),
-            Self::TestListingProgressNoSpinner(p) => run_simple_ui(p, recv),
-            Self::QuietProgressBar(p) => run_simple_ui(p, recv),
-            Self::MultipleProgressBars(p) => run_simple_ui(p, recv),
-            Self::QuietNoBar(p) => run_simple_ui(p, recv),
-            Self::NoBar(p) => run_simple_ui(p, recv),
+        match &mut self.prog_impl {
+            ProgressImpl::TestListingProgress(p) => run_simple_ui(p, recv, self.stdout_is_tty),
+            ProgressImpl::TestListingProgressNoSpinner(p) => {
+                run_simple_ui(p, recv, self.stdout_is_tty)
+            }
+            ProgressImpl::QuietProgressBar(p) => run_simple_ui(p, recv, self.stdout_is_tty),
+            ProgressImpl::MultipleProgressBars(p) => run_simple_ui(p, recv, self.stdout_is_tty),
+            ProgressImpl::QuietNoBar(p) => run_simple_ui(p, recv, self.stdout_is_tty),
+            ProgressImpl::NoBar(p) => run_simple_ui(p, recv, self.stdout_is_tty),
         }
     }
 }
@@ -182,13 +195,135 @@ where
     })
 }
 
+pub struct ProgressSlogRecordDecorator<ProgressIndicatorT> {
+    level: slog::Level,
+    prog: ProgressIndicatorT,
+    line: String,
+    use_color: bool,
+}
+
+impl<ProgressIndicatorT> ProgressSlogRecordDecorator<ProgressIndicatorT>
+where
+    ProgressIndicatorT: ProgressIndicator,
+{
+    pub fn new(level: slog::Level, prog: ProgressIndicatorT, use_color: bool) -> Self {
+        Self {
+            level,
+            prog,
+            line: String::new(),
+            use_color,
+        }
+    }
+}
+
+impl<ProgressIndicatorT> io::Write for ProgressSlogRecordDecorator<ProgressIndicatorT>
+where
+    ProgressIndicatorT: ProgressIndicator,
+{
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.line += &String::from_utf8_lossy(buf);
+        if let Some(p) = self.line.bytes().position(|b| b == b'\n') {
+            let remaining = self.line.split_off(p);
+            let line = std::mem::replace(&mut self.line, remaining[1..].into());
+            self.prog.lock_printing().println(line);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<ProgressIndicatorT> slog_term::RecordDecorator
+    for ProgressSlogRecordDecorator<ProgressIndicatorT>
+where
+    ProgressIndicatorT: ProgressIndicator,
+{
+    fn reset(&mut self) -> io::Result<()> {
+        if !self.use_color {
+            return Ok(());
+        }
+
+        self.write_all(b"\x1B[0m")
+    }
+
+    fn start_level(&mut self) -> io::Result<()> {
+        if !self.use_color {
+            return Ok(());
+        }
+
+        self.write_all(b"\x1B[")?;
+        self.write_all(match self.level {
+            slog::Level::Critical => b"35", // Magenta
+            slog::Level::Error => b"31",    // Red
+            slog::Level::Warning => b"33",  // Yellow
+            slog::Level::Info => b"32",     // Green
+            slog::Level::Debug => b"36",    // Cyan
+            slog::Level::Trace => b"34",    // Blue
+        })?;
+        self.write_all(b"m")?;
+        Ok(())
+    }
+
+    fn start_key(&mut self) -> io::Result<()> {
+        if !self.use_color {
+            return Ok(());
+        }
+
+        self.write_all(b"\x1B[1m")
+    }
+
+    fn start_msg(&mut self) -> io::Result<()> {
+        if !self.use_color {
+            return Ok(());
+        }
+
+        self.write_all(b"\x1B[1m")
+    }
+}
+
+struct ProgressSlogDecorator<ProgressIndicatorT> {
+    prog: ProgressIndicatorT,
+    use_color: bool,
+}
+
+impl<ProgressIndicatorT> ProgressSlogDecorator<ProgressIndicatorT> {
+    fn new(prog: ProgressIndicatorT, use_color: bool) -> Self {
+        Self { prog, use_color }
+    }
+}
+
+impl<ProgressIndicatorT> slog_term::Decorator for ProgressSlogDecorator<ProgressIndicatorT>
+where
+    ProgressIndicatorT: ProgressIndicator,
+{
+    fn with_record<F>(
+        &self,
+        record: &slog::Record,
+        _logger_values: &slog::OwnedKVList,
+        f: F,
+    ) -> io::Result<()>
+    where
+        F: FnOnce(&mut dyn slog_term::RecordDecorator) -> io::Result<()>,
+    {
+        let mut d =
+            ProgressSlogRecordDecorator::new(record.level(), self.prog.clone(), self.use_color);
+        f(&mut d)
+    }
+}
+
 fn run_simple_ui<ProgressIndicatorT>(
     prog: &ProgressIndicatorT,
     recv: Receiver<UiMessage>,
+    stdout_is_tty: bool,
 ) -> Result<()>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
+    let slog_dec = ProgressSlogDecorator::new(prog.clone(), stdout_is_tty);
+    let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
+
     let mut last_tick = Instant::now();
     loop {
         if last_tick.elapsed() > Duration::from_millis(500) {
@@ -201,7 +336,9 @@ where
                 UiMessage::List(line) => prog.lock_printing().println(line),
                 UiMessage::BuildOutputLine(_) => {}
                 UiMessage::BuildOutputChunk(_) => {}
-                UiMessage::LogMessage(line) => prog.lock_printing().println(line),
+                UiMessage::SlogRecord(r) => {
+                    let _ = r.log_to(&slog_drain);
+                }
                 UiMessage::JobFinished(res) => job_finished(prog, res),
                 UiMessage::UpdatePendingJobsCount(count) => prog.update_length(count),
                 UiMessage::JobEnqueued(_) => {}
