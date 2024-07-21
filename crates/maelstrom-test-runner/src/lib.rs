@@ -849,7 +849,7 @@ where
         is_list(&extra_options),
         stdout_is_tty,
         config_parent.quiet,
-    );
+    )?;
 
     if extra_options.as_ref().client_bg_proc {
         alternative_mains::client_bg_proc()

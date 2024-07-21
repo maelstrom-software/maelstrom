@@ -216,14 +216,14 @@ impl str::FromStr for UiKind {
     }
 }
 
-pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet) -> Box<dyn Ui> {
-    match kind {
+pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet) -> Result<Box<dyn Ui>> {
+    Ok(match kind {
         UiKind::Simple => Box::new(SimpleUi::new(
             list,
             stdout_is_tty,
             quiet,
             console::Term::buffered_stdout(),
         )),
-        UiKind::Fancy => Box::new(fancy::FancyUi::new(list, stdout_is_tty, quiet)),
-    }
+        UiKind::Fancy => Box::new(fancy::FancyUi::new(list, stdout_is_tty, quiet)?),
+    })
 }

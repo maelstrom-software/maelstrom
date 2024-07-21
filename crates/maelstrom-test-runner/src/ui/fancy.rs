@@ -2,7 +2,7 @@ mod multi_gauge;
 
 use super::{Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use crate::config::Quiet;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use derive_more::From;
 use indicatif::HumanBytes;
 use maelstrom_base::stats::JobState;
@@ -125,8 +125,18 @@ pub struct FancyUi {
 }
 
 impl FancyUi {
-    pub fn new(_list: bool, _stdout_is_tty: bool, _quiet: Quiet) -> Self {
-        Self {
+    pub fn new(list: bool, stdout_is_tty: bool, quiet: Quiet) -> Result<Self> {
+        if list {
+            bail!("`--ui fancy` doesn't support listing");
+        }
+        if !stdout_is_tty {
+            bail!("stdout must be a TTY to use `--ui fancy`")
+        }
+        if quiet.into_inner() {
+            bail!("`--ui fancy` doesn't support quiet mode")
+        }
+
+        Ok(Self {
             jobs_waiting_for_artifacts: 0,
             jobs_pending: 0,
             jobs_running: 0,
@@ -142,7 +152,7 @@ impl FancyUi {
             enqueue_status: Some("starting...".into()),
             throbber_state: Default::default(),
             remote_progress: vec![],
-        }
+        })
     }
 }
 
