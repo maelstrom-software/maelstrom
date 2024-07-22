@@ -152,10 +152,17 @@ impl Widget for MultiGauge<'_> {
                         Color::Reset
                     };
                     for y in area.top()..area.bottom() {
-                        buf.get_mut(area.left(), y)
-                            .set_symbol(get_unicode_block(frac))
-                            .set_fg(fg)
-                            .set_bg(bg);
+                        let x = area.left();
+                        let cell = buf.get_mut(x, y);
+                        if x < label_col || x > label_col + clamped_label_width || y != label_row {
+                            cell.set_symbol(get_unicode_block(frac))
+                                .set_fg(fg)
+                                .set_bg(bg);
+                        } else {
+                            // The transition overlaps with the label
+                            let c = if frac >= 0.5 { fg } else { bg };
+                            cell.set_symbol(" ").set_fg(Color::Reset).set_bg(c);
+                        }
                     }
                 }
             }
