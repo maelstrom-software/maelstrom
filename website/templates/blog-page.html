@@ -1,9 +1,17 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h1 class="title">
-  {{ page.title }}
-</h1>
-<p class="subtitle"><strong>{{ page.date }}</strong></p>
-{{ page.content | safe }}
+<div class="wrapper">
+  <div class="container" id="main">
+    <article id="content">
+      <h1 class="title">
+        {{ page.title }}
+      </h1>
+      <p class="subtitle"><strong>{{ page.date }}</strong></p>
+      {{ page.content | safe }}
+    </article>
+  </div>
+</div>
 {% endblock content %}
+
+<!-- vim: set sw=2 ts=2 et ai: -->

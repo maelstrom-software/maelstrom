@@ -2,40 +2,30 @@
 
 {% block content %}
 
-<!-- Overview -->
 <div class="wrapper">
   <div class="container" id="main">
-    <!-- Content -->
-    <article id="content">
-      <header>
-          <h2>{{ section.title }}</h2>
-            <p>Maelstrom packages your Rust tests into hermetic micro-containers, then schedules
-            and distributes them amongst an arbitrarily large cluster of test-runners.</p>
-      </header>
-      <a href="#" class="image featured"><img src="images/pic06.jpg" alt="" /></a>
-    </article>
-  </div>
-</div>
+    <header>
+      <h2>{{ section.title }}</h2>
+    </header>
 
-<div class="wrapper">
-  <div class="container">
     <div class="row">
       {% for page in section.pages %}
-      <section class="col-6 col-12-narrower feature">
+      <div class="col-6 col-12-narrower feature">
         <div class="image-wrapper first">
           <a href="#" class="image featured"><img src="images/pic01.jpg" alt="" /></a>
         </div>
-        <header>
-            <h2>{{ page.title }}</h2>
-        </header>
+        <a href="{{ page.permalink | safe }}">
+          <header>
+            <h3>{{ page.title }}</h3>
+          </header>
+        </a>
         {{ page.summary | safe }}
-        <ul class="actions">
-          <li><a href="{{ page.permalink | safe }}" class="button">Elevate my awareness</a></li>
-        </ul>
-      </section>
+      </div>
       {% endfor %}
     </div>
   </div>
 </div>
 
 {% endblock content %}
+
+<!-- vim: set sw=2 ts=2 et ai: -->

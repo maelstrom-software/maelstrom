@@ -33,20 +33,11 @@
 
         </div>
 
-        {% block hero %} {% endblock %}
+        {% block after_header %} {% endblock %}
 
       </div>
 
-      <!-- Overview -->
-      <div class="wrapper">
-        <div class="container" id="main">
-
-          <!-- Content -->
-          <article id="content">
-            {% block content %} {% endblock %}
-          </article>
-        </div>
-      </div>
+      {% block content %} {% endblock %}
 
       <!-- Footer -->
       <div id="footer-wrapper">

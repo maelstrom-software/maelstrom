@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
-{% block hero %}
-<!-- Hero -->
+{% block after_header %}
 <section id="hero" class="container">
   <header>
     <h2>A clustered, hermetic test runner.
@@ -14,8 +13,16 @@
 {% endblock hero %}
 
 {% block content %}
-<header>
-  <h2>{{ section.title }}</h2>
-</header>
-{{ section.content | safe }}
+<div class="wrapper">
+  <div class="container" id="main">
+    <article id="content">
+      <header>
+        <h2>{{ section.title }}</h2>
+      </header>
+      {{ section.content | safe }}
+    </article>
+  </div>
+</div>
 {% endblock content %}
+
+<!-- vim: set sw=2 ts=2 et ai: -->
