@@ -441,10 +441,18 @@ impl Ui for FancyUi {
                     UiMessage::AllJobsFinished(summary) => {
                         self.all_done = Some(summary);
                     }
-                    UiMessage::Shutdown => break,
                 },
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        drop(slog_drain);
+        if !self.print_above.is_empty() {
+            let rows = std::mem::take(&mut self.print_above);
+            let term_width = terminal.backend().size()?.width;
+            for t in rows {
+                terminal.insert_before(t.height(term_width), move |buf| t.render(buf.area, buf))?;
             }
         }
         terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;

@@ -643,7 +643,7 @@ where
         introspect_driver.drive(state.deps.client(), ui.clone());
         ui.update_length(state.queuing_state.expected_job_count);
 
-        state.logging_output.update(ui.clone());
+        state.logging_output.display_on_ui(ui.clone());
         slog::debug!(state.log, "main app created");
 
         let queuing = JobQueuing::new(
@@ -721,8 +721,11 @@ pub struct LoggingOutput {
 }
 
 impl LoggingOutput {
-    fn update(&self, ui: UiSender) {
+    fn display_on_ui(&self, ui: UiSender) {
         *self.inner.lock().unwrap() = LoggingOutputInner::Ui(UiSlogDrain::new(ui));
+    }
+    fn display_on_term(&self) {
+        *self.inner.lock().unwrap() = LoggingOutputInner::default();
     }
 }
 
@@ -774,7 +777,7 @@ where
     let exit_code_res = std::thread::scope(|scope| {
         let mut app = MainApp::new(
             &state,
-            ui_sender.clone(),
+            ui_sender,
             DefaultIntrospectDriver::new(scope),
             timeout_override,
         )?;
@@ -782,10 +785,14 @@ where
         app.drain()?;
         app.finish()
     });
+    let log = state.log.clone();
+    let logging_output = state.logging_output.clone();
     drop(state);
+    slog::debug!(log, "MainAppState destroyed");
 
-    ui_sender.shutdown();
+    logging_output.display_on_term();
     let ui_res = ui_handle.join().unwrap();
+    slog::debug!(log, "UI thread joined");
 
     let exit_code = exit_code_res?;
     ui_res?;
