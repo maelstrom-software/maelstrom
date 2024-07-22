@@ -164,6 +164,7 @@ impl slog::Drain for UiSlogDrain {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum UiKind {
+    Auto,
     Simple,
     Fancy,
 }
@@ -173,6 +174,7 @@ impl fmt::Display for UiKind {
         match self {
             Self::Simple => write!(f, "simple"),
             Self::Fancy => write!(f, "fancy"),
+            Self::Auto => write!(f, "auto"),
         }
     }
 }
@@ -197,6 +199,7 @@ impl str::FromStr for UiKind {
         match s {
             "simple" => Ok(Self::Simple),
             "fancy" => Ok(Self::Fancy),
+            "auto" => Ok(Self::Auto),
             ui_name => Err(UnknownUiError {
                 ui_name: ui_name.into(),
             }),
@@ -213,5 +216,12 @@ pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet) -> R
             console::Term::buffered_stdout(),
         )),
         UiKind::Fancy => Box::new(fancy::FancyUi::new(list, stdout_is_tty, quiet)?),
+        UiKind::Auto => {
+            if list || !stdout_is_tty || quiet.into_inner() {
+                factory(UiKind::Simple, list, stdout_is_tty, quiet)?
+            } else {
+                factory(UiKind::Fancy, list, stdout_is_tty, quiet)?
+            }
+        }
     })
 }

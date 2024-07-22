@@ -87,8 +87,8 @@ pub struct Config {
     #[config(flag, short = 'q')]
     pub quiet: Quiet,
 
-    /// The UI format.
-    #[config(value_name = "UI_KIND", default = "UiKind::Simple")]
+    /// The TUI style to use. Options are `auto`, `simple`, and `fancy`
+    #[config(value_name = "UI_KIND", default = "UiKind::Auto")]
     pub ui: UiKind,
 
     /// Override timeout value for all tests specified (O indicates no timeout).
