@@ -12,5 +12,7 @@ build_search_index = false
 # Theme can be customised by setting the `highlight_theme` variable to a theme supported by Zola
 highlight_code = false
 
+smart_punctuation = true
+
 [extra]
 # Put all your custom variables here
