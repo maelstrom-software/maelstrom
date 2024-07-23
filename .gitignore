@@ -12,3 +12,4 @@ result*
 /crates/maelstrom-web/target
 /**/__pycache__
 /website/public
+/website/static/processed_images

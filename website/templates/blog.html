@@ -18,7 +18,8 @@
           <header>
             <h3>{{ page.title }}</h3>
           </header>
-          <img src="{{ page.permalink ~ "tile.png" }}" style="width:400px;">
+          {% set image = resize_image(path = page.path ~ "/tile.png", width=400, height=200) %}
+          <img src="{{ image.url }}">
         </a>
         {{ page.summary | safe }}
       </div>
