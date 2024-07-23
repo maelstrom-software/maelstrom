@@ -274,10 +274,12 @@ impl CommandBuilder {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn _value(
         mut self,
         field: &'static str,
         short: Option<char>,
+        alias: Option<String>,
         value_name: &'static str,
         default: Option<String>,
         help: &'static str,
@@ -286,13 +288,21 @@ impl CommandBuilder {
         let name = field.to_kebab_case();
         let env_var = format!("{}_{}", self.env_var_prefix, field.to_shouty_snake_case());
         let default = default.unwrap_or("no default, must be specified".to_string());
+        let help = if let Some(alias) = &alias {
+            format!("{help} [default: {default}] [alias: {alias}] [env: {env_var}]")
+        } else {
+            format!("{help} [default: {default}] [env: {env_var}]")
+        };
         let mut arg = Arg::new(name.clone())
             .long(name)
             .value_name(value_name)
             .action(action)
-            .help(format!("{help} [default: {default}] [env: {env_var}]"));
+            .help(help);
         if let Some(short) = short {
-            arg = arg.short(short)
+            arg = arg.short(short);
+        }
+        if let Some(alias) = alias {
+            arg = arg.alias(alias);
         }
         self.command = self.command.arg(arg);
         self
@@ -302,17 +312,33 @@ impl CommandBuilder {
         self,
         field: &'static str,
         short: Option<char>,
+        alias: Option<String>,
         value_name: &'static str,
         default: Option<String>,
         help: &'static str,
     ) -> Self {
-        self._value(field, short, value_name, default, help, ArgAction::Set)
-    }
-
-    pub fn flag_value(self, field: &'static str, short: Option<char>, help: &'static str) -> Self {
         self._value(
             field,
             short,
+            alias,
+            value_name,
+            default,
+            help,
+            ArgAction::Set,
+        )
+    }
+
+    pub fn flag_value(
+        self,
+        field: &'static str,
+        short: Option<char>,
+        alias: Option<String>,
+        help: &'static str,
+    ) -> Self {
+        self._value(
+            field,
+            short,
+            alias,
             "",
             Some("false".to_string()),
             help,

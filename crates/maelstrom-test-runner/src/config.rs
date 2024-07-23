@@ -127,7 +127,7 @@ pub struct Config {
     pub quiet: Quiet,
 
     /// Runs all of the selected tests this many times. Must be non-zero.
-    #[config(value_name = "COUNT", default = "Repeat::default()")]
+    #[config(alias = "loop", value_name = "COUNT", default = "Repeat::default()")]
     pub repeat: Repeat,
 
     /// The UI style to use. Options are `auto`, `simple`, and `fancy`.

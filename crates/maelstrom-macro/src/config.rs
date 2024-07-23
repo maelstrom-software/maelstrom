@@ -24,6 +24,7 @@ struct ConfigStructField {
     #[darling(default)]
     flatten: bool,
     short: Option<char>,
+    alias: Option<String>,
     value_name: Option<String>,
     default: Option<Expr>,
     next_help_heading: Option<String>,
@@ -68,6 +69,15 @@ impl ConfigStructField {
         }
     }
 
+    fn alias(&self) -> Expr {
+        match &self.alias {
+            Some(alias) => {
+                parse_quote!(std::option::Option::Some(::std::string::ToString::to_string(#alias)))
+            }
+            None => parse_quote!(::std::option::Option::None),
+        }
+    }
+
     fn doc_comment(&self) -> Result<String> {
         let doc = self
             .attrs
@@ -103,6 +113,7 @@ impl ConfigStructField {
     fn gen_builder_value_call(&self) -> Result<Expr> {
         let name = self.ident().unraw().to_string();
         let short = self.short();
+        let alias = self.alias();
         let value_name = self.value_name()?;
         let default = self.default_as_string_option();
         let doc = self.doc_comment()?;
@@ -111,6 +122,7 @@ impl ConfigStructField {
                 builder,
                 #name,
                 #short,
+                #alias,
                 #value_name,
                 #default,
                 #doc,
@@ -121,12 +133,14 @@ impl ConfigStructField {
     fn gen_builder_flag_value_call(&self) -> Result<Expr> {
         let name = self.ident().unraw().to_string();
         let short = self.short();
+        let alias = self.alias();
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
             let builder = ::maelstrom_util::config::CommandBuilder::flag_value(
                 builder,
                 #name,
                 #short,
+                #alias,
                 #doc,
             )
         })
@@ -135,6 +149,7 @@ impl ConfigStructField {
     fn gen_builder_option_value_call(&self) -> Result<Expr> {
         let name = self.ident().unraw().to_string();
         let short = self.short();
+        let alias = self.alias();
         let value_name = self.value_name()?;
         let default = self.default_as_string_option();
         let doc = self.doc_comment()?;
@@ -143,6 +158,7 @@ impl ConfigStructField {
                 builder,
                 #name,
                 #short,
+                #alias,
                 #value_name,
                 #default,
                 #doc,
