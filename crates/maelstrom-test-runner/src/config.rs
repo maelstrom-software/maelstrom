@@ -33,15 +33,15 @@ impl Debug for Quiet {
 
 #[derive(Copy, Clone, Debug, Deserialize, From)]
 #[serde(transparent)]
-pub struct TestLoopTimes(NonZeroUsize);
+pub struct Repeat(NonZeroUsize);
 
-impl From<TestLoopTimes> for usize {
-    fn from(s: TestLoopTimes) -> usize {
+impl From<Repeat> for usize {
+    fn from(s: Repeat) -> usize {
         s.0.into()
     }
 }
 
-impl TryFrom<usize> for TestLoopTimes {
+impl TryFrom<usize> for Repeat {
     type Error = <NonZeroUsize as TryFrom<usize>>::Error;
 
     fn try_from(t: usize) -> result::Result<Self, Self::Error> {
@@ -49,13 +49,13 @@ impl TryFrom<usize> for TestLoopTimes {
     }
 }
 
-impl Default for TestLoopTimes {
+impl Default for Repeat {
     fn default() -> Self {
         Self::from(NonZeroUsize::new(1).unwrap())
     }
 }
 
-impl str::FromStr for TestLoopTimes {
+impl str::FromStr for Repeat {
     type Err = <NonZeroUsize as str::FromStr>::Err;
 
     fn from_str(s: &str) -> result::Result<Self, Self::Err> {
@@ -63,7 +63,7 @@ impl str::FromStr for TestLoopTimes {
     }
 }
 
-impl fmt::Display for TestLoopTimes {
+impl fmt::Display for Repeat {
     fn fmt(&self, f: &mut Formatter<'_>) -> result::Result<(), fmt::Error> {
         fmt::Display::fmt(&self.0, f)
     }
@@ -127,8 +127,8 @@ pub struct Config {
     pub quiet: Quiet,
 
     /// Runs all of the selected tests this many times. Must be non-zero.
-    #[config(value_name = "TEST_LOOP_TIMES", default = "TestLoopTimes::default()")]
-    pub r#loop: TestLoopTimes,
+    #[config(value_name = "COUNT", default = "Repeat::default()")]
+    pub repeat: Repeat,
 
     /// The TUI style to use. Options are `auto`, `simple`, and `fancy`
     #[config(value_name = "UI_KIND", default = "UiKind::Auto")]

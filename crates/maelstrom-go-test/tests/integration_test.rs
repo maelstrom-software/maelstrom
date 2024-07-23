@@ -53,7 +53,7 @@ fn do_maelstrom_go_test_test(
             slots: Slots::default(),
             accept_invalid_remote_container_tls_certs: true.into(),
             ui: ui::UiKind::Simple,
-            r#loop: Default::default(),
+            repeat: Default::default(),
         },
     };
     let term = InMemoryTerm::new(50, 50);

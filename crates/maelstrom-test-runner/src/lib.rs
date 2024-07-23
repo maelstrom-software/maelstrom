@@ -16,7 +16,7 @@ pub use deps::*;
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use clap::{Args, Command};
-use config::TestLoopTimes;
+use config::Repeat;
 use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout, Utf8PathBuf};
 use maelstrom_client::{spec::JobSpec, ClientBgProcess, ProjectDir, StateDir};
@@ -91,7 +91,7 @@ struct JobQueuingState<TestCollectorT: CollectTests> {
     expected_job_count: u64,
     test_listing: Arc<Mutex<Option<TestListing<TestCollectorT>>>>,
     list_action: Option<ListAction>,
-    test_loop_times: TestLoopTimes,
+    repeat: Repeat,
     collector_options: TestCollectorT::Options,
 }
 
@@ -104,11 +104,11 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
         test_metadata: AllMetadata<TestCollectorT::TestFilter>,
         test_listing: TestListing<TestCollectorT>,
         list_action: Option<ListAction>,
-        test_loop_times: TestLoopTimes,
+        repeat: Repeat,
         collector_options: TestCollectorT::Options,
     ) -> Result<Self> {
         let mut expected_job_count = test_listing.expected_job_count(&filter);
-        expected_job_count *= usize::from(test_loop_times) as u64;
+        expected_job_count *= usize::from(repeat) as u64;
 
         Ok(Self {
             packages,
@@ -120,7 +120,7 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
             expected_job_count,
             test_listing: Arc::new(Mutex::new(Some(test_listing))),
             list_action,
-            test_loop_times,
+            repeat,
             collector_options,
         })
     }
@@ -533,7 +533,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
         list_action: Option<ListAction>,
-        test_loop_times: TestLoopTimes,
+        repeat: Repeat,
         stderr_color: bool,
         project_dir: impl AsRef<Root<ProjectDir>>,
         packages: &[PackageM<MainAppDepsT>],
@@ -547,7 +547,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
             "include_filter" => ?include_filter,
             "exclude_filter" => ?exclude_filter,
             "list_action" => ?list_action,
-            "test_loop_times" => ?test_loop_times
+            "repeat" => ?repeat
         );
 
         let mut test_metadata =
@@ -581,7 +581,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
                 test_metadata,
                 test_listing,
                 list_action,
-                test_loop_times,
+                repeat,
                 collector_options,
             )?,
             test_listing_store,
@@ -733,7 +733,7 @@ where
                 }
                 CollectionResult::NoTest(EnqueueResult::Done) => {
                     self.stage = EnqueueStage::Looping {
-                        times: usize::from(self.state.queuing_state.test_loop_times) - 1,
+                        times: usize::from(self.state.queuing_state.repeat) - 1,
                         position: 0,
                     };
                     self.enqueue_one()

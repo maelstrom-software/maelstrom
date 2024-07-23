@@ -1,7 +1,7 @@
 mod fake_test_framework;
 
 use crate::{
-    config::{Quiet, TestLoopTimes},
+    config::{Quiet, Repeat},
     introspect_driver::IntrospectDriver,
     test_listing::TestListingStore,
     ui::{self, Ui as _},
@@ -157,7 +157,7 @@ fn run_app(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-    test_loop_times: TestLoopTimes,
+    repeat: Repeat,
     list: Option<ListAction>,
     finish: bool,
 ) -> String {
@@ -189,7 +189,7 @@ fn run_app(
         include_filter,
         exclude_filter,
         list,
-        test_loop_times,
+        repeat,
         false, // stderr_color
         project_dir,
         &packages,
@@ -257,7 +257,7 @@ fn run_or_list_all_tests_sync(
         quiet,
         include_filter,
         exclude_filter,
-        TestLoopTimes::default(),
+        Repeat::default(),
         list,
         true, // finish
     )
@@ -722,7 +722,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
         Quiet::from(false),
         vec!["all".into()],
         vec![],
-        TestLoopTimes::default(),
+        Repeat::default(),
         None,
         true, // finish
     );
@@ -803,7 +803,7 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         quiet,
         vec!["all".into()],
         vec![],
-        TestLoopTimes::default(),
+        Repeat::default(),
         None,
         false, // finish
     );
@@ -991,7 +991,7 @@ fn run_loop_test(fake_tests: FakeTests, loop_times: usize, expected_output: &str
         false.into(), // quiet
         vec!["all".into()],
         vec![],
-        TestLoopTimes::try_from(loop_times).unwrap(),
+        Repeat::try_from(loop_times).unwrap(),
         None,  // list
         false, // finish
     );
