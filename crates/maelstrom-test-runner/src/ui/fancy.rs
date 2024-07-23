@@ -473,6 +473,10 @@ impl Drop for FancyUi {
 }
 
 impl FancyUi {
+    fn num_running_tests(&self) -> usize {
+        self.running_tests.values().map(|r| r.len()).sum::<usize>()
+    }
+
     fn handle_key(&mut self, key: KeyEvent) {
         if key.kind != KeyEventKind::Press {
             return;
@@ -489,10 +493,7 @@ impl FancyUi {
         let create_block = |title: String| Block::bordered().gray().title(title.bold());
 
         let omitted_tests = self
-            .running_tests
-            .values()
-            .map(|r| r.len())
-            .sum::<usize>()
+            .num_running_tests()
             .saturating_sub((area.height as usize).saturating_sub(2));
         let omitted_trailer = (omitted_tests > 0)
             .then(|| format!(" ({omitted_tests} tests not shown)"))
@@ -665,7 +666,7 @@ impl Widget for &mut FancyUi {
             sections.push((Constraint::Fill(1), FancyUi::render_summary as _));
         } else {
             if !self.running_tests.is_empty() {
-                let max_height = (self.running_tests.len() + 2)
+                let max_height = (self.num_running_tests() + 2)
                     .try_into()
                     .unwrap_or(u16::MAX);
                 sections.push((
