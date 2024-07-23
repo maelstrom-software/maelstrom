@@ -16,6 +16,7 @@ pub use deps::*;
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use clap::{Args, Command};
+use config::TestLoopTimes;
 use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout, Utf8PathBuf};
 use maelstrom_client::{spec::JobSpec, ClientBgProcess, ProjectDir, StateDir};
@@ -90,6 +91,7 @@ struct JobQueuingState<TestCollectorT: CollectTests> {
     expected_job_count: u64,
     test_listing: Arc<Mutex<Option<TestListing<TestCollectorT>>>>,
     list_action: Option<ListAction>,
+    test_loop_times: TestLoopTimes,
     collector_options: TestCollectorT::Options,
 }
 
@@ -102,9 +104,11 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
         test_metadata: AllMetadata<TestCollectorT::TestFilter>,
         test_listing: TestListing<TestCollectorT>,
         list_action: Option<ListAction>,
+        test_loop_times: TestLoopTimes,
         collector_options: TestCollectorT::Options,
     ) -> Result<Self> {
-        let expected_job_count = test_listing.expected_job_count(&filter);
+        let mut expected_job_count = test_listing.expected_job_count(&filter);
+        expected_job_count *= usize::from(test_loop_times) as u64;
 
         Ok(Self {
             packages,
@@ -116,8 +120,16 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
             expected_job_count,
             test_listing: Arc::new(Mutex::new(Some(test_listing))),
             list_action,
+            test_loop_times,
             collector_options,
         })
+    }
+
+    fn track_outstanding(&self, case_str: &str, ui: &UiSender) {
+        let count = self.jobs_queued.fetch_add(1, Ordering::AcqRel);
+        ui.update_length(std::cmp::max(self.expected_job_count, count + 1));
+        ui.job_enqueued(case_str.into());
+        self.tracker.add_outstanding();
     }
 }
 
@@ -250,7 +262,7 @@ where
         &mut self,
         case_name: &str,
         case_metadata: &CaseMetadataM<MainAppDepsT>,
-    ) -> Result<EnqueueResult> {
+    ) -> Result<CollectionResult<MainAppDepsT>> {
         let case_str = self
             .artifact
             .format_case(&self.package_name, case_name, case_metadata);
@@ -260,7 +272,7 @@ where
 
         if self.queuing_state.list_action.is_some() {
             self.ui.list(case_str);
-            return Ok(EnqueueResult::Listed);
+            return Ok(CollectionResult::NoTest(EnqueueResult::Listed));
         }
 
         let test_metadata = self
@@ -295,18 +307,6 @@ where
             }
         }
 
-        // N.B. Must do this before we enqueue the job, but after we know we can't fail
-        let count = self
-            .queuing_state
-            .jobs_queued
-            .fetch_add(1, Ordering::AcqRel);
-        self.ui.update_length(std::cmp::max(
-            self.queuing_state.expected_job_count,
-            count + 1,
-        ));
-        self.ui.job_enqueued(case_str.clone());
-        self.queuing_state.tracker.add_outstanding();
-
         let visitor = JobStatusVisitor::new(
             self.queuing_state.tracker.clone(),
             self.queuing_state.test_listing.clone(),
@@ -320,8 +320,9 @@ where
         );
 
         if self.ignored_cases.contains(case_name) {
+            self.queuing_state.track_outstanding(&case_str, &self.ui);
             visitor.job_ignored();
-            return Ok(EnqueueResult::Ignored);
+            return Ok(CollectionResult::NoTest(EnqueueResult::Ignored));
         }
 
         let estimated_duration = self
@@ -333,12 +334,12 @@ where
             .unwrap()
             .get_timing(&self.package_name, &self.artifact.to_key(), case_name);
 
-        self.ui
-            .update_enqueue_status(format!("submitting job for {case_str}"));
-        slog::debug!(&self.log, "submitting job"; "case" => &case_str);
         let (program, arguments) = self.artifact.build_command(case_name, case_metadata);
-        self.deps.client().add_job(
-            JobSpec {
+        Ok(CollectionResult::Test(TestToEnqueue {
+            package_name: self.package_name.clone(),
+            case: case_name.into(),
+            case_str,
+            spec: JobSpec {
                 program,
                 arguments,
                 image: test_metadata.image,
@@ -358,22 +359,17 @@ where
                 estimated_duration,
                 allocate_tty: None,
             },
-            move |res| visitor.job_finished(res),
-        )?;
-
-        Ok(EnqueueResult::Enqueued {
-            package_name: self.package_name.clone(),
-            case: case_name.into(),
-        })
+            visitor,
+        }))
     }
 
     /// Attempt to enqueue the next test as a job in the client
     ///
     /// Returns an `EnqueueResult` describing what happened. Meant to be called until it returns
     /// `EnqueueResult::Done`
-    fn enqueue_one(&mut self) -> Result<EnqueueResult> {
+    fn enqueue_one(&mut self) -> Result<CollectionResult<MainAppDepsT>> {
         let Some((case_name, case_metadata)) = self.cases.next() else {
-            return Ok(EnqueueResult::Done);
+            return Ok(CollectionResult::NoTest(EnqueueResult::Done));
         };
         self.queue_job_from_case(&case_name, &case_metadata)
     }
@@ -487,12 +483,12 @@ where
     ///
     /// Returns an `EnqueueResult` describing what happened. Meant to be called it returns
     /// `EnqueueResult::Done`
-    fn enqueue_one(&mut self) -> Result<EnqueueResult> {
+    fn enqueue_one(&mut self) -> Result<CollectionResult<MainAppDepsT>> {
         slog::debug!(self.log, "enqueuing a job");
 
         if self.artifact_queuing.is_none() && !self.start_queuing_from_artifact()? {
             self.finish()?;
-            return Ok(EnqueueResult::Done);
+            return Ok(CollectionResult::NoTest(EnqueueResult::Done));
         }
         self.package_match = true;
 
@@ -537,6 +533,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
         list_action: Option<ListAction>,
+        test_loop_times: TestLoopTimes,
         stderr_color: bool,
         project_dir: impl AsRef<Root<ProjectDir>>,
         packages: &[PackageM<MainAppDepsT>],
@@ -550,6 +547,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
             "include_filter" => ?include_filter,
             "exclude_filter" => ?exclude_filter,
             "list_action" => ?list_action,
+            "test_loop_times" => ?test_loop_times
         );
 
         let mut test_metadata =
@@ -583,6 +581,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
                 test_metadata,
                 test_listing,
                 list_action,
+                test_loop_times,
                 collector_options,
             )?,
             test_listing_store,
@@ -618,11 +617,71 @@ impl EnqueueResult {
     }
 }
 
+struct TestToEnqueue<MainAppDepsT: MainAppDeps> {
+    /// The name of the package containing this test
+    package_name: String,
+    /// The name of the case containing this test
+    case: String,
+    /// This is a kind-of FQDN for the test which we can display to the user
+    case_str: String,
+    /// The spec to submit to the client
+    spec: JobSpec,
+    /// This is used with the callback to give to the client
+    visitor: JobStatusVisitor<ArtifactKeyM<MainAppDepsT>, CaseMetadataM<MainAppDepsT>>,
+}
+
+impl<MainAppDepsT: MainAppDeps> Clone for TestToEnqueue<MainAppDepsT> {
+    fn clone(&self) -> Self {
+        Self {
+            package_name: self.package_name.clone(),
+            case: self.case.clone(),
+            case_str: self.case_str.clone(),
+            spec: self.spec.clone(),
+            visitor: self.visitor.clone(),
+        }
+    }
+}
+
+impl<MainAppDepsT: MainAppDeps> TestToEnqueue<MainAppDepsT> {
+    fn enqueue(self, state: &MainAppState<MainAppDepsT>, ui: &UiSender) -> Result<EnqueueResult> {
+        let case_str = self.case_str;
+        state.queuing_state.track_outstanding(&case_str, ui);
+        ui.update_enqueue_status(format!("submitting job for {case_str}"));
+        slog::debug!(&state.log, "submitting job"; "case" => &case_str);
+        let cb = move |res| self.visitor.job_finished(res);
+        state.deps.client().add_job(self.spec, cb)?;
+        Ok(EnqueueResult::Enqueued {
+            package_name: self.package_name,
+            case: self.case,
+        })
+    }
+}
+
+enum CollectionResult<MainAppDepsT: MainAppDeps> {
+    Test(TestToEnqueue<MainAppDepsT>),
+    NoTest(EnqueueResult),
+}
+
+impl<MainAppDepsT: MainAppDeps> CollectionResult<MainAppDepsT> {
+    /// Is this `CollectionResult` the `Done` variant
+    pub fn is_done(&self) -> bool {
+        matches!(self, Self::NoTest(EnqueueResult::Done))
+    }
+}
+
+enum EnqueueStage {
+    Initial,
+    Looping { times: usize, position: usize },
+    Done,
+}
+
 struct MainApp<'state, IntrospectDriverT, MainAppDepsT: MainAppDeps> {
     state: &'state MainAppState<MainAppDepsT>,
     queuing: JobQueuing<'state, MainAppDepsT>,
     introspect_driver: IntrospectDriverT,
     ui: UiSender,
+    test_history: Vec<TestToEnqueue<MainAppDepsT>>,
+    stage: EnqueueStage,
 }
 
 impl<'state, 'scope, IntrospectDriverT, MainAppDepsT>
@@ -658,13 +717,50 @@ where
             queuing,
             introspect_driver,
             ui,
+            test_history: vec![],
+            stage: EnqueueStage::Initial,
         })
     }
 
     /// Enqueue one test as a job on the `Client`. This is meant to be called repeatedly until
     /// `EnqueueResult::Done` is returned, or an error is encountered.
     pub fn enqueue_one(&mut self) -> Result<EnqueueResult> {
-        self.queuing.enqueue_one()
+        match self.stage {
+            EnqueueStage::Initial => match self.queuing.enqueue_one()? {
+                CollectionResult::Test(test) => {
+                    self.test_history.push(test.clone());
+                    test.enqueue(self.state, &self.ui)
+                }
+                CollectionResult::NoTest(EnqueueResult::Done) => {
+                    self.stage = EnqueueStage::Looping {
+                        times: usize::from(self.state.queuing_state.test_loop_times) - 1,
+                        position: 0,
+                    };
+                    self.enqueue_one()
+                }
+                CollectionResult::NoTest(res) => Ok(res),
+            },
+            EnqueueStage::Looping { times, position } => {
+                if times == 0 {
+                    self.stage = EnqueueStage::Done;
+                    self.enqueue_one()
+                } else if position >= self.test_history.len() {
+                    self.stage = EnqueueStage::Looping {
+                        times: times - 1,
+                        position: 0,
+                    };
+                    self.enqueue_one()
+                } else {
+                    let test = self.test_history[position].clone();
+                    self.stage = EnqueueStage::Looping {
+                        times,
+                        position: position + 1,
+                    };
+                    test.enqueue(self.state, &self.ui)
+                }
+            }
+            EnqueueStage::Done => Ok(EnqueueResult::Done),
+        }
     }
 
     /// Indicates that we have finished enqueuing jobs and starts tearing things down

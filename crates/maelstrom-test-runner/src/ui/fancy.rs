@@ -308,7 +308,7 @@ pub struct FancyUi {
     all_done: Option<UiJobSummary>,
     producing_build_output: bool,
 
-    running_tests: BTreeMap<String, Instant>,
+    running_tests: BTreeMap<String, Vec<Instant>>,
     build_output: vt100::Parser,
     print_above: Vec<PrintAbove>,
     enqueue_status: Option<String>,
@@ -410,14 +410,19 @@ impl Ui for FancyUi {
                     UiMessage::List(_) => {}
                     UiMessage::JobFinished(res) => {
                         self.jobs_completed += 1;
-                        self.running_tests.remove(&res.name).assert_is_some();
+                        let runs = self.running_tests.get_mut(&res.name).unwrap();
+                        runs.remove(0);
+                        if runs.is_empty() {
+                            self.running_tests.remove(&res.name).assert_is_some();
+                        }
                         self.print_above.extend(format_finished(res));
                     }
                     UiMessage::UpdatePendingJobsCount(count) => self.jobs_outstanding = count,
                     UiMessage::JobEnqueued(name) => {
                         self.running_tests
-                            .insert(name, Instant::now())
-                            .assert_is_none();
+                            .entry(name)
+                            .and_modify(|runs| runs.push(Instant::now()))
+                            .or_insert_with(|| vec![Instant::now()]);
                     }
                     UiMessage::UpdateIntrospectState(resp) => {
                         let mut states = resp.artifact_uploads;
@@ -485,12 +490,18 @@ impl FancyUi {
 
         let omitted_tests = self
             .running_tests
-            .len()
+            .values()
+            .map(|r| r.len())
+            .sum::<usize>()
             .saturating_sub((area.height as usize).saturating_sub(2));
         let omitted_trailer = (omitted_tests > 0)
             .then(|| format!(" ({omitted_tests} tests not shown)"))
             .unwrap_or_default();
-        let mut running_tests: Vec<_> = self.running_tests.iter().collect();
+        let mut running_tests: Vec<(&String, &Instant)> = self
+            .running_tests
+            .iter()
+            .flat_map(|(n, r)| r.iter().map(move |t| (n, t)))
+            .collect();
         running_tests.sort_by_key(|a| a.1);
         Table::new(
             running_tests

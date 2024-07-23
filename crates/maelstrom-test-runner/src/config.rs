@@ -8,9 +8,10 @@ use maelstrom_util::{
     root::RootBuf,
 };
 use serde::Deserialize;
+use std::num::NonZeroUsize;
 use std::{
     fmt::{self, Debug, Formatter},
-    result,
+    result, str,
 };
 use xdg::BaseDirectories;
 
@@ -27,6 +28,44 @@ impl Quiet {
 impl Debug for Quiet {
     fn fmt(&self, f: &mut Formatter<'_>) -> result::Result<(), fmt::Error> {
         self.0.fmt(f)
+    }
+}
+
+#[derive(Copy, Clone, Debug, Deserialize, From)]
+#[serde(transparent)]
+pub struct TestLoopTimes(NonZeroUsize);
+
+impl From<TestLoopTimes> for usize {
+    fn from(s: TestLoopTimes) -> usize {
+        s.0.into()
+    }
+}
+
+impl TryFrom<usize> for TestLoopTimes {
+    type Error = <NonZeroUsize as TryFrom<usize>>::Error;
+
+    fn try_from(t: usize) -> result::Result<Self, Self::Error> {
+        Ok(Self(t.try_into()?))
+    }
+}
+
+impl Default for TestLoopTimes {
+    fn default() -> Self {
+        Self::from(NonZeroUsize::new(1).unwrap())
+    }
+}
+
+impl str::FromStr for TestLoopTimes {
+    type Err = <NonZeroUsize as str::FromStr>::Err;
+
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+        Ok(Self::from(NonZeroUsize::from_str(s)?))
+    }
+}
+
+impl fmt::Display for TestLoopTimes {
+    fn fmt(&self, f: &mut Formatter<'_>) -> result::Result<(), fmt::Error> {
+        fmt::Display::fmt(&self.0, f)
     }
 }
 
@@ -86,6 +125,10 @@ pub struct Config {
     /// Don't output information about the tests being run.
     #[config(flag, short = 'q')]
     pub quiet: Quiet,
+
+    /// Runs all of the selected tests this many times. Must be non-zero.
+    #[config(value_name = "TEST_LOOP_TIMES", default = "TestLoopTimes::default()")]
+    pub r#loop: TestLoopTimes,
 
     /// The TUI style to use. Options are `auto`, `simple`, and `fancy`
     #[config(value_name = "UI_KIND", default = "UiKind::Auto")]

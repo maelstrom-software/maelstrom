@@ -1,7 +1,7 @@
 mod fake_test_framework;
 
 use crate::{
-    config::Quiet,
+    config::{Quiet, TestLoopTimes},
     introspect_driver::IntrospectDriver,
     test_listing::TestListingStore,
     ui::{self, Ui as _},
@@ -157,6 +157,7 @@ fn run_app(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
+    test_loop_times: TestLoopTimes,
     list: Option<ListAction>,
     finish: bool,
 ) -> String {
@@ -188,6 +189,7 @@ fn run_app(
         include_filter,
         exclude_filter,
         list,
+        test_loop_times,
         false, // stderr_color
         project_dir,
         &packages,
@@ -255,6 +257,7 @@ fn run_or_list_all_tests_sync(
         quiet,
         include_filter,
         exclude_filter,
+        TestLoopTimes::default(),
         list,
         true, // finish
     )
@@ -719,6 +722,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
         Quiet::from(false),
         vec!["all".into()],
         vec![],
+        TestLoopTimes::default(),
         None,
         true, // finish
     );
@@ -799,6 +803,7 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         quiet,
         vec!["all".into()],
         vec![],
+        TestLoopTimes::default(),
         None,
         false, // finish
     );
@@ -968,6 +973,106 @@ fn complete_quiet() {
         fake_tests,
         true.into(),
         "#####################-------------------- 1/2 jobs",
+    );
+}
+
+fn run_loop_test(fake_tests: FakeTests, loop_times: usize, expected_output: &str) {
+    let tmp_dir = tempdir().unwrap();
+    let project_dir = RootBuf::<ProjectDir>::new(tmp_dir.path().join("project"));
+
+    let term = InMemoryTerm::new(50, 50);
+    let term_clone = term.clone();
+    let contents = run_app(
+        Root::new(tmp_dir.path()),
+        term_clone,
+        fake_tests,
+        &project_dir,
+        true,         // stdout_tty
+        false.into(), // quiet
+        vec!["all".into()],
+        vec![],
+        TestLoopTimes::try_from(loop_times).unwrap(),
+        None,  // list
+        false, // finish
+    );
+    assert_eq!(contents, expected_output);
+}
+
+#[test]
+fn loop_two_times() {
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    desired_state: JobState::Complete,
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    desired_state: JobState::Complete,
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+    run_loop_test(
+        fake_tests,
+        2, // loop times
+        "\
+        foo test_it............................OK   1.000s\n\
+        bar test_it............................OK   1.000s\n\
+        foo test_it............................OK   1.000s\n\
+        bar test_it............................OK   1.000s\n\
+        ######################## 4/4 waiting for artifacts\n\
+        ######################## 4/4 pending\n\
+        ######################## 4/4 running\n\
+        ######################## 4/4 complete\
+        ",
+    );
+}
+
+#[test]
+fn loop_three_times() {
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    desired_state: JobState::Complete,
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    desired_state: JobState::Complete,
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+    run_loop_test(
+        fake_tests,
+        3, // loop times
+        "\
+        foo test_it............................OK   1.000s\n\
+        bar test_it............................OK   1.000s\n\
+        foo test_it............................OK   1.000s\n\
+        bar test_it............................OK   1.000s\n\
+        foo test_it............................OK   1.000s\n\
+        bar test_it............................OK   1.000s\n\
+        ######################## 6/6 waiting for artifacts\n\
+        ######################## 6/6 pending\n\
+        ######################## 6/6 running\n\
+        ######################## 6/6 complete\
+        ",
     );
 }
 

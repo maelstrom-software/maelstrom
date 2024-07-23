@@ -85,11 +85,8 @@ impl JobStatusTracker {
     }
 }
 
-pub struct JobStatusVisitor<
-    ArtifactKeyT: TestArtifactKey,
-    CaseMetadataT: TestCaseMetadata,
-    RemoveFixtureOutputFn,
-> {
+#[derive(Clone)]
+pub struct JobStatusVisitor<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     tracker: Arc<JobStatusTracker>,
     test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT, CaseMetadataT>>>>,
     package: String,
@@ -97,11 +94,10 @@ pub struct JobStatusVisitor<
     case: String,
     case_str: String,
     ui: UiSender,
-    remove_fixture_output: RemoveFixtureOutputFn,
+    remove_fixture_output: fn(&str, Vec<String>) -> Vec<String>,
 }
 
-impl<ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
-    JobStatusVisitor<ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
+impl<ArtifactKeyT, CaseMetadataT> JobStatusVisitor<ArtifactKeyT, CaseMetadataT>
 where
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
@@ -115,7 +111,7 @@ where
         case: String,
         case_str: String,
         ui: UiSender,
-        remove_fixture_output: RemoveFixtureOutputFn,
+        remove_fixture_output: fn(&str, Vec<String>) -> Vec<String>,
     ) -> Self {
         Self {
             tracker,
@@ -168,12 +164,10 @@ fn format_test_output(
     test_output_lines
 }
 
-impl<ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
-    JobStatusVisitor<ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
+impl<ArtifactKeyT, CaseMetadataT> JobStatusVisitor<ArtifactKeyT, CaseMetadataT>
 where
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
-    RemoveFixtureOutputFn: Fn(&str, Vec<String>) -> Vec<String>,
 {
     pub fn job_finished(&self, res: Result<(ClientJobId, JobOutcomeResult)>) {
         let test_status: UiJobStatus;
@@ -217,14 +211,14 @@ where
                         "stdout",
                         cjid,
                         &self.case_str,
-                        &self.remove_fixture_output,
+                        self.remove_fixture_output,
                     ));
                     test_output_stderr.extend(format_test_output(
                         &stderr,
                         "stderr",
                         cjid,
                         &self.case_str,
-                        &self.remove_fixture_output,
+                        self.remove_fixture_output,
                     ));
                 }
                 self.test_listing
@@ -255,14 +249,14 @@ where
                     "stdout",
                     cjid,
                     &self.case_str,
-                    &self.remove_fixture_output,
+                    self.remove_fixture_output,
                 ));
                 test_output_stderr.extend(format_test_output(
                     &stderr,
                     "stderr",
                     cjid,
                     &self.case_str,
-                    &self.remove_fixture_output,
+                    self.remove_fixture_output,
                 ));
                 self.test_listing
                     .lock()

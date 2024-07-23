@@ -562,6 +562,7 @@ pub fn main(
             extra_options.parent.include,
             extra_options.parent.exclude,
             list_action,
+            config.parent.r#loop,
             stderr_is_tty,
             workspace_dir,
             &cargo_metadata

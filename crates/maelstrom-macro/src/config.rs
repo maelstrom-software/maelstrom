@@ -2,8 +2,8 @@ use darling::{ast::Data, FromDeriveInput, FromField};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
-    parse_quote, Attribute, DeriveInput, Expr, ExprLit, Ident, Item, ItemImpl, Lit, Meta,
-    MetaNameValue, Path, Result, Type, Visibility,
+    ext::IdentExt as _, parse_quote, Attribute, DeriveInput, Expr, ExprLit, Ident, Item, ItemImpl,
+    Lit, Meta, MetaNameValue, Path, Result, Type, Visibility,
 };
 
 enum DefaultValue<'a> {
@@ -101,7 +101,7 @@ impl ConfigStructField {
     }
 
     fn gen_builder_value_call(&self) -> Result<Expr> {
-        let name = self.ident().to_string();
+        let name = self.ident().unraw().to_string();
         let short = self.short();
         let value_name = self.value_name()?;
         let default = self.default_as_string_option();
@@ -119,7 +119,7 @@ impl ConfigStructField {
     }
 
     fn gen_builder_flag_value_call(&self) -> Result<Expr> {
-        let name = self.ident().to_string();
+        let name = self.ident().unraw().to_string();
         let short = self.short();
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
@@ -133,7 +133,7 @@ impl ConfigStructField {
     }
 
     fn gen_builder_option_value_call(&self) -> Result<Expr> {
-        let name = self.ident().to_string();
+        let name = self.ident().unraw().to_string();
         let short = self.short();
         let value_name = self.value_name()?;
         let default = self.default_as_string_option();
@@ -159,7 +159,7 @@ impl ConfigStructField {
     }
 
     fn gen_config_bag_get_call(&self) -> Expr {
-        let name = self.ident().to_string();
+        let name = self.ident().unraw().to_string();
         match self.default() {
             DefaultValue::Closure(closure) => {
                 parse_quote! {
@@ -180,7 +180,7 @@ impl ConfigStructField {
     }
 
     fn gen_config_bag_get_flag_call(&self) -> Expr {
-        let name = self.ident().to_string();
+        let name = self.ident().unraw().to_string();
         parse_quote! {
             ::std::option::Option::unwrap_or(
                 ::maelstrom_util::config::ConfigBag::get_flag(&config_bag, #name)?,
@@ -189,7 +189,7 @@ impl ConfigStructField {
     }
 
     fn gen_config_bag_get_option_call(&self) -> Expr {
-        let name = self.ident().to_string();
+        let name = self.ident().unraw().to_string();
         parse_quote! {
             ::maelstrom_util::config::ConfigBag::get_option(&config_bag, #name)?
         }
