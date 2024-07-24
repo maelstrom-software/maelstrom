@@ -1,6 +1,7 @@
 +++
 title = "Maelstrom: Cure for the Common Complacency"
 date = 2024-07-18
+weight = 1
 draft = true
 +++
 

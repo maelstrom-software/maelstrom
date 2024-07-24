@@ -1,6 +1,7 @@
 +++
 title = "Maelstrom's Architecture"
 date = 2024-07-18
+weight = 1001
 draft = true
 +++
 
