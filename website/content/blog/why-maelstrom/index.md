@@ -82,45 +82,82 @@ and frustrating to debug.
 Maelstrom is a framework that addresses the problems listed above. It consists
 of three parts.
 
-First, we provide a way to enumerate the dependencies of every test. These
+First, we provide a way to specify the dependencies of every test. These
 dependencies include any external software, devices, and files the test expects
 to be installed on the system, as well as any shared network resources the test
 relies on.
 
-First, we believe that associated with every test should be a description of
-the tests's dependencies. This should include any external software, devices,
-and files the test expects to be installed on the system, as well as any shared
-network resources the test relies on. *enumerated dependencies*
-
 Second, we run every test in its own isolated environment that includes only
-the test's enumerated dependencies.
-
-Second, we believe that every test should be run in its own container that only
-provides the test's enumerated dependencies. This is an extension of the best
+the tests's enumerated dependencies. This is an extension of the best
 practice of running every test in its own fixture, where the fixture is taken
-to include the whole file system, system resources, etc. *isolation*
-
-Second, we believe that every test should be run in its own environment with
-just the specified dependencies available. We take the notion of running every
-test in a fresh fixture or in its own process to the next level by running
-every test in its own container. Sometimes it makes sense to share pieces of
-infrastructre between test runs, and we support that. But we want you to have
-to opt in to that. If you don't, every depdendency is assumed to be isolated.
+to include the whole file system, system resources, etc. We've written our own
+extremely lightweight container runtime to implement this feature, which means
+that there is very little overhead compared to running every test in its own
+procces.
 
 Third, we provide a mechanism to build a cluster of tests runners, so
 developers can either run tests locally on their machines, or in parallel on an
 arbitrarily large cluster.
 
-Third, we believe that developers should have a platform they can use to run
-tests both locally on their machines and also on shared clusters of machines.
-*universal execution*
+## How to Use Maelstrom
 
-Third, we believe that tests should be runnable both locally and on shared
-clusters. Ideally, every developer would have a cluster available to them on
-which to run their tests. We 
+Maelstrom provides specialized test runners for a variety of test frameworks.
+We currently support Rust (via `cargo test`), Golang (via `go test`), and
+Pytest. We will continue to add more tests runners in the future.
 
+If Maelstrom doesn't currently support a test runner, a developer can write
+their own pretty easily using our Rust or gRPC bindings. We also provide a
+command-line utility for running an arbitrary program in the Maelstrom
+environment. This can be used for ad hoc testing or as a target for scripts.
 
-## How We Imagine People Using It
+To get started running their tests using Maelstrom, a developer starts by just
+using the Maelstrom test runner as a drop-in replacement for their test runner.
+For example, a developer would type `cargo maelstrom` instead of `cargo test`.
+This will run all tests in a minimal environment to start with. Some tests may
+not run propertly without more dependencies specified. A developer can then opt
+in to these required dependencies by adding dependencies to tests that match
+certain patterns. It usually only takes a few minutes to a whole project's
+tests working with Maelstrom.
 
-## Summary, Future, and Call to Action
- Change the way developers think about testing in general.
+## Advantages Once Set Up
+
+Once a developer starts using Maelstrom, there are a lot of things they can do.
+Ideally, they will have access to a cluster of test runner: the bigger the
+better. This cluster should be shared by all developers on the project, and
+probably also with CI.
+
+They can run more of their tests more often. With a cluster available,
+running tests can become a very fast affair. A developer can then get instant
+feedback when something breaks.
+
+They can run all of their tests while developing, including the ones run by CI.
+And since CI uses the same specifications, a developer can be confident that a
+test that passes for them will also pass in CI. The converse is also true: a
+test that fails in CI will fail for the developer, making reproducing a failure
+much easier.
+
+CI will also complete more quickly, since it will have a cluster available to
+it. It will efficiently distribute test runs across the cluster, utilizing all
+of the execution machines at once, without a developer having to do manual
+balancing of test runs.
+
+Having a cluster available also makes debugging flaky tests easier. A developer
+can tell Maelstrom to run thousands of individual instances of a test, and
+return when one fails. With enough cores in the cluster, a developer can
+quickly track down even the most troublesome Heisenbug.
+
+We have found that once developers have the experience of having a system like
+Maelstrom at their disposal, they start to change how they approach testing.
+Being able to test more of the system more often is part of it, but they also
+start to write test differently. It now becomes more feasible to engage in more
+computationally intensive testing. Developers can rely more heavily on fuzz
+testing, "chaos testing", and exhaustive simulation.
+
+While the full value of Maelstrom's model works best when developers have
+clusters available to them, there are a still a lot of advantages even when
+that is not the case. It's still great to have tests always run the same way,
+whether in CI or locally. And it's still great to be able to run tests
+everywhere. In fact, we imagine a lot of developers will start with Maelstrom
+without a generally-available cluster, then maybe move to having a cluster just
+for CI, and then progress eventually to having a shared project for the entire
+project.
