@@ -8,6 +8,8 @@ draft = true
 This release we are announcing two main things. These are an **overhaul of our test-runner terminal
 UI**, and a **new test-runner for the Go programming language**.
 
+<!-- more -->
+
 See the [0.11.0 release notes](https://github.com/maelstrom-software/maelstrom/releases/tag/v0.11.0) for a
 complete list of changes. This post give a tour of the two biggest things.
 
