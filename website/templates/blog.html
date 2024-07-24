@@ -1,12 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
-
 <div class="wrapper">
   <div class="container" id="main">
-    <header>
-      <h2>{{ section.title }}</h2>
-    </header>
 
     <div class="row">
       {% for page in section.pages %}
@@ -27,7 +23,6 @@
     </div>
   </div>
 </div>
-
 {% endblock content %}
 
 <!-- vim: set sw=2 ts=2 et ai: -->
