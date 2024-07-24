@@ -243,6 +243,7 @@ fn run_or_list_all_tests_sync(
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
     list: Option<ListAction>,
+    repeat: Repeat,
 ) -> String {
     let bin_dir = tmp_dir.join::<BinDir>("bin");
     let project_dir = tmp_dir.join::<ProjectDir>("project");
@@ -257,7 +258,7 @@ fn run_or_list_all_tests_sync(
         quiet,
         include_filter,
         exclude_filter,
-        Repeat::default(),
+        repeat,
         list,
         true, // finish
     )
@@ -269,6 +270,7 @@ fn run_all_tests_sync(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
+    repeat: Repeat,
 ) -> String {
     run_or_list_all_tests_sync(
         tmp_dir,
@@ -277,6 +279,7 @@ fn run_all_tests_sync(
         include_filter,
         exclude_filter,
         None,
+        repeat,
     )
 }
 
@@ -287,6 +290,7 @@ fn list_all_tests_sync(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
+    repeat: Repeat,
     expected_tests: &str,
 ) {
     let listing = run_or_list_all_tests_sync(
@@ -296,6 +300,7 @@ fn list_all_tests_sync(
         include_filter.clone(),
         exclude_filter.clone(),
         Some(ListAction::ListTests),
+        repeat,
     );
     assert_eq!(listing, expected_tests);
 }
@@ -315,7 +320,8 @@ fn no_tests_all_tests_sync() {
             fake_tests,
             false.into(),
             vec!["all".into()],
-            vec![]
+            vec![],
+            Repeat::default(),
         ),
         "\
         \n\
@@ -341,6 +347,7 @@ fn no_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
+        Repeat::default(),
         "",
     );
 }
@@ -372,7 +379,8 @@ fn two_tests_all_tests_sync() {
             fake_tests,
             false.into(),
             vec!["all".into()],
-            vec![]
+            vec![],
+            Repeat::default(),
         ),
         "\
         bar test_it............................OK   1.000s\n\
@@ -412,6 +420,42 @@ fn two_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
+        Repeat::default(),
+        indoc! {"
+            bar test_it
+            foo test_it\
+        "},
+    );
+}
+
+#[test]
+fn two_tests_all_tests_sync_listing_with_repeat() {
+    let tmp_dir = tempdir().unwrap();
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+    list_all_tests_sync(
+        Root::new(tmp_dir.path()),
+        fake_tests,
+        false.into(),
+        vec!["all".into()],
+        vec![],
+        Repeat::try_from(2).unwrap(),
         indoc! {"
             bar test_it
             foo test_it\
@@ -460,7 +504,8 @@ fn four_tests_filtered_sync() {
             fake_tests,
             false.into(),
             vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
-            vec!["package = \"bin\"".into()]
+            vec!["package = \"bin\"".into()],
+            Repeat::default(),
         ),
         "\
         bar test_it2...........................OK   1.000s\n\
@@ -514,6 +559,7 @@ fn four_tests_filtered_sync_listing() {
         false.into(),
         vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
         vec!["package = \"bin\"".into()],
+        Repeat::default(),
         indoc! {"
             bar test_it2
             foo test_it\
@@ -555,7 +601,8 @@ fn three_tests_single_package_sync() {
             fake_tests,
             false.into(),
             vec!["package = \"foo\"".into()],
-            vec![]
+            vec![],
+            Repeat::default(),
         ),
         "\
         foo test_it............................OK   1.000s\n\
@@ -607,7 +654,8 @@ fn three_tests_single_package_filtered_sync() {
             fake_tests,
             false.into(),
             vec!["and = [{ package = \"foo\" }, { name = \"test_it\" }]".into()],
-            vec![]
+            vec![],
+            Repeat::default(),
         ),
         "\
         foo test_it............................OK   1.000s\n\
@@ -654,7 +702,8 @@ fn ignored_test_sync() {
             fake_tests,
             false.into(),
             vec!["all".into()],
-            vec![]
+            vec![],
+            Repeat::default(),
         ),
         "\
         bar test_it............................OK   1.000s\n\
@@ -663,6 +712,60 @@ fn ignored_test_sync() {
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         2\n\
+        Failed Tests    :         0\n\
+        Ignored Tests   :         1\n\
+        \x20\x20\x20\x20foo test_it: ignored\
+        "
+    );
+}
+
+#[test]
+fn ignored_test_sync_with_repeat() {
+    let tmp_dir = tempdir().unwrap();
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ignored: true,
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+    assert_eq!(
+        run_all_tests_sync(
+            Root::new(tmp_dir.path()),
+            fake_tests,
+            false.into(),
+            vec!["all".into()],
+            vec![],
+            Repeat::try_from(2).unwrap()
+        ),
+        "\
+        bar test_it............................OK   1.000s\n\
+        bar test_it............................OK   1.000s\n\
+        baz test_it............................OK   1.000s\n\
+        baz test_it............................OK   1.000s\n\
+        foo test_it.......................IGNORED\n\
+        \n\
+        ================== Test Summary ==================\n\
+        Successful Tests:         4\n\
         Failed Tests    :         0\n\
         Ignored Tests   :         1\n\
         \x20\x20\x20\x20foo test_it: ignored\
@@ -697,7 +800,8 @@ fn two_tests_all_tests_sync_quiet() {
             fake_tests,
             true.into(),
             vec!["all".into()],
-            vec![]
+            vec![],
+            Repeat::default(),
         ),
         "\
         \n\
@@ -1025,8 +1129,8 @@ fn loop_two_times() {
         2, // loop times
         "\
         foo test_it............................OK   1.000s\n\
-        bar test_it............................OK   1.000s\n\
         foo test_it............................OK   1.000s\n\
+        bar test_it............................OK   1.000s\n\
         bar test_it............................OK   1.000s\n\
         ######################## 4/4 waiting for artifacts\n\
         ######################## 4/4 pending\n\
@@ -1063,10 +1167,10 @@ fn loop_three_times() {
         3, // loop times
         "\
         foo test_it............................OK   1.000s\n\
-        bar test_it............................OK   1.000s\n\
+        foo test_it............................OK   1.000s\n\
         foo test_it............................OK   1.000s\n\
         bar test_it............................OK   1.000s\n\
-        foo test_it............................OK   1.000s\n\
+        bar test_it............................OK   1.000s\n\
         bar test_it............................OK   1.000s\n\
         ######################## 6/6 waiting for artifacts\n\
         ######################## 6/6 pending\n\
@@ -1109,6 +1213,7 @@ fn expected_count_updates_packages() {
         false.into(),
         vec!["all".into()],
         vec![],
+        Repeat::default(),
     );
 
     let test_listing_store = TestListingStore::new(
@@ -1137,6 +1242,7 @@ fn expected_count_updates_packages() {
         false.into(),
         vec!["all".into()],
         vec![],
+        Repeat::default(),
     );
 
     // new listing should match
@@ -1164,6 +1270,7 @@ fn expected_count_updates_cases() {
         false.into(),
         vec!["all".into()],
         vec![],
+        Repeat::default(),
     );
 
     let test_listing_store = TestListingStore::new(
@@ -1188,6 +1295,7 @@ fn expected_count_updates_cases() {
         false.into(),
         vec!["all".into()],
         vec![],
+        Repeat::default(),
     );
 
     // new listing should match
@@ -1215,6 +1323,7 @@ fn filtering_none_does_not_build() {
         false.into(),
         vec!["none".into()],
         vec![],
+        Repeat::default(),
     );
 
     let entries: Vec<_> = Fs::new()

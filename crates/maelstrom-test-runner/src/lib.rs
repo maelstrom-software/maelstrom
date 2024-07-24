@@ -30,7 +30,7 @@ use std::{
     ffi::OsString,
     fmt::Debug,
     io::{self, IsTerminal as _},
-    str,
+    mem, str,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -669,9 +669,14 @@ impl<MainAppDepsT: MainAppDeps> CollectionResult<MainAppDepsT> {
     }
 }
 
-enum EnqueueStage {
-    Initial,
-    Looping { times: usize, position: usize },
+#[derive(Default)]
+enum EnqueueStage<MainAppDepsT: MainAppDeps> {
+    #[default]
+    NeedTest,
+    Repeating {
+        test: TestToEnqueue<MainAppDepsT>,
+        times: usize,
+    },
     Done,
 }
 
@@ -680,8 +685,7 @@ struct MainApp<'state, IntrospectDriverT, MainAppDepsT: MainAppDeps> {
     queuing: JobQueuing<'state, MainAppDepsT>,
     introspect_driver: IntrospectDriverT,
     ui: UiSender,
-    test_history: Vec<TestToEnqueue<MainAppDepsT>>,
-    stage: EnqueueStage,
+    stage: EnqueueStage<MainAppDepsT>,
 }
 
 impl<'state, 'scope, IntrospectDriverT, MainAppDepsT>
@@ -717,47 +721,41 @@ where
             queuing,
             introspect_driver,
             ui,
-            test_history: vec![],
-            stage: EnqueueStage::Initial,
+            stage: EnqueueStage::NeedTest,
         })
     }
 
     /// Enqueue one test as a job on the `Client`. This is meant to be called repeatedly until
     /// `EnqueueResult::Done` is returned, or an error is encountered.
     pub fn enqueue_one(&mut self) -> Result<EnqueueResult> {
-        match self.stage {
-            EnqueueStage::Initial => match self.queuing.enqueue_one()? {
+        let repeat_times = usize::from(self.state.queuing_state.repeat);
+        match mem::take(&mut self.stage) {
+            EnqueueStage::NeedTest => match self.queuing.enqueue_one()? {
                 CollectionResult::Test(test) => {
-                    self.test_history.push(test.clone());
+                    if repeat_times > 1 {
+                        self.stage = EnqueueStage::Repeating {
+                            times: repeat_times - 1,
+                            test: test.clone(),
+                        };
+                    }
                     test.enqueue(self.state, &self.ui)
                 }
                 CollectionResult::NoTest(EnqueueResult::Done) => {
-                    self.stage = EnqueueStage::Looping {
-                        times: usize::from(self.state.queuing_state.repeat) - 1,
-                        position: 0,
-                    };
-                    self.enqueue_one()
+                    self.stage = EnqueueStage::Done;
+                    Ok(EnqueueResult::Done)
                 }
                 CollectionResult::NoTest(res) => Ok(res),
             },
-            EnqueueStage::Looping { times, position } => {
-                if times == 0 {
-                    self.stage = EnqueueStage::Done;
-                    self.enqueue_one()
-                } else if position >= self.test_history.len() {
-                    self.stage = EnqueueStage::Looping {
-                        times: times - 1,
-                        position: 0,
-                    };
-                    self.enqueue_one()
+            EnqueueStage::Repeating { test, times } => {
+                if times == 1 {
+                    self.stage = EnqueueStage::NeedTest;
                 } else {
-                    let test = self.test_history[position].clone();
-                    self.stage = EnqueueStage::Looping {
-                        times,
-                        position: position + 1,
+                    self.stage = EnqueueStage::Repeating {
+                        test: test.clone(),
+                        times: times - 1,
                     };
-                    test.enqueue(self.state, &self.ui)
                 }
+                test.enqueue(self.state, &self.ui)
             }
             EnqueueStage::Done => Ok(EnqueueResult::Done),
         }
