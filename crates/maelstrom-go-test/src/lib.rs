@@ -134,12 +134,12 @@ impl TestFilter for pattern::Pattern {
 
     fn filter(
         &self,
-        package: &str,
+        module: &str,
         _artifact: Option<&GoTestArtifactKey>,
         case: Option<(&str, &NoCaseMetadata)>,
     ) -> Option<bool> {
         let c = pattern::Context {
-            package: package.into(),
+            package: module.into(),
             file: None,
             case: case.map(|(case, _)| pattern::Case { name: case.into() }),
         };
@@ -151,42 +151,22 @@ struct GoTestCollector;
 
 #[derive(Debug)]
 pub(crate) struct GoTestArtifact {
-    id: GoPackageId,
+    id: GoModuleImportPath,
+    name: String,
     path: PathBuf,
 }
 
 #[derive(Debug, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
-pub(crate) struct GoPackageId(String);
+pub(crate) struct GoModuleImportPath(String);
 
-impl GoPackageId {
-    fn short_name(&self) -> &str {
-        let mut comp = self.0.split('/').collect::<Vec<&str>>().into_iter().rev();
-        let last = comp.next().unwrap();
-
-        let version_re = regex::Regex::new("^v[0-9]*$").unwrap();
-        if version_re.is_match(last) {
-            comp.next().unwrap()
-        } else {
-            last
-        }
-    }
-}
-
-#[test]
-fn short_name() {
-    assert_eq!(GoPackageId("github.com/foo/bar".into()).short_name(), "bar");
-    assert_eq!(GoPackageId("github.com/foo/v1".into()).short_name(), "foo");
-    assert_eq!(GoPackageId("github.com/foo/v1a".into()).short_name(), "v1a");
-}
-
-impl TestPackageId for GoPackageId {}
+impl TestPackageId for GoModuleImportPath {}
 
 impl TestArtifact for GoTestArtifact {
     type ArtifactKey = GoTestArtifactKey;
-    type PackageId = GoPackageId;
+    type PackageId = GoModuleImportPath;
     type CaseMetadata = NoCaseMetadata;
 
-    fn package(&self) -> GoPackageId {
+    fn package(&self) -> GoModuleImportPath {
         self.id.clone()
     }
 
@@ -212,7 +192,7 @@ impl TestArtifact for GoTestArtifact {
     }
 
     fn name(&self) -> &str {
-        self.id.short_name()
+        &self.name
     }
 
     fn build_command(
@@ -229,26 +209,24 @@ impl TestArtifact for GoTestArtifact {
 
     fn format_case(
         &self,
-        package_name: &str,
+        import_path: &str,
         case_name: &str,
         _case_metadata: &NoCaseMetadata,
     ) -> String {
-        format!("{package_name} {case_name}")
+        format!("{import_path} {case_name}")
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct GoPackage {
-    id: GoPackageId,
-    package_dir: PathBuf,
-}
+pub(crate) struct GoModule(go_test::GoModule);
 
-impl TestPackage for GoPackage {
-    type PackageId = GoPackageId;
+impl TestPackage for GoModule {
+    type PackageId = GoModuleImportPath;
     type ArtifactKey = GoTestArtifactKey;
 
+    #[allow(clippy::misnamed_getters)]
     fn name(&self) -> &str {
-        &self.id.0
+        &self.0.import_path
     }
 
     fn artifacts(&self) -> Vec<GoTestArtifactKey> {
@@ -257,8 +235,8 @@ impl TestPackage for GoPackage {
         }]
     }
 
-    fn id(&self) -> GoPackageId {
-        self.id.clone()
+    fn id(&self) -> GoModuleImportPath {
+        GoModuleImportPath(self.0.import_path.clone())
     }
 }
 
@@ -271,8 +249,8 @@ impl CollectTests for GoTestCollector {
     type Artifact = GoTestArtifact;
     type ArtifactStream = go_test::TestArtifactStream;
     type TestFilter = pattern::Pattern;
-    type PackageId = GoPackageId;
-    type Package = GoPackage;
+    type PackageId = GoModuleImportPath;
+    type Package = GoModule;
     type ArtifactKey = GoTestArtifactKey;
     type Options = GoTestOptions;
     type CaseMetadata = NoCaseMetadata;
@@ -281,10 +259,11 @@ impl CollectTests for GoTestCollector {
         &self,
         color: bool,
         _options: &GoTestOptions,
-        packages: Vec<&GoPackage>,
+        modules: Vec<&GoModule>,
         ui: &UiSender,
     ) -> Result<(go_test::WaitHandle, go_test::TestArtifactStream)> {
-        go_test::build_and_collect(color, packages, ui.clone())
+        let modules = modules.into_iter().map(|m| &m.0).collect();
+        go_test::build_and_collect(color, modules, ui.clone())
     }
 
     fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {
@@ -392,7 +371,11 @@ pub fn main_with_stderr_and_project_dir(
     )?;
     let deps = DefaultMainAppDeps::new(&client)?;
 
-    let packages = go_test::find_packages(project_dir.as_ref()).context("finding go packages")?;
+    let modules: Vec<_> = go_test::find_modules(project_dir.as_ref())
+        .context("finding go modules")?
+        .into_iter()
+        .map(GoModule)
+        .collect();
 
     let state = MainAppState::new(
         deps,
@@ -402,7 +385,7 @@ pub fn main_with_stderr_and_project_dir(
         config.parent.repeat,
         stderr_is_tty,
         project_dir,
-        &packages,
+        &modules,
         &state_dir,
         GoTestOptions,
         logging_output,

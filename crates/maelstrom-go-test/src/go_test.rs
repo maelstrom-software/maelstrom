@@ -1,14 +1,14 @@
-use crate::{GoPackage, GoPackageId, GoTestArtifact};
+use crate::{GoModuleImportPath, GoTestArtifact};
 use anyhow::{Context as _, Result};
 use maelstrom_test_runner::ui::UiSender;
-use maelstrom_util::fs::Fs;
 use maelstrom_util::process::ExitCode;
-use std::ffi::OsStr;
+use serde::Deserialize;
 use std::os::unix::process::ExitStatusExt as _;
 use std::{
     fmt,
     io::{BufRead as _, BufReader},
     path::Path,
+    path::PathBuf,
     process::{Command, Stdio},
     str,
     sync::mpsc,
@@ -120,16 +120,16 @@ fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
 }
 
 fn multi_go_build(
-    packages: Vec<GoPackage>,
+    modules: Vec<GoModule>,
     send: mpsc::Sender<GoTestArtifact>,
     ui: UiSender,
 ) -> Result<()> {
     let mut handles = vec![];
-    for p in packages {
+    for m in modules {
         let send_clone = send.clone();
         let ui_clone = ui.clone();
         handles.push(thread::spawn(move || -> Result<()> {
-            let res = go_build(&p.package_dir, ui_clone);
+            let res = go_build(&m.dir, ui_clone);
             if is_no_go_files_error(&res) {
                 return Ok(());
             }
@@ -137,8 +137,9 @@ fn multi_go_build(
             let output = res?;
             if !output.contains("[no test files]") {
                 let _ = send_clone.send(GoTestArtifact {
-                    id: p.id.clone(),
-                    path: p.package_dir.join(format!("{}.test", p.id.short_name())),
+                    id: GoModuleImportPath(m.import_path.clone()),
+                    name: m.name.clone(),
+                    path: m.dir.join(format!("{}.test", &m.name)),
                 });
             }
             Ok(())
@@ -152,10 +153,10 @@ fn multi_go_build(
 
 pub(crate) fn build_and_collect(
     _color: bool,
-    packages: Vec<&GoPackage>,
+    modules: Vec<&GoModule>,
     ui: UiSender,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
-    let paths = packages.into_iter().cloned().collect();
+    let paths = modules.into_iter().cloned().collect();
     let (send, recv) = mpsc::channel();
     let handle = thread::spawn(move || multi_go_build(paths, send, ui));
     Ok((WaitHandle { handle }, TestArtifactStream { recv }))
@@ -175,31 +176,37 @@ pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<V
         .collect())
 }
 
-fn go_list(dir: &Path) -> Result<String> {
-    let output = Command::new("go").current_dir(dir).arg("list").output()?;
-    Ok(str::from_utf8(&output.stdout)?.trim().into())
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub(crate) struct GoModule {
+    pub dir: PathBuf,
+    pub import_path: String,
+    pub name: String,
+    #[allow(dead_code)]
+    pub root: PathBuf,
 }
 
-pub(crate) fn find_packages(dir: &Path) -> Result<Vec<GoPackage>> {
-    let dir = dir.canonicalize()?;
-    let iter = Fs.walk(&dir).filter(|path| {
-        path.as_ref()
-            .is_ok_and(|p| p.file_name() == Some(OsStr::new("go.mod")))
-    });
-    let mut packages = vec![];
-    for go_mod in iter {
-        let go_mod = go_mod?;
-        let contents = Fs.read_to_string(&go_mod)?;
-        if contents.trim().is_empty() {
-            // skip empty go.mod files
-            continue;
+fn go_list(dir: &Path) -> Result<Vec<GoModule>> {
+    let output = Command::new("go")
+        .current_dir(dir)
+        .arg("list")
+        .arg("-json")
+        .arg("./...")
+        .output()?;
+    let mut modules = vec![];
+    let mut cursor = &output.stdout[..];
+    while !cursor.is_empty() {
+        let mut d = serde_json::Deserializer::new(serde_json::de::IoRead::new(&mut cursor));
+        let m: GoModule = serde::Deserialize::deserialize(&mut d)?;
+        modules.push(m);
+        while !cursor.is_empty() && (cursor[0] as char).is_ascii_whitespace() {
+            cursor = &cursor[1..];
         }
-        let package_dir = go_mod.parent().unwrap().to_owned();
-        let module_name = go_list(&package_dir)?;
-        packages.push(GoPackage {
-            id: GoPackageId(module_name),
-            package_dir,
-        });
     }
-    Ok(packages)
+    Ok(modules)
+}
+
+pub(crate) fn find_modules(dir: &Path) -> Result<Vec<GoModule>> {
+    let dir = dir.canonicalize()?;
+    go_list(&dir)
 }
