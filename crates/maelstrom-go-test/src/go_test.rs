@@ -135,10 +135,11 @@ fn multi_go_build(
 
             let output = res?;
             if !output.contains("[no test files]") {
+                let import_path = GoModuleImportPath(m.import_path.clone());
                 let _ = send_clone.send(GoTestArtifact {
-                    id: GoModuleImportPath(m.import_path.clone()),
                     name: m.name.clone(),
-                    path: m.dir.join(format!("{}.test", &m.name)),
+                    path: m.dir.join(format!("{}.test", import_path.short_name())),
+                    id: import_path,
                 });
             }
             Ok(())

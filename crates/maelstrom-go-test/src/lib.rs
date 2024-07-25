@@ -159,6 +159,36 @@ pub(crate) struct GoTestArtifact {
 #[derive(Debug, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
 pub(crate) struct GoModuleImportPath(String);
 
+impl GoModuleImportPath {
+    fn short_name(&self) -> &str {
+        let mut comp = self.0.split('/').collect::<Vec<&str>>().into_iter().rev();
+        let last = comp.next().unwrap();
+
+        let version_re = regex::Regex::new("^v[0-9]*$").unwrap();
+        if version_re.is_match(last) {
+            comp.next().unwrap()
+        } else {
+            last
+        }
+    }
+}
+
+#[test]
+fn short_name() {
+    assert_eq!(
+        GoModuleImportPath("github.com/foo/bar".into()).short_name(),
+        "bar"
+    );
+    assert_eq!(
+        GoModuleImportPath("github.com/foo/v1".into()).short_name(),
+        "foo"
+    );
+    assert_eq!(
+        GoModuleImportPath("github.com/foo/v1a".into()).short_name(),
+        "v1a"
+    );
+}
+
 impl TestPackageId for GoModuleImportPath {}
 
 impl TestArtifact for GoTestArtifact {
