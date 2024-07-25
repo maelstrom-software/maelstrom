@@ -64,6 +64,9 @@ type ArtifactKeyM<MainAppDepsT> =
 type PackageM<MainAppDepsT> =
     <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::Package;
 
+type PackageIdM<MainAppDepsT> =
+    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::PackageId;
+
 type CollectOptionsM<MainAppDepsT> =
     <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::Options;
 
@@ -82,13 +85,12 @@ type ArtifactStreamM<MainAppDepsT> =
 ///
 /// This object is separate from `MainAppState` because it is lent to `JobQueuing`
 struct JobQueuingState<TestCollectorT: CollectTests> {
-    packages: BTreeMap<TestCollectorT::PackageId, TestCollectorT::Package>,
     filter: TestCollectorT::TestFilter,
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
     jobs_queued: AtomicU64,
     test_metadata: AllMetadata<TestCollectorT::TestFilter>,
-    expected_job_count: u64,
+    expected_job_count: AtomicU64,
     test_listing: Arc<Mutex<Option<TestListing<TestCollectorT>>>>,
     list_action: Option<ListAction>,
     repeat: Repeat,
@@ -98,7 +100,6 @@ struct JobQueuingState<TestCollectorT: CollectTests> {
 impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        packages: BTreeMap<TestCollectorT::PackageId, TestCollectorT::Package>,
         filter: TestCollectorT::TestFilter,
         stderr_color: bool,
         test_metadata: AllMetadata<TestCollectorT::TestFilter>,
@@ -107,17 +108,13 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
         repeat: Repeat,
         collector_options: TestCollectorT::Options,
     ) -> Result<Self> {
-        let mut expected_job_count = test_listing.expected_job_count(&filter);
-        expected_job_count *= usize::from(repeat) as u64;
-
         Ok(Self {
-            packages,
             filter,
             stderr_color,
             tracker: Arc::new(JobStatusTracker::default()),
             jobs_queued: AtomicU64::new(0),
             test_metadata,
-            expected_job_count,
+            expected_job_count: AtomicU64::new(0),
             test_listing: Arc::new(Mutex::new(Some(test_listing))),
             list_action,
             repeat,
@@ -127,7 +124,10 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
 
     fn track_outstanding(&self, case_str: &str, ui: &UiSender) {
         let count = self.jobs_queued.fetch_add(1, Ordering::AcqRel);
-        ui.update_length(std::cmp::max(self.expected_job_count, count + 1));
+        ui.update_length(std::cmp::max(
+            self.expected_job_count.load(Ordering::Acquire),
+            count + 1,
+        ));
         ui.job_enqueued(case_str.into());
         self.tracker.add_outstanding();
     }
@@ -385,6 +385,7 @@ struct JobQueuing<'a, MainAppDepsT: MainAppDeps> {
     deps: &'a MainAppDepsT,
     ui: UiSender,
     wait_handle: Option<BuildHandleM<MainAppDepsT>>,
+    packages: BTreeMap<PackageIdM<MainAppDepsT>, PackageM<MainAppDepsT>>,
     package_match: bool,
     artifacts: Option<ArtifactStreamM<MainAppDepsT>>,
     artifact_queuing: Option<ArtifactQueuing<'a, MainAppDepsT>>,
@@ -404,7 +405,39 @@ where
     ) -> Result<Self> {
         ui.update_enqueue_status(MainAppDepsT::TestCollector::ENQUEUE_MESSAGE);
 
-        let building_tests = !queuing_state.packages.is_empty()
+        let packages = deps.test_collector().get_packages(&ui)?;
+
+        let mut locked_test_listing = queuing_state.test_listing.lock().unwrap();
+        let test_listing = locked_test_listing.as_mut().unwrap();
+        test_listing
+            .retain_packages_and_artifacts(packages.iter().map(|p| (p.name(), p.artifacts())));
+
+        let mut expected_job_count = test_listing.expected_job_count(&queuing_state.filter);
+        drop(locked_test_listing);
+
+        expected_job_count *= usize::from(queuing_state.repeat) as u64;
+        ui.update_length(expected_job_count);
+        queuing_state
+            .expected_job_count
+            .store(expected_job_count, Ordering::Release);
+
+        let selected_packages: BTreeMap<_, _> = packages
+            .iter()
+            .filter(|p| {
+                queuing_state
+                    .filter
+                    .filter(p.name(), None, None)
+                    .unwrap_or(true)
+            })
+            .map(|p| (p.id(), p.clone()))
+            .collect();
+
+        slog::debug!(
+            &log, "filtered packages";
+            "selected_packages" => ?Vec::from_iter(selected_packages.keys()),
+        );
+
+        let building_tests = !selected_packages.is_empty()
             && matches!(
                 queuing_state.list_action,
                 None | Some(ListAction::ListTests)
@@ -415,7 +448,7 @@ where
                 deps.test_collector().start(
                     queuing_state.stderr_color,
                     &queuing_state.collector_options,
-                    queuing_state.packages.values().collect(),
+                    selected_packages.values().collect(),
                     &ui,
                 )
             })
@@ -427,6 +460,7 @@ where
             queuing_state,
             deps,
             ui,
+            packages: selected_packages,
             package_match: false,
             artifacts,
             artifact_queuing: None,
@@ -450,7 +484,6 @@ where
 
         slog::debug!(self.log, "got artifact"; "artifact" => ?artifact);
         let package_name = self
-            .queuing_state
             .packages
             .get(&artifact.package())
             .expect("artifact for unknown package")
@@ -524,7 +557,6 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
     /// `list_action`: if some, tests aren't run, instead tests or other things are listed
     /// `stderr_color`: should terminal color codes be written to `stderr` or not
     /// `project_dir`: the path to the root of the project
-    /// `packages`: a listing of all the packages
     /// `broker_addr`: the network address of the broker which we connect to
     /// `client_driver`: an object which drives the background work of the `Client`
     #[allow(clippy::too_many_arguments)]
@@ -536,7 +568,6 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         repeat: Repeat,
         stderr_color: bool,
         project_dir: impl AsRef<Root<ProjectDir>>,
-        packages: &[PackageM<MainAppDepsT>],
         state_dir: impl AsRef<Root<StateDir>>,
         collector_options: CollectOptionsM<MainAppDepsT>,
         logging_output: LoggingOutput,
@@ -553,21 +584,8 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         let mut test_metadata =
             AllMetadata::load(log.clone(), project_dir, MainAppDepsT::MAELSTROM_TEST_TOML)?;
         let test_listing_store = TestListingStore::new(Fs::new(), &state_dir);
-        let mut test_listing = test_listing_store.load()?;
-        test_listing
-            .retain_packages_and_artifacts(packages.iter().map(|p| (p.name(), p.artifacts())));
-
+        let test_listing = test_listing_store.load()?;
         let filter = TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
-        let selected_packages: BTreeMap<_, _> = packages
-            .iter()
-            .filter(|p| filter.filter(p.name(), None, None).unwrap_or(true))
-            .map(|p| (p.id(), p.clone()))
-            .collect();
-
-        slog::debug!(
-            log, "filtered packages";
-            "selected_packages" => ?Vec::from_iter(selected_packages.keys()),
-        );
 
         let vars = deps.get_template_vars(&collector_options)?;
         test_metadata.replace_template_vars(&vars)?;
@@ -575,7 +593,6 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         Ok(Self {
             deps,
             queuing_state: JobQueuingState::new(
-                selected_packages,
                 filter,
                 stderr_color,
                 test_metadata,
@@ -704,7 +721,6 @@ where
         'state: 'scope,
     {
         introspect_driver.drive(state.deps.client(), ui.clone());
-        ui.update_length(state.queuing_state.expected_job_count);
 
         state.logging_output.display_on_ui(ui.clone());
         slog::debug!(state.log, "main app created");

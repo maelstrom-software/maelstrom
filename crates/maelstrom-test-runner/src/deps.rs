@@ -178,6 +178,8 @@ pub trait CollectTests {
     fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
         lines
     }
+
+    fn get_packages(&self, ui: &ui::UiSender) -> Result<Vec<Self::Package>>;
 }
 
 pub trait TestFilter: Sized + FromStr<Err = anyhow::Error> {

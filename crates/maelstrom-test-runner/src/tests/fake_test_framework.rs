@@ -343,4 +343,8 @@ impl CollectTests for TestCollector {
             })
             .collect()
     }
+
+    fn get_packages(&self, _ui: &ui::UiSender) -> Result<Vec<FakeTestPackage>> {
+        Ok(self.tests.packages())
+    }
 }

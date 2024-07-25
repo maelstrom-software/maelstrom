@@ -18,7 +18,7 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
     fs::Fs,
     process::ExitCode,
-    root::Root,
+    root::{Root, RootBuf},
     template::TemplateVars,
 };
 use std::path::Path;
@@ -96,10 +96,12 @@ struct DefaultMainAppDeps<'client> {
 }
 
 impl<'client> DefaultMainAppDeps<'client> {
-    pub fn new(client: &'client Client) -> Result<Self> {
+    pub fn new(client: &'client Client, project_dir: &Root<ProjectDir>) -> Result<Self> {
         Ok(Self {
             client,
-            test_collector: GoTestCollector,
+            test_collector: GoTestCollector {
+                project_dir: project_dir.to_owned(),
+            },
         })
     }
 }
@@ -147,7 +149,9 @@ impl TestFilter for pattern::Pattern {
     }
 }
 
-struct GoTestCollector;
+struct GoTestCollector {
+    project_dir: RootBuf<ProjectDir>,
+}
 
 #[derive(Debug)]
 pub(crate) struct GoTestArtifact {
@@ -303,6 +307,14 @@ impl CollectTests for GoTestCollector {
     fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
         lines
     }
+
+    fn get_packages(&self, _ui: &UiSender) -> Result<Vec<GoModule>> {
+        Ok(go_test::find_modules(self.project_dir.as_ref())
+            .context("finding go modules")?
+            .into_iter()
+            .map(GoModule)
+            .collect())
+    }
 }
 
 impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
@@ -399,13 +411,7 @@ pub fn main_with_stderr_and_project_dir(
         config.parent.accept_invalid_remote_container_tls_certs,
         log.clone(),
     )?;
-    let deps = DefaultMainAppDeps::new(&client)?;
-
-    let modules: Vec<_> = go_test::find_modules(project_dir.as_ref())
-        .context("finding go modules")?
-        .into_iter()
-        .map(GoModule)
-        .collect();
+    let deps = DefaultMainAppDeps::new(&client, project_dir)?;
 
     let state = MainAppState::new(
         deps,
@@ -415,7 +421,6 @@ pub fn main_with_stderr_and_project_dir(
         config.parent.repeat,
         stderr_is_tty,
         project_dir,
-        &modules,
         &state_dir,
         GoTestOptions,
         logging_output,

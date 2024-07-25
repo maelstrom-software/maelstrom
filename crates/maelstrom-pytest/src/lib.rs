@@ -487,6 +487,14 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         }
     }
 
+    fn get_packages(&self, _ui: &UiSender) -> Result<Vec<PytestPackage>> {
+        Ok(vec![PytestPackage {
+            name: "default".into(),
+            id: PytestPackageId("default".into()),
+            artifacts: find_artifacts(self.project_dir.as_ref())?,
+        }])
+    }
+
     fn remove_fixture_output(_case_str: &str, mut lines: Vec<String>) -> Vec<String> {
         let start_re = Regex::new("=+ FAILURES =+").unwrap();
         let end_re = Regex::new("=+ short test summary info =+").unwrap();
@@ -668,12 +676,6 @@ pub fn main_with_stderr_and_project_dir(
         &client,
     )?;
 
-    let packages = vec![PytestPackage {
-        name: "default".into(),
-        id: PytestPackageId("default".into()),
-        artifacts: find_artifacts(project_dir.as_ref())?,
-    }];
-
     let state = MainAppState::new(
         deps,
         extra_options.parent.include,
@@ -682,7 +684,6 @@ pub fn main_with_stderr_and_project_dir(
         config.parent.repeat,
         stderr_is_tty,
         project_dir,
-        &packages,
         &state_dir,
         PytestOptions,
         logging_output,

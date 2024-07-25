@@ -163,14 +163,12 @@ fn run_app(
 ) -> String {
     let fs = Fs::new();
     let log = test_logger();
-    let packages = fake_tests.packages();
     slog::info!(
         log, "doing test";
         "quiet" => ?quiet,
         "include_filter" => ?include_filter,
         "exclude_filter" => ?exclude_filter,
         "list" => ?list,
-        "packages" => ?packages
     );
 
     fs.create_dir_all(bin_dir).unwrap();
@@ -192,7 +190,6 @@ fn run_app(
         repeat,
         false, // stderr_color
         project_dir,
-        &packages,
         target_directory.join::<StateDir>("maelstrom/state"),
         TestOptions,
         LoggingOutput::default(),

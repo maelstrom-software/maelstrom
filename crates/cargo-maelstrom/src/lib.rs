@@ -56,6 +56,7 @@ impl DefaultMainAppDeps {
         inline_limit: InlineLimit,
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+        packages: Vec<CargoPackage>,
         log: slog::Logger,
     ) -> Result<Self> {
         let project_dir = project_dir.as_ref();
@@ -88,7 +89,7 @@ impl DefaultMainAppDeps {
         )?;
         Ok(Self {
             client,
-            test_collector: CargoTestCollector { log },
+            test_collector: CargoTestCollector { log, packages },
             target_dir: target_dir.as_ref().to_owned(),
         })
     }
@@ -211,6 +212,7 @@ struct CargoOptions {
 
 struct CargoTestCollector {
     log: slog::Logger,
+    packages: Vec<CargoPackage>,
 }
 
 #[derive(Debug)]
@@ -353,6 +355,10 @@ impl CollectTests for CargoTestCollector {
 
     fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {
         Ok(TestLayers::GenerateForBinary)
+    }
+
+    fn get_packages(&self, _ui: &UiSender) -> Result<Vec<CargoPackage>> {
+        Ok(self.packages.clone())
     }
 
     /// The Rust std test fixture prints out some output like "running 1 test" etc. This isn't very
@@ -537,6 +543,12 @@ pub fn main(
         Fs.create_dir_all(&state_dir)?;
         Fs.create_dir_all(&cache_dir)?;
 
+        let packages = cargo_metadata
+            .workspace_packages()
+            .into_iter()
+            .map(|p| CargoPackage(p.clone()))
+            .collect::<Vec<_>>();
+
         let deps = DefaultMainAppDeps::new(
             bg_proc,
             config.parent.broker,
@@ -549,6 +561,7 @@ pub fn main(
             config.parent.inline_limit,
             config.parent.slots,
             config.parent.accept_invalid_remote_container_tls_certs,
+            packages,
             log.clone(),
         )?;
 
@@ -565,11 +578,6 @@ pub fn main(
             config.parent.repeat,
             stderr_is_tty,
             workspace_dir,
-            &cargo_metadata
-                .workspace_packages()
-                .into_iter()
-                .map(|p| CargoPackage(p.clone()))
-                .collect::<Vec<_>>(),
             &state_dir,
             cargo_options,
             logging_output,
