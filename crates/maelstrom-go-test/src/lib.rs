@@ -136,12 +136,12 @@ impl TestFilter for pattern::Pattern {
 
     fn filter(
         &self,
-        module: &str,
+        package: &str,
         _artifact: Option<&GoTestArtifactKey>,
         case: Option<(&str, &NoCaseMetadata)>,
     ) -> Option<bool> {
         let c = pattern::Context {
-            package: module.into(),
+            package: package.into(),
             file: None,
             case: case.map(|(case, _)| pattern::Case { name: case.into() }),
         };
@@ -155,15 +155,15 @@ struct GoTestCollector {
 
 #[derive(Debug)]
 pub(crate) struct GoTestArtifact {
-    id: GoModuleImportPath,
+    id: GoImportPath,
     name: String,
     path: PathBuf,
 }
 
 #[derive(Debug, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
-pub(crate) struct GoModuleImportPath(String);
+pub(crate) struct GoImportPath(String);
 
-impl GoModuleImportPath {
+impl GoImportPath {
     fn short_name(&self) -> &str {
         let mut comp = self.0.split('/').collect::<Vec<&str>>().into_iter().rev();
         let last = comp.next().unwrap();
@@ -180,27 +180,24 @@ impl GoModuleImportPath {
 #[test]
 fn short_name() {
     assert_eq!(
-        GoModuleImportPath("github.com/foo/bar".into()).short_name(),
+        GoImportPath("github.com/foo/bar".into()).short_name(),
         "bar"
     );
+    assert_eq!(GoImportPath("github.com/foo/v1".into()).short_name(), "foo");
     assert_eq!(
-        GoModuleImportPath("github.com/foo/v1".into()).short_name(),
-        "foo"
-    );
-    assert_eq!(
-        GoModuleImportPath("github.com/foo/v1a".into()).short_name(),
+        GoImportPath("github.com/foo/v1a".into()).short_name(),
         "v1a"
     );
 }
 
-impl TestPackageId for GoModuleImportPath {}
+impl TestPackageId for GoImportPath {}
 
 impl TestArtifact for GoTestArtifact {
     type ArtifactKey = GoTestArtifactKey;
-    type PackageId = GoModuleImportPath;
+    type PackageId = GoImportPath;
     type CaseMetadata = NoCaseMetadata;
 
-    fn package(&self) -> GoModuleImportPath {
+    fn package(&self) -> GoImportPath {
         self.id.clone()
     }
 
@@ -252,10 +249,10 @@ impl TestArtifact for GoTestArtifact {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct GoModule(go_test::GoModule);
+pub(crate) struct GoPackage(go_test::GoPackage);
 
-impl TestPackage for GoModule {
-    type PackageId = GoModuleImportPath;
+impl TestPackage for GoPackage {
+    type PackageId = GoImportPath;
     type ArtifactKey = GoTestArtifactKey;
 
     #[allow(clippy::misnamed_getters)]
@@ -269,8 +266,8 @@ impl TestPackage for GoModule {
         }]
     }
 
-    fn id(&self) -> GoModuleImportPath {
-        GoModuleImportPath(self.0.import_path.clone())
+    fn id(&self) -> GoImportPath {
+        GoImportPath(self.0.import_path.clone())
     }
 }
 
@@ -283,8 +280,8 @@ impl CollectTests for GoTestCollector {
     type Artifact = GoTestArtifact;
     type ArtifactStream = go_test::TestArtifactStream;
     type TestFilter = pattern::Pattern;
-    type PackageId = GoModuleImportPath;
-    type Package = GoModule;
+    type PackageId = GoImportPath;
+    type Package = GoPackage;
     type ArtifactKey = GoTestArtifactKey;
     type Options = GoTestOptions;
     type CaseMetadata = NoCaseMetadata;
@@ -293,27 +290,27 @@ impl CollectTests for GoTestCollector {
         &self,
         color: bool,
         _options: &GoTestOptions,
-        modules: Vec<&GoModule>,
+        packages: Vec<&GoPackage>,
         ui: &UiSender,
     ) -> Result<(go_test::WaitHandle, go_test::TestArtifactStream)> {
-        let modules = modules.into_iter().map(|m| &m.0).collect();
-        go_test::build_and_collect(color, modules, ui.clone())
+        let packages = packages.into_iter().map(|m| &m.0).collect();
+        go_test::build_and_collect(color, packages, ui.clone())
     }
 
     fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {
         Ok(TestLayers::GenerateForBinary)
     }
 
-    fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
-        lines
+    fn get_packages(&self, ui: &UiSender) -> Result<Vec<GoPackage>> {
+        Ok(go_test::go_list(self.project_dir.as_ref(), ui)
+            .with_context(|| "running go list")?
+            .into_iter()
+            .map(GoPackage)
+            .collect())
     }
 
-    fn get_packages(&self, _ui: &UiSender) -> Result<Vec<GoModule>> {
-        Ok(go_test::find_modules(self.project_dir.as_ref())
-            .context("finding go modules")?
-            .into_iter()
-            .map(GoModule)
-            .collect())
+    fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
+        lines
     }
 }
 
@@ -361,7 +358,7 @@ pub fn main(
     stderr_is_tty: bool,
     ui: impl Ui,
 ) -> Result<ExitCode> {
-    let project_root = go_test::get_project_root()?;
+    let project_root = go_test::get_module_root()?;
     let project_dir = Root::<ProjectDir>::new(project_root.as_ref());
     main_with_stderr_and_project_dir(
         config,

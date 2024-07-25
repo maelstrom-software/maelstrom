@@ -1,15 +1,16 @@
-use crate::{GoModuleImportPath, GoTestArtifact};
-use anyhow::{Context as _, Result};
+use crate::{GoImportPath, GoTestArtifact};
+use anyhow::{anyhow, Context as _, Result};
 use maelstrom_test_runner::ui::UiSender;
+use maelstrom_util::fs::Fs;
 use maelstrom_util::process::ExitCode;
 use serde::Deserialize;
 use std::os::unix::process::ExitStatusExt as _;
 use std::{
     fmt,
-    io::{BufRead as _, BufReader},
+    io::{BufRead, BufReader},
     path::Path,
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{Command, ExitStatus, Stdio},
     str,
     sync::mpsc,
     thread,
@@ -55,45 +56,24 @@ impl Iterator for TestArtifactStream {
     }
 }
 
-fn go_build(dir: &Path, ui: UiSender) -> Result<String> {
-    let mut child = Command::new("go")
-        .current_dir(dir)
-        .arg("test")
-        .arg("-c")
-        .stderr(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()?;
-
-    let stdout = BufReader::new(child.stdout.take().unwrap());
-    let ui_clone = ui.clone();
-    let stdout_handle = thread::spawn(move || -> Result<String> {
-        let mut stdout_string = String::new();
-        for line in stdout.lines() {
-            let line = line?;
-            stdout_string += &line;
-            stdout_string += "\n";
-            ui_clone.build_output_line(line);
+fn handle_build_output(ui: UiSender, send_to_ui: bool, r: impl BufRead) -> Result<String> {
+    let mut output_s = String::new();
+    for line in r.lines() {
+        let line = line?;
+        output_s += &line;
+        output_s += "\n";
+        if send_to_ui {
+            ui.build_output_line(line);
         }
-        Ok(stdout_string)
-    });
+    }
+    Ok(output_s)
+}
 
-    let stderr = BufReader::new(child.stderr.take().unwrap());
-    let ui_clone = ui.clone();
-    let stderr_handle = thread::spawn(move || -> Result<String> {
-        let mut stderr_string = String::new();
-        for line in stderr.lines() {
-            let line = line?;
-            stderr_string += &line;
-            stderr_string += "\n";
-            ui_clone.build_output_line(line);
-        }
-        Ok(stderr_string)
-    });
-
-    let stdout = stdout_handle.join().unwrap()?;
-    let stderr = stderr_handle.join().unwrap()?;
-
-    let exit_status = child.wait()?;
+fn handle_build_cmd_status(
+    exit_status: ExitStatus,
+    stdout: String,
+    stderr: String,
+) -> Result<String> {
     if exit_status.success() {
         Ok(stdout)
     } else {
@@ -109,6 +89,32 @@ fn go_build(dir: &Path, ui: UiSender) -> Result<String> {
     }
 }
 
+fn run_build_cmd(cmd: &mut Command, stdout_to_ui: bool, ui: UiSender) -> Result<String> {
+    let mut child = cmd.stderr(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
+
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let ui_clone = ui.clone();
+    let stdout_handle = thread::spawn(move || handle_build_output(ui_clone, stdout_to_ui, stdout));
+
+    let stderr = BufReader::new(child.stderr.take().unwrap());
+    let ui_clone = ui.clone();
+    let stderr_handle = thread::spawn(move || handle_build_output(ui_clone, true, stderr));
+
+    let stdout = stdout_handle.join().unwrap()?;
+    let stderr = stderr_handle.join().unwrap()?;
+
+    let exit_status = child.wait()?;
+    handle_build_cmd_status(exit_status, stdout, stderr)
+}
+
+fn go_build(dir: &Path, ui: UiSender) -> Result<String> {
+    run_build_cmd(
+        Command::new("go").current_dir(dir).arg("test").arg("-c"),
+        true, /* stdout_to_ui */
+        ui,
+    )
+}
+
 fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
     if let Err(e) = res {
         if let Some(e) = e.downcast_ref::<BuildError>() {
@@ -119,12 +125,12 @@ fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
 }
 
 fn multi_go_build(
-    modules: Vec<GoModule>,
+    packages: Vec<GoPackage>,
     send: mpsc::Sender<GoTestArtifact>,
     ui: UiSender,
 ) -> Result<()> {
     let mut handles = vec![];
-    for m in modules {
+    for m in packages {
         let send_clone = send.clone();
         let ui_clone = ui.clone();
         handles.push(thread::spawn(move || -> Result<()> {
@@ -135,7 +141,7 @@ fn multi_go_build(
 
             let output = res?;
             if !output.contains("[no test files]") {
-                let import_path = GoModuleImportPath(m.import_path.clone());
+                let import_path = GoImportPath(m.import_path.clone());
                 let _ = send_clone.send(GoTestArtifact {
                     name: m.name.clone(),
                     path: m.dir.join(format!("{}.test", import_path.short_name())),
@@ -158,10 +164,10 @@ fn multi_go_build(
 
 pub(crate) fn build_and_collect(
     _color: bool,
-    modules: Vec<&GoModule>,
+    packages: Vec<&GoPackage>,
     ui: UiSender,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
-    let paths = modules.into_iter().cloned().collect();
+    let paths = packages.into_iter().cloned().collect();
     let (send, recv) = mpsc::channel();
     let handle = thread::spawn(move || multi_go_build(paths, send, ui));
     Ok((WaitHandle { handle }, TestArtifactStream { recv }))
@@ -183,7 +189,7 @@ pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<V
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(crate) struct GoModule {
+pub(crate) struct GoPackage {
     pub dir: PathBuf,
     pub import_path: String,
     pub name: String,
@@ -191,35 +197,40 @@ pub(crate) struct GoModule {
     pub root: PathBuf,
 }
 
-fn go_list(dir: &Path) -> Result<Vec<GoModule>> {
-    let output = Command::new("go")
-        .current_dir(dir)
-        .arg("list")
-        .arg("-json")
-        .arg("./...")
-        .output()?;
-    let mut modules = vec![];
-    let mut cursor = &output.stdout[..];
+pub(crate) fn go_list(dir: &Path, ui: &UiSender) -> Result<Vec<GoPackage>> {
+    let stdout = run_build_cmd(
+        Command::new("go")
+            .current_dir(dir)
+            .arg("list")
+            .arg("-json")
+            .arg("./..."),
+        false, /* stdout_to_ui */
+        ui.clone(),
+    )?
+    .into_bytes();
+
+    let mut packages = vec![];
+    let mut cursor = &stdout[..];
     while !cursor.is_empty() {
         let mut d = serde_json::Deserializer::new(serde_json::de::IoRead::new(&mut cursor));
-        let m: GoModule = serde::Deserialize::deserialize(&mut d)?;
-        modules.push(m);
+        let m: GoPackage = serde::Deserialize::deserialize(&mut d)?;
+        packages.push(m);
         while !cursor.is_empty() && (cursor[0] as char).is_ascii_whitespace() {
             cursor = &cursor[1..];
         }
     }
-    Ok(modules)
+    Ok(packages)
 }
 
-pub(crate) fn find_modules(dir: &Path) -> Result<Vec<GoModule>> {
-    let dir = dir.canonicalize()?;
-    go_list(&dir)
-}
+/// Find the module root by searching upwards from PWD to a path containing a "go.mod"
+pub(crate) fn get_module_root() -> Result<PathBuf> {
+    let mut c = Path::new(".").canonicalize()?;
 
-pub(crate) fn get_project_root() -> Result<PathBuf> {
-    if let Ok(Some(first_module)) = go_list(Path::new(".")).map(|v| v.into_iter().next()) {
-        Ok(first_module.root)
-    } else {
-        Ok(Path::new(".").canonicalize()?)
+    while !Fs.exists(c.join("go.mod")) {
+        c = c
+            .parent()
+            .ok_or_else(|| anyhow!("Failed to find module root"))?
+            .into();
     }
+    Ok(c)
 }
