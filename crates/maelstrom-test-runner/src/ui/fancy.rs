@@ -460,6 +460,13 @@ impl Ui for FancyUi {
                 terminal.insert_before(t.height(term_width), move |buf| t.render(buf.area, buf))?;
             }
         }
+
+        // Clear away some of the temporal UI elements before we update the screen one last time.
+        self.producing_build_output = false;
+        self.enqueue_status = None;
+        self.remote_progress.clear();
+        self.running_tests.clear();
+
         terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
 
         Ok(())
