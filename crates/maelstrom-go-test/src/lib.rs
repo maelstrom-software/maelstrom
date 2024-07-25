@@ -234,7 +234,7 @@ impl TestArtifact for GoTestArtifact {
         let binary_name = self.path().file_name().unwrap().to_str().unwrap();
         (
             format!("/{binary_name}").into(),
-            vec!["-test.run".into(), case_name.into()],
+            vec!["-test.run".into(), format!("^{case_name}$")],
         )
     }
 
