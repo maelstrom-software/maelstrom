@@ -204,7 +204,7 @@ br.clear {
 }
 
 .feature {
-  text-align: center;
+  text-align: left;
 }
 
 /* Sections/Article */
@@ -1890,7 +1890,7 @@ ul.icons li:before {
   width: 2.5em;
   height: 2.5em;
   border-radius: 0.35em;
-  text-align: center;
+  text-align: left;
   line-height: 2.5em;
   margin-right: 0.75em;
 }
@@ -2135,7 +2135,7 @@ button:hover,
   background-image: url("images/overlay.png"), url("images/header.svg"), linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
   background-position: top left, center center;
   color: #52575c;
-  text-align: center;
+  text-align: left;
   padding: 1em 0 1em 0;
 }
 

@@ -6,7 +6,7 @@ draft = true
 +++
 
 At Maelstrom, our goal is to improve developer productivity. We believe that
-tests are key to writing high-quality, reliable software and we spend a lot of time thinking
+tests are key to writing high-quality, reliable software, and we spend a lot of time thinking
 about how to make them better.
 
 We think that there are three important aspects to good tests: Tests should be
@@ -14,12 +14,12 @@ We think that there are three important aspects to good tests: Tests should be
 
 <!-- more -->
 
-## Fast
+### Fast
 
 We believe that a developer should be able to run their tests quickly.
 
 When a developer is waiting for tests to run, they're not doing productive
-work, like writing code. On top of that, if tests take too long to run, the
+work -- namely writing code. On top of that, if tests take too long to run, the
 developer's mind starts to wander. They context switch to some other task and
 lose their state of flow.
 
@@ -35,32 +35,28 @@ have a huge impact on a developer's behavior. With a fast test-running setup, a
 developer can run their tests scores of times during a day, catch defects
 immediately, and do so without losing interest and getting distracted.
 
-## Accessible
+### Accessible
 
 We believe that a developer should be able to run any test at any time, right
 from their local development environment.
 
-We've noticed a disturbing trend recently where a lot of tests can only be run
-in CI. We don't like this for a number of reasons. One is that it means that
-instead of running those tests many times throughout the day, a developer
-instead tends to only run them only occasionally, maybe a few times a week.
-It's not uncommon for a developer to do a lot of work only to find out in CI
-that they made a bad assumption and have to start over with a new design.
+We've noticed a disturbing trend where many tests can only be run
+in CI. The implication of this behavior are that
+instead of running those tests many times throughout the day, developers only run them occasionally, most as little as a few times a week. These developers often complete hours or days of work only to find out in CI that they have to start over with a new design.
 
-Another is that it can be hard to reproduce and fix a failure that was seen in
+Additionally, it can be hard to reproduce and fix a failure that was seen in
 CI. Sometimes a developer will resort to repeatedly submitting speculative
 change to CI just to kick off new runs of the tests.
 
-Things are much better when a developer can simply run all of the tests, in
-exactly the same environment that CI does, right from their local machine.
+When a developer can simply and habitually run all of their tests, in
+exactly the same environment that CI does, right from their local machine, it dramatically decreases the time they spend on root-cause-analysis, bug fixing, or redesign.
 
-## Reliable
+### Reliable
 
 We believe that tests should be reliable.
 
 It seems obvious that we should make our tests as reliable as possible.
-However, today there are some sources of unreliability that we tend not to
-think much about today.
+However, there are some sources of unreliability that seem to go under-acknowledged.
 
 The first source of unreliability is the reliance of the test on the execution
 environment. A test may have a dependency on a certain file or piece of
@@ -70,16 +66,16 @@ break.
 
 The second source of unreliability is test-to-test interactions. A test may
 leave around artifacts --- in the process's memory, files stored
-on disk, or data stored in network services --- that may affect test run
+on disk, or data stored in network services --- that affect the test run
 afterwards. If the tests are run in a different order, or if the first test is
-changed, then a test may fail for mysterious reason.
+changed, then a test may fail and diagnosing that failure may be incredibly difficult.
 
-These instances of "action at a distance" can be very confusing to understand
+These instances of "action at a distance" can be confusing to understand
 and frustrating to debug.
 
-## What We've Built
+### What We've Built
 
-Maelstrom is a framework that addresses the problems listed above. It consists
+Maelstrom is a framework that addresses these problems, and it consists
 of three parts.
 
 First, we provide a way to specify the dependencies of every test. These
@@ -99,7 +95,7 @@ Third, we provide a mechanism to build a cluster of tests runners, so
 developers can either run tests locally on their machines, or in parallel on an
 arbitrarily large cluster.
 
-## How to Use Maelstrom
+### How to Use Maelstrom
 
 Maelstrom provides specialized test runners for a variety of test frameworks.
 We currently support Rust (via `cargo test`), Golang (via `go test`), and
@@ -119,7 +115,7 @@ in to these required dependencies by adding dependencies to tests that match
 certain patterns. It usually only takes a few minutes to a whole project's
 tests working with Maelstrom.
 
-## Advantages Once Set Up
+### Advantages Once Set Up
 
 Once a developer starts using Maelstrom, there are a lot of things they can do.
 Ideally, they will have access to a cluster of test runner: the bigger the
