@@ -203,7 +203,6 @@ impl Matcher {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompoundSelectorName {
-    File,
     Name,
     Package,
 }
@@ -211,7 +210,6 @@ pub enum CompoundSelectorName {
 impl CompoundSelectorName {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         choice((
-            attempt(prefix("file", 1)).map(|_| Self::File),
             attempt(prefix("name", 1)).map(|_| Self::Name),
             attempt(prefix("package", 1)).map(|_| Self::Package),
         ))
@@ -469,7 +467,7 @@ fn simple_expr() {
     fn test_it_err(a: &str) {
         assert!(parse_str!(SimpleExpression, a).is_err());
     }
-    for n in ["file", "markers", "name", "node_id", "package"] {
+    for n in ["name", "package"] {
         test_it_err(&format!("{n}"));
         test_it_err(&format!("{n}()"));
     }
@@ -505,7 +503,7 @@ fn simple_expr_compound() {
         );
     }
     test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
-    test_it("file.ends_with[hey?]", File, EndsWith("hey?".into()));
+    test_it("package.ends_with[hey?]", Package, EndsWith("hey?".into()));
 }
 
 #[test]
@@ -657,10 +655,10 @@ fn pattern_complicated_boolean_expr_compound() {
     }
 
     test_it(
-        "file.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/",
+        "package.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/",
         AndExpression::And(
             CompoundSelector {
-                name: CompoundSelectorName::File,
+                name: CompoundSelectorName::Package,
                 matcher: Matcher::StartsWith("hi".into()),
             }
             .into(),
@@ -675,12 +673,12 @@ fn pattern_complicated_boolean_expr_compound() {
     );
 
     test_it(
-        "( file.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/ ) || package.ends_with(jo)",
+        "( package.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/ ) || package.ends_with(jo)",
         OrExpression::Or(
             NotExpression::Simple(
                 AndExpression::And(
                     CompoundSelector {
-                        name: CompoundSelectorName::File,
+                        name: CompoundSelectorName::Package,
                         matcher: Matcher::StartsWith("hi".into()),
                     }
                     .into(),

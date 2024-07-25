@@ -12,15 +12,10 @@ pub struct Case {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Context {
     pub package: String,
-    pub file: Option<String>,
     pub case: Option<Case>,
 }
 
 impl Context {
-    fn file(&self) -> Option<&String> {
-        self.file.as_ref()
-    }
-
     fn case(&self) -> Option<&Case> {
         self.case.as_ref()
     }
@@ -49,7 +44,6 @@ fn interpret_matcher(s: &str, matcher: &Matcher) -> bool {
 pub fn interpret_compound_selector(s: &CompoundSelector, c: &Context) -> Option<bool> {
     use CompoundSelectorName::*;
     Some(match s.name {
-        File => interpret_matcher(c.file()?, &s.matcher),
         Name => interpret_matcher(&c.case()?.name, &s.matcher),
         Package => interpret_matcher(&c.package, &s.matcher),
     })
@@ -104,11 +98,10 @@ pub fn interpret_pattern(s: &Pattern, c: &Context) -> Option<bool> {
 
 #[test]
 fn simple_expression_simple_selector() {
-    fn test_it(s: &str, file: Option<&str>, expected: Option<bool>) {
+    fn test_it(s: &str, case: Option<&str>, expected: Option<bool>) {
         let c = Context {
             package: "foo".into(),
-            file: file.map(|f| f.into()),
-            case: None,
+            case: case.map(|c| Case { name: c.into() }),
         };
         let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
         assert_eq!(actual, expected);
@@ -116,23 +109,22 @@ fn simple_expression_simple_selector() {
 
     // for all inputs, these expression evaluate as true
     for w in ["all", "any", "true"] {
-        test_it(w, Some("foo.test"), Some(true));
+        test_it(w, Some("foo"), Some(true));
         test_it(w, None, Some(true));
     }
 
     // for all inputs, these expression evaluate as false
     for w in ["none", "false"] {
-        test_it(w, Some("foo.test"), Some(false));
+        test_it(w, Some("foo"), Some(false));
         test_it(w, None, Some(false));
     }
 }
 
 #[cfg(test)]
-fn test_compound_sel(s: &str, file: Option<&str>, expected: Option<bool>) {
+fn test_compound_sel(s: &str, case: Option<&str>, expected: Option<bool>) {
     let c = Context {
         package: "foo".into(),
-        file: file.map(|f| f.into()),
-        case: None,
+        case: case.map(|c| Case { name: c.into() }),
     };
     let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
     assert_eq!(actual, expected);
@@ -140,7 +132,7 @@ fn test_compound_sel(s: &str, file: Option<&str>, expected: Option<bool>) {
 
 #[test]
 fn simple_expression_compound_selector_starts_with() {
-    let p = "file.starts_with(bar)";
+    let p = "name.starts_with(bar)";
     test_compound_sel(p, Some("barbaz"), Some(true));
     test_compound_sel(p, Some("bazbar"), Some(false));
     test_compound_sel(p, None, None);
@@ -148,7 +140,7 @@ fn simple_expression_compound_selector_starts_with() {
 
 #[test]
 fn simple_expression_compound_selector_ends_with() {
-    let p = "file.ends_with(bar)";
+    let p = "name.ends_with(bar)";
     test_compound_sel(p, Some("bazbar"), Some(true));
     test_compound_sel(p, Some("barbaz"), Some(false));
     test_compound_sel(p, None, None);
@@ -156,7 +148,7 @@ fn simple_expression_compound_selector_ends_with() {
 
 #[test]
 fn simple_expression_compound_selector_equals() {
-    let p = "file.equals(bar)";
+    let p = "name.equals(bar)";
     test_compound_sel(p, Some("bar"), Some(true));
     test_compound_sel(p, Some("baz"), Some(false));
     test_compound_sel(p, None, None);
@@ -164,7 +156,7 @@ fn simple_expression_compound_selector_equals() {
 
 #[test]
 fn simple_expression_compound_selector_contains() {
-    let p = "file.contains(bar)";
+    let p = "name.contains(bar)";
     test_compound_sel(p, Some("bazbarbin"), Some(true));
     test_compound_sel(p, Some("bazbin"), Some(false));
     test_compound_sel(p, None, None);
@@ -172,7 +164,7 @@ fn simple_expression_compound_selector_contains() {
 
 #[test]
 fn simple_expression_compound_selector_matches() {
-    let p = "file.matches(^[a-z]*$)";
+    let p = "name.matches(^[a-z]*$)";
     test_compound_sel(p, Some("bazbarbin"), Some(true));
     test_compound_sel(p, Some("baz-bin"), Some(false));
     test_compound_sel(p, None, None);
@@ -180,7 +172,7 @@ fn simple_expression_compound_selector_matches() {
 
 #[test]
 fn simple_expression_compound_selector_globs() {
-    let p = "file.globs(baz*)";
+    let p = "name.globs(baz*)";
     test_compound_sel(p, Some("bazbarbin"), Some(true));
     test_compound_sel(p, Some("binbaz"), Some(false));
     test_compound_sel(p, None, None);
@@ -189,14 +181,12 @@ fn simple_expression_compound_selector_globs() {
 #[cfg(test)]
 fn test_compound_sel_case(
     s: &str,
-    file: Option<&str>,
     package: impl Into<String>,
     case: impl Into<String>,
     expected: Option<bool>,
 ) {
     let c = Context {
         package: package.into(),
-        file: file.map(|f| f.into()),
         case: Some(Case { name: case.into() }),
     };
     let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
@@ -206,16 +196,16 @@ fn test_compound_sel_case(
 #[test]
 fn simple_expression_compound_selector_packge() {
     let p = "package.matches(^[a-z]*$)";
-    test_compound_sel_case(p, Some("foo.test"), "bazbarbin", "TestIt", Some(true));
-    test_compound_sel_case(p, Some("foo.test"), "baz-bin", "TestIt", Some(false));
-    test_compound_sel_case(p, None, "baz-bin", "TestIt", Some(false));
+    test_compound_sel_case(p, "bazbarbin", "TestIt", Some(true));
+    test_compound_sel_case(p, "baz-bin", "TestIt", Some(false));
+    test_compound_sel_case(p, "baz-bin", "TestIt", Some(false));
 }
 
 #[test]
 fn simple_expression_compound_selector_name() {
     let p = "name.matches(^[a-zA-Z]*$)";
-    test_compound_sel_case(p, Some("foo.test"), "pkg", "TestBar", Some(true));
-    test_compound_sel_case(p, Some("foo.test"), "pkg", "Test-Baz", Some(false));
+    test_compound_sel_case(p, "pkg", "TestBar", Some(true));
+    test_compound_sel_case(p, "pkg", "Test-Baz", Some(false));
 }
 
 #[test]
@@ -223,7 +213,6 @@ fn and_or_not_diff_expressions() {
     fn test_it(s: &str, expected: bool) {
         let c = Context {
             package: "foo".into(),
-            file: Some("foo.test".into()),
             case: Some(Case {
                 name: "foo_test".into(),
             }),
@@ -253,7 +242,6 @@ fn and_or_not_diff_maybe_expressions() {
     fn test_it(s: &str, expected: Option<bool>) {
         let c = Context {
             package: "foo".into(),
-            file: Some("foo.test".into()),
             case: None,
         };
         let actual = interpret_pattern(&parse_str!(Pattern, s).unwrap(), &c);

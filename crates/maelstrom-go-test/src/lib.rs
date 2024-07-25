@@ -142,7 +142,6 @@ impl TestFilter for pattern::Pattern {
     ) -> Option<bool> {
         let c = pattern::Context {
             package: package.into(),
-            file: None,
             case: case.map(|(case, _)| pattern::Case { name: case.into() }),
         };
         pattern::interpret_pattern(self, &c)
