@@ -92,7 +92,6 @@ fn go_build(dir: &Path, ui: UiSender) -> Result<String> {
 
     let stdout = stdout_handle.join().unwrap()?;
     let stderr = stderr_handle.join().unwrap()?;
-    ui.done_building();
 
     let exit_status = child.wait()?;
     if exit_status.success() {
@@ -145,9 +144,14 @@ fn multi_go_build(
             Ok(())
         }));
     }
-    for handle in handles {
-        handle.join().unwrap()?;
+
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    ui.done_building();
+
+    for res in results {
+        res?
     }
+
     Ok(())
 }
 
