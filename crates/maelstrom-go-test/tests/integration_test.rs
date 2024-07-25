@@ -8,7 +8,7 @@ use maelstrom_util::{
     process::ExitCode,
     root::{Root, RootBuf},
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
 fn spawn_bg_proc() -> ClientBgProcess {
@@ -25,20 +25,10 @@ fn spawn_bg_proc() -> ClientBgProcess {
 }
 
 fn do_maelstrom_go_test_test(
-    source_contents: &str,
+    temp_dir: &tempfile::TempDir,
+    project_dir: &Path,
     extra_options: ExtraCommandLineOptions,
 ) -> String {
-    let fs = Fs::new();
-    let temp_dir = tempdir().unwrap();
-
-    let project_dir = temp_dir.path().join("project");
-    fs.create_dir(&project_dir).unwrap();
-    fs.write(project_dir.join("foo_test.go"), source_contents)
-        .unwrap();
-
-    fs.write(project_dir.join("foo.go"), "package foo").unwrap();
-    fs.write(project_dir.join("go.mod"), "module foo").unwrap();
-
     let container_image_depot_root = RootBuf::new(temp_dir.path().join("container"));
 
     let config = Config {
@@ -88,13 +78,38 @@ fn do_maelstrom_go_test_test(
 
 #[test]
 fn test_simple_success() {
-    let contents = do_maelstrom_go_test_test(
-        &indoc::indoc! {"
-            package foo;
-            import \"testing\"
+    let fs = Fs::new();
+    let temp_dir = tempdir().unwrap();
 
-            func TestA(t *testing.T) {}
-        "},
+    let project_dir = temp_dir.path().join("project");
+
+    fs.create_dir(&project_dir).unwrap();
+    fs.create_dir(project_dir.join("foo")).unwrap();
+    fs.create_dir(project_dir.join("bar")).unwrap();
+
+    fs.write(project_dir.join("go.mod"), "module baz").unwrap();
+
+    let source_contents = indoc::indoc! {"
+        package foo;
+        import \"testing\"
+
+        func TestA(t *testing.T) {}
+    "};
+    fs.write(project_dir.join("foo/foo_test.go"), source_contents)
+        .unwrap();
+
+    let source_contents = indoc::indoc! {"
+        package bar;
+        import \"testing\"
+
+        func TestA(t *testing.T) {}
+    "};
+    fs.write(project_dir.join("bar/bar_test.go"), source_contents)
+        .unwrap();
+
+    let contents = do_maelstrom_go_test_test(
+        &temp_dir,
+        &project_dir,
         ExtraCommandLineOptions {
             parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
                 include: vec!["all".into()],
@@ -104,14 +119,18 @@ fn test_simple_success() {
         },
     );
     assert!(
-        contents.contains("foo TestA..............................OK"),
+        contents.contains("baz/foo TestA..........................OK"),
+        "{contents}"
+    );
+    assert!(
+        contents.contains("baz/bar TestA..........................OK"),
         "{contents}"
     );
     assert!(
         contents.ends_with(
             "\
             ================== Test Summary ==================\n\
-            Successful Tests:         1\n\
+            Successful Tests:         2\n\
             Failed Tests    :         0\
         "
         ),
