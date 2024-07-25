@@ -210,3 +210,11 @@ pub(crate) fn find_modules(dir: &Path) -> Result<Vec<GoModule>> {
     let dir = dir.canonicalize()?;
     go_list(&dir)
 }
+
+pub(crate) fn get_project_root() -> Result<PathBuf> {
+    if let Ok(Some(first_module)) = go_list(Path::new(".")).map(|v| v.into_iter().next()) {
+        Ok(first_module.root)
+    } else {
+        Ok(Path::new(".").canonicalize()?)
+    }
+}

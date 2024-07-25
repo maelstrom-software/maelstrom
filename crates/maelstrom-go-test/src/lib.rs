@@ -319,8 +319,8 @@ pub fn main(
     stderr_is_tty: bool,
     ui: impl Ui,
 ) -> Result<ExitCode> {
-    let cwd = Path::new(".").canonicalize()?;
-    let project_dir = Root::<ProjectDir>::new(&cwd);
+    let project_root = go_test::get_project_root()?;
+    let project_dir = Root::<ProjectDir>::new(project_root.as_ref());
     main_with_stderr_and_project_dir(
         config,
         extra_options,
