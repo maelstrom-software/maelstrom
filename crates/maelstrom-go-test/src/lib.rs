@@ -96,11 +96,16 @@ struct DefaultMainAppDeps<'client> {
 }
 
 impl<'client> DefaultMainAppDeps<'client> {
-    pub fn new(client: &'client Client, project_dir: &Root<ProjectDir>) -> Result<Self> {
+    pub fn new(
+        client: &'client Client,
+        project_dir: &Root<ProjectDir>,
+        build_dir: &Root<BuildDir>,
+    ) -> Result<Self> {
         Ok(Self {
             client,
             test_collector: GoTestCollector {
                 project_dir: project_dir.to_owned(),
+                build_dir: build_dir.to_owned(),
             },
         })
     }
@@ -150,6 +155,7 @@ impl TestFilter for pattern::Pattern {
 
 struct GoTestCollector {
     project_dir: RootBuf<ProjectDir>,
+    build_dir: RootBuf<BuildDir>,
 }
 
 #[derive(Debug)]
@@ -293,7 +299,7 @@ impl CollectTests for GoTestCollector {
         ui: &UiSender,
     ) -> Result<(go_test::WaitHandle, go_test::TestArtifactStream)> {
         let packages = packages.into_iter().map(|m| &m.0).collect();
-        go_test::build_and_collect(color, packages, ui.clone())
+        go_test::build_and_collect(color, packages, self.build_dir.as_ref(), ui.clone())
     }
 
     fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {
@@ -407,7 +413,7 @@ pub fn main_with_stderr_and_project_dir(
         config.parent.accept_invalid_remote_container_tls_certs,
         log.clone(),
     )?;
-    let deps = DefaultMainAppDeps::new(&client, project_dir)?;
+    let deps = DefaultMainAppDeps::new(&client, project_dir, build_dir)?;
 
     let state = MainAppState::new(
         deps,

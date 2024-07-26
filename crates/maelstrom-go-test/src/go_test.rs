@@ -107,9 +107,14 @@ fn run_build_cmd(cmd: &mut Command, stdout_to_ui: bool, ui: UiSender) -> Result<
     handle_build_cmd_status(exit_status, stdout, stderr)
 }
 
-fn go_build(dir: &Path, ui: UiSender) -> Result<String> {
+fn go_build(dir: &Path, output: &Path, ui: UiSender) -> Result<String> {
     run_build_cmd(
-        Command::new("go").current_dir(dir).arg("test").arg("-c"),
+        Command::new("go")
+            .current_dir(dir)
+            .arg("test")
+            .arg("-c")
+            .arg("-o")
+            .arg(output),
         true, /* stdout_to_ui */
         ui,
     )
@@ -126,25 +131,35 @@ fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
 
 fn multi_go_build(
     packages: Vec<GoPackage>,
+    build_dir: PathBuf,
     send: mpsc::Sender<GoTestArtifact>,
     ui: UiSender,
 ) -> Result<()> {
     let mut handles = vec![];
     for m in packages {
+        // We put the built binary in a deterministic location so rebuilds overwrite what was there
+        // before
+        let import_path = GoImportPath(m.import_path.clone());
+        let binary_name = format!("{}.test", import_path.short_name());
+        let package_path = m.dir.strip_prefix(m.root)?;
+        let binary_path = build_dir.join(package_path).join(binary_name);
+        if let Some(parent) = binary_path.parent() {
+            Fs.create_dir_all(parent)?;
+        }
+
         let send_clone = send.clone();
         let ui_clone = ui.clone();
         handles.push(thread::spawn(move || -> Result<()> {
-            let res = go_build(&m.dir, ui_clone);
+            let res = go_build(&m.dir, &binary_path, ui_clone);
             if is_no_go_files_error(&res) {
                 return Ok(());
             }
 
             let output = res?;
             if !output.contains("[no test files]") {
-                let import_path = GoImportPath(m.import_path.clone());
                 let _ = send_clone.send(GoTestArtifact {
                     name: m.name.clone(),
-                    path: m.dir.join(format!("{}.test", import_path.short_name())),
+                    path: binary_path,
                     id: import_path,
                 });
             }
@@ -165,11 +180,13 @@ fn multi_go_build(
 pub(crate) fn build_and_collect(
     _color: bool,
     packages: Vec<&GoPackage>,
+    build_dir: &Path,
     ui: UiSender,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
+    let build_dir = build_dir.join("test_binaries");
     let paths = packages.into_iter().cloned().collect();
     let (send, recv) = mpsc::channel();
-    let handle = thread::spawn(move || multi_go_build(paths, send, ui));
+    let handle = thread::spawn(move || multi_go_build(paths, build_dir, send, ui));
     Ok((WaitHandle { handle }, TestArtifactStream { recv }))
 }
 
@@ -193,7 +210,6 @@ pub(crate) struct GoPackage {
     pub dir: PathBuf,
     pub import_path: String,
     pub name: String,
-    #[allow(dead_code)]
     pub root: PathBuf,
 }
 
