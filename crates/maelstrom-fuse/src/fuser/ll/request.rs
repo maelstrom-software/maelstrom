@@ -315,13 +315,6 @@ mod op {
         }
     }
 
-    /// Get file attributes.
-    #[derive(Debug)]
-    pub struct GetAttr<'a> {
-        header: &'a fuse_in_header,
-    }
-    impl_request!(GetAttr<'_>);
-
     /// Set file attributes.
     #[derive(Debug)]
     pub struct SetAttr<'a> {
@@ -416,13 +409,6 @@ mod op {
             )
         }
     }
-
-    /// Read symbolic link.
-    #[derive(Debug)]
-    pub struct ReadLink<'a> {
-        header: &'a fuse_in_header,
-    }
-    impl_request!(ReadLink<'_>);
 
     /// Create a symbolic link.
     #[derive(Debug)]
@@ -662,13 +648,6 @@ mod op {
             self.arg.flags
         }
     }
-
-    /// Get file system statistics.
-    #[derive(Debug)]
-    pub struct StatFs<'a> {
-        header: &'a fuse_in_header,
-    }
-    impl_request!(StatFs<'_>);
 
     /// Release an open file.
     ///

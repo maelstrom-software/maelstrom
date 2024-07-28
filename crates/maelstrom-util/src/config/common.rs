@@ -155,17 +155,6 @@ impl FromStr for CacheSize {
     }
 }
 
-#[derive(Debug)]
-pub struct CacheSizeFromStrError(String);
-
-impl Display for CacheSizeFromStrError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl error::Error for CacheSizeFromStrError {}
-
 #[derive(Clone, Copy, Debug, Deserialize, EnumString, Serialize, ValueEnum)]
 #[clap(rename_all = "kebab_case")]
 #[serde(rename_all = "kebab-case")]

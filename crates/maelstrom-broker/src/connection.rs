@@ -30,34 +30,34 @@ use tokio::{
 /// * `IdT` - The type of the ID used to identify this client or worker
 ///
 /// * `FromSchedulerMessageT` - The type of the messages sent from the scheduler to this client or
-/// worker
+///   worker
 ///
 /// # Arguments
 ///
 /// * `scheduler_sender` - The sender for sending messages to the sender. A "connected" message
-/// will be sent using this sender which will include a newly-created FromSchedulerMessageT sender
-/// that the scheduler can use to send messages back to this task. After that messages read from
-/// `reader` will be sent to the scheduler over this sender. Finally, when it's time to
-/// disconnected, a "disconnected" message will be sent using this sender
+///   will be sent using this sender which will include a newly-created FromSchedulerMessageT
+///   sender that the scheduler can use to send messages back to this task. After that messages
+///   read from `reader` will be sent to the scheduler over this sender. Finally, when it's time to
+///   disconnected, a "disconnected" message will be sent using this sender
 ///
 /// * `id` - The id for this client or worker. This will be used in the "connected" message and the
-/// "disconnected" message
+///   "disconnected" message
 ///
 /// * `connected_msg_builder` - A closure used to build the "connected" scheduler message. It takes
-/// the `id` and the newly-created FromSchedulerMessageT sender used to communicate with this task.
-/// This will be sent immediately to the scheduler on `scheduler_sender`
+///   the `id` and the newly-created FromSchedulerMessageT sender used to communicate with this
+///   task. This will be sent immediately to the scheduler on `scheduler_sender`
 ///
 /// * `disconnected_msg_builder` - A closure used to build the "disconnected" scheduler message. It
-/// takes the `id`. This will be sent on `scheduler_sender` right before this function returns to
-/// tell the scheduler that this client/worker has disconnected
+///   takes the `id`. This will be sent on `scheduler_sender` right before this function returns to
+///   tell the scheduler that this client/worker has disconnected
 ///
 /// * `socket_reader_main` - An async closure that is called on a new task to read all of the
-/// messages from the socket-like object and write them to the supplied scheduler sender. The
-/// scheduler sender will be a clone of `scheduler_sender`
+///   messages from the socket-like object and write them to the supplied scheduler sender. The
+///   scheduler sender will be a clone of `scheduler_sender`
 ///
 /// * `socket_writer_main` - An async closure that is called on a new task to read all of the
-/// messages from the supplied scheduler receiver and write them to the socket-like object.
-/// The scheduler receiver will be a newly-created FromSchedulerMessageT receiver
+///   messages from the supplied scheduler receiver and write them to the socket-like object. The
+///   scheduler receiver will be a newly-created FromSchedulerMessageT receiver
 ///
 pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFutureT>(
     scheduler_sender: SchedulerSender,
