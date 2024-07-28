@@ -6,6 +6,7 @@ use crate::{
     test_listing::TestListingStore,
     ui::{self, Ui as _},
     BuildDir, ClientTrait, EnqueueResult, ListAction, MainApp, MainAppDeps, MainAppState,
+    NotCollected,
 };
 use anyhow::Result;
 use fake_test_framework::{
@@ -203,8 +204,8 @@ fn run_app(
     loop {
         let res = app.enqueue_one().unwrap();
         let (package_name, case) = match res {
-            EnqueueResult::Done => break,
-            EnqueueResult::Ignored | EnqueueResult::Listed => continue,
+            EnqueueResult::NotEnqueued(NotCollected::Done) => break,
+            EnqueueResult::NotEnqueued(NotCollected::Ignored | NotCollected::Listed) => continue,
             EnqueueResult::Enqueued { package_name, case } => (package_name, case),
         };
         let test = fake_tests.find_case(&package_name, &case);

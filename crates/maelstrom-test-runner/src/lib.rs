@@ -17,6 +17,7 @@ use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use clap::{Args, Command};
 use config::Repeat;
+use derive_more::From;
 use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout, Utf8PathBuf};
 use maelstrom_client::{spec::JobSpec, ClientBgProcess, ProjectDir, StateDir};
@@ -272,7 +273,7 @@ where
 
         if self.queuing_state.list_action.is_some() {
             self.ui.list(case_str);
-            return Ok(CollectionResult::NoTest(EnqueueResult::Listed));
+            return Ok(NotCollected::Listed.into());
         }
 
         let test_metadata = self
@@ -322,7 +323,7 @@ where
         if self.ignored_cases.contains(case_name) {
             self.queuing_state.track_outstanding(&case_str, &self.ui);
             visitor.job_ignored();
-            return Ok(CollectionResult::NoTest(EnqueueResult::Ignored));
+            return Ok(NotCollected::Ignored.into());
         }
 
         let estimated_duration = self
@@ -335,7 +336,7 @@ where
             .get_timing(&self.package_name, &self.artifact.to_key(), case_name);
 
         let (program, arguments) = self.artifact.build_command(case_name, case_metadata);
-        Ok(CollectionResult::Test(TestToEnqueue {
+        Ok(TestToEnqueue {
             package_name: self.package_name.clone(),
             case: case_name.into(),
             case_str,
@@ -360,19 +361,20 @@ where
                 allocate_tty: None,
             },
             visitor,
-        }))
+        }
+        .into())
     }
 
     /// Attempt to collect the next test as a job to run on the client.
     ///
     /// Returns an [`CollectionResult`] describing what happened.
     ///
-    /// When a test is successfully collected it returns `CollectionResult::Test(...)`
+    /// When a test is successfully collected it returns `CollectionResult::Collected(...)`
     ///
-    /// Meant to be called until it returns `CollectionResult::NoTest(EnququeResult::Done)`
+    /// Meant to be called until it returns `CollectionResult::NotCollected(NotCollected::Done)`
     fn collect_one(&mut self) -> Result<CollectionResult<MainAppDepsT>> {
         let Some((case_name, case_metadata)) = self.cases.next() else {
-            return Ok(CollectionResult::NoTest(EnqueueResult::Done));
+            return Ok(NotCollected::Done.into());
         };
         self.build_job_from_case(&case_name, &case_metadata)
     }
@@ -519,15 +521,15 @@ where
     ///
     /// Returns an [`CollectionResult`] describing what happened.
     ///
-    /// When a test is successfully collected it returns `CollectionResult::Test(...)`
+    /// When a test is successfully collected it returns `CollectionResult::Collected(...)`
     ///
-    /// Meant to be called until it returns `CollectionResult::NoTest(EnququeResult::Done)`
+    /// Meant to be called until it returns `CollectionResult::NotCollected(NotCollected::Done)`
     fn collect_one(&mut self) -> Result<CollectionResult<MainAppDepsT>> {
         slog::debug!(self.log, "enqueuing a job");
 
         if self.artifact_queuing.is_none() && !self.start_queuing_from_artifact()? {
             self.finish()?;
-            return Ok(CollectionResult::NoTest(EnqueueResult::Done));
+            return Ok(NotCollected::Done.into());
         }
         self.package_match = true;
 
@@ -611,29 +613,37 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
     }
 }
 
+/// The `MainApp` enqueues tests as jobs. With each attempted job enqueued, if we for some reason
+/// didn't enqueue the test we get this status instead.
+pub enum NotCollected {
+    /// No job was enqueued, instead the test that would have been enqueued has been ignored
+    /// because it has been marked as such.
+    Ignored,
+    /// No job was enqueued, we have run out of tests to run.
+    Done,
+    /// No job was enqueued, we listed the test case instead.
+    Listed,
+}
+
 /// The `MainApp` enqueues tests as jobs. With each attempted job enqueued this object is returned
 /// and describes what happened.
+#[derive(From)]
 pub enum EnqueueResult {
-    /// A job successfully enqueued with the following information
+    /// A job successfully enqueued with the following information.
     Enqueued { package_name: String, case: String },
-    /// No job was enqueued, instead the test that would have been enqueued has been ignored
-    /// because it has been marked as `#[ignored]`
-    Ignored,
-    /// No job was enqueued, we have run out of tests to run
-    Done,
-    /// No job was enqueued, we listed the test case instead
-    Listed,
+    /// A job was not enqueued, instead something else happened.
+    NotEnqueued(NotCollected),
 }
 
 impl EnqueueResult {
     /// Is this `EnqueueResult` the `Done` variant
     pub fn is_done(&self) -> bool {
-        matches!(self, Self::Done)
+        matches!(self, Self::NotEnqueued(NotCollected::Done))
     }
 
     /// Is this `EnqueueResult` the `Ignored` variant
     pub fn is_ignored(&self) -> bool {
-        matches!(self, Self::Ignored)
+        matches!(self, Self::NotEnqueued(NotCollected::Ignored))
     }
 }
 
@@ -678,18 +688,18 @@ impl<MainAppDepsT: MainAppDeps> TestToEnqueue<MainAppDepsT> {
 }
 
 /// Returned internally when we attempt to collect the next test job to run. If we get a test then
-/// [`TestToEnqueue`] is returned with a test that can be run. Otherwise we get back an
-/// [`EnqueueResult`] containing either [`EnqueueResult`] explaining what happened. It shouldn't
-/// ever contain [`EnqueueResult::Enqueued`].
+/// [`TestToEnqueue`] is returned with a test that can be run. Otherwise we get back a
+/// [`NotCollected`] explaining what happened.
+#[derive(From)]
 enum CollectionResult<MainAppDepsT: MainAppDeps> {
-    Test(TestToEnqueue<MainAppDepsT>),
-    NoTest(EnqueueResult),
+    Collected(TestToEnqueue<MainAppDepsT>),
+    NotCollected(NotCollected),
 }
 
 impl<MainAppDepsT: MainAppDeps> CollectionResult<MainAppDepsT> {
-    /// Does this `CollectionResult` contain [`EnqueueResult::Done`].
+    /// Does this `CollectionResult` contain [`NotCollected::Done`].
     pub fn is_done(&self) -> bool {
-        matches!(self, Self::NoTest(EnqueueResult::Done))
+        matches!(self, Self::NotCollected(NotCollected::Done))
     }
 }
 
@@ -756,7 +766,7 @@ where
         let repeat_times = usize::from(self.state.queuing_state.repeat);
         match mem::take(&mut self.stage) {
             EnqueueStage::NeedTest => match self.queuing.collect_one()? {
-                CollectionResult::Test(test) => {
+                CollectionResult::Collected(test) => {
                     if repeat_times > 1 {
                         self.stage = EnqueueStage::Repeating {
                             times: repeat_times - 1,
@@ -765,11 +775,11 @@ where
                     }
                     test.enqueue(self.state, &self.ui)
                 }
-                CollectionResult::NoTest(EnqueueResult::Done) => {
+                CollectionResult::NotCollected(NotCollected::Done) => {
                     self.stage = EnqueueStage::Done;
-                    Ok(EnqueueResult::Done)
+                    Ok(NotCollected::Done.into())
                 }
-                CollectionResult::NoTest(res) => Ok(res),
+                CollectionResult::NotCollected(res) => Ok(res.into()),
             },
             EnqueueStage::Repeating { test, times } => {
                 if times == 1 {
@@ -782,7 +792,7 @@ where
                 }
                 test.enqueue(self.state, &self.ui)
             }
-            EnqueueStage::Done => Ok(EnqueueResult::Done),
+            EnqueueStage::Done => Ok(NotCollected::Done.into()),
         }
     }
 
