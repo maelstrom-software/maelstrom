@@ -284,6 +284,25 @@ where
                 &self.artifact.to_key(),
                 (case_name, case_metadata),
             )?;
+
+        let visitor = JobStatusVisitor::new(
+            self.queuing_state.tracker.clone(),
+            self.queuing_state.test_listing.clone(),
+            self.package_name.clone(),
+            self.artifact.to_key(),
+            case_name.to_owned(),
+            case_str.clone(),
+            self.ui.clone(),
+            MainAppDepsT::TestCollector::remove_fixture_output
+                as fn(&str, Vec<String>) -> Vec<String>,
+        );
+
+        if self.ignored_cases.contains(case_name) || test_metadata.ignore {
+            self.queuing_state.track_outstanding(&case_str, &self.ui);
+            visitor.job_ignored();
+            return Ok(NotCollected::Ignored.into());
+        }
+
         self.ui
             .update_enqueue_status(format!("calculating layers for {case_str}"));
         slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
@@ -306,24 +325,6 @@ where
                     layers.push(self.deps.client().add_layer(layer_spec)?);
                 }
             }
-        }
-
-        let visitor = JobStatusVisitor::new(
-            self.queuing_state.tracker.clone(),
-            self.queuing_state.test_listing.clone(),
-            self.package_name.clone(),
-            self.artifact.to_key(),
-            case_name.to_owned(),
-            case_str.clone(),
-            self.ui.clone(),
-            MainAppDepsT::TestCollector::remove_fixture_output
-                as fn(&str, Vec<String>) -> Vec<String>,
-        );
-
-        if self.ignored_cases.contains(case_name) {
-            self.queuing_state.track_outstanding(&case_str, &self.ui);
-            visitor.job_ignored();
-            return Ok(NotCollected::Ignored.into());
         }
 
         let estimated_duration = self

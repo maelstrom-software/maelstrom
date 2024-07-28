@@ -375,3 +375,12 @@ timeout = 60
 
 This field sets the [`timeout`](../../spec.md#timeout) field of the
 job spec. It must be an unsigned, 32-bit integer.
+
+## `ignore`
+
+```toml
+[[directives]]
+ignore = true
+
+This field specifies that the tests should be ignored and not run. If the tests would run otherwise
+they will instead display as "ignored". The tests still show up when listing.

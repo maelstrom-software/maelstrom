@@ -770,6 +770,69 @@ fn ignored_test_sync_with_repeat() {
 }
 
 #[test]
+fn ignored_test_via_config_sync() {
+    let tmp_dir = tempdir().unwrap();
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+    let project_dir = tmp_dir.path().join("project");
+    Fs.create_dir_all(&project_dir).unwrap();
+    let config_path = project_dir.join(TestMainAppDeps::MAELSTROM_TEST_TOML);
+    Fs.write(
+        config_path,
+        indoc! {"
+            [[directives]]
+            filter = \"package = \\\"foo\\\"\"
+            ignore = true
+        "},
+    )
+    .unwrap();
+    assert_eq!(
+        run_all_tests_sync(
+            Root::new(tmp_dir.path()),
+            fake_tests,
+            false.into(),
+            vec!["all".into()],
+            vec![],
+            Repeat::default(),
+        ),
+        "\
+        bar test_it............................OK   1.000s\n\
+        baz test_it............................OK   1.000s\n\
+        foo test_it.......................IGNORED\n\
+        \n\
+        ================== Test Summary ==================\n\
+        Successful Tests:         2\n\
+        Failed Tests    :         0\n\
+        Ignored Tests   :         1\n\
+        \x20\x20\x20\x20foo test_it: ignored\
+        "
+    );
+}
+
+#[test]
 fn two_tests_all_tests_sync_quiet() {
     let tmp_dir = tempdir().unwrap();
     let fake_tests = FakeTests {

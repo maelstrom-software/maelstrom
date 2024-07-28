@@ -27,9 +27,10 @@ pub struct TestDirective<TestFilterT> {
     pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
     pub added_environment: BTreeMap<String, String>,
     pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
+    pub ignore: Option<bool>,
 }
 
-// The derived Default will put a TestFilterT: Default bound on the implementaion
+// The derived Default will put a TestFilterT: Default bound on the implementation
 impl<TestFilterT> Default for TestDirective<TestFilterT> {
     fn default() -> Self {
         Self {
@@ -48,6 +49,7 @@ impl<TestFilterT> Default for TestDirective<TestFilterT> {
             environment: None,
             added_environment: Default::default(),
             working_directory: None,
+            ignore: None,
         }
     }
 }
@@ -70,6 +72,7 @@ enum DirectiveField {
     AddedLayers,
     Environment,
     AddedEnvironment,
+    Ignore,
 }
 
 struct DirectiveVisitor<TestFilterT>(PhantomData<TestFilterT>);
@@ -103,6 +106,7 @@ where
         let mut added_layers = None;
         let mut environment = None;
         let mut added_environment = None;
+        let mut ignore = None;
         while let Some(key) = map.next_key()? {
             match key {
                 DirectiveField::Filter => {
@@ -212,6 +216,9 @@ where
                 DirectiveField::AddedEnvironment => {
                     added_environment = Some(map.next_value()?);
                 }
+                DirectiveField::Ignore => {
+                    ignore = Some(map.next_value()?);
+                }
             }
         }
         Ok(TestDirective {
@@ -230,6 +237,7 @@ where
             working_directory,
             environment,
             added_environment: added_environment.unwrap_or_default(),
+            ignore,
         })
     }
 }

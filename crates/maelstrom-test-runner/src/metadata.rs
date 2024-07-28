@@ -81,6 +81,7 @@ impl<TestFilterT> Default for AllMetadata<TestFilterT> {
             added_layers: vec![],
             added_mounts: vec![],
             image: None,
+            ignore: None,
         };
         Self {
             directives: vec![single_directive],
@@ -111,6 +112,7 @@ pub struct TestMetadata {
     pub layers: Vec<Layer>,
     pub environment: Vec<EnvironmentSpec>,
     pub mounts: Vec<JobMount>,
+    pub ignore: bool,
 }
 
 impl TestMetadata {
@@ -146,6 +148,7 @@ impl TestMetadata {
             ref environment,
             ref added_environment,
             ref working_directory,
+            ignore,
         }: &TestDirective<TestFilterT>,
     ) -> Result<Self> {
         let mut image = image.as_ref().map(|image| ImageSpec {
@@ -162,6 +165,7 @@ impl TestMetadata {
         self.user = user.or(self.user);
         self.group = group.or(self.group);
         self.timeout = timeout.unwrap_or(self.timeout);
+        self.ignore = ignore.unwrap_or(self.ignore);
 
         match layers {
             Some(PossiblyImage::Explicit(layers)) => {
