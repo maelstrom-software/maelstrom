@@ -1,8 +1,11 @@
 use crate::{GoImportPath, GoTestArtifact};
 use anyhow::{anyhow, Context as _, Result};
-use maelstrom_test_runner::ui::UiSender;
-use maelstrom_util::fs::Fs;
-use maelstrom_util::process::ExitCode;
+use maelstrom_test_runner::{ui::UiSender, BuildDir};
+use maelstrom_util::{
+    fs::Fs,
+    process::ExitCode,
+    root::{Root, RootBuf},
+};
 use serde::Deserialize;
 use std::os::unix::process::ExitStatusExt as _;
 use std::{
@@ -131,10 +134,12 @@ fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
 
 fn multi_go_build(
     packages: Vec<GoPackage>,
-    build_dir: PathBuf,
+    build_dir: RootBuf<BuildDir>,
     send: mpsc::Sender<GoTestArtifact>,
     ui: UiSender,
 ) -> Result<()> {
+    let build_dir = build_dir.into_path_buf();
+
     let mut handles = vec![];
     for m in packages {
         // We put the built binary in a deterministic location so rebuilds overwrite what was there
@@ -159,7 +164,7 @@ fn multi_go_build(
             if !output.contains("[no test files]") {
                 let _ = send_clone.send(GoTestArtifact {
                     name: m.name.clone(),
-                    path: binary_path,
+                    path: binary_path.to_path_buf(),
                     id: import_path,
                 });
             }
@@ -180,10 +185,10 @@ fn multi_go_build(
 pub(crate) fn build_and_collect(
     _color: bool,
     packages: Vec<&GoPackage>,
-    build_dir: &Path,
+    build_dir: &Root<BuildDir>,
     ui: UiSender,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
-    let build_dir = build_dir.join("test_binaries");
+    let build_dir = build_dir.to_owned();
     let paths = packages.into_iter().cloned().collect();
     let (send, recv) = mpsc::channel();
     let handle = thread::spawn(move || multi_go_build(paths, build_dir, send, ui));

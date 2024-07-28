@@ -100,11 +100,11 @@ impl<'client> DefaultMainAppDeps<'client> {
     pub fn new(
         client: &'client Client,
         project_dir: &Root<ProjectDir>,
-        build_dir: &Root<BuildDir>,
+        cache_dir: &Root<CacheDir>,
     ) -> Result<Self> {
         Ok(Self {
             client,
-            test_collector: GoTestCollector::new(project_dir, build_dir),
+            test_collector: GoTestCollector::new(project_dir, cache_dir),
         })
     }
 }
@@ -153,14 +153,14 @@ impl TestFilter for pattern::Pattern {
 
 struct GoTestCollector {
     project_dir: RootBuf<ProjectDir>,
-    build_dir: RootBuf<BuildDir>,
+    cache_dir: RootBuf<CacheDir>,
 }
 
 impl GoTestCollector {
-    fn new(project_dir: &Root<ProjectDir>, build_dir: &Root<BuildDir>) -> Self {
+    fn new(project_dir: &Root<ProjectDir>, cache_dir: &Root<CacheDir>) -> Self {
         Self {
             project_dir: project_dir.to_owned(),
-            build_dir: build_dir.to_owned(),
+            cache_dir: cache_dir.to_owned(),
         }
     }
 }
@@ -314,7 +314,9 @@ impl CollectTests for GoTestCollector {
         ui: &UiSender,
     ) -> Result<(go_test::WaitHandle, go_test::TestArtifactStream)> {
         let packages = packages.into_iter().map(|m| &m.0).collect();
-        go_test::build_and_collect(color, packages, self.build_dir.as_ref(), ui.clone())
+
+        let build_dir = self.cache_dir.join::<BuildDir>("test-binaries");
+        go_test::build_and_collect(color, packages, &build_dir, ui.clone())
     }
 
     fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {
@@ -392,6 +394,9 @@ pub fn main(
     )
 }
 
+/// This is the `.maelstrom-go-test` directory.
+pub struct HiddenDir;
+
 #[allow(clippy::too_many_arguments)]
 pub fn main_with_stderr_and_project_dir(
     config: Config,
@@ -403,8 +408,13 @@ pub fn main_with_stderr_and_project_dir(
     mut stderr: impl io::Write,
     project_dir: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
-    let build_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-go-test");
-    let build_dir = Root::<BuildDir>::new(&build_dir);
+    let hidden_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-go-test");
+    let hidden_dir = Root::<HiddenDir>::new(&hidden_dir);
+    let state_dir = hidden_dir.join::<StateDir>("state");
+    let cache_dir = hidden_dir.join::<CacheDir>("cache");
+
+    Fs.create_dir_all(&state_dir)?;
+    Fs.create_dir_all(&cache_dir)?;
 
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
@@ -415,7 +425,7 @@ pub fn main_with_stderr_and_project_dir(
         let list_res = alternative_mains::list_packages(
             ui,
             project_dir,
-            build_dir,
+            &cache_dir,
             &extra_options.parent.include,
             &extra_options.parent.exclude,
         );
@@ -425,11 +435,6 @@ pub fn main_with_stderr_and_project_dir(
         Ok(exit_code)
     } else {
         let list_action = extra_options.list.tests.then_some(ListAction::ListTests);
-        let state_dir = build_dir.join::<StateDir>("state");
-        let cache_dir = build_dir.join::<CacheDir>("cache");
-
-        Fs.create_dir_all(&state_dir)?;
-        Fs.create_dir_all(&cache_dir)?;
 
         let client = create_client(
             bg_proc,
@@ -444,7 +449,7 @@ pub fn main_with_stderr_and_project_dir(
             config.parent.accept_invalid_remote_container_tls_certs,
             log.clone(),
         )?;
-        let deps = DefaultMainAppDeps::new(&client, project_dir, build_dir)?;
+        let deps = DefaultMainAppDeps::new(&client, project_dir, &cache_dir)?;
 
         let state = MainAppState::new(
             deps,
