@@ -127,52 +127,69 @@ impl UiSender {
 }
 
 impl UiSender {
+    /// Should be sent when no more build output is expected.
+    /// You shouldn't call [`Self::build_output_line`] or [`Self::build_output_chunk`] after
+    /// calling this.
     pub fn done_building(&self) {
         let _ = self.send.send(UiMessage::DoneBuilding);
     }
 
+    /// Display a given line a build output.
     pub fn build_output_line(&self, line: String) {
         let _ = self.send.send(UiMessage::BuildOutputLine(line));
     }
 
+    /// Send a chunk of TTY data as build output. This is parsed by a vt100 parser.
     pub fn build_output_chunk(&self, chunk: &[u8]) {
         let _ = self.send.send(UiMessage::BuildOutputChunk(chunk.into()));
     }
 
+    /// Display a slog log messages.
     pub fn slog_record(&self, r: slog_async::AsyncRecord) {
         let _ = self.send.send(UiMessage::SlogRecord(r));
     }
 
+    /// When being used for listing tests, display a line of listing output.
     pub fn list(&self, line: String) {
         let _ = self.send.send(UiMessage::List(line));
     }
 
+    /// Should be sent when a test job has finished.
     pub fn job_finished(&self, res: UiJobResult) {
         let _ = self.send.send(UiMessage::JobFinished(res));
     }
 
+    /// Update the total number of tests we expect to run by the time we are done.
     pub fn update_length(&self, new_length: u64) {
         let _ = self
             .send
             .send(UiMessage::UpdatePendingJobsCount(new_length));
     }
 
+    /// Sent when we've enqueued a new test job.
     pub fn job_enqueued(&self, name: String) {
         let _ = self.send.send(UiMessage::JobEnqueued(name));
     }
 
+    /// Update the status message. This messages is displayed until [`Self::done_queuing_jobs`] is
+    /// called.
     pub fn update_enqueue_status(&self, msg: impl Into<String>) {
         let _ = self.send.send(UiMessage::UpdateEnqueueStatus(msg.into()));
     }
 
+    /// Update the UI with the latest job status information.
     pub fn update_introspect_state(&self, resp: IntrospectResponse) {
         let _ = self.send.send(UiMessage::UpdateIntrospectState(resp));
     }
 
+    /// Should be called when all test jobs that are going to be enqueued are enqueued. This should
+    /// cause the enqueue status set by [`Self::update_enqueue_status`] to disappear.
     pub fn done_queuing_jobs(&self) {
         let _ = self.send.send(UiMessage::DoneQueuingJobs);
     }
 
+    /// Should be called when all the test jobs are completed. This may cause the UI to display
+    /// some kind of "results" or "summary" to the user.
     pub fn finished(&self, summary: UiJobSummary) -> Result<()> {
         let _ = self.send.send(UiMessage::AllJobsFinished(summary));
         Ok(())
