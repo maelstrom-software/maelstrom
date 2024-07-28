@@ -1,3 +1,4 @@
+pub mod alternative_mains;
 pub mod cli;
 mod go_test;
 pub mod pattern;
@@ -103,10 +104,7 @@ impl<'client> DefaultMainAppDeps<'client> {
     ) -> Result<Self> {
         Ok(Self {
             client,
-            test_collector: GoTestCollector {
-                project_dir: project_dir.to_owned(),
-                build_dir: build_dir.to_owned(),
-            },
+            test_collector: GoTestCollector::new(project_dir, build_dir),
         })
     }
 }
@@ -156,6 +154,15 @@ impl TestFilter for pattern::Pattern {
 struct GoTestCollector {
     project_dir: RootBuf<ProjectDir>,
     build_dir: RootBuf<BuildDir>,
+}
+
+impl GoTestCollector {
+    fn new(project_dir: &Root<ProjectDir>, build_dir: &Root<BuildDir>) -> Self {
+        Self {
+            project_dir: project_dir.to_owned(),
+            build_dir: build_dir.to_owned(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -396,51 +403,68 @@ pub fn main_with_stderr_and_project_dir(
     mut stderr: impl io::Write,
     project_dir: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
+    let build_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-go-test");
+    let build_dir = Root::<BuildDir>::new(&build_dir);
+
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
 
-    let list_action = extra_options.list.then_some(ListAction::ListTests);
-    let build_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-go-test");
-    let build_dir = Root::<BuildDir>::new(&build_dir);
-    let state_dir = build_dir.join::<StateDir>("state");
-    let cache_dir = build_dir.join::<CacheDir>("cache");
+    if extra_options.list.packages {
+        let (ui_handle, ui) = ui.start_ui_thread(logging_output, log);
 
-    Fs.create_dir_all(&state_dir)?;
-    Fs.create_dir_all(&cache_dir)?;
+        let list_res = alternative_mains::list_packages(
+            ui,
+            project_dir,
+            build_dir,
+            &extra_options.parent.include,
+            &extra_options.parent.exclude,
+        );
+        let ui_res = ui_handle.join();
+        let exit_code = list_res?;
+        ui_res?;
+        Ok(exit_code)
+    } else {
+        let list_action = extra_options.list.tests.then_some(ListAction::ListTests);
+        let state_dir = build_dir.join::<StateDir>("state");
+        let cache_dir = build_dir.join::<CacheDir>("cache");
 
-    let client = create_client(
-        bg_proc,
-        config.parent.broker,
-        project_dir,
-        &state_dir,
-        config.parent.container_image_depot_root,
-        &cache_dir,
-        config.parent.cache_size,
-        config.parent.inline_limit,
-        config.parent.slots,
-        config.parent.accept_invalid_remote_container_tls_certs,
-        log.clone(),
-    )?;
-    let deps = DefaultMainAppDeps::new(&client, project_dir, build_dir)?;
+        Fs.create_dir_all(&state_dir)?;
+        Fs.create_dir_all(&cache_dir)?;
 
-    let state = MainAppState::new(
-        deps,
-        extra_options.parent.include,
-        extra_options.parent.exclude,
-        list_action,
-        config.parent.repeat,
-        stderr_is_tty,
-        project_dir,
-        &state_dir,
-        GoTestOptions,
-        log,
-    )?;
+        let client = create_client(
+            bg_proc,
+            config.parent.broker,
+            project_dir,
+            &state_dir,
+            config.parent.container_image_depot_root,
+            &cache_dir,
+            config.parent.cache_size,
+            config.parent.inline_limit,
+            config.parent.slots,
+            config.parent.accept_invalid_remote_container_tls_certs,
+            log.clone(),
+        )?;
+        let deps = DefaultMainAppDeps::new(&client, project_dir, build_dir)?;
 
-    let res = run_app_with_ui_multithreaded(
-        state,
-        logging_output,
-        config.parent.timeout.map(Timeout::new),
-        ui,
-    );
-    maybe_print_build_error(&mut stderr, res)
+        let state = MainAppState::new(
+            deps,
+            extra_options.parent.include,
+            extra_options.parent.exclude,
+            list_action,
+            config.parent.repeat,
+            stderr_is_tty,
+            project_dir,
+            &state_dir,
+            GoTestOptions,
+            log,
+        )?;
+
+        let res = run_app_with_ui_multithreaded(
+            state,
+            logging_output,
+            config.parent.timeout.map(Timeout::new),
+            ui,
+        );
+        maybe_print_build_error(&mut stderr, res)
+    }
 }

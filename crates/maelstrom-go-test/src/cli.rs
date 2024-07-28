@@ -6,12 +6,34 @@ pub struct ExtraCommandLineOptions {
     #[command(flatten)]
     pub parent: maelstrom_test_runner::config::ExtraCommandLineOptions,
 
+    #[command(flatten)]
+    pub list: ListOptions,
+}
+
+#[derive(Args, Default)]
+#[group(multiple = false)]
+#[command(next_help_heading = "List Options")]
+pub struct ListOptions {
     #[arg(
-        long = "list",
-        help = "Instead of running tests, print the tests that would have been run.",
-        help_heading = "List Options"
+        long = "list-tests",
+        visible_alias = "list",
+        help = "Instead of running tests, print the tests that would have been run. \
+            May require building test binaries."
     )]
-    pub list: bool,
+    pub tests: bool,
+
+    #[arg(
+        long = "list-packages",
+        help = "Instead of running tests, print the packages of those tests that would \
+            have been run."
+    )]
+    pub packages: bool,
+}
+
+impl ListOptions {
+    pub fn any(&self) -> bool {
+        self.tests || self.packages
+    }
 }
 
 impl AsRef<maelstrom_test_runner::config::ExtraCommandLineOptions> for ExtraCommandLineOptions {
