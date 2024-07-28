@@ -544,7 +544,6 @@ pub struct MainAppState<MainAppDepsT: MainAppDeps> {
     deps: MainAppDepsT,
     queuing_state: JobQueuingState<MainAppDepsT::TestCollector>,
     test_listing_store: TestListingStore<ArtifactKeyM<MainAppDepsT>, CaseMetadataM<MainAppDepsT>>,
-    logging_output: LoggingOutput,
     log: slog::Logger,
 }
 
@@ -570,7 +569,6 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
         collector_options: CollectOptionsM<MainAppDepsT>,
-        logging_output: LoggingOutput,
         log: slog::Logger,
     ) -> Result<Self> {
         slog::debug!(
@@ -602,7 +600,6 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
                 collector_options,
             )?,
             test_listing_store,
-            logging_output,
             log,
         })
     }
@@ -722,7 +719,6 @@ where
     {
         introspect_driver.drive(state.deps.client(), ui.clone());
 
-        state.logging_output.display_on_ui(ui.clone());
         slog::debug!(state.log, "main app created");
 
         let queuing = JobQueuing::new(
@@ -831,10 +827,11 @@ pub struct LoggingOutput {
 }
 
 impl LoggingOutput {
-    fn display_on_ui(&self, ui: UiSender) {
+    pub fn display_on_ui(&self, ui: UiSender) {
         *self.inner.lock().unwrap() = LoggingOutputInner::Ui(UiSlogDrain::new(ui));
     }
-    fn display_on_term(&self) {
+
+    pub fn display_on_term(&self) {
         *self.inner.lock().unwrap() = LoggingOutputInner::default();
     }
 }
@@ -874,15 +871,14 @@ impl Logger {
 
 pub fn run_app_with_ui_multithreaded<MainAppDepsT>(
     state: MainAppState<MainAppDepsT>,
+    logging_output: LoggingOutput,
     timeout_override: Option<Option<Timeout>>,
-    mut ui: impl Ui,
+    ui: impl Ui,
 ) -> Result<ExitCode>
 where
     MainAppDepsT: MainAppDeps,
 {
-    let (ui_send, ui_recv) = std::sync::mpsc::channel();
-    let ui_sender = UiSender::new(ui_send);
-    let ui_handle = std::thread::spawn(move || ui.run(ui_recv));
+    let (ui_handle, ui_sender) = ui.start_ui_thread(logging_output, state.log.clone());
 
     let exit_code_res = std::thread::scope(|scope| {
         let mut app = MainApp::new(
@@ -896,14 +892,10 @@ where
         app.finish()
     });
     let log = state.log.clone();
-    let logging_output = state.logging_output.clone();
     drop(state);
     slog::debug!(log, "MainAppState destroyed");
 
-    logging_output.display_on_term();
-    let ui_res = ui_handle.join().unwrap();
-    slog::debug!(log, "UI thread joined");
-
+    let ui_res = ui_handle.join();
     let exit_code = exit_code_res?;
     ui_res?;
 

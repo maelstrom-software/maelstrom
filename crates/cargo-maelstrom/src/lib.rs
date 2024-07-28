@@ -580,11 +580,15 @@ pub fn main(
             workspace_dir,
             &state_dir,
             cargo_options,
-            logging_output,
             log,
         )?;
 
-        let res = run_app_with_ui_multithreaded(state, config.parent.timeout.map(Timeout::new), ui);
+        let res = run_app_with_ui_multithreaded(
+            state,
+            logging_output,
+            config.parent.timeout.map(Timeout::new),
+            ui,
+        );
         maybe_print_build_error(res)
     }
 }

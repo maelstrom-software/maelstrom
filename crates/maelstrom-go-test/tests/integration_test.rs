@@ -115,7 +115,7 @@ fn test_simple_success() {
                 include: vec!["all".into()],
                 ..Default::default()
             },
-            list: false,
+            list: Default::default(),
         },
     );
     assert!(

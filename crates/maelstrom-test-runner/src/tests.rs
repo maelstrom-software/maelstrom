@@ -5,8 +5,7 @@ use crate::{
     introspect_driver::IntrospectDriver,
     test_listing::TestListingStore,
     ui::{self, Ui as _},
-    BuildDir, ClientTrait, EnqueueResult, ListAction, LoggingOutput, MainApp, MainAppDeps,
-    MainAppState,
+    BuildDir, ClientTrait, EnqueueResult, ListAction, MainApp, MainAppDeps, MainAppState,
 };
 use anyhow::Result;
 use fake_test_framework::{
@@ -192,7 +191,6 @@ fn run_app(
         project_dir,
         target_directory.join::<StateDir>("maelstrom/state"),
         TestOptions,
-        LoggingOutput::default(),
         log.clone(),
     )
     .unwrap();

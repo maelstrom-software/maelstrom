@@ -1,7 +1,7 @@
 mod fancy;
 mod simple;
 
-use crate::config::Quiet;
+use crate::{config::Quiet, LoggingOutput};
 use anyhow::Result;
 use maelstrom_client::IntrospectResponse;
 use serde::{Deserialize, Serialize};
@@ -11,8 +11,48 @@ use std::{fmt, str};
 
 pub use simple::SimpleUi;
 
+pub struct UiHandle {
+    handle: std::thread::JoinHandle<Result<()>>,
+    logging_output: LoggingOutput,
+    log: slog::Logger,
+}
+
+impl UiHandle {
+    /// Wait for the UI thread to exit and return any error it had. This must be called after the
+    /// associated `UiSender` has been destroyed, or else it will wait forever.
+    pub fn join(self) -> Result<()> {
+        self.logging_output.display_on_term();
+        let ui_res = self.handle.join().unwrap();
+        slog::debug!(self.log, "UI thread joined");
+        ui_res
+    }
+}
+
 pub trait Ui: Send + Sync + 'static {
     fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()>;
+
+    fn start_ui_thread(
+        mut self,
+        logging_output: LoggingOutput,
+        log: slog::Logger,
+    ) -> (UiHandle, UiSender)
+    where
+        Self: Sized,
+    {
+        let (ui_send, ui_recv) = std::sync::mpsc::channel();
+        let ui_sender = UiSender::new(ui_send);
+        let thread_handle = std::thread::spawn(move || self.run(ui_recv));
+        logging_output.display_on_ui(ui_sender.clone());
+
+        (
+            UiHandle {
+                logging_output,
+                log,
+                handle: thread_handle,
+            },
+            ui_sender,
+        )
+    }
 }
 
 impl Ui for Box<dyn Ui> {

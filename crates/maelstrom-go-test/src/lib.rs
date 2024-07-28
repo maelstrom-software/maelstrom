@@ -433,10 +433,14 @@ pub fn main_with_stderr_and_project_dir(
         project_dir,
         &state_dir,
         GoTestOptions,
-        logging_output,
         log,
     )?;
 
-    let res = run_app_with_ui_multithreaded(state, config.parent.timeout.map(Timeout::new), ui);
+    let res = run_app_with_ui_multithreaded(
+        state,
+        logging_output,
+        config.parent.timeout.map(Timeout::new),
+        ui,
+    );
     maybe_print_build_error(&mut stderr, res)
 }
