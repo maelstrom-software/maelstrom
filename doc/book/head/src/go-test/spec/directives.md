@@ -21,7 +21,7 @@ example, this snippet specifies two directives:
 network = "loopback"
 
 [[directives]]
-filter = "package.equals(maelstrom-util) && name.equals(io::splicer)"
+filter = "package.equals(maelstrom-software.com/maelstrom/util) && name.equals(TestIoSplicer)"
 added_mounts = [{ type = "proc", mount_point = "/proc" }]
 added_layers = [{ stubs = [ "proc/" ] }]
 ```

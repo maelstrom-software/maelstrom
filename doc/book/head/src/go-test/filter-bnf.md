@@ -25,7 +25,7 @@ simple-selector        := simple-selector-name
 simple-selector-name   := "all" | "any" | "true"
                        |  "none" | "false"
 compound-selector      := compound-selector-name "." matcher-name matcher-parameter
-compound-selector-name := "name" | "file" | "package"
+compound-selector-name := "name" | "package"
 matcher-name           := "equals" | "contains" | "starts_with" | "ends_with" |
                           "matches" | "globs"
 matcher-parameter      := <punctuation mark followed by characters followed by

@@ -55,3 +55,10 @@ run. This is used to predict the number of tests that will be run in subsequent
 invocations, as well as how long they will take. This is stored in the <span
 style="white-space: nowrap;">`.maelstrom-go-test/state/test-listing.toml`</span> file in
 the project directory.
+
+## Test Binaries
+
+<span style="white-space: nowrap;">`maelstrom-go-test`</span> builds go binaries and puts them in
+<span style="white-space: nowrap;">`.maelstrom-go-test/cache/test-binaries`</span>. These need to
+exist here so we can either run them or upload them. They are organized in a directory structure
+that mirrors your project directory.

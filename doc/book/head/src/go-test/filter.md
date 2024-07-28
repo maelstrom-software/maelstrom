@@ -39,8 +39,7 @@ These are the possible compound selectors:
 Compound Selector    | Selected Name
 ---------------------|-------------------------------------------------
 `name`               | the name of the test
-`file`               | the name of the test's file
-`package`            | the name of the test's package
+`package`            | the import-path of the test's package
 
 These are the possible matchers:
 
@@ -69,8 +68,7 @@ Let's put this all together with some examples:
 Pattern                            | What it Matches
 -----------------------------------|----------------
 `test.equals(foo_test)`            | Any test named `"foo_test"`.
-`file.contains/maelstrom/`         | Any test in file whose name contains the substring `"maelstrom"`.
-`package.matches{(foo)*bar}`       | Any test whose package name matches the regular expression `(foo)*bar`.
+`package.matches{(foo)*bar}`       | Any test whose package import-path matches the regular expression `(foo)*bar`.
 
 ## Compound Expressions
 
