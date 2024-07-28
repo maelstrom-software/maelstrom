@@ -239,7 +239,15 @@ impl TestArtifact for GoTestArtifact {
         let binary_name = self.path().file_name().unwrap().to_str().unwrap();
         (
             format!("/{binary_name}").into(),
-            vec!["-test.run".into(), format!("^{case_name}$")],
+            vec![
+                "-test.run".into(),
+                // This argument is a regular expression and we want an exact match for our test
+                // name. We shouldn't have to worry about escaping the test name.
+                format!("^{case_name}$"),
+                // We have our own mechanism for timeouts, so we disable the one built into the
+                // test binary.
+                "-test.timeout=0".into(),
+            ],
         )
     }
 
