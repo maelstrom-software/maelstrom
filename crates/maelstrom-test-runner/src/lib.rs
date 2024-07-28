@@ -133,9 +133,9 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
     }
 }
 
-/// Enqueues test cases as jobs in the given client from the given artifact
+/// Collects test cases for an artifact as jobs to be run on the client.
 ///
-/// This object is like an iterator, it maintains a position in the test listing and enqueues the
+/// This object is like an iterator, it maintains a position in the test listing and returns the
 /// next thing when asked.
 ///
 /// This object is stored inside `JobQueuing` and is used to keep track of which artifact it is
@@ -258,7 +258,7 @@ where
         Ok(generated_artifacts)
     }
 
-    fn queue_job_from_case(
+    fn build_job_from_case(
         &mut self,
         case_name: &str,
         case_metadata: &CaseMetadataM<MainAppDepsT>,
@@ -363,21 +363,24 @@ where
         }))
     }
 
-    /// Attempt to enqueue the next test as a job in the client
+    /// Attempt to collect the next test as a job to run on the client.
     ///
-    /// Returns an `EnqueueResult` describing what happened. Meant to be called until it returns
-    /// `EnqueueResult::Done`
-    fn enqueue_one(&mut self) -> Result<CollectionResult<MainAppDepsT>> {
+    /// Returns an [`CollectionResult`] describing what happened.
+    ///
+    /// When a test is successfully collected it returns `CollectionResult::Test(...)`
+    ///
+    /// Meant to be called until it returns `CollectionResult::NoTest(EnququeResult::Done)`
+    fn collect_one(&mut self) -> Result<CollectionResult<MainAppDepsT>> {
         let Some((case_name, case_metadata)) = self.cases.next() else {
             return Ok(CollectionResult::NoTest(EnqueueResult::Done));
         };
-        self.queue_job_from_case(&case_name, &case_metadata)
+        self.build_job_from_case(&case_name, &case_metadata)
     }
 }
 
-/// Enqueues tests as jobs using the given deps.
+/// Collects test cases as jobs to be run on the client.
 ///
-/// This object is like an iterator, it maintains a position in the test listing and enqueues the
+/// This object is like an iterator, it maintains a position in the test listing and returns the
 /// next thing when asked.
 struct JobQueuing<'a, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
@@ -512,11 +515,14 @@ where
         Ok(())
     }
 
-    /// Attempt to enqueue the next test as a job in the client
+    /// Attempt to collect the next test as a job to run on the client.
     ///
-    /// Returns an `EnqueueResult` describing what happened. Meant to be called it returns
-    /// `EnqueueResult::Done`
-    fn enqueue_one(&mut self) -> Result<CollectionResult<MainAppDepsT>> {
+    /// Returns an [`CollectionResult`] describing what happened.
+    ///
+    /// When a test is successfully collected it returns `CollectionResult::Test(...)`
+    ///
+    /// Meant to be called until it returns `CollectionResult::NoTest(EnququeResult::Done)`
+    fn collect_one(&mut self) -> Result<CollectionResult<MainAppDepsT>> {
         slog::debug!(self.log, "enqueuing a job");
 
         if self.artifact_queuing.is_none() && !self.start_queuing_from_artifact()? {
@@ -525,10 +531,10 @@ where
         }
         self.package_match = true;
 
-        let res = self.artifact_queuing.as_mut().unwrap().enqueue_one()?;
+        let res = self.artifact_queuing.as_mut().unwrap().collect_one()?;
         if res.is_done() {
             self.artifact_queuing = None;
-            return self.enqueue_one();
+            return self.collect_one();
         }
 
         Ok(res)
@@ -671,13 +677,17 @@ impl<MainAppDepsT: MainAppDeps> TestToEnqueue<MainAppDepsT> {
     }
 }
 
+/// Returned internally when we attempt to collect the next test job to run. If we get a test then
+/// [`TestToEnqueue`] is returned with a test that can be run. Otherwise we get back an
+/// [`EnqueueResult`] containing either [`EnqueueResult`] explaining what happened. It shouldn't
+/// ever contain [`EnqueueResult::Enqueued`].
 enum CollectionResult<MainAppDepsT: MainAppDeps> {
     Test(TestToEnqueue<MainAppDepsT>),
     NoTest(EnqueueResult),
 }
 
 impl<MainAppDepsT: MainAppDeps> CollectionResult<MainAppDepsT> {
-    /// Is this `CollectionResult` the `Done` variant
+    /// Does this `CollectionResult` contain [`EnqueueResult::Done`].
     pub fn is_done(&self) -> bool {
         matches!(self, Self::NoTest(EnqueueResult::Done))
     }
@@ -685,12 +695,15 @@ impl<MainAppDepsT: MainAppDeps> CollectionResult<MainAppDepsT> {
 
 #[derive(Default)]
 enum EnqueueStage<MainAppDepsT: MainAppDeps> {
+    /// We are ready to collect the next test.
     #[default]
     NeedTest,
+    /// We are in the middle of repeating a test.
     Repeating {
         test: TestToEnqueue<MainAppDepsT>,
         times: usize,
     },
+    /// We are all done.
     Done,
 }
 
@@ -742,7 +755,7 @@ where
     pub fn enqueue_one(&mut self) -> Result<EnqueueResult> {
         let repeat_times = usize::from(self.state.queuing_state.repeat);
         match mem::take(&mut self.stage) {
-            EnqueueStage::NeedTest => match self.queuing.enqueue_one()? {
+            EnqueueStage::NeedTest => match self.queuing.collect_one()? {
                 CollectionResult::Test(test) => {
                     if repeat_times > 1 {
                         self.stage = EnqueueStage::Repeating {
