@@ -14,6 +14,7 @@
   mypy,
   black,
   zola,
+  go,
   version ? null
 }:
 
@@ -58,6 +59,7 @@ let
       python311Packages.xdg-base-dirs
       mdbook
       zola
+      go
     ];
 
     buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];
