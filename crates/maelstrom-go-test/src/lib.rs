@@ -44,9 +44,6 @@ impl AsRef<maelstrom_test_runner::config::Config> for Config {
 pub const MAELSTROM_TEST_TOML: &str = "maelstrom-go-test.toml";
 pub const ADDED_DEFAULT_TEST_METADATA: &str = include_str!("added-default-test-metadata.toml");
 
-/// The Maelstrom target directory is <target-dir>/maelstrom.
-pub struct MaelstromTargetDir;
-
 #[allow(clippy::too_many_arguments)]
 fn create_client(
     bg_proc: ClientBgProcess,

@@ -393,7 +393,7 @@ impl<T: AsRef<Path>> DirEntry<T> {
     }
 }
 
-/// Used to respond to [ReadDirPlus] requests.
+/// Used to respond to [`super::request::Operation::ReadDirPlus`] requests.
 #[derive(Debug)]
 pub struct DirEntList(EntListBuf);
 impl From<DirEntList> for Response<'_> {
@@ -457,7 +457,7 @@ impl<T: AsRef<Path>> DirEntryPlus<T> {
     }
 }
 
-/// Used to respond to [ReadDir] requests.
+/// Used to respond to [`super::request::Operation::ReadDir`] requests.
 #[derive(Debug)]
 pub struct DirEntPlusList(EntListBuf);
 impl From<DirEntPlusList> for Response<'_> {

@@ -1096,7 +1096,7 @@ mod op {
     ///
     /// The userspace filesystem may ignore the [Interrupt] requests entirely,
     /// or may honor them by sending a reply to the **original** request, with
-    /// the error set to [Errno::EINTR].
+    /// the error set to [`maelstrom_linux::Errno::EINTR`].
     ///
     /// It is also possible that there's a race between processing the
     /// original request and its [Interrupt] request.  There are two
@@ -1110,7 +1110,7 @@ mod op {
     ///
     /// If the filesystem cannot find the original request, it should wait for
     /// some timeout and/or a number of new requests to arrive, after which it
-    /// should reply to the [Interrupt] request with an [Errno::EAGAIN] error.
+    /// should reply to the [Interrupt] request with an [`maelstrom_linux::Errno::EAGAIN`] error.
     /// In case (1) the [Interrupt] request will be requeued.  In case (2) the
     /// [Interrupt] reply will be ignored.
     #[derive(Debug)]
@@ -1280,8 +1280,6 @@ mod op {
     }
 
     /// Rename a file.
-    ///
-    /// TODO: Document the differences to [Rename] and [Exchange]
     #[derive(Debug)]
     pub struct Rename2<'a> {
         header: &'a fuse_in_header,

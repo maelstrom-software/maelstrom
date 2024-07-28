@@ -52,7 +52,7 @@ impl<LatentT, ActiveT> StateMachine<LatentT, ActiveT> {
     /// Attempt to become the starter. This will return an error unless the state machine is in the
     /// `Latent` state and this is the first attempt to start it. Upon success, two things
     /// will be returned: the extra information provided to [`Self::new`] as well as a
-    /// [`StartingHandle`] to be used to indicate the outcome of the startup attempt.
+    /// [`ActivationHandle`] to be used to indicate the outcome of the startup attempt.
     pub fn try_to_begin_activation(
         &self,
     ) -> Result<(LatentT, ActivationHandle<'_, LatentT, ActiveT>)> {
@@ -92,7 +92,7 @@ impl<LatentT, ActiveT> StateMachine<LatentT, ActiveT> {
         self.active_value(*self.sender.borrow())
     }
 
-    /// Like [`started`], but also return a [`StateWatcher`] that can be used to interrupt
+    /// Like [`Self::active`], but also return a [`ActiveWatcher`] that can be used to interrupt
     /// long-running requests when the state machine transitions to failed. The issue here is that
     /// some sorts of out-of-band failures of the client may result in the client just "stopping"
     /// and not resolving requests one way or the other. A watcher can be used to detect this

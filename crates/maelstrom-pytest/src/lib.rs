@@ -65,9 +65,6 @@ impl AsRef<maelstrom_test_runner::config::Config> for Config {
     }
 }
 
-/// The Maelstrom target directory is <target-dir>/maelstrom.
-pub struct MaelstromTargetDir;
-
 #[allow(clippy::too_many_arguments)]
 fn create_client(
     bg_proc: ClientBgProcess,

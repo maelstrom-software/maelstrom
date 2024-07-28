@@ -1,6 +1,6 @@
 pub use crate::{
-    cache::{Cache, CacheDir, StdFs},
-    dispatcher::{ArtifactFetcher, BrokerSender, Dispatcher, Message},
+    cache::{Cache, CacheDir, GetArtifact, StdFs},
+    dispatcher::{ArtifactFetcher, BrokerSender, Deps, Dispatcher, Message},
     executor::MountDir,
     executor::TmpfsDir,
     DispatcherAdapter, WorkerCacheDir,

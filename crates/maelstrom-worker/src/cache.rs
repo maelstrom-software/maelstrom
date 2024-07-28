@@ -262,8 +262,8 @@ impl<FsT: Fs> Cache<FsT> {
         }
     }
 
-    /// Attempt to fetch `artifact` from the cache. See [GetArtifact] for the meaning of the return
-    /// values.
+    /// Attempt to fetch `artifact` from the cache. See [`GetArtifact`] for the meaning of the
+    /// return values.
     pub fn get_artifact(
         &mut self,
         kind: EntryKind,

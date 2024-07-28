@@ -33,7 +33,7 @@ pub use maelstrom_test_runner::Logger;
 pub const MAELSTROM_TEST_TOML: &str = "cargo-maelstrom.toml";
 pub const ADDED_DEFAULT_TEST_METADATA: &str = include_str!("added-default-test-metadata.toml");
 
-/// The Maelstrom target directory is <target-dir>/maelstrom.
+/// The Maelstrom target directory is `<target-dir>/maelstrom`.
 pub struct MaelstromTargetDir;
 
 struct DefaultMainAppDeps {
