@@ -1,25 +1,8 @@
-use super::MAELSTROM_TEST_TOML;
 use crate::{pattern, CargoArtifactKey};
 use anyhow::Result;
 use cargo_metadata::Package as CargoPackage;
-use maelstrom_base::Utf8Path;
-use maelstrom_test_runner::metadata::DEFAULT_TEST_METADATA;
-use maelstrom_util::{fs::Fs, process::ExitCode};
+use maelstrom_util::process::ExitCode;
 use std::io::Write;
-
-/// Write out a default config file to `<workspace-root>/<MAELSTROM_TEST_TOML>` if nothing exists
-/// there already.
-pub fn init(workspace_root: &Utf8Path) -> Result<ExitCode> {
-    let path = workspace_root.join(MAELSTROM_TEST_TOML);
-    if !Fs.exists(&path) {
-        Fs.write(&path, DEFAULT_TEST_METADATA)?;
-        println!("Wrote default config to {path}.");
-        Ok(ExitCode::SUCCESS)
-    } else {
-        println!("Config already exists at {path}. Doing nothing.");
-        Ok(ExitCode::FAILURE)
-    }
-}
 
 /// Returns `true` if the given `CargoPackage` matches the given pattern
 pub fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
