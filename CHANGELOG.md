@@ -8,20 +8,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### General
+There are two big changes in this release: a brand-new terminal UI and a Go test runner.
+
+Our original terminal UI was enough to get the job done, but it wasn't anything
+special. Starting this release, we plan on investing more heavily in our UI. We
+think that this release is a great start. The new UI is a lot prettier, but
+more importantly, it shows more information. There are new sections that show
+the background build command, any pending artifact uploads and container image
+downloads, and any running tests. This makes it much easier to understand
+what's going on in the background.
+
+We're also proud to announce our Go test runner: `maelstrom-go-test`. This new
+test runner joins our Pytest and Rust test runners. The Go test runner
+currently runs all the tests that a `go test ./...` invocation would run,
+including normal tests, fuzz tests with their base corpus, and examples. There
+isn't yet support for actual fuzzing, profiling, or benchmarking. We plan to
+expand the supported features in the future.
+
+In addition to these to big changes, there are a lot of smaller ones. See below
+for details.
+
+#### Added
+- A way to turn off tests inside of all three test runners. This is useful when moving a
+  test corpus over to Maelstrom. It's nice to be able to ignore some tests
+  initially, and then add them back in slowly while containerizing them.
+  \[[96](https://github.com/maelstrom-software/maelstrom/issues/96)\]
+- Versioning of documentation on our web site. You can see documentation for
+  latest release [here](https://maelstrom-software.com/doc/book/latest/).
+  Previous releases can be found by using the [desired version in the
+  URL](https://maelstrom-software.com/doc/book/0.10.0/).
+  \[[276](https://github.com/maelstrom-software/maelstrom/issues/276)\]
+- Documentation for templating of paths in test-runner configurations.
 
 #### Removed
 - The `devices` field of job specifications, both in clients and in the
   protobuf types, has been removed. This was deprecated in the last release.
   Use devices layers instead.
   \[[321](https://github.com/maelstrom-software/maelstrom/issues/321)\]
+
+#### Changed
+- `maelstrom-test.toml` is now deprecated. Use the test-runner specific file
+  instead (`cargo-maelstrom.toml`, `maelstrom-pytest.toml`, or
+  `maelstrom-go-test.toml`).
+  \[[332](https://github.com/maelstrom-software/maelstrom/issues/332)\]
+- The default for `include_shared_libraries` for test runners has changed.
+  Before, if there were any layers added, it would be turned off. However, that
+  doesn't make much sense since most tests have at least one layer for stubs,
+  etc. Instead, the we now turn this off only if test's container is based off
+  of a container image.
+  \[[232](https://github.com/maelstrom-software/maelstrom/issues/232)\]
 - `image` specifications in clients no longer need to provide a `use` field. If
   one is not provided, `layers` and `environment` will be used. Also, the name
   can be specified directly as a string, like `"image = \"docker:foo\""`.
   \[[329](https://github.com/maelstrom-software/maelstrom/issues/329)\]
-- Changed the default for `include_shared_libraries` in test runners when it
-  isn't explicitly specified.
-  \[[329](https://github.com/maelstrom-software/maelstrom/issues/329)\]
-- `maelstrom-test.toml` is now deprecated.
 
 ## [0.10.0] - 2024-07-03
 ### High-Level
@@ -55,7 +94,7 @@ These changes affect the job specification used by all the test runners and `mae
 - When generating manifests, if a file is under a certain size (< 200KiB) the data is included
   as part of the manifest instead of uploaded as a separate artifact.
 - Fixed issue where we were running out of file descriptors contending with ourselves on the
-  contianer tags lock. \[[291](https://github.com/maelstrom-software/maelstrom/issues/291)\]
+  container tags lock. \[[291](https://github.com/maelstrom-software/maelstrom/issues/291)\]
 - Support for docker images with a `/` in the name as added.
   \[[295](https://github.com/maelstrom-software/maelstrom/issues/295)\]
 - Support for docker images from other public container image providers was added.
