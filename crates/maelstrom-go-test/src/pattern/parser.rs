@@ -1,7 +1,7 @@
 use crate::parse_str;
 use anyhow::{anyhow, Error, Result};
 use combine::{
-    attempt, between, choice, many, many1, optional, parser,
+    attempt, between, choice, look_ahead, many, many1, optional, parser,
     parser::{
         char::{space, spaces, string},
         combinator::{lazy, no_partial},
@@ -204,14 +204,19 @@ impl Matcher {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompoundSelectorName {
     Name,
-    Package,
+    PackageImportPath,
+    PackagePath,
+    PackageName,
 }
 
 impl CompoundSelectorName {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
+        let dot = || look_ahead(token('.'));
         choice((
-            attempt(prefix("name", 1)).map(|_| Self::Name),
-            attempt(prefix("package", 1)).map(|_| Self::Package),
+            attempt(prefix("name", 1).skip(dot())).map(|_| Self::Name),
+            attempt(prefix("package_import_path", 1).skip(dot())).map(|_| Self::PackageImportPath),
+            attempt(prefix("package_path", 9).skip(dot())).map(|_| Self::PackagePath),
+            attempt(prefix("package_name", 9).skip(dot())).map(|_| Self::PackageName),
         ))
     }
 }
@@ -403,7 +408,7 @@ impl OrExpression {
 
 #[derive(Debug, PartialEq, Eq, From)]
 #[from(types(NotExpression, AndExpression))]
-pub struct Pattern(pub OrExpression);
+pub(crate) struct Pattern(pub OrExpression);
 
 impl Pattern {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
@@ -503,7 +508,58 @@ fn simple_expr_compound() {
         );
     }
     test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
-    test_it("package.ends_with[hey?]", Package, EndsWith("hey?".into()));
+    test_it(
+        "package_import_path.ends_with[hey?]",
+        PackageImportPath,
+        EndsWith("hey?".into()),
+    );
+    test_it(
+        "package_path.ends_with[hey?]",
+        PackagePath,
+        EndsWith("hey?".into()),
+    );
+    test_it(
+        "package_name.ends_with[hey?]",
+        PackageName,
+        EndsWith("hey?".into()),
+    );
+}
+
+#[test]
+fn simple_expr_compound_prefix() {
+    use CompoundSelectorName::*;
+    use Matcher::*;
+
+    fn test_it(a: &str, name: CompoundSelectorName, matcher: Matcher) {
+        assert_eq!(
+            parse_str!(SimpleExpression, a),
+            Ok(CompoundSelector { name, matcher }.into())
+        );
+    }
+
+    test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
+    test_it("n.matches<foo>", Name, Matches(regex!("foo").into()));
+    test_it(
+        "p.ends_with[hey?]",
+        PackageImportPath,
+        EndsWith("hey?".into()),
+    );
+    test_it(
+        "package.ends_with[hey?]",
+        PackageImportPath,
+        EndsWith("hey?".into()),
+    );
+
+    test_it(
+        "package_p.ends_with[hey?]",
+        PackagePath,
+        EndsWith("hey?".into()),
+    );
+    test_it(
+        "package_n.ends_with[hey?]",
+        PackageName,
+        EndsWith("hey?".into()),
+    );
 }
 
 #[test]
@@ -658,7 +714,7 @@ fn pattern_complicated_boolean_expr_compound() {
         "package.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/",
         AndExpression::And(
             CompoundSelector {
-                name: CompoundSelectorName::Package,
+                name: CompoundSelectorName::PackageImportPath,
                 matcher: Matcher::StartsWith("hi".into()),
             }
             .into(),
@@ -678,7 +734,7 @@ fn pattern_complicated_boolean_expr_compound() {
             NotExpression::Simple(
                 AndExpression::And(
                     CompoundSelector {
-                        name: CompoundSelectorName::Package,
+                        name: CompoundSelectorName::PackageImportPath,
                         matcher: Matcher::StartsWith("hi".into()),
                     }
                     .into(),
@@ -695,7 +751,7 @@ fn pattern_complicated_boolean_expr_compound() {
             .into(),
             Box::new(
                 CompoundSelector {
-                    name: CompoundSelectorName::Package,
+                    name: CompoundSelectorName::PackageImportPath,
                     matcher: Matcher::EndsWith("jo".into()),
                 }
                 .into(),

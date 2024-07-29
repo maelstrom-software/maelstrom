@@ -111,3 +111,14 @@ n.eq(foo)
 We can abbreviate `name` to `n` since no other selector starts with "n", but we
 can't abbreviate `equals` to `e` because there is another selector, `ends_with`,
 that also starts with an "e".
+
+The `package_import_path` matcher name has a special case. Any prefix of `package` will resolve
+to `package_import_path` instead of `package_path` or `package_name`.
+
+For example, all of the following resolve to `package_import_path`
+```maelstrom-test-pattern
+package_import_path.equals(foo)
+package_i.equals(foo)
+package.equals(foo)
+p.equals(foo)
+```

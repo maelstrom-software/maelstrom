@@ -148,7 +148,7 @@ struct ArtifactQueuing<'a, MainAppDepsT: MainAppDeps> {
     ui: UiSender,
     artifact: ArtifactM<MainAppDepsT>,
     ignored_cases: HashSet<String>,
-    package_name: String,
+    package: PackageM<MainAppDepsT>,
     cases: CaseIter<CaseMetadataM<MainAppDepsT>>,
     timeout_override: Option<Option<Timeout>>,
     generated_artifacts: Option<GeneratedArtifacts>,
@@ -165,9 +165,9 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     queuing_state: &JobQueuingState<TestCollectorT>,
     ui: &UiSender,
     artifact: &TestCollectorT::Artifact,
-    package_name: &str,
+    package: &TestCollectorT::Package,
 ) -> Result<TestListingResult<TestCollectorT::CaseMetadata>> {
-    ui.update_enqueue_status(format!("getting test list for {package_name}"));
+    ui.update_enqueue_status(format!("getting test list for {}", package.name()));
 
     slog::debug!(log, "listing ignored tests"; "artifact" => ?artifact);
     let ignored_cases: HashSet<_> = artifact.list_ignored_tests()?.into_iter().collect();
@@ -178,7 +178,7 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     let artifact_key = artifact.to_key();
     let mut listing = queuing_state.test_listing.lock().unwrap();
     listing.as_mut().unwrap().update_artifact_cases(
-        package_name,
+        package.name(),
         artifact_key.clone(),
         cases.clone(),
     );
@@ -186,7 +186,7 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     cases.retain(|(c, cd)| {
         queuing_state
             .filter
-            .filter(package_name, Some(&artifact_key), Some((c.as_str(), cd)))
+            .filter(package, Some(&artifact_key), Some((c.as_str(), cd)))
             .expect("should have case")
     });
     Ok(TestListingResult {
@@ -206,16 +206,16 @@ where
         deps: &'a MainAppDepsT,
         ui: UiSender,
         artifact: ArtifactM<MainAppDepsT>,
-        package_name: String,
+        package: PackageM<MainAppDepsT>,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
-        let listing = list_test_cases(log.clone(), queuing_state, &ui, &artifact, &package_name)?;
+        let listing = list_test_cases(log.clone(), queuing_state, &ui, &artifact, &package)?;
 
-        ui.update_enqueue_status(format!("generating artifacts for {package_name}"));
+        ui.update_enqueue_status(format!("generating artifacts for {}", package.name()));
         slog::debug!(
             log,
             "generating artifacts";
-            "package_name" => &package_name,
+            "package_name" => package.name(),
             "artifact" => ?artifact);
 
         Ok(Self {
@@ -225,7 +225,7 @@ where
             ui,
             artifact,
             ignored_cases: listing.ignored_cases,
-            package_name,
+            package,
             cases: listing.cases.into_iter(),
             timeout_override,
             generated_artifacts: None,
@@ -266,7 +266,7 @@ where
     ) -> Result<CollectionResult<MainAppDepsT>> {
         let case_str = self
             .artifact
-            .format_case(&self.package_name, case_name, case_metadata);
+            .format_case(self.package.name(), case_name, case_metadata);
         self.ui
             .update_enqueue_status(format!("processing {case_str}"));
         slog::debug!(self.log, "enqueuing test case"; "case" => &case_str);
@@ -280,7 +280,7 @@ where
             .queuing_state
             .test_metadata
             .get_metadata_for_test_with_env(
-                &self.package_name,
+                &self.package,
                 &self.artifact.to_key(),
                 (case_name, case_metadata),
             )?;
@@ -288,7 +288,7 @@ where
         let visitor = JobStatusVisitor::new(
             self.queuing_state.tracker.clone(),
             self.queuing_state.test_listing.clone(),
-            self.package_name.clone(),
+            self.package.name().into(),
             self.artifact.to_key(),
             case_name.to_owned(),
             case_str.clone(),
@@ -334,11 +334,11 @@ where
             .unwrap()
             .as_ref()
             .unwrap()
-            .get_timing(&self.package_name, &self.artifact.to_key(), case_name);
+            .get_timing(self.package.name(), &self.artifact.to_key(), case_name);
 
         let (program, arguments) = self.artifact.build_command(case_name, case_metadata);
         Ok(TestToEnqueue {
-            package_name: self.package_name.clone(),
+            package_name: self.package.name().into(),
             case: case_name.into(),
             case_str,
             spec: JobSpec {
@@ -418,7 +418,13 @@ where
         test_listing
             .retain_packages_and_artifacts(packages.iter().map(|p| (p.name(), p.artifacts())));
 
-        let mut expected_job_count = test_listing.expected_job_count(&queuing_state.filter);
+        let package_map: BTreeMap<_, _> = packages
+            .iter()
+            .map(|p| (p.name().into(), p.clone()))
+            .collect();
+
+        let mut expected_job_count =
+            test_listing.expected_job_count(&package_map, &queuing_state.filter);
         drop(locked_test_listing);
 
         expected_job_count *= usize::from(queuing_state.repeat) as u64;
@@ -429,12 +435,7 @@ where
 
         let selected_packages: BTreeMap<_, _> = packages
             .iter()
-            .filter(|p| {
-                queuing_state
-                    .filter
-                    .filter(p.name(), None, None)
-                    .unwrap_or(true)
-            })
+            .filter(|p| queuing_state.filter.filter(p, None, None).unwrap_or(true))
             .map(|p| (p.id(), p.clone()))
             .collect();
 
@@ -489,11 +490,10 @@ where
         let artifact = artifact?;
 
         slog::debug!(self.log, "got artifact"; "artifact" => ?artifact);
-        let package_name = self
+        let package = self
             .packages
             .get(&artifact.package())
-            .expect("artifact for unknown package")
-            .name();
+            .expect("artifact for unknown package");
 
         self.artifact_queuing = Some(ArtifactQueuing::new(
             self.log.clone(),
@@ -501,7 +501,7 @@ where
             self.deps,
             self.ui.clone(),
             artifact,
-            package_name.into(),
+            package.clone(),
             self.timeout_override,
         )?);
 

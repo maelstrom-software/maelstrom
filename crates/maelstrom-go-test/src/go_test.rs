@@ -1,4 +1,4 @@
-use crate::{GoImportPath, GoTestArtifact};
+use crate::GoImportPath;
 use anyhow::{anyhow, Context as _, Result};
 use maelstrom_test_runner::{ui::UiSender, BuildDir};
 use maelstrom_util::{
@@ -132,6 +132,11 @@ fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
     false
 }
 
+pub(crate) struct GoTestArtifact {
+    pub package: GoPackage,
+    pub path: PathBuf,
+}
+
 fn multi_go_build(
     packages: Vec<GoPackage>,
     build_dir: RootBuf<BuildDir>,
@@ -141,13 +146,12 @@ fn multi_go_build(
     let build_dir = build_dir.into_path_buf();
 
     let mut handles = vec![];
-    for m in packages {
+    for pkg in packages {
         // We put the built binary in a deterministic location so rebuilds overwrite what was there
         // before
-        let import_path = GoImportPath(m.import_path.clone());
+        let import_path = GoImportPath(pkg.import_path.clone());
         let binary_name = format!("{}.test", import_path.short_name());
-        let package_path = m.dir.strip_prefix(m.root)?;
-        let binary_path = build_dir.join(package_path).join(binary_name);
+        let binary_path = build_dir.join(pkg.root_relative_path()).join(binary_name);
         if let Some(parent) = binary_path.parent() {
             Fs.create_dir_all(parent)?;
         }
@@ -155,7 +159,7 @@ fn multi_go_build(
         let send_clone = send.clone();
         let ui_clone = ui.clone();
         handles.push(thread::spawn(move || -> Result<()> {
-            let res = go_build(&m.dir, &binary_path, ui_clone);
+            let res = go_build(&pkg.dir, &binary_path, ui_clone);
             if is_no_go_files_error(&res) {
                 return Ok(());
             }
@@ -163,9 +167,8 @@ fn multi_go_build(
             let output = res?;
             if !output.contains("[no test files]") {
                 let _ = send_clone.send(GoTestArtifact {
-                    name: m.name.clone(),
+                    package: pkg,
                     path: binary_path.to_path_buf(),
-                    id: import_path,
                 });
             }
             Ok(())
@@ -218,6 +221,15 @@ pub(crate) struct GoPackage {
     pub root: PathBuf,
 }
 
+impl GoPackage {
+    pub fn root_relative_path(&self) -> PathBuf {
+        self.dir
+            .strip_prefix(&self.root)
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default()
+    }
+}
+
 pub(crate) fn go_list(dir: &Path, ui: &UiSender) -> Result<Vec<GoPackage>> {
     let stdout = run_build_cmd(
         Command::new("go")
@@ -234,8 +246,8 @@ pub(crate) fn go_list(dir: &Path, ui: &UiSender) -> Result<Vec<GoPackage>> {
     let mut cursor = &stdout[..];
     while !cursor.is_empty() {
         let mut d = serde_json::Deserializer::new(serde_json::de::IoRead::new(&mut cursor));
-        let m: GoPackage = serde::Deserialize::deserialize(&mut d)?;
-        packages.push(m);
+        let pkg: GoPackage = serde::Deserialize::deserialize(&mut d)?;
+        packages.push(pkg);
         while !cursor.is_empty() && (cursor[0] as char).is_ascii_whitespace() {
             cursor = &cursor[1..];
         }

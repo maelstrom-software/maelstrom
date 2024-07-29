@@ -1,5 +1,5 @@
-pub mod interpreter;
-pub mod parser;
+mod interpreter;
+mod parser;
 
-pub use interpreter::{interpret_pattern, Artifact, ArtifactKind, Case, Context};
-pub use parser::{compile_filter, Pattern};
+pub(crate) use interpreter::{interpret_pattern, Artifact, ArtifactKind, Case, Context};
+pub(crate) use parser::{compile_filter, Pattern};

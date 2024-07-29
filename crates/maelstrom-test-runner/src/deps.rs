@@ -150,7 +150,11 @@ pub trait TestPackage: Clone + fmt::Debug {
 pub trait CollectTests {
     const ENQUEUE_MESSAGE: &'static str;
 
-    type TestFilter: TestFilter<ArtifactKey = Self::ArtifactKey, CaseMetadata = Self::CaseMetadata>;
+    type TestFilter: TestFilter<
+        Package = Self::Package,
+        ArtifactKey = Self::ArtifactKey,
+        CaseMetadata = Self::CaseMetadata,
+    >;
 
     type BuildHandle: Wait;
     type PackageId: TestPackageId;
@@ -183,13 +187,14 @@ pub trait CollectTests {
 }
 
 pub trait TestFilter: Sized + FromStr<Err = anyhow::Error> {
+    type Package: TestPackage;
     type ArtifactKey: TestArtifactKey;
     type CaseMetadata: TestCaseMetadata;
 
     fn compile(include: &[String], exclude: &[String]) -> Result<Self>;
     fn filter(
         &self,
-        package: &str,
+        package: &Self::Package,
         artifact: Option<&Self::ArtifactKey>,
         case: Option<(&str, &Self::CaseMetadata)>,
     ) -> Option<bool>;
@@ -251,7 +256,51 @@ impl FromStr for SimpleFilter {
 }
 
 #[cfg(test)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StringPackageId(pub String);
+
+#[cfg(test)]
+impl<'a> From<&'a str> for StringPackageId {
+    fn from(s: &'a str) -> Self {
+        Self(s.into())
+    }
+}
+
+#[cfg(test)]
+impl TestPackageId for StringPackageId {}
+
+#[cfg(test)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StringPackage(pub String);
+
+#[cfg(test)]
+impl<'a> From<&'a str> for StringPackage {
+    fn from(s: &'a str) -> Self {
+        Self(s.into())
+    }
+}
+
+#[cfg(test)]
+impl TestPackage for StringPackage {
+    type PackageId = StringPackageId;
+    type ArtifactKey = StringArtifactKey;
+
+    fn name(&self) -> &str {
+        &self.0
+    }
+
+    fn artifacts(&self) -> Vec<Self::ArtifactKey> {
+        vec![]
+    }
+
+    fn id(&self) -> Self::PackageId {
+        StringPackageId(self.0.clone())
+    }
+}
+
+#[cfg(test)]
 impl TestFilter for SimpleFilter {
+    type Package = StringPackage;
     type ArtifactKey = StringArtifactKey;
     type CaseMetadata = NoCaseMetadata;
 
@@ -275,7 +324,7 @@ impl TestFilter for SimpleFilter {
 
     fn filter(
         &self,
-        package: &str,
+        package: &StringPackage,
         artifact: Option<&Self::ArtifactKey>,
         case: Option<(&str, &NoCaseMetadata)>,
     ) -> Option<bool> {
@@ -283,7 +332,7 @@ impl TestFilter for SimpleFilter {
             Self::All => Some(true),
             Self::None => Some(false),
             Self::Name(m) => case.map(|(c, _)| c == m),
-            Self::Package(m) => Some(package == m),
+            Self::Package(m) => Some(&package.0 == m),
             Self::ArtifactEndsWith(m) => artifact.map(|a| a.0.ends_with(m)),
             Self::Not(f) => f.filter(package, artifact, case).map(|v| !v),
             Self::Or(p) => p.into_iter().fold(Some(false), |acc, x| {

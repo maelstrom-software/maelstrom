@@ -1,7 +1,7 @@
 pub mod alternative_mains;
 pub mod cli;
 mod go_test;
-pub mod pattern;
+mod pattern;
 
 use anyhow::{Context as _, Result};
 use maelstrom_base::{Timeout, Utf8PathBuf};
@@ -127,6 +127,7 @@ impl FromStr for GoTestArtifactKey {
 }
 
 impl TestFilter for pattern::Pattern {
+    type Package = GoPackage;
     type ArtifactKey = GoTestArtifactKey;
     type CaseMetadata = NoCaseMetadata;
 
@@ -136,12 +137,14 @@ impl TestFilter for pattern::Pattern {
 
     fn filter(
         &self,
-        package: &str,
+        package: &GoPackage,
         _artifact: Option<&GoTestArtifactKey>,
         case: Option<(&str, &NoCaseMetadata)>,
     ) -> Option<bool> {
         let c = pattern::Context {
-            package: package.into(),
+            package_import_path: package.0.import_path.clone(),
+            package_path: package.0.root_relative_path().display().to_string(),
+            package_name: package.0.name.clone(),
             case: case.map(|(case, _)| pattern::Case { name: case.into() }),
         };
         pattern::interpret_pattern(self, &c)
@@ -165,8 +168,16 @@ impl GoTestCollector {
 #[derive(Debug)]
 pub(crate) struct GoTestArtifact {
     id: GoImportPath,
-    name: String,
     path: PathBuf,
+}
+
+impl From<go_test::GoTestArtifact> for GoTestArtifact {
+    fn from(a: go_test::GoTestArtifact) -> Self {
+        Self {
+            id: GoImportPath(a.package.import_path),
+            path: a.path,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
@@ -232,7 +243,7 @@ impl TestArtifact for GoTestArtifact {
     }
 
     fn name(&self) -> &str {
-        &self.name
+        unimplemented!()
     }
 
     fn build_command(
@@ -288,6 +299,16 @@ impl TestPackage for GoPackage {
     }
 }
 
+struct TestArtifactStream(go_test::TestArtifactStream);
+
+impl Iterator for TestArtifactStream {
+    type Item = Result<GoTestArtifact>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|r| r.map(GoTestArtifact::from))
+    }
+}
+
 struct GoTestOptions;
 
 impl CollectTests for GoTestCollector {
@@ -295,7 +316,7 @@ impl CollectTests for GoTestCollector {
 
     type BuildHandle = go_test::WaitHandle;
     type Artifact = GoTestArtifact;
-    type ArtifactStream = go_test::TestArtifactStream;
+    type ArtifactStream = TestArtifactStream;
     type TestFilter = pattern::Pattern;
     type PackageId = GoImportPath;
     type Package = GoPackage;
@@ -309,11 +330,12 @@ impl CollectTests for GoTestCollector {
         _options: &GoTestOptions,
         packages: Vec<&GoPackage>,
         ui: &UiSender,
-    ) -> Result<(go_test::WaitHandle, go_test::TestArtifactStream)> {
+    ) -> Result<(go_test::WaitHandle, TestArtifactStream)> {
         let packages = packages.into_iter().map(|m| &m.0).collect();
 
         let build_dir = self.cache_dir.join::<BuildDir>("test-binaries");
-        go_test::build_and_collect(color, packages, &build_dir, ui.clone())
+        let (wait, stream) = go_test::build_and_collect(color, packages, &build_dir, ui.clone())?;
+        Ok((wait, TestArtifactStream(stream)))
     }
 
     fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {

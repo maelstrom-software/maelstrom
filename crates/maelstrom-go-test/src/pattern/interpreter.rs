@@ -11,7 +11,9 @@ pub struct Case {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Context {
-    pub package: String,
+    pub package_import_path: String,
+    pub package_path: String,
+    pub package_name: String,
     pub case: Option<Case>,
 }
 
@@ -45,7 +47,9 @@ pub fn interpret_compound_selector(s: &CompoundSelector, c: &Context) -> Option<
     use CompoundSelectorName::*;
     Some(match s.name {
         Name => interpret_matcher(&c.case()?.name, &s.matcher),
-        Package => interpret_matcher(&c.package, &s.matcher),
+        PackageImportPath => interpret_matcher(&c.package_import_path, &s.matcher),
+        PackagePath => interpret_matcher(&c.package_path, &s.matcher),
+        PackageName => interpret_matcher(&c.package_name, &s.matcher),
     })
 }
 
@@ -100,7 +104,9 @@ pub fn interpret_pattern(s: &Pattern, c: &Context) -> Option<bool> {
 fn simple_expression_simple_selector() {
     fn test_it(s: &str, case: Option<&str>, expected: Option<bool>) {
         let c = Context {
-            package: "foo".into(),
+            package_import_path: "foo".into(),
+            package_path: "bar".into(),
+            package_name: "baz".into(),
             case: case.map(|c| Case { name: c.into() }),
         };
         let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
@@ -123,7 +129,9 @@ fn simple_expression_simple_selector() {
 #[cfg(test)]
 fn test_compound_sel(s: &str, case: Option<&str>, expected: Option<bool>) {
     let c = Context {
-        package: "foo".into(),
+        package_import_path: "foo".into(),
+        package_path: "bar".into(),
+        package_name: "baz".into(),
         case: case.map(|c| Case { name: c.into() }),
     };
     let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
@@ -186,7 +194,9 @@ fn test_compound_sel_case(
     expected: Option<bool>,
 ) {
     let c = Context {
-        package: package.into(),
+        package_import_path: package.into(),
+        package_path: "".into(),
+        package_name: "".into(),
         case: Some(Case { name: case.into() }),
     };
     let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
@@ -212,7 +222,9 @@ fn simple_expression_compound_selector_name() {
 fn and_or_not_diff_expressions() {
     fn test_it(s: &str, expected: bool) {
         let c = Context {
-            package: "foo".into(),
+            package_import_path: "foo".into(),
+            package_path: "bar".into(),
+            package_name: "baz".into(),
             case: Some(Case {
                 name: "foo_test".into(),
             }),
@@ -241,7 +253,9 @@ fn and_or_not_diff_expressions() {
 fn and_or_not_diff_maybe_expressions() {
     fn test_it(s: &str, expected: Option<bool>) {
         let c = Context {
-            package: "foo".into(),
+            package_import_path: "foo".into(),
+            package_path: "bar".into(),
+            package_name: "baz".into(),
             case: None,
         };
         let actual = interpret_pattern(&parse_str!(Pattern, s).unwrap(), &c);

@@ -168,7 +168,11 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         });
     }
 
-    pub fn expected_job_count<TestFilterT>(&self, filter: &TestFilterT) -> u64
+    pub fn expected_job_count<TestFilterT>(
+        &self,
+        packages: &BTreeMap<String, TestFilterT::Package>,
+        filter: &TestFilterT,
+    ) -> u64
     where
         TestFilterT: TestFilter<ArtifactKey = ArtifactKeyT, CaseMetadata = CaseMetadataT>,
     {
@@ -180,6 +184,9 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                     .flat_map(move |(a, c)| c.cases.iter().map(move |(c, cd)| (p, a, c, cd)))
             })
             .filter(|(p, a, c, cd)| {
+                let Some(p) = packages.get(*p) else {
+                    return false;
+                };
                 filter
                     .filter(p, Some(a), Some((c, &cd.metadata)))
                     .expect("case is provided")
@@ -738,14 +745,25 @@ mod tests {
             ),
         ]);
 
-        assert_eq!(listing.expected_job_count(&SimpleFilter::All), 6);
-        assert_eq!(listing.expected_job_count(&SimpleFilter::None), 0);
+        let packages = ["package-1", "package-2"]
+            .into_iter()
+            .map(|p| (p.into(), p.into()))
+            .collect();
+
+        assert_eq!(listing.expected_job_count(&packages, &SimpleFilter::All), 6);
         assert_eq!(
-            listing.expected_job_count(&SimpleFilter::Package("package-1".into())),
+            listing.expected_job_count(&packages, &SimpleFilter::None),
+            0
+        );
+        assert_eq!(
+            listing.expected_job_count(&packages, &SimpleFilter::Package("package-1".into())),
             5
         );
         assert_eq!(
-            listing.expected_job_count(&SimpleFilter::ArtifactEndsWith(".library".into())),
+            listing.expected_job_count(
+                &packages,
+                &SimpleFilter::ArtifactEndsWith(".library".into())
+            ),
             4
         );
     }

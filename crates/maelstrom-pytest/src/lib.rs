@@ -156,6 +156,7 @@ impl FromStr for PytestArtifactKey {
 }
 
 impl TestFilter for pattern::Pattern {
+    type Package = PytestPackage;
     type ArtifactKey = PytestArtifactKey;
     type CaseMetadata = PytestCaseMetadata;
 
@@ -165,12 +166,12 @@ impl TestFilter for pattern::Pattern {
 
     fn filter(
         &self,
-        package: &str,
+        package: &PytestPackage,
         artifact: Option<&PytestArtifactKey>,
         case: Option<(&str, &PytestCaseMetadata)>,
     ) -> Option<bool> {
         let c = pattern::Context {
-            package: package.into(),
+            package: package.name().into(),
             file: artifact.map(|a| a.path.display().to_string()),
             case: case.map(|(name, metadata)| pattern::Case {
                 name: name.into(),

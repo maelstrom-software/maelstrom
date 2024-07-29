@@ -424,7 +424,7 @@ impl OrExpression {
 
 #[derive(Debug, PartialEq, Eq, From)]
 #[from(types(NotExpression, AndExpression))]
-pub struct Pattern(pub OrExpression);
+pub(crate) struct Pattern(pub OrExpression);
 
 impl Pattern {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {

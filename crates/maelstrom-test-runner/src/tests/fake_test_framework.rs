@@ -2,8 +2,8 @@ use crate::{
     metadata::TestMetadata,
     test_listing::TestListing,
     ui::{self},
-    BuildDir, CollectTests, NoCaseMetadata, SimpleFilter, StringArtifactKey, TestArtifact,
-    TestLayers, TestPackage, TestPackageId, Wait,
+    BuildDir, CollectTests, NoCaseMetadata, SimpleFilter, StringArtifactKey, StringPackage,
+    TestArtifact, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use anyhow::Result;
 use maelstrom_base::{
@@ -301,6 +301,36 @@ impl TestPackage for FakeTestPackage {
     }
 }
 
+pub struct FakeTestFilter(SimpleFilter);
+
+impl std::str::FromStr for FakeTestFilter {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(Self(SimpleFilter::from_str(s)?))
+    }
+}
+
+impl TestFilter for FakeTestFilter {
+    type Package = FakeTestPackage;
+    type ArtifactKey = StringArtifactKey;
+    type CaseMetadata = NoCaseMetadata;
+
+    fn compile(include: &[String], exclude: &[String]) -> Result<Self> {
+        Ok(Self(SimpleFilter::compile(include, exclude)?))
+    }
+
+    fn filter(
+        &self,
+        package: &FakeTestPackage,
+        artifact: Option<&Self::ArtifactKey>,
+        case: Option<(&str, &NoCaseMetadata)>,
+    ) -> Option<bool> {
+        self.0
+            .filter(&StringPackage(package.name().into()), artifact, case)
+    }
+}
+
 pub struct TestOptions;
 
 impl CollectTests for TestCollector {
@@ -310,7 +340,7 @@ impl CollectTests for TestCollector {
     type Artifact = FakeTestArtifact;
     type ArtifactStream = std::vec::IntoIter<Result<FakeTestArtifact>>;
     type Options = TestOptions;
-    type TestFilter = SimpleFilter;
+    type TestFilter = FakeTestFilter;
     type ArtifactKey = StringArtifactKey;
     type PackageId = FakePackageId;
     type Package = FakeTestPackage;

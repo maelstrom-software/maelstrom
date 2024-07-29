@@ -106,7 +106,7 @@ pub fn interpret_simple_expression(s: &SimpleExpression, c: &Context) -> Option<
     }
 }
 
-pub fn interpret_pattern(s: &Pattern, c: &Context) -> Option<bool> {
+pub(crate) fn interpret_pattern(s: &Pattern, c: &Context) -> Option<bool> {
     interpret_or_expression(&s.0, c)
 }
 

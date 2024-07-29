@@ -6,7 +6,9 @@ use maelstrom_util::{process::ExitCode, root::Root};
 /// Returns `true` if the given `GoPackage` matches the given pattern
 fn filter_package(package: &GoPackage, p: &pattern::Pattern) -> bool {
     let c = pattern::Context {
-        package: package.name().into(),
+        package_import_path: package.0.import_path.clone(),
+        package_path: package.0.root_relative_path().display().to_string(),
+        package_name: package.0.name.clone(),
         case: None,
     };
     pattern::interpret_pattern(p, &c).unwrap_or(true)

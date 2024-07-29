@@ -431,7 +431,7 @@ impl OrExpression {
 
 #[derive(Debug, PartialEq, Eq, From)]
 #[from(types(NotExpression, AndExpression))]
-pub struct Pattern(pub OrExpression);
+pub(crate) struct Pattern(pub OrExpression);
 
 impl Pattern {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
@@ -468,7 +468,10 @@ fn compile_filter_or(filters: &[String]) -> Result<OrExpression> {
         })
 }
 
-pub fn compile_filter(include_filter: &[String], exclude_filter: &[String]) -> Result<Pattern> {
+pub(crate) fn compile_filter(
+    include_filter: &[String],
+    exclude_filter: &[String],
+) -> Result<Pattern> {
     let include = compile_filter_or(include_filter)?;
     let exclude = compile_filter_or(exclude_filter)?;
     Ok(AndExpression::Diff(include.into(), Box::new(exclude.into())).into())

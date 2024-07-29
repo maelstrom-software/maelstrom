@@ -1,8 +1,8 @@
-pub mod alternative_mains;
+mod alternative_mains;
 pub mod cargo;
 pub mod cli;
 pub mod config;
-pub mod pattern;
+mod pattern;
 
 use anyhow::{anyhow, Result};
 use cargo_metadata::Target as CargoTarget;
@@ -179,6 +179,7 @@ fn cargo_artifact_key_from_str_good() {
 }
 
 impl TestFilter for pattern::Pattern {
+    type Package = CargoPackage;
     type ArtifactKey = CargoArtifactKey;
     type CaseMetadata = NoCaseMetadata;
 
@@ -188,12 +189,12 @@ impl TestFilter for pattern::Pattern {
 
     fn filter(
         &self,
-        package: &str,
+        package: &CargoPackage,
         artifact: Option<&CargoArtifactKey>,
         case: Option<(&str, &NoCaseMetadata)>,
     ) -> Option<bool> {
         let c = pattern::Context {
-            package: package.into(),
+            package: package.name().into(),
             artifact: artifact.map(|a| pattern::Artifact {
                 name: a.name.clone(),
                 kind: a.kind,
