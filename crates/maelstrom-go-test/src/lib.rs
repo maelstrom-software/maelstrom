@@ -262,6 +262,9 @@ impl TestArtifact for GoTestArtifact {
                 // We have our own mechanism for timeouts, so we disable the one built into the
                 // test binary.
                 "-test.timeout=0".into(),
+                // Print out more information, in particular this include whether or not the test
+                // was skipped.
+                "-test.v".into(),
             ],
         )
     }
