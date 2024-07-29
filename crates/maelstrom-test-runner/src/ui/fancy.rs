@@ -469,6 +469,13 @@ impl Ui for FancyUi {
 
         terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
 
+        // Spit out the summary
+        if self.all_done.is_some() {
+            terminal.insert_before(self.summary_height(), |buf| {
+                self.render_summary(buf.area, buf)
+            })?;
+        }
+
         Ok(())
     }
 }
@@ -560,6 +567,15 @@ impl FancyUi {
                 self.jobs_completed,
             ))
             .render(area, buf);
+    }
+
+    fn summary_height(&self) -> u16 {
+        let summary = self.all_done.as_ref().unwrap();
+        let mut h = summary.failed.len() + summary.ignored.len() + 3;
+        if !summary.ignored.is_empty() {
+            h += 1;
+        }
+        h.try_into().unwrap_or(u16::MAX)
     }
 
     fn render_summary(&mut self, area: Rect, buf: &mut Buffer) {
@@ -669,9 +685,7 @@ impl Widget for &mut FancyUi {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut sections = vec![];
 
-        if self.all_done.is_some() {
-            sections.push((Constraint::Fill(1), FancyUi::render_summary as _));
-        } else {
+        if self.all_done.is_none() {
             if !self.running_tests.is_empty() {
                 let max_height = (self.num_running_tests() + 2)
                     .try_into()
