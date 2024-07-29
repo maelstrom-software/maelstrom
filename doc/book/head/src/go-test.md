@@ -25,4 +25,8 @@ If you want to restrict the tests being run, you have to use the
 Similar to `go test`, `maelstrom-go-test` won't run any tests from nested modules. For these you
 need to change to the root or a sub-directory of the module-root for these modules.
 
-Currently we don't support go's test caching, fuzzing, profiling, or benchmarking.
+Currently we don't support go's test caching, profiling, or benchmarking.
+
+We run fuzz tests and examples in the same way that `go test` does (without any special options). If
+you have corpus files you need to make sure you copy them into the test container using the [Job
+Specification](go-test/spec.md).
