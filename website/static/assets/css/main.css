@@ -2129,14 +2129,8 @@ button:hover,
 
 #promo-wrapper {
   position: relative;
-  background-image: url("images/overlay.png"), url("images/header.svg"), -moz-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
-  background-image: url("images/overlay.png"), url("images/header.svg"), -webkit-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
-  background-image: url("images/overlay.png"), url("images/header.svg"), -ms-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
-  background-image: url("images/overlay.png"), url("images/header.svg"), linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
-  background-position: top left, center center;
-  color: #52575c;
   text-align: left;
-  padding: 1em 0 1em 0;
+  padding: 0em 0 0em 0;
 }
 
 #footer-wrapper {
@@ -2340,6 +2334,7 @@ button:hover,
   border-color: rgba(255, 255, 255, 0);
   color: #27636B;
   font-size: 1.25em;
+  position: 50%
 }
 
 #promo .button:hover {

@@ -1,10 +1,16 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="wrapper">
-  <div class="container" id="main">
-    <h2>Maelstrom Blog</h2>
+ <!-- Promo -->
+<div id="promo-wrapper">
+  <section id="promo">
+  <div class="image-container">
+  <a href="https://maelstrom-software.com/doc/book/latest/installation.html" class="image promo"><img src="images/Silent Killer.png" alt=""></a>
+  </section>
+  </div>
 
+  <div class="wrapper">
+    <div class="container" id="main">
     <div class="row">
       {% for page in section.pages %}
       <div class="col-6 col-12-narrower feature">
@@ -15,8 +21,8 @@
           <header>
             <h3>{{ page.title }}</h3>
           </header>
-          {% set image = resize_image(path = page.path ~ "/tile.png", width=400, height=200) %}
-          <img src="{{ image.url }}">
+          {% set image = resize_image(path = page.path ~ "/tile.png", width=1000, height=500) %}
+          <img src="{{ image.url }}" width="100%">
         </a>
         <p><strong>{{ page.date }}</strong></p>
         {{ page.summary | safe }}
