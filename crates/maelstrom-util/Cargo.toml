@@ -39,7 +39,7 @@ slog-async.workspace = true
 slog-term.workspace = true
 slog.workspace = true
 strum.workspace = true
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["net", "sync", "time"] }
 toml.workspace = true
 walkdir.workspace = true
 xdg.workspace = true
