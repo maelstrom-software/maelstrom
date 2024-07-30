@@ -78,7 +78,8 @@ cargo maelstrom
 ```
 
 This runs in "standalone" mode, meaning all tests are run locally. Each test is
-run in its own container, configured with a few common dependencies. It may work for your project without any further configuration.
+run in its own container, configured with a few common dependencies. It may
+work for your project without any further configuration.
 
 If some tests fail, however, it likely means those tests have dependencies on
 their execution environment that aren't packaged in their containers.
@@ -89,7 +90,8 @@ do this, run:
 cargo maelstrom --init
 ```
 
-Then edit the created `cargo-maelstrom.toml` file as described in the [book](https://maelstrom-software.com/doc/book/latest/cargo-maelstrom/spec.html).
+Then edit the created `cargo-maelstrom.toml` file as described in the
+[book](https://maelstrom-software.com/doc/book/latest/cargo-maelstrom/spec.html).
 
 ## Running `maelstrom-go-test`
 
@@ -99,14 +101,21 @@ To run your Go tests, use `maelstrom-go-test`:
 maelstrom-go-test
 ```
 
-You can add container dependencies by modifying the `maelstrom-go-test.toml`
-file. To do this, run:
+This runs in "standalone" mode, meaning all tests are run locally. Each test is
+run in its own container, configured with a few common dependencies. It may
+work for your project without any further configuration.
+
+If some tests fail, however, it likely means those tests have dependencies on
+their execution environment that aren't packaged in their containers. You can
+remedy this by adding directives to the `maelstrom-go-test.toml` file. To do
+this, run:
 
 ```bash
 maelstrom-go-test --init
 ```
 
-Then edit the created `maelstrom-go-test.toml` file as described in the [book](https://maelstrom-software.com/doc/book/latest/go-test/spec.html).
+Then edit the created `maelstrom-go-test.toml` file as described in the
+[book](https://maelstrom-software.com/doc/book/latest/go-test/spec.html).
 
 ## Running `maelstrom-pytest`
 
