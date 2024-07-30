@@ -12,14 +12,14 @@ Clients include the test runners &mdash;
 
 ### Test Runners
 
-Test runners are the glue between their associated test frameworks (Cargo,
+Test runners are the glue between their associated test frameworks (Cargo, Go,
 Pytest, etc.) and the Maelstrom system. Test runners know how to build test
 binaries (if applicable), what dependencies to package up into containers to
 run the test binaries, and how to execute individual tests using the test
 binaries. They then use this information to build tests, execute them on the
 Maelstrom system, and then collect and present the results.
 
-We currently have two test runners, but we're working to add more quickly.
+We currently have three test runners, but we're working to add more quickly.
 Please let us know if there is a specific test framework you are interested in,
 and we'll work to prioritize it.
 

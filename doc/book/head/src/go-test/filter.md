@@ -36,10 +36,15 @@ argument.
 
 These are the possible compound selectors:
 
-Compound Selector    | Selected Name
----------------------|-------------------------------------------------
-`name`               | the name of the test
-`package`            | the import-path of the test's package
+Compound Selector     | Selected Name
+----------------------|-------------------------------------------------
+`name`                | the name of the test
+`package_import_path` | the import-path of the test's package
+`package_path`        | trailing part of the import-path after the module's name
+`package_name`        | name the package uses in its `package` declaration
+
+See [below](#specifying-packages) for more details on the various ways to
+specify a package.
 
 These are the possible matchers:
 
@@ -122,3 +127,22 @@ package_i.equals(foo)
 package.equals(foo)
 p.equals(foo)
 ```
+
+## Specifying Packages
+
+What exactly counts as a "package name" in Go can be a bit confusing. We
+therefore support three different ways to specify a package. To illustrate the
+various ways, imagine that we have a module called
+`github.org/maelstrom-software/maelstrom`. Inside of that module there is a
+subdirectory called `client`, and inside of that, there is another subdirectory
+called `rpc`. To confuse things, all the `.go` files in `rpc` start with
+`package client_rpc`. In this case, the tests in this directory would all have
+the following values:
+
+Selector              | Value
+----------------------|------
+`package_import_path` | `github.org/maelstrom-software/client/rpc`
+`package_path`        | `client/rpc`
+`package_name`        | `client_rpc`
+
+The `package_path` for the root of a module will be the empty string.
