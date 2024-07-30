@@ -39,6 +39,9 @@ for details.
   URL](https://maelstrom-software.com/doc/book/0.10.0/).
   \[[276](https://github.com/maelstrom-software/maelstrom/issues/276)\]
 - Documentation for templating of paths in test-runner configurations.
+- A new `--repeat` (alias: `--loop`) command-line option to repeat all tests a
+  certain number of times.
+  \[[85](https://github.com/maelstrom-software/maelstrom/issues/85)\]
 
 #### Removed
 - The `devices` field of job specifications, both in clients and in the
