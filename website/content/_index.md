@@ -110,6 +110,8 @@ cargo maelstrom --init
 Then edit the created <tt>cargo-maelstrom.toml</tt> file as described [in the
 book](https://maelstrom-software.com/doc/book/latest/cargo-maelstrom/spec.html)
 
+<p><h3><b>Running <tt>maelstrom-go-test</tt></b></h3></p>
+
 To run your Go tests, use <tt>maelstrom-go-test</tt>:
 
 ```sh
