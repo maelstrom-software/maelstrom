@@ -151,7 +151,3 @@ wasm-bindgen-futures = "0.4"
 wasm-logger = "0.2"
 xdg = "2.5.2"
 zerocopy = { version = "0.7", features = ["derive"] }
-[profile.wasm_dev]
-inherits = "dev"
-[profile.wasm_release]
-inherits = "release"
