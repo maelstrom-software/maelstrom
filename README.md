@@ -51,7 +51,14 @@ For Rust tests:
 cargo binstall cargo-maelstrom
 ```
 
+For Go tests:
+
+```bash
+cargo binstall maelstrom-go-test
+```
+
 For Python tests:
+
 ```bash
 cargo binstall maelstrom-pytest
 ```
