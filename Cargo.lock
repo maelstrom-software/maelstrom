@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-maelstrom"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2936,7 +2936,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-base"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "bincode",
  "camino",
@@ -2955,7 +2955,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-broker"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2984,7 +2984,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-client"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3016,7 +3016,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-client-base"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -3042,7 +3042,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-client-process"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3075,7 +3075,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-container"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "anyhow_trace",
@@ -3108,7 +3108,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-fuse"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "anyhow_trace",
@@ -3136,7 +3136,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-go-test"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3170,7 +3170,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-layer-fs"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "anyhow_trace",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-linux"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "derive_more",
  "libc",
@@ -3205,7 +3205,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-macro"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3215,14 +3215,14 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-plot"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "maelstrom-pytest"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3256,7 +3256,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-run"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "ascii",
@@ -3281,14 +3281,14 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-simex"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "num",
 ]
 
 [[package]]
 name = "maelstrom-test"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "maelstrom-base",
@@ -3298,7 +3298,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-test-runner"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3349,7 +3349,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-util"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -3393,7 +3393,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-web"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -3417,7 +3417,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-worker"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3458,7 +3458,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-worker-child"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "maelstrom-linux",
 ]
@@ -6931,7 +6931,7 @@ checksum = "791978798f0597cfc70478424c2b4fdc2b7a8024aaff78497ef00f24ef674193"
 
 [[package]]
 name = "xtask"
-version = "0.11.0-dev"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "camino",
