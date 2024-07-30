@@ -84,6 +84,23 @@ cargo maelstrom --init
 
 Then edit the created `cargo-maelstrom.toml` file as described in the [book](https://maelstrom-software.com/doc/book/latest/cargo-maelstrom/spec.html).
 
+## Running `maelstrom-go-test`
+
+To run your Go tests, use `maelstrom-go-test`:
+
+```bash
+maelstrom-go-test
+```
+
+You can add container dependencies by modifying the `maelstrom-go-test.toml`
+file. To do this, run:
+
+```bash
+maelstrom-go-test --init
+```
+
+Then edit the created `maelstrom-go-test.toml` file as described in the [book](https://maelstrom-software.com/doc/book/latest/maelstrom-go-test/spec.html).
+
 ## Running `maelstrom-pytest`
 
 Before running tests, we need to do a little setup.
