@@ -1,8 +1,7 @@
 +++
 title = "Maelstrom 0.11.0 Release"
-date = 2024-07-29
+date = 2024-07-30
 weight = 1000
-draft = true
 +++
 
 We're excited to announce Maelstrom 0.11.0. There are two main changes this
@@ -64,13 +63,7 @@ uploads and container image downloads.
 
 ## Go Test Runner
 
-New with this release we are announcing our support for running Go tests via
-our new test runner <tt>maelstrom-go-test</tt>. [Check out the
-book](/doc/book/latest/go-test.html) for detailed documentation about it.
-
-This adds to our two other existing test runners <tt>cargo-maelstrom</tt> and
-<tt>maelstrom-pytest</tt>.
-
-Like all our test runners, we run all the tests in lightweight containers and
-with high parallelism. We are excited about the possibilities this unlocks by
-bringing reliability and speed to running Go tests.
+We're also excited to announce a new Go test runner:
+<tt>maelstrom-go-test</tt>. This is a drop-in replacement for <tt>go test</tt>.
+We now have test runners for Go, Pytest, and Rust. [Check out the
+book](/doc/book/latest/go-test.html) for detailed documentation.
