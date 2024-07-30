@@ -9,8 +9,9 @@ run your tests because:
 
 <a href="https://maelstrom-software.com/doc/book/latest/" class="rightimg wrap"><img src="images/Architecture Small.png" alt="" /></a>
 
-- **It's easy.** Maelstrom functions as a drop-in replacement for <tt>cargo-test</tt> and
-  <tt>pytest</tt>. In most cases, it just works with your existing tests with minimal configuration.
+- **It's easy.** Maelstrom functions as a drop-in replacement for
+  <tt>cargo-test</tt>, <tt>go test</tt>, and <tt>pytest</tt>. In most cases, it
+  just works with your existing tests with minimal configuration.
 - **It's reliable.** Maelstrom runs every test hermetically in its own lightweight container and
   runs each test independently, eliminating confusing errors caused by inter-test or implicit
   test-environment dependencies.
@@ -18,12 +19,14 @@ run your tests because:
   increase test throughput.
 - **It's clean.** Maelstrom has a from-scratch, rootless container implementation (not relying on
   docker or RunC) written in Rust, optimized to be low-overhead and start quickly.
-- **It's fast.** In most cases, Maelstrom is faster than <tt>cargo test</tt>, even without adding
-  clustering.  Maelstrom’s test-per-process model is inherently slower than <tt>pytest</tt>’s
-  shared-process model, but Maelstrom provides test isolation at a low performance cost.
+- **It's fast.** In most cases, Maelstrom is faster than <tt>cargo test</tt> or
+  <tt>go test</tt>, even without adding clustering.  Maelstrom’s
+  test-per-process model is inherently slower than <tt>pytest</tt>’s
+  shared-process model, but Maelstrom provides test isolation at a low
+  performance cost.
 
-Maelstrom is currently available for Rust and Pytest on Linux.  C++, Typescript, and Java are coming
-soon.
+Maelstrom is currently available for Rust, Go, and Pytest on Linux.  C++,
+Typescript, and Java are coming soon.
 
 While our focus thus far has been on running tests, Maelstrom's underlying job execution system is
 general-purpose. We provide a command line utility to run arbitrary commands, as well a gRPC-based
@@ -65,7 +68,14 @@ For Rust tests:
 cargo binstall cargo-maelstrom
 ```
 
+For Go tests:
+
+```bash
+cargo binstall maelstrom-go-test
+```
+
 For Python tests:
+
 ```sh
 cargo binstall maelstrom-pytest
 ```
@@ -100,6 +110,27 @@ cargo maelstrom --init
 Then edit the created <tt>cargo-maelstrom.toml</tt> file as described [in the
 book](https://maelstrom-software.com/doc/book/latest/cargo-maelstrom/spec.html)
 
+To run your Go tests, use <tt>maelstrom-go-test</tt>:
+
+```sh
+maelstrom-go-test
+```
+
+This runs in "standalone" mode, meaning all tests are run locally. Each test is run in its own
+container, configured with a few common dependencies. It may work for your project without any
+further configuration.
+
+If some tests fail, however, it likely means those tests have dependencies on their execution
+environment that aren't packaged in their containers. You can remedy this by adding directives to
+the <tt>maelstrom-go-test.toml</tt> file. To do this, run:
+
+```sh
+maelstrom-go-test --init
+```
+
+Then edit the created <tt>maelstrom-go-test.toml</tt> file as described [in the
+book](https://maelstrom-software.com/doc/book/latest/go-test/spec.html)
+
 <p><h3><b>Running <tt>maelstrom-pytest</tt></b></h3></p>
 Before running tests, we need to do a little setup.
 
@@ -114,7 +145,6 @@ Then update the file to include a python image
 ```toml
 [[directives]]
 image = "docker://python:3.11-slim"
-image.use = ["layers", "environment"]
 ```
 This example installs an [image from Docker](https://hub.docker.com/_/python)
 
