@@ -50,11 +50,13 @@ This option can be combined with [`--include` and `--exclude`](#include-and-excl
 
 ## `--list-packages`
 
-The `--list-packages` command-line option causes `maelstrom-go-test` to print the
-packages from which it would potentially run tests, without actually building any binaries
-or running any tests. This command may have to wait for the `go` binary to download dependencies.
+The `--list-packages` command-line option causes `maelstrom-go-test` to print
+the packages from which it would potentially run tests, without actually
+building any binaries or running any tests. This command may have to wait for
+the `go` binary to download dependencies, however.
 
-Since we don't build any tests, it also may include packages which don't contain any tests.
+Because `maelstrom-go-test` won't attempt to build the tests in the given
+packages, it may include packages that don't actually have any tests.
 
 This option can be combined with [`--include` and `--exclude`](#include-and-exclude).
 
