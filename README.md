@@ -106,7 +106,7 @@ file. To do this, run:
 maelstrom-go-test --init
 ```
 
-Then edit the created `maelstrom-go-test.toml` file as described in the [book](https://maelstrom-software.com/doc/book/latest/maelstrom-go-test/spec.html).
+Then edit the created `maelstrom-go-test.toml` file as described in the [book](https://maelstrom-software.com/doc/book/latest/go-test/spec.html).
 
 ## Running `maelstrom-pytest`
 
