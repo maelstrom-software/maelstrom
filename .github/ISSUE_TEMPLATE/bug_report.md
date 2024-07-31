@@ -1,38 +1,25 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Create a report to help us improve Maelstrom
 title: ''
-labels: ''
+labels: bug
 assignees: ''
 
 ---
 
-**Describe the bug**
+**Specific Maelstrom Program?**
+Please tell us if this bug is associated with a specific program (e.g.
+`maelstrom-broker`), a class of programs (e.g. all test runners), or with the
+project in general.
+
+**Bug Description**
 A clear and concise description of what the bug is.
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+**How to Reproduce**
+Please list the steps to reproduce the behavior.
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+**Expected Behavior**
+Please describe what you expected to happen compared to what actually happened.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
-
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
-
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
-
-**Additional context**
-Add any other context about the problem here.
+**Additional Context**
+Please provide any other context that may be useful, such as a stack trace, screenshot, etc.
