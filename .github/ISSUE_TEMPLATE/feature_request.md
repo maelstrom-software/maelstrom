@@ -2,19 +2,27 @@
 name: Feature request
 about: Suggest an idea for this project
 title: ''
-labels: ''
+labels: enhancement 
 assignees: ''
 
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+**Specific Maelstrom Program?**
+Please tell us if this is feature is associated with a specific program (e.g.
+`maelstrom-broker`), a class of programs (e.g. all test runners), or with the
+project in general.
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+**Problem Statement**
+Please describe what problem the user is trying to solve.
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+**Proposed Solution**
+Please described your proposed solution, if any. It's alright if you don't have
+one, or only have a sketch of one.
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+**Other Projects**
+If there are other projects that you konw about that solve this problem, please
+point us in the direction of their solutions. Please describe what you like or
+dislike about their solutions.
+
+**Additional Context**
+Please describe any other context or details that may be relevant.
