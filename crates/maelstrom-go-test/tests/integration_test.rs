@@ -8,6 +8,7 @@ use maelstrom_util::{
     process::ExitCode,
     root::{Root, RootBuf},
 };
+use regex::Regex;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
@@ -28,6 +29,7 @@ fn do_maelstrom_go_test_test(
     temp_dir: &tempfile::TempDir,
     project_dir: &Path,
     extra_options: ExtraCommandLineOptions,
+    expected_exit_code: ExitCode,
 ) -> String {
     let container_image_depot_root = RootBuf::new(temp_dir.path().join("container"));
 
@@ -67,8 +69,9 @@ fn do_maelstrom_go_test_test(
     .unwrap();
 
     assert!(
-        exit_code == ExitCode::SUCCESS,
-        "maelstrom-go-test failed: {}: {}",
+        exit_code == expected_exit_code,
+        "maelstrom-go-test unexpected exit code: exit_code={:?}, stderr={}: term={}",
+        exit_code,
         String::from_utf8(stderr).unwrap(),
         term.contents()
     );
@@ -77,25 +80,33 @@ fn do_maelstrom_go_test_test(
 }
 
 #[test]
-fn test_simple_success() {
+fn many_different_tests_success() {
     let fs = Fs::new();
     let temp_dir = tempdir().unwrap();
 
     let project_dir = temp_dir.path().join("project");
 
     fs.create_dir(&project_dir).unwrap();
-    fs.create_dir(project_dir.join("foo")).unwrap();
-    fs.create_dir(project_dir.join("bar")).unwrap();
+    fs.create_dir(project_dir.join("pkg1")).unwrap();
+    fs.create_dir(project_dir.join("pkg2")).unwrap();
+    fs.create_dir(project_dir.join("pkg3")).unwrap();
 
-    fs.write(project_dir.join("go.mod"), "module baz").unwrap();
+    fs.write(project_dir.join("go.mod"), "module maelstrom-software.com")
+        .unwrap();
 
     let source_contents = indoc::indoc! {"
         package foo;
+
+        import \"fmt\"
         import \"testing\"
 
         func TestA(t *testing.T) {}
+        func ExampleB() {
+            fmt.Println(\"foo\")
+            // Output: foo
+        }
     "};
-    fs.write(project_dir.join("foo/foo_test.go"), source_contents)
+    fs.write(project_dir.join("pkg1/foo_test.go"), source_contents)
         .unwrap();
 
     let source_contents = indoc::indoc! {"
@@ -103,8 +114,22 @@ fn test_simple_success() {
         import \"testing\"
 
         func TestA(t *testing.T) {}
+        func FuzzB(f *testing.F) {
+            f.Add(1)
+            f.Fuzz(func(t *testing.T, i int) {
+                if i > 100 {
+                    t.Fatalf(\"%d > 100\", i)
+                }
+            })
+        }
     "};
-    fs.write(project_dir.join("bar/bar_test.go"), source_contents)
+    fs.write(project_dir.join("pkg2/bar_test.go"), source_contents)
+        .unwrap();
+
+    let source_contents = indoc::indoc! {"
+        package empty;
+    "};
+    fs.write(project_dir.join("pkg3/empty.go"), source_contents)
         .unwrap();
 
     let contents = do_maelstrom_go_test_test(
@@ -117,23 +142,88 @@ fn test_simple_success() {
             },
             list: Default::default(),
         },
+        ExitCode::SUCCESS,
     );
-    assert!(
-        contents.contains("baz/foo TestA..........................OK"),
-        "{contents}"
-    );
-    assert!(
-        contents.contains("baz/bar TestA..........................OK"),
-        "{contents}"
-    );
+    let tests = [
+        "maelstrom-software.com/pkg1 TestA......OK",
+        "maelstrom-software.com/pkg1 ExampleB...OK",
+        "maelstrom-software.com/pkg2 TestA......OK",
+        "maelstrom-software.com/pkg2 FuzzB......OK",
+    ];
+    for t in tests {
+        assert!(contents.contains(t), "{contents}");
+    }
     assert!(
         contents.ends_with(
             "\
             ================== Test Summary ==================\n\
-            Successful Tests:         2\n\
+            Successful Tests:         4\n\
             Failed Tests    :         0\
         "
         ),
+        "{contents}"
+    );
+}
+
+#[test]
+fn single_failure() {
+    let fs = Fs::new();
+    let temp_dir = tempdir().unwrap();
+
+    let project_dir = temp_dir.path().join("project");
+
+    fs.create_dir(&project_dir).unwrap();
+    fs.create_dir(project_dir.join("pkg1")).unwrap();
+
+    fs.write(project_dir.join("go.mod"), "module maelstrom-software.com")
+        .unwrap();
+
+    let source_contents = indoc::indoc! {"
+        package foo;
+
+        import \"fmt\"
+        import \"testing\"
+
+        func TestA(t *testing.T) {
+            fmt.Println(\"test output\")
+            t.Fatal(\"test failure\")
+        }
+    "};
+    fs.write(project_dir.join("pkg1/foo_test.go"), source_contents)
+        .unwrap();
+
+    let contents = do_maelstrom_go_test_test(
+        &temp_dir,
+        &project_dir,
+        ExtraCommandLineOptions {
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                ..Default::default()
+            },
+            list: Default::default(),
+        },
+        ExitCode::from(1),
+    );
+
+    assert!(
+        Regex::new(
+            "(?ms)^\
+            maelstrom-software.com/pkg1 TestA....FAIL   [\\d\\.]+s\n\
+            === RUN   TestA\n\
+            test output\n\
+            \\s\\s\\s\\sfoo_test.go:8: test failure\n\
+            --- FAIL: TestA \\([\\d\\.]+s\\)\n\
+            FAIL\n\
+            \n\
+            \n\
+            ================== Test Summary ==================\n\
+                Successful Tests:         0\n\
+                Failed Tests    :         1\n\
+                \\s\\s\\s\\smaelstrom-software.com/pkg1 TestA: failure\
+            $"
+        )
+        .unwrap()
+        .is_match(&contents),
         "{contents}"
     );
 }
