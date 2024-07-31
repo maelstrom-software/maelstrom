@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Added
+- `maelstrom-go-test` now edits out some lines from test failures that come from the `go test` test
+  fixture code.
+
 ## [0.11.0] - 2024-07-30
 
 ### General
