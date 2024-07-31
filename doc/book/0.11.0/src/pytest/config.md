@@ -70,8 +70,13 @@ to a terminal, it will only print a summary at the end.
 ## `ui`
 
 The `ui` configuration value controls the UI style used. It must be one of
-`auto`, `fancy`, or `simple`. The value of `auto` will use `fancy` if standard
-output is a terminal, and `simple` otherwise.
+`auto`, `fancy`, or `simple`. The default value is `auto`.
+
+Style    | Description
+---------|------------
+`simple` | This is our original UI. It prints one line per test result (unless [`quiet`](#quiet) is `true`), and will display some progress bars if standard output is a TTY.
+`fancy`  | This is our new UI. It has a rich TTY experience with a lot of status updates. It is incompatible with [`quiet`](#quiet) or with non-TTY standard output.
+`auto`   | Will choose `fancy` if standard output is a TTY and [`quiet`](#quiet) isn't `true`. Otherwise, it will choose `simple`.
 
 ## `timeout`
 
