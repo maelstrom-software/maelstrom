@@ -126,13 +126,13 @@ pub struct Config {
     #[config(flag, short = 'q')]
     pub quiet: Quiet,
 
-    /// Runs all of the selected tests this many times. Must be non-zero.
-    #[config(alias = "loop", value_name = "COUNT", default = "Repeat::default()")]
-    pub repeat: Repeat,
-
     /// The UI style to use. Options are `auto`, `simple`, and `fancy`.
     #[config(value_name = "UI-STYLE", default = "UiKind::Auto")]
     pub ui: UiKind,
+
+    /// Runs all of the selected tests this many times. Must be non-zero.
+    #[config(alias = "loop", value_name = "COUNT", default = "Repeat::default()")]
+    pub repeat: Repeat,
 
     /// Override timeout value for all tests specified (O indicates no timeout).
     #[config(
