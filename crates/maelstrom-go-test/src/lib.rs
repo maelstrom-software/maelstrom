@@ -314,6 +314,44 @@ impl Iterator for TestArtifactStream {
 
 struct GoTestOptions;
 
+impl GoTestCollector {
+    fn remove_fixture_output_test(case_str: &str, mut lines: Vec<String>) -> Vec<String> {
+        if let Some(pos) = lines
+            .iter()
+            .position(|s| s == &format!("=== RUN   {case_str}"))
+        {
+            lines = lines[(pos + 1)..].to_vec();
+        }
+        if let Some(pos) = lines
+            .iter()
+            .rposition(|s| s.starts_with(&format!("--- FAIL: {case_str} ")))
+        {
+            lines = lines[..pos].to_vec();
+        }
+        lines
+    }
+
+    fn remove_fixture_output_fuzz(_case_str: &str, mut lines: Vec<String>) -> Vec<String> {
+        if let Some(pos) = lines.iter().rposition(|s| s == "FAIL") {
+            lines = lines[..pos].to_vec();
+        }
+        lines
+    }
+
+    fn remove_fixture_output_example(case_str: &str, mut lines: Vec<String>) -> Vec<String> {
+        if let Some(pos) = lines
+            .iter()
+            .position(|s| s.starts_with(&format!("--- FAIL: {case_str} ")))
+        {
+            lines = lines[(pos + 1)..].to_vec();
+        }
+        if let Some(pos) = lines.iter().rposition(|s| s == "FAIL") {
+            lines = lines[..pos].to_vec();
+        }
+        lines
+    }
+}
+
 impl CollectTests for GoTestCollector {
     const ENQUEUE_MESSAGE: &'static str = "building artifacts...";
 
@@ -344,7 +382,6 @@ impl CollectTests for GoTestCollector {
     fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {
         Ok(TestLayers::GenerateForBinary)
     }
-
     fn get_packages(&self, ui: &UiSender) -> Result<Vec<GoPackage>> {
         Ok(go_test::go_list(self.project_dir.as_ref(), ui)
             .with_context(|| "running go list")?
@@ -353,9 +390,183 @@ impl CollectTests for GoTestCollector {
             .collect())
     }
 
-    fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
-        lines
+    fn remove_fixture_output(case_str: &str, lines: Vec<String>) -> Vec<String> {
+        if case_str.starts_with("Fuzz") {
+            Self::remove_fixture_output_fuzz(case_str, lines)
+        } else if case_str.starts_with("Example") {
+            Self::remove_fixture_output_example(case_str, lines)
+        } else {
+            Self::remove_fixture_output_test(case_str, lines)
+        }
     }
+}
+
+#[test]
+fn remove_fixture_output_basic_case() {
+    let example = indoc::indoc! {"
+    === RUN   TestAdd
+    test output
+        foo_test.go:9: 1 + 2 != 3
+    --- FAIL: TestAdd (0.00s)
+    FAIL
+    "};
+    let cleansed = GoTestCollector::remove_fixture_output(
+        "TestAdd",
+        example.split('\n').map(ToOwned::to_owned).collect(),
+    );
+    assert_eq!(
+        cleansed.join("\n") + "\n",
+        indoc::indoc! {"
+        test output
+            foo_test.go:9: 1 + 2 != 3
+        "}
+    );
+}
+
+#[test]
+fn remove_fixture_output_different_case_str_beginning() {
+    let example = indoc::indoc! {"
+    === RUN   TestAdd2
+    test output
+        foo_test.go:9: 1 + 2 != 3
+    --- FAIL: TestAdd (0.00s)
+    FAIL
+    "};
+    let cleansed = GoTestCollector::remove_fixture_output(
+        "TestAdd",
+        example.split('\n').map(ToOwned::to_owned).collect(),
+    );
+    assert_eq!(
+        cleansed.join("\n") + "\n",
+        indoc::indoc! {"
+        === RUN   TestAdd2
+        test output
+            foo_test.go:9: 1 + 2 != 3
+        "}
+    );
+}
+
+#[test]
+fn remove_fixture_output_different_case_str_end() {
+    let example = indoc::indoc! {"
+    === RUN   TestAdd
+    test output
+        foo_test.go:9: 1 + 2 != 3
+    --- FAIL: TestAdd2 (0.00s)
+    FAIL
+    "};
+    let cleansed = GoTestCollector::remove_fixture_output(
+        "TestAdd",
+        example.split('\n').map(ToOwned::to_owned).collect(),
+    );
+    assert_eq!(
+        cleansed.join("\n"),
+        indoc::indoc! {"
+        test output
+            foo_test.go:9: 1 + 2 != 3
+        --- FAIL: TestAdd2 (0.00s)
+        FAIL
+        "}
+    );
+}
+
+#[test]
+fn remove_fixture_output_multiple_matching_lines() {
+    let example = indoc::indoc! {"
+    === RUN   TestAdd
+    === RUN   TestAdd
+    test output
+        foo_test.go:9: 1 + 2 != 3
+    --- FAIL: TestAdd (0.00s)
+    --- FAIL: TestAdd (0.00s)
+    FAIL
+    "};
+    let cleansed = GoTestCollector::remove_fixture_output(
+        "TestAdd",
+        example.split('\n').map(ToOwned::to_owned).collect(),
+    );
+    assert_eq!(
+        cleansed.join("\n") + "\n",
+        indoc::indoc! {"
+        === RUN   TestAdd
+        test output
+            foo_test.go:9: 1 + 2 != 3
+        --- FAIL: TestAdd (0.00s)
+        "}
+    );
+}
+
+#[test]
+fn remove_fixture_output_fuzz_test() {
+    let example = indoc::indoc! {"
+        === RUN   FuzzAdd2
+        === RUN   FuzzAdd2/seed#0
+            foo_test.go:47: 1 + 2 != 3
+        === RUN   FuzzAdd2/seed#1
+            foo_test.go:47: 2 + 2 != 4
+        === RUN   FuzzAdd2/seed#2
+            foo_test.go:47: 3 + 2 != 5
+        === RUN   FuzzAdd2/simple.fuzz
+            foo_test.go:47: 100 + 2 != 102
+        --- FAIL: FuzzAdd2 (0.00s)
+            --- FAIL: FuzzAdd2/seed#0 (0.00s)
+            --- FAIL: FuzzAdd2/seed#1 (0.00s)
+            --- FAIL: FuzzAdd2/seed#2 (0.00s)
+            --- FAIL: FuzzAdd2/simple.fuzz (0.00s)
+        FAIL
+    "};
+    let cleansed = GoTestCollector::remove_fixture_output(
+        "FuzzAdd2",
+        example.split('\n').map(ToOwned::to_owned).collect(),
+    );
+    assert_eq!(
+        cleansed.join("\n") + "\n",
+        indoc::indoc! {"
+        === RUN   FuzzAdd2
+        === RUN   FuzzAdd2/seed#0
+            foo_test.go:47: 1 + 2 != 3
+        === RUN   FuzzAdd2/seed#1
+            foo_test.go:47: 2 + 2 != 4
+        === RUN   FuzzAdd2/seed#2
+            foo_test.go:47: 3 + 2 != 5
+        === RUN   FuzzAdd2/simple.fuzz
+            foo_test.go:47: 100 + 2 != 102
+        --- FAIL: FuzzAdd2 (0.00s)
+            --- FAIL: FuzzAdd2/seed#0 (0.00s)
+            --- FAIL: FuzzAdd2/seed#1 (0.00s)
+            --- FAIL: FuzzAdd2/seed#2 (0.00s)
+            --- FAIL: FuzzAdd2/simple.fuzz (0.00s)
+        "}
+    );
+}
+
+#[test]
+fn remove_fixture_output_example_test() {
+    let example = indoc::indoc! {"
+        --- FAIL: ExamplePrintln (0.00s)
+        got:
+        The output of
+        this example.
+        want:
+        Thej output of
+        this example.
+        FAIL
+    "};
+    let cleansed = GoTestCollector::remove_fixture_output(
+        "ExamplePrintln",
+        example.split('\n').map(ToOwned::to_owned).collect(),
+    );
+    assert_eq!(
+        cleansed.join("\n") + "\n",
+        indoc::indoc! {"
+            got:
+            The output of
+            this example.
+            want:
+            Thej output of
+            this example.
+        "}
+    );
 }
 
 impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {

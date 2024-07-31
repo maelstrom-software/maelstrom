@@ -68,11 +68,14 @@ fn do_maelstrom_go_test_test(
     )
     .unwrap();
 
+    if exit_code != ExitCode::SUCCESS {
+        println!("stderr = {}", String::from_utf8(stderr).unwrap());
+    }
+
     assert!(
         exit_code == expected_exit_code,
-        "maelstrom-go-test unexpected exit code: exit_code={:?}, stderr={}: term={}",
+        "maelstrom-go-test unexpected exit code: exit_code={:?}, term={}",
         exit_code,
-        String::from_utf8(stderr).unwrap(),
         term.contents()
     );
 
@@ -166,7 +169,7 @@ fn many_different_tests_success() {
 }
 
 #[test]
-fn single_failure() {
+fn single_test_failure() {
     let fs = Fs::new();
     let temp_dir = tempdir().unwrap();
 
@@ -209,17 +212,141 @@ fn single_failure() {
         Regex::new(
             "(?ms)^\
             maelstrom-software.com/pkg1 TestA....FAIL   [\\d\\.]+s\n\
-            === RUN   TestA\n\
             test output\n\
             \\s\\s\\s\\sfoo_test.go:8: test failure\n\
-            --- FAIL: TestA \\([\\d\\.]+s\\)\n\
-            FAIL\n\
-            \n\
             \n\
             ================== Test Summary ==================\n\
                 Successful Tests:         0\n\
                 Failed Tests    :         1\n\
                 \\s\\s\\s\\smaelstrom-software.com/pkg1 TestA: failure\
+            $"
+        )
+        .unwrap()
+        .is_match(&contents),
+        "{contents}"
+    );
+}
+
+#[test]
+fn single_fuzz_failure() {
+    let fs = Fs::new();
+    let temp_dir = tempdir().unwrap();
+
+    let project_dir = temp_dir.path().join("project");
+
+    fs.create_dir(&project_dir).unwrap();
+    fs.create_dir(project_dir.join("pkg1")).unwrap();
+
+    fs.write(project_dir.join("go.mod"), "module maelstrom-software.com")
+        .unwrap();
+
+    let source_contents = indoc::indoc! {"
+        package foo;
+
+        import \"testing\"
+
+        func FuzzB(f *testing.F) {
+            f.Add(1)
+            f.Add(200)
+            f.Fuzz(func(t *testing.T, i int) {
+                if i > 100 {
+                    t.Fatalf(\"%d > 100\", i)
+                }
+            })
+        }
+    "};
+    fs.write(project_dir.join("pkg1/foo_test.go"), source_contents)
+        .unwrap();
+
+    let contents = do_maelstrom_go_test_test(
+        &temp_dir,
+        &project_dir,
+        ExtraCommandLineOptions {
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                ..Default::default()
+            },
+            list: Default::default(),
+        },
+        ExitCode::from(1),
+    );
+
+    assert!(
+        Regex::new(
+            "(?ms)^\
+            maelstrom-software.com/pkg1 FuzzB....FAIL   [\\d\\.]+s\n\
+            === RUN   FuzzB\n\
+            === RUN   FuzzB/seed\\#0\n\
+            === RUN   FuzzB/seed\\#1\n\
+            \\s\\s\\s\\sfoo_test.go:10: 200 > 100\n\
+            --- FAIL: FuzzB \\([\\d\\.]+s\\)\n\
+            \\s\\s\\s\\s--- PASS: FuzzB/seed\\#0 \\([\\d\\.]+s\\)\n\
+            \\s\\s\\s\\s--- FAIL: FuzzB/seed\\#1 \\([\\d\\.]+s\\)\n\
+            \n\
+            ================== Test Summary ==================\n\
+                Successful Tests:         0\n\
+                Failed Tests    :         1\n\
+                \\s\\s\\s\\smaelstrom-software.com/pkg1 FuzzB: failure\
+            $"
+        )
+        .unwrap()
+        .is_match(&contents),
+        "{contents}"
+    );
+}
+
+#[test]
+fn single_example_failure() {
+    let fs = Fs::new();
+    let temp_dir = tempdir().unwrap();
+
+    let project_dir = temp_dir.path().join("project");
+
+    fs.create_dir(&project_dir).unwrap();
+    fs.create_dir(project_dir.join("pkg1")).unwrap();
+
+    fs.write(project_dir.join("go.mod"), "module maelstrom-software.com")
+        .unwrap();
+
+    let source_contents = indoc::indoc! {"
+        package foo;
+
+        import \"fmt\"
+
+        func ExampleB() {
+            fmt.Println(\"foo\")
+            // Output: bar
+        }
+    "};
+    fs.write(project_dir.join("pkg1/foo_test.go"), source_contents)
+        .unwrap();
+
+    let contents = do_maelstrom_go_test_test(
+        &temp_dir,
+        &project_dir,
+        ExtraCommandLineOptions {
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                ..Default::default()
+            },
+            list: Default::default(),
+        },
+        ExitCode::from(1),
+    );
+
+    assert!(
+        Regex::new(
+            "(?ms)^\
+            maelstrom-software.com/pkg1 ExampleB.FAIL   [\\d\\.]+s\n\
+            got:\n\
+            foo\n\
+            want:\n\
+            bar\n\
+            \n\
+            ================== Test Summary ==================\n\
+                Successful Tests:         0\n\
+                Failed Tests    :         1\n\
+                \\s\\s\\s\\smaelstrom-software.com/pkg1 ExampleB: failure\
             $"
         )
         .unwrap()
