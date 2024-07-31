@@ -126,7 +126,7 @@ pub struct Config {
     #[config(flag, short = 'q')]
     pub quiet: Quiet,
 
-    /// The UI style to use. Options are `auto`, `simple`, and `fancy`.
+    /// The UI style to use. Options are "auto", "simple", and "fancy".
     #[config(value_name = "UI-STYLE", default = "UiKind::Auto")]
     pub ui: UiKind,
 
