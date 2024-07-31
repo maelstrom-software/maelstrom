@@ -382,5 +382,6 @@ job spec. It must be an unsigned, 32-bit integer.
 [[directives]]
 ignore = true
 
-This field specifies that the tests should be ignored and not run. If the tests would run otherwise
-they will instead display as "ignored". The tests still show up when listing.
+This field specifies that any tests matching the directive should not be run.
+When tests are run, ignored tests are displayed with a special "ignored" state.
+When tests are listed, ignored tests are listed normally.
