@@ -59,7 +59,7 @@ the log level to `maelstrom-client`, which will log its output in a [file named
 
 ## `quiet`
 
-The `quiet` configuration values, if set to `true`, causes <span
+The `quiet` configuration value, if set to `true`, causes <span
 style="white-space: nowrap;">`maelstrom-pytest`</span> to be more more succinct
 with its output. If <span style="white-space: nowrap;">`maelstrom-pytest`</span>
 is outputting to a terminal, it will display a single-line progress bar
