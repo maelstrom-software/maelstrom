@@ -13,6 +13,7 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`log-level`</span>                  | string  | [minimum log level](#log-level)                                                             | `"info"`
 <span style="white-space: nowrap;">`quiet`</span>                      | boolean | [don't output per-test information](#quiet)                                                 | `false`
 <span style="white-space: nowrap;">`ui`</span>                         | string  | [UI style to use](#ui)                                                                      | `"auto"`
+<span style="white-space: nowrap;">`repeat`</span>                     | number  | [how many times to run each test](#repeat)                                                  | `1`
 <span style="white-space: nowrap;">`timeout`</span>                    | string  | [override timeout value tests](#timeout)                                                    | don't override
 <span style="white-space: nowrap;">`collect-from-module`</span>        | string  | [collect tests from the specified module](#collect-from-module)                                                    | don't override
 
@@ -77,6 +78,12 @@ Style    | Description
 `simple` | This is our original UI. It prints one line per test result (unless [`quiet`](#quiet) is `true`), and will display some progress bars if standard output is a TTY.
 `fancy`  | This is our new UI. It has a rich TTY experience with a lot of status updates. It is incompatible with [`quiet`](#quiet) or with non-TTY standard output.
 `auto`   | Will choose `fancy` if standard output is a TTY and [`quiet`](#quiet) isn't `true`. Otherwise, it will choose `simple`.
+
+## `repeat`
+
+The `repeat` configuration value specifies how many times each test will be
+run. It must be a nonnegative integer. On the command line, `--loop` can be
+used as an alias for `--repeat`.
 
 ## `timeout`
 
