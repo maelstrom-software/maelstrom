@@ -7,6 +7,10 @@ assignees: ''
 
 ---
 
+**Acceptance Criteria**
+
+**Implementation Considerations**
+
 **Definition of Done**
 - [ ] `CHANGELOG.md` updated.
 - [ ] Documentation in `doc/book/head` updated.
