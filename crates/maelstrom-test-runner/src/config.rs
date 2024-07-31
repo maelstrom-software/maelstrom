@@ -130,7 +130,7 @@ pub struct Config {
     #[config(value_name = "UI-STYLE", default = "UiKind::Auto")]
     pub ui: UiKind,
 
-    /// Runs all of the selected tests this many times. Must be non-zero.
+    /// The number of times to run each selected test. Must be non-zero.
     #[config(alias = "loop", value_name = "COUNT", default = "Repeat::default()")]
     pub repeat: Repeat,
 
