@@ -12,6 +12,7 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`broker`</span>                     | string  | [address of broker](#broker)                                                                | standalone mode
 <span style="white-space: nowrap;">`log-level`</span>                  | string  | [minimum log level](#log-level)                                                             | `"info"`
 <span style="white-space: nowrap;">`quiet`</span>                      | boolean | [don't output per-test information](#quiet)                                                 | `false`
+<span style="white-space: nowrap;">`ui`</span>                         | string  | [UI style touse](#ui)                                                                       | `"auto"`
 <span style="white-space: nowrap;">`timeout`</span>                    | string  | [override timeout value tests](#timeout)                                                    | don't override
 
 ## `cache-size`
@@ -64,6 +65,12 @@ with its output. If <span style="white-space: nowrap;">`maelstrom-go-test`</span
 is outputting to a terminal, it will display a single-line progress bar
 indicating all test state, then print a summary at the end. If not outputting
 to a terminal, it will only print a summary at the end.
+
+## `ui`
+
+The `ui` configuration value controls the UI style used. It must be one of
+`auto`, `fancy`, or `simple`. The value of `auto` will use `fancy` if standard
+output is a terminal, and `simple` otherwise.
 
 ## `timeout`
 
