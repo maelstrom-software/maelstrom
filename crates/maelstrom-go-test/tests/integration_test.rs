@@ -108,6 +108,9 @@ fn many_different_tests_success() {
             fmt.Println(\"foo\")
             // Output: foo
         }
+        func TestC(t *testing.T) {
+            t.Skip(\"hi\")
+        }
     "};
     fs.write(project_dir.join("pkg1/foo_test.go"), source_contents)
         .unwrap();
@@ -152,18 +155,24 @@ fn many_different_tests_success() {
         "maelstrom-software.com/pkg1 ExampleB...OK",
         "maelstrom-software.com/pkg2 TestA......OK",
         "maelstrom-software.com/pkg2 FuzzB......OK",
+        "maelstrom-software.com/pkg1 TestC.IGNORED",
     ];
     for t in tests {
-        assert!(contents.contains(t), "{contents}");
+        assert!(contents.contains(t), "{t} not in {contents}");
     }
     assert!(
-        contents.ends_with(
-            "\
+        Regex::new(
+            "(?ms)^\
+            .*\n\
             ================== Test Summary ==================\n\
             Successful Tests:         4\n\
-            Failed Tests    :         0\
-        "
-        ),
+            Failed Tests    :         0\n\
+            Ignored Tests   :         1\n\
+            \\s\\s\\s\\smaelstrom-software.com/pkg1 TestC: ignored\
+            $"
+        )
+        .unwrap()
+        .is_match(&contents),
         "{contents}"
     );
 }
@@ -216,9 +225,9 @@ fn single_test_failure() {
             \\s\\s\\s\\sfoo_test.go:8: test failure\n\
             \n\
             ================== Test Summary ==================\n\
-                Successful Tests:         0\n\
-                Failed Tests    :         1\n\
-                \\s\\s\\s\\smaelstrom-software.com/pkg1 TestA: failure\
+            Successful Tests:         0\n\
+            Failed Tests    :         1\n\
+            \\s\\s\\s\\smaelstrom-software.com/pkg1 TestA: failure\
             $"
         )
         .unwrap()
@@ -284,9 +293,9 @@ fn single_fuzz_failure() {
             \\s\\s\\s\\s--- FAIL: FuzzB/seed\\#1 \\([\\d\\.]+s\\)\n\
             \n\
             ================== Test Summary ==================\n\
-                Successful Tests:         0\n\
-                Failed Tests    :         1\n\
-                \\s\\s\\s\\smaelstrom-software.com/pkg1 FuzzB: failure\
+            Successful Tests:         0\n\
+            Failed Tests    :         1\n\
+            \\s\\s\\s\\smaelstrom-software.com/pkg1 FuzzB: failure\
             $"
         )
         .unwrap()
@@ -344,9 +353,9 @@ fn single_example_failure() {
             bar\n\
             \n\
             ================== Test Summary ==================\n\
-                Successful Tests:         0\n\
-                Failed Tests    :         1\n\
-                \\s\\s\\s\\smaelstrom-software.com/pkg1 ExampleB: failure\
+            Successful Tests:         0\n\
+            Failed Tests    :         1\n\
+            \\s\\s\\s\\smaelstrom-software.com/pkg1 ExampleB: failure\
             $"
         )
         .unwrap()

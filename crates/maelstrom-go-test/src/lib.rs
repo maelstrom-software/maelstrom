@@ -399,6 +399,93 @@ impl CollectTests for GoTestCollector {
             Self::remove_fixture_output_test(case_str, lines)
         }
     }
+
+    fn was_test_ignored(case_str: &str, lines: &[String]) -> bool {
+        println!("{case_str:?} {lines:?}");
+        if let Some(last) = lines.iter().rposition(|s| !s.is_empty()) {
+            if last == 0 {
+                println!("ignored = false");
+                return false;
+            }
+            let r = lines[last - 1].starts_with(&format!("--- SKIP: {case_str} "))
+                && lines[last] == "PASS";
+            println!("ignored = {r}");
+            r
+        } else {
+            println!("ignored = false");
+            false
+        }
+    }
+}
+
+#[test]
+fn test_regular_output_not_skipped() {
+    let example = indoc::indoc! {"
+    === RUN   TestAdd
+    test output
+        foo_test.go:9: 1 + 2 != 3
+    --- FAIL: TestAdd (0.00s)
+    FAIL
+    "};
+    let ignored = GoTestCollector::was_test_ignored(
+        "TestAdd",
+        &example
+            .split('\n')
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>(),
+    );
+    assert!(!ignored);
+}
+
+#[test]
+fn test_empty_output_not_skipped() {
+    let ignored = GoTestCollector::was_test_ignored("TestAdd", &vec![]);
+    assert!(!ignored);
+}
+
+#[test]
+fn test_single_line_not_skipped() {
+    let ignored =
+        GoTestCollector::was_test_ignored("TestAdd", &vec!["--- SKIP: TestAdd (0.00s)".into()]);
+    assert!(!ignored);
+}
+
+#[test]
+fn test_skip_output() {
+    let example = indoc::indoc! {"
+    === RUN   TestAdd
+    test output
+        foo_test.go:11: HELLO
+    --- SKIP: TestAdd (0.00s)
+    PASS
+    "};
+    let ignored = GoTestCollector::was_test_ignored(
+        "TestAdd",
+        &example
+            .split('\n')
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>(),
+    );
+    assert!(ignored);
+}
+
+#[test]
+fn test_skip_output_different_case_str() {
+    let example = indoc::indoc! {"
+    === RUN   TestAdd2
+    test output
+        foo_test.go:11: HELLO
+    --- SKIP: TestAdd2 (0.00s)
+    PASS
+    "};
+    let ignored = GoTestCollector::was_test_ignored(
+        "TestAdd",
+        &example
+            .split('\n')
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>(),
+    );
+    assert!(!ignored);
 }
 
 #[test]

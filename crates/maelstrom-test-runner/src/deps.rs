@@ -183,6 +183,10 @@ pub trait CollectTests {
         lines
     }
 
+    fn was_test_ignored(_case_str: &str, _lines: &[String]) -> bool {
+        false
+    }
+
     fn get_packages(&self, ui: &ui::UiSender) -> Result<Vec<Self::Package>>;
 }
 

@@ -27,6 +27,8 @@ Similar to `go test`, `maelstrom-go-test` won't run any tests from nested
 modules. For these you need to change to the root or a sub-directory of the
 module-root for these modules.
 
+Tests which call [`t.Skip`](https://pkg.go.dev/testing#hdr-Skipping) are labeled as `IGNORED`.
+
 Currently we don't support go's test caching, coverage instrumentation,
 profiling, or benchmarking.
 

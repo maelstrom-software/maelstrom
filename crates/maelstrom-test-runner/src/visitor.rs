@@ -95,6 +95,7 @@ pub struct JobStatusVisitor<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCa
     case_str: String,
     ui: UiSender,
     remove_fixture_output: fn(&str, Vec<String>) -> Vec<String>,
+    was_ignored: fn(&str, &[String]) -> bool,
 }
 
 impl<ArtifactKeyT, CaseMetadataT> JobStatusVisitor<ArtifactKeyT, CaseMetadataT>
@@ -112,6 +113,7 @@ where
         case_str: String,
         ui: UiSender,
         remove_fixture_output: fn(&str, Vec<String>) -> Vec<String>,
+        was_ignored: fn(&str, &[String]) -> bool,
     ) -> Self {
         Self {
             tracker,
@@ -122,8 +124,29 @@ where
             case_str,
             ui,
             remove_fixture_output,
+            was_ignored,
         }
     }
+}
+
+fn was_ignored(
+    res: &JobOutputResult,
+    case_str: &str,
+    was_ignored_fn: impl Fn(&str, &[String]) -> bool,
+) -> bool {
+    let (_, case_str) = case_str.rsplit_once(' ').unwrap_or(("", case_str));
+    let lines = match res {
+        JobOutputResult::None => vec![],
+        JobOutputResult::Inline(bytes) => String::from_utf8_lossy(bytes)
+            .split('\n')
+            .map(ToOwned::to_owned)
+            .collect(),
+        JobOutputResult::Truncated { first, .. } => String::from_utf8_lossy(first)
+            .split('\n')
+            .map(ToOwned::to_owned)
+            .collect(),
+    };
+    was_ignored_fn(case_str, &lines)
 }
 
 fn format_test_output(
@@ -221,6 +244,12 @@ where
                         self.remove_fixture_output,
                     ));
                 }
+
+                if !job_failed && was_ignored(&stdout, &self.case_str, self.was_ignored) {
+                    self.job_ignored();
+                    return;
+                }
+
                 self.test_listing
                     .lock()
                     .unwrap()

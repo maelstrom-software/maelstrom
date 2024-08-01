@@ -295,6 +295,7 @@ where
             self.ui.clone(),
             MainAppDepsT::TestCollector::remove_fixture_output
                 as fn(&str, Vec<String>) -> Vec<String>,
+            MainAppDepsT::TestCollector::was_test_ignored as fn(&str, &[String]) -> bool,
         );
 
         if self.ignored_cases.contains(case_name) || test_metadata.ignore {
