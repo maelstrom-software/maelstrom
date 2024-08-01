@@ -401,18 +401,12 @@ impl CollectTests for GoTestCollector {
     }
 
     fn was_test_ignored(case_str: &str, lines: &[String]) -> bool {
-        println!("{case_str:?} {lines:?}");
         if let Some(last) = lines.iter().rposition(|s| !s.is_empty()) {
             if last == 0 {
-                println!("ignored = false");
                 return false;
             }
-            let r = lines[last - 1].starts_with(&format!("--- SKIP: {case_str} "))
-                && lines[last] == "PASS";
-            println!("ignored = {r}");
-            r
+            lines[last - 1].starts_with(&format!("--- SKIP: {case_str} ")) && lines[last] == "PASS"
         } else {
-            println!("ignored = false");
             false
         }
     }
