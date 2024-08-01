@@ -47,6 +47,7 @@ fn do_maelstrom_go_test_test(
             ui: ui::UiKind::Simple,
             repeat: Default::default(),
         },
+        go_test_options: Default::default(),
     };
     let term = InMemoryTerm::new(50, 50);
 

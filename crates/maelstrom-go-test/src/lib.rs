@@ -1,15 +1,16 @@
 pub mod alternative_mains;
 pub mod cli;
+mod config;
 mod go_test;
 mod pattern;
 
 use anyhow::{Context as _, Result};
+use config::GoTestOptions;
 use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
-use maelstrom_macro::Config;
 use maelstrom_test_runner::{
     metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
     CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata,
@@ -27,19 +28,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::{fmt, io};
 
+pub use config::Config;
 pub use maelstrom_test_runner::Logger;
-
-#[derive(Config, Debug)]
-pub struct Config {
-    #[config(flatten)]
-    pub parent: maelstrom_test_runner::config::Config,
-}
-
-impl AsRef<maelstrom_test_runner::config::Config> for Config {
-    fn as_ref(&self) -> &maelstrom_test_runner::config::Config {
-        &self.parent
-    }
-}
 
 pub const MAELSTROM_TEST_TOML: &str = "maelstrom-go-test.toml";
 pub const ADDED_DEFAULT_TEST_METADATA: &str = include_str!("added-default-test-metadata.toml");
@@ -169,6 +159,7 @@ impl GoTestCollector {
 pub(crate) struct GoTestArtifact {
     id: GoImportPath,
     path: PathBuf,
+    options: GoTestOptions,
 }
 
 impl From<go_test::GoTestArtifact> for GoTestArtifact {
@@ -176,6 +167,7 @@ impl From<go_test::GoTestArtifact> for GoTestArtifact {
         Self {
             id: GoImportPath(a.package.import_path),
             path: a.path,
+            options: a.options,
         }
     }
 }
@@ -265,6 +257,9 @@ impl TestArtifact for GoTestArtifact {
                 // Print out more information, in particular this include whether or not the test
                 // was skipped.
                 "-test.v".into(),
+                // Plumb these options through
+                format!("-test.short={}", self.options.short),
+                format!("-test.fullpath={}", self.options.fullpath),
             ],
         )
     }
@@ -311,8 +306,6 @@ impl Iterator for TestArtifactStream {
         self.0.next().map(|r| r.map(GoTestArtifact::from))
     }
 }
-
-struct GoTestOptions;
 
 impl GoTestCollector {
     fn remove_fixture_output_test(case_str: &str, mut lines: Vec<String>) -> Vec<String> {
@@ -367,15 +360,15 @@ impl CollectTests for GoTestCollector {
 
     fn start(
         &self,
-        color: bool,
-        _options: &GoTestOptions,
+        _color: bool,
+        options: &GoTestOptions,
         packages: Vec<&GoPackage>,
         ui: &UiSender,
     ) -> Result<(go_test::WaitHandle, TestArtifactStream)> {
         let packages = packages.into_iter().map(|m| &m.0).collect();
 
         let build_dir = self.cache_dir.join::<BuildDir>("test-binaries");
-        let (wait, stream) = go_test::build_and_collect(color, packages, &build_dir, ui.clone())?;
+        let (wait, stream) = go_test::build_and_collect(options, packages, &build_dir, ui.clone())?;
         Ok((wait, TestArtifactStream(stream)))
     }
 
@@ -774,7 +767,7 @@ pub fn main_with_stderr_and_project_dir(
             stderr_is_tty,
             project_dir,
             &state_dir,
-            GoTestOptions,
+            config.go_test_options,
             log,
         )?;
 

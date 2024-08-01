@@ -1,4 +1,4 @@
-use crate::GoImportPath;
+use crate::{GoImportPath, GoTestOptions};
 use anyhow::{anyhow, Context as _, Result};
 use maelstrom_test_runner::{ui::UiSender, BuildDir};
 use maelstrom_util::{
@@ -110,17 +110,17 @@ fn run_build_cmd(cmd: &mut Command, stdout_to_ui: bool, ui: UiSender) -> Result<
     handle_build_cmd_status(exit_status, stdout, stderr)
 }
 
-fn go_build(dir: &Path, output: &Path, ui: UiSender) -> Result<String> {
-    run_build_cmd(
-        Command::new("go")
-            .current_dir(dir)
-            .arg("test")
-            .arg("-c")
-            .arg("-o")
-            .arg(output),
-        true, /* stdout_to_ui */
-        ui,
-    )
+fn go_build(dir: &Path, output: &Path, options: &GoTestOptions, ui: UiSender) -> Result<String> {
+    let mut cmd = Command::new("go");
+    cmd.current_dir(dir)
+        .arg("test")
+        .arg("-c")
+        .arg("-o")
+        .arg(output);
+    if let Some(vet_value) = &options.vet {
+        cmd.arg(format!("--vet={vet_value}"));
+    }
+    run_build_cmd(&mut cmd, true /* stdout_to_ui */, ui)
 }
 
 fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
@@ -135,11 +135,13 @@ fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
 pub(crate) struct GoTestArtifact {
     pub package: GoPackage,
     pub path: PathBuf,
+    pub options: GoTestOptions,
 }
 
 fn multi_go_build(
     packages: Vec<GoPackage>,
     build_dir: RootBuf<BuildDir>,
+    options: GoTestOptions,
     send: mpsc::Sender<GoTestArtifact>,
     ui: UiSender,
 ) -> Result<()> {
@@ -158,8 +160,9 @@ fn multi_go_build(
 
         let send_clone = send.clone();
         let ui_clone = ui.clone();
+        let options_clone = options.clone();
         handles.push(thread::spawn(move || -> Result<()> {
-            let res = go_build(&pkg.dir, &binary_path, ui_clone);
+            let res = go_build(&pkg.dir, &binary_path, &options_clone, ui_clone);
             if is_no_go_files_error(&res) {
                 return Ok(());
             }
@@ -169,6 +172,7 @@ fn multi_go_build(
                 let _ = send_clone.send(GoTestArtifact {
                     package: pkg,
                     path: binary_path.to_path_buf(),
+                    options: options_clone,
                 });
             }
             Ok(())
@@ -186,15 +190,16 @@ fn multi_go_build(
 }
 
 pub(crate) fn build_and_collect(
-    _color: bool,
+    options: &GoTestOptions,
     packages: Vec<&GoPackage>,
     build_dir: &Root<BuildDir>,
     ui: UiSender,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
+    let options = options.clone();
     let build_dir = build_dir.to_owned();
     let paths = packages.into_iter().cloned().collect();
     let (send, recv) = mpsc::channel();
-    let handle = thread::spawn(move || multi_go_build(paths, build_dir, send, ui));
+    let handle = thread::spawn(move || multi_go_build(paths, build_dir, options, send, ui));
     Ok((WaitHandle { handle }, TestArtifactStream { recv }))
 }
 

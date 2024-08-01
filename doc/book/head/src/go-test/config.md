@@ -15,6 +15,9 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`ui`</span>                         | string  | [UI style to use](#ui)                                                                      | `"auto"`
 <span style="white-space: nowrap;">`repeat`</span>                     | number  | [how many times to run each test](#repeat)                                                  | `1`
 <span style="white-space: nowrap;">`timeout`</span>                    | string  | [override timeout value tests](#timeout)                                                    | don't override
+<span style="white-space: nowrap;">`vet`</span>                        | string  | [control `go test` `-vet` flag_value](#vet)                                                 | `go test`'s default
+<span style="white-space: nowrap;">`short`</span>                      | boolean | [tells long running tests to shorten their time](#short)                                    | `false`
+<span style="white-space: nowrap;">`fullpath`</span>                   | boolean | [Shows the full file name in error messages](#fullpath)                                     | `false`
 
 ## `cache-size`
 
@@ -89,3 +92,19 @@ used as an alias for `--repeat`.
 The optional `timeout` configuration value provides the
 [timeout](../spec.md#timeout) value to use for all tests. This will override
 any value set in [`maelstrom-go-test.toml`](spec/fields.md#timeout).
+
+## `vet`
+
+This configuration controls the value of the `-vet` flag that is passed to `go test`. See `go help
+test` for more information. If not provided, it similarly does not provide the flag to `go test`
+causing it to do its default as described in the aforementioned documentation.
+
+## `short`
+
+Tells long running tests to shorten their run time. This flag is forwarded to test binaries. See `go
+help testflag` for more information about its affect
+
+## `fullpath`
+
+Shows the full file name in error messages. This flag is forwarded to test binaries. See `go help
+testflag` for more information about its affect
