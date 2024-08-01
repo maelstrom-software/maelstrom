@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture code.
 - `maelstrom-go-test` now shows tests which call `t.Skip` as status `IGNORED`
 
+#### Changed
+- `ui` test-runner configuration option value now matches the same casing as the CLI option
+  (kebab-case)
+
 ## [0.11.0] - 2024-07-30
 
 ### General

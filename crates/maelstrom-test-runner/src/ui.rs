@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 use std::{fmt, str};
+use strum::EnumIter;
 
 pub use simple::SimpleUi;
 
@@ -219,7 +220,8 @@ impl slog::Drain for UiSlogDrain {
     }
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, EnumIter)]
+#[serde(rename_all = "kebab-case")]
 pub enum UiKind {
     Auto,
     Simple,
@@ -261,6 +263,29 @@ impl str::FromStr for UiKind {
                 ui_name: ui_name.into(),
             }),
         }
+    }
+}
+
+#[test]
+fn ui_kind_parsing_and_fmt() {
+    use strum::IntoEnumIterator as _;
+
+    for k in UiKind::iter() {
+        let s = k.to_string();
+
+        // parse from Display::fmt value
+        let parsed: UiKind = s.parse().unwrap();
+        assert_eq!(parsed, k);
+
+        // TOML value serialization matches Display::fmt value
+        let mut toml_str = String::new();
+        let serializer = toml::ser::ValueSerializer::new(&mut toml_str);
+        Serialize::serialize(&k, serializer).unwrap();
+        assert_eq!(&toml_str, &format!("\"{s}\""));
+
+        // TOML value deserialization matches original value
+        let toml_v = UiKind::deserialize(toml::de::ValueDeserializer::new(&toml_str)).unwrap();
+        assert_eq!(toml_v, k);
     }
 }
 
