@@ -7,6 +7,8 @@ assignees: ''
 
 ---
 
+**Use Cases**
+
 **Acceptance Criteria**
 
 **Implementation Considerations**
