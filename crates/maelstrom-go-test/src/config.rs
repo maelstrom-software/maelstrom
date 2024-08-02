@@ -13,7 +13,7 @@ pub struct Config {
 pub struct GoTestOptions {
     /// Controls the value of the `-vet` flag being passed to `go test`. See `go help test` for
     /// details.
-    #[config(option, default = r#""go test's default""#, value_name = "VET_OPTIONS")]
+    #[config(option, default = r#""go test's default""#, value_name = "VET-OPTIONS")]
     pub vet: Option<String>,
 
     /// Tells long-running tests to shorten their run time. See `go help testflag` for details.
