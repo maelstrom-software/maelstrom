@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ui` test-runner configuration option value now matches the same casing as the CLI option
   (kebab-case)
 
+### Fixed
+- Fixed issue with test-runner fancy UI where it would crash if the summary was too large.
+
 ## [0.11.0] - 2024-07-30
 
 ### General

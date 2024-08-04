@@ -231,7 +231,7 @@ fn format_finished(res: UiJobResult) -> Vec<PrintAbove> {
         ));
     }
 
-    let mut output = vec![Row::new(line.into_iter()).into()];
+    let mut output = vec![(Row::new(line.into_iter()), test_status_constraints()).into()];
 
     if let Some(details) = res.status.details() {
         output.extend(details.split('\n').map(|l| Line::from(l.to_owned()).into()));
@@ -266,31 +266,31 @@ fn format_running_test(name: &str, time: &Instant) -> Row<'static> {
 
 #[derive(From)]
 enum PrintAbove {
-    StatusLine(Row<'static>),
+    StatusLine(Row<'static>, Vec<Constraint>),
     Output(Line<'static>),
 }
 
 impl PrintAbove {
     fn height(&self, width: u16) -> u16 {
         match self {
-            Self::StatusLine(_) => 1,
+            Self::StatusLine(_, _) => 1,
             Self::Output(l) => (l.width() as u16).div_ceil(width),
         }
     }
 }
 
+fn test_status_constraints() -> Vec<Constraint> {
+    vec![
+        Constraint::Fill(1),
+        Constraint::Length(7),
+        Constraint::Length(8),
+    ]
+}
+
 impl Widget for PrintAbove {
     fn render(self, area: Rect, buf: &mut Buffer) {
         match self {
-            Self::StatusLine(row) => Table::new(
-                [row],
-                [
-                    Constraint::Fill(1),
-                    Constraint::Length(7),
-                    Constraint::Length(8),
-                ],
-            )
-            .render(area, buf),
+            Self::StatusLine(row, constraints) => Table::new([row], constraints).render(area, buf),
             Self::Output(l) => Paragraph::new(l)
                 .wrap(Wrap { trim: true })
                 .render(area, buf),
@@ -452,6 +452,11 @@ impl Ui for FancyUi {
             }
         }
 
+        // Spit out the summary
+        if self.all_done.is_some() {
+            self.render_summary();
+        }
+
         drop(slog_drain);
         if !self.print_above.is_empty() {
             let rows = std::mem::take(&mut self.print_above);
@@ -468,13 +473,6 @@ impl Ui for FancyUi {
         self.running_tests.clear();
 
         terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
-
-        // Spit out the summary
-        if self.all_done.is_some() {
-            terminal.insert_before(self.summary_height(), |buf| {
-                self.render_summary(buf.area, buf)
-            })?;
-        }
 
         Ok(())
     }
@@ -569,19 +567,9 @@ impl FancyUi {
             .render(area, buf);
     }
 
-    fn summary_height(&self) -> u16 {
-        let summary = self.all_done.as_ref().unwrap();
-        let mut h = summary.failed.len() + summary.ignored.len() + 3;
-        if !summary.ignored.is_empty() {
-            h += 1;
-        }
-        h.try_into().unwrap_or(u16::MAX)
-    }
-
-    fn render_summary(&mut self, area: Rect, buf: &mut Buffer) {
-        let layout = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]);
-        let [title_area, table_area] = layout.areas(area);
-        Paragraph::new(Line::from("Test Summary").centered()).render(title_area, buf);
+    fn render_summary(&mut self) {
+        self.print_above
+            .push(Line::from("Test Summary").centered().into());
 
         let summary = self.all_done.as_ref().unwrap();
         let num_failed = summary.failed.len();
@@ -590,53 +578,46 @@ impl FancyUi {
 
         let summary_line = |msg, cnt| {
             (
-                Constraint::Length(1),
-                Table::new(
-                    [Row::new([Cell::from(msg), Cell::from(format!("{cnt}"))])],
-                    [Constraint::Fill(1), Constraint::Length(9)],
-                ),
+                Row::new([Cell::from(msg), Cell::from(format!("{cnt}"))]),
+                vec![Constraint::Fill(1), Constraint::Length(9)],
             )
+                .into()
         };
 
-        let list_tests = |tests: &Vec<String>, status: Span<'static>| {
+        let list_tests = |tests: &Vec<String>, status: Span<'static>| -> Vec<_> {
             let longest = tests.iter().map(|t| t.width()).max().unwrap_or(0);
-            (
-                Constraint::Length(tests.len().try_into().unwrap_or(u16::MAX)),
-                Table::new(
-                    tests.iter().map(|t| {
+            tests
+                .iter()
+                .map(|t| {
+                    (
                         Row::new([
                             Cell::from(""),
                             Cell::from(format!("{t}:")),
                             Cell::from(status.clone()),
-                        ])
-                    }),
-                    [
-                        Constraint::Length(4),
-                        Constraint::Length(longest as u16 + 1),
-                        Constraint::Length(7),
-                    ],
-                ),
-            )
+                        ]),
+                        vec![
+                            Constraint::Length(4),
+                            Constraint::Length(longest as u16 + 1),
+                            Constraint::Length(7),
+                        ],
+                    )
+                        .into()
+                })
+                .collect()
         };
 
-        let mut sections = vec![
-            summary_line("Successful Tests".green(), num_succeeded),
-            summary_line("Failed Tests".red(), num_failed),
-            list_tests(&summary.failed, "failure".red()),
-        ];
-        if num_ignored > 0 {
-            sections.push(summary_line("Ignored Tests".yellow(), num_ignored));
-            sections.push(list_tests(&summary.ignored, "ignored".yellow()));
-        }
+        self.print_above
+            .push(summary_line("Successful Tests".green(), num_succeeded));
+        self.print_above
+            .push(summary_line("Failed Tests".red(), num_failed));
+        self.print_above
+            .extend(list_tests(&summary.failed, "failure".red()));
 
-        let layout = Layout::vertical(sections.iter().map(|(c, _)| *c));
-        let areas = layout.split(table_area);
-        let sections = sections
-            .into_iter()
-            .zip(areas.iter())
-            .map(|((_, t), a)| (*a, t));
-        for (rect, t) in sections {
-            t.render(rect, buf);
+        if num_ignored > 0 {
+            self.print_above
+                .push(summary_line("Ignored Tests".yellow(), num_ignored));
+            self.print_above
+                .extend(list_tests(&summary.ignored, "ignored".yellow()));
         }
     }
 
