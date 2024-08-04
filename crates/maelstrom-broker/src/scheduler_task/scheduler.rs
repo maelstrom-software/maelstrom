@@ -230,7 +230,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 self.receive_worker_connected(deps, id, slots, sender)
             }
             Message::WorkerDisconnected(id) => self.receive_worker_disconnected(deps, id),
-            Message::FromWorker(wid, WorkerToBroker(jid, result)) => {
+            Message::FromWorker(wid, WorkerToBroker::JobResponse(jid, result)) => {
                 self.receive_worker_response(deps, wid, jid, result)
             }
             Message::GotArtifact(digest, size, path) => {
@@ -997,7 +997,7 @@ mod tests {
 
         fixture.receive_message(FromWorker(
             wid![1],
-            WorkerToBroker(jid![1], Ok(outcome![1])),
+            WorkerToBroker::JobResponse(jid![1], Ok(outcome![1])),
         ));
     }
 
@@ -1019,7 +1019,7 @@ mod tests {
     script_test! {
         response_from_known_worker_for_unknown_job_ignored,
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        FromWorker(wid![1], WorkerToBroker(jid![1], Ok(outcome![1]))) => {};
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1], Ok(outcome![1]))) => {};
     }
 
     script_test! {
@@ -1035,7 +1035,7 @@ mod tests {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1], spec![1, Tar])),
         };
-        FromWorker(wid![1], WorkerToBroker(jid![1], Ok(outcome![1]))) => {
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
         };
@@ -1044,7 +1044,7 @@ mod tests {
     script_test! {
         response_from_worker_for_disconnected_client_ignored,
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        FromWorker(wid![1], WorkerToBroker(jid![1], Ok(outcome![1]))) => {};
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1], Ok(outcome![1]))) => {};
     }
 
     script_test! {
@@ -1110,7 +1110,7 @@ mod tests {
             ToWorker(wid![3], EnqueueJob(jid![1, 7], spec![7, Tar])),
         };
 
-        FromWorker(wid![1], WorkerToBroker(jid![1, 1], Ok(outcome![1]))) => {
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
         };
@@ -1119,7 +1119,7 @@ mod tests {
             ToWorker(wid![1], EnqueueJob(jid![1, 8], spec![8, Tar])),
         };
 
-        FromWorker(wid![2], WorkerToBroker(jid![1, 2], Ok(outcome![2]))) => {
+        FromWorker(wid![2], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![2]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
             CacheDecrementRefcount(digest![2]),
         };
@@ -1128,7 +1128,7 @@ mod tests {
             ToWorker(wid![2], EnqueueJob(jid![1, 9], spec![9, Tar])),
         };
 
-        FromWorker(wid![3], WorkerToBroker(jid![1, 3], Ok(outcome![3]))) => {
+        FromWorker(wid![3], WorkerToBroker::JobResponse(jid![1, 3], Ok(outcome![3]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![3], Ok(outcome![3]))),
             CacheDecrementRefcount(digest![3]),
         };
@@ -1187,14 +1187,14 @@ mod tests {
         };
 
         // 2/2 1/2
-        FromWorker(wid![2], WorkerToBroker(jid![1, 2], Ok(outcome![2]))) => {
+        FromWorker(wid![2], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![2]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
             CacheDecrementRefcount(digest![2]),
             ToWorker(wid![2], EnqueueJob(jid![1, 5], spec![5, Tar])),
         };
 
         // 1/2 2/2
-        FromWorker(wid![1], WorkerToBroker(jid![1, 1], Ok(outcome![1]))) => {
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 6], spec![6, Tar])),
@@ -1292,7 +1292,7 @@ mod tests {
             ToWorker(wid![3], EnqueueJob(jid![1, 1], spec![1, Tar])),
         };
 
-        FromWorker(wid![2], WorkerToBroker(jid![1, 2], Ok(outcome![2]))) => {
+        FromWorker(wid![2], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![2]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
             CacheDecrementRefcount(digest![2]),
             ToWorker(wid![2], EnqueueJob(jid![1, 4], spec![4, Tar].estimated_duration(Some(millis!(40))))),
@@ -1329,7 +1329,7 @@ mod tests {
             CacheGetArtifact(jid![1, 4], digest![4]),
         };
 
-        FromWorker(wid![1], WorkerToBroker(jid![1, 1], Ok(outcome![1]))) => {
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 3], spec![3, Tar].estimated_duration(Some(millis!(300))))),
@@ -1343,7 +1343,7 @@ mod tests {
             ToWorker(wid![2], EnqueueJob(jid![1, 2], spec![2, Tar])),
         };
 
-        FromWorker(wid![2], WorkerToBroker(jid![1, 2], Ok(outcome![2]))) => {
+        FromWorker(wid![2], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![2]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
             CacheDecrementRefcount(digest![2]),
             ToWorker(wid![2], EnqueueJob(jid![1, 3], spec![3, Tar].estimated_duration(Some(millis!(300))))),
@@ -1410,12 +1410,12 @@ mod tests {
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![2, Tar])),
         };
 
-        FromWorker(wid![1], WorkerToBroker(jid![1, 1], Ok(outcome![1]))) => {
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
         };
 
-        FromWorker(wid![1], WorkerToBroker(jid![1, 2], Ok(outcome![1]))) => {
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![2]),
         };
@@ -1518,7 +1518,7 @@ mod tests {
             CacheClientDisconnected(cid![2]),
         };
 
-        FromWorker(wid![1], WorkerToBroker(jid![1, 1], Ok(outcome![1]))) => {
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 3], spec![3, Tar])),
@@ -1635,7 +1635,7 @@ mod tests {
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Tar), (43, Tar), (44, Tar)]])),
         };
 
-        FromWorker(wid![1], WorkerToBroker(jid![1, 2], Ok(outcome![1]))) => {
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![42]),
             CacheDecrementRefcount(digest![43]),
@@ -2166,7 +2166,7 @@ mod tests {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec![1, Tar])),
         };
-        FromWorker(wid![1], WorkerToBroker(jid![1, 1], Ok(outcome![1]))) => {
+        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
         };

@@ -511,12 +511,19 @@ where
         match state {
             ExecutingJobState::Nominal { .. } => {
                 self.broker_sender
-                    .send_message_to_broker(WorkerToBroker(jid, result.map(JobOutcome::Completed)));
+                    .send_message_to_broker(WorkerToBroker::JobResponse(
+                        jid,
+                        result.map(JobOutcome::Completed),
+                    ));
             }
             ExecutingJobState::Canceled => {}
-            ExecutingJobState::TimedOut => self.broker_sender.send_message_to_broker(
-                WorkerToBroker(jid, result.map(|c| JobOutcome::TimedOut(c.effects))),
-            ),
+            ExecutingJobState::TimedOut => {
+                self.broker_sender
+                    .send_message_to_broker(WorkerToBroker::JobResponse(
+                        jid,
+                        result.map(|c| JobOutcome::TimedOut(c.effects)),
+                    ))
+            }
         }
 
         for cache::Key { kind, digest } in cache_keys {
@@ -555,10 +562,11 @@ where
             //
             // Otherwise, it means that there were previous errors for this entry, or it was
             // canceled, and there's nothing to do here.
-            self.broker_sender.send_message_to_broker(WorkerToBroker(
-                jid,
-                Err(JobError::System(format!("{msg} {digest}: {err:?}"))),
-            ));
+            self.broker_sender
+                .send_message_to_broker(WorkerToBroker::JobResponse(
+                    jid,
+                    Err(JobError::System(format!("{msg} {digest}: {err:?}"))),
+                ));
             for cache::Key { kind, digest } in entry.tracker.into_cache_keys() {
                 self.cache.decrement_ref_count(kind, &digest);
             }
@@ -1196,7 +1204,7 @@ mod tests {
             CacheDecrementRefCount(UpperFsLayer, upper_digest!(41, 42, 41)),
         };
         Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
+            SendMessageToBroker(WorkerToBroker::JobResponse(jid!(1), Ok(outcome!(1)))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             JobHandleDropped(jid!(1)),
@@ -1326,7 +1334,7 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
         };
         Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
+            SendMessageToBroker(WorkerToBroker::JobResponse(jid!(1), Ok(outcome!(1)))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             JobHandleDropped(jid!(1)),
@@ -1358,7 +1366,7 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(3), jid!(3)),
         };
         Message::JobCompleted(jid!(1), Err(JobError::System(string!("system error")))) => {
-            SendMessageToBroker(WorkerToBroker(
+            SendMessageToBroker(WorkerToBroker::JobResponse(
                 jid!(1), Err(JobError::System(string!("system error"))))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
@@ -1366,7 +1374,7 @@ mod tests {
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/b")),
         };
         Message::JobCompleted(jid!(2), Err(JobError::Execution(string!("execution error")))) => {
-            SendMessageToBroker(WorkerToBroker(
+            SendMessageToBroker(WorkerToBroker::JobResponse(
                 jid!(2), Err(JobError::Execution(string!("execution error"))))),
             CacheDecrementRefCount(Blob, digest!(2)),
             CacheDecrementRefCount(BottomFsLayer, digest!(2)),
@@ -1426,7 +1434,7 @@ mod tests {
             StartTimer(jid!(1), Duration::from_secs(33)),
         };
         Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
+            SendMessageToBroker(WorkerToBroker::JobResponse(jid!(1), Ok(outcome!(1)))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             TimerHandleDropped(jid!(1)),
@@ -1484,7 +1492,7 @@ mod tests {
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::TimedOut(JobEffects {
+            SendMessageToBroker(WorkerToBroker::JobResponse(jid!(1), Ok(JobOutcome::TimedOut(JobEffects {
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Inline(boxed_u8!(b"stderr")),
                 duration: std::time::Duration::from_secs(1),
@@ -1515,7 +1523,7 @@ mod tests {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             TimerHandleDropped(jid!(1)),
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
+            SendMessageToBroker(WorkerToBroker::JobResponse(jid!(1), Ok(outcome!(1)))),
             JobHandleDropped(jid!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/2")),
         };
@@ -1580,7 +1588,7 @@ mod tests {
         };
         ArtifactFetchCompleted(digest!(42), Err(anyhow!("foo"))) => {
             CacheGotArtifactFailure(Blob, digest!(42)),
-            SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::System(
+            SendMessageToBroker(WorkerToBroker::JobResponse(jid!(1), Err(JobError::System(
                 string!("Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a: foo"))))),
             CacheDecrementRefCount(Blob, digest!(41))
         };
@@ -1638,7 +1646,7 @@ mod tests {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             CacheDecrementRefCount(UpperFsLayer, upper_digest!(1, 1)),
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
+            SendMessageToBroker(WorkerToBroker::JobResponse(jid!(1), Ok(outcome!(1)))),
             JobHandleDropped(jid!(1)),
         };
     }

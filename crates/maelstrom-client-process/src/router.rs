@@ -156,7 +156,7 @@ impl<DepsT: Deps> Router<DepsT> {
                     counts,
                 );
             }
-            Message::LocalWorker(WorkerToBroker(jid, result)) => {
+            Message::LocalWorker(WorkerToBroker::JobResponse(jid, result)) => {
                 if self.counts[JobState::Pending] > 0 {
                     self.counts[JobState::Pending] -= 1;
                 } else {
@@ -636,7 +636,10 @@ mod tests {
             .receive_message(RunJob(spec!(0, Tar), cjid!(0)));
         fixture
             .router
-            .receive_message(LocalWorker(WorkerToBroker(jid!(0, 1), Ok(outcome!(0)))));
+            .receive_message(LocalWorker(WorkerToBroker::JobResponse(
+                jid!(0, 1),
+                Ok(outcome!(0)),
+            )));
     }
 
     script_test! {
@@ -645,7 +648,7 @@ mod tests {
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
-        LocalWorker(WorkerToBroker(jid!(0, 0), Ok(outcome!(0)))) => {
+        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
             JobDone(cjid!(0), Ok(outcome!(0))),
         };
     }
@@ -660,7 +663,10 @@ mod tests {
             .receive_message(RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)));
         fixture
             .router
-            .receive_message(LocalWorker(WorkerToBroker(jid!(0, 1), Ok(outcome!(0)))));
+            .receive_message(LocalWorker(WorkerToBroker::JobResponse(
+                jid!(0, 1),
+                Ok(outcome!(0)),
+            )));
     }
 
     script_test! {
@@ -669,7 +675,7 @@ mod tests {
         RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar).network(JobNetwork::Local)),
         };
-        LocalWorker(WorkerToBroker(jid!(0, 0), Ok(outcome!(0)))) => {
+        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
             JobDone(cjid!(0), Ok(outcome!(0))),
         };
     }
@@ -805,7 +811,7 @@ mod tests {
             }),
         };
 
-        LocalWorker(WorkerToBroker(jid!(0, 3), Ok(outcome!(3)))) => {
+        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 3), Ok(outcome!(3)))) => {
             JobDone(cjid!(3), Ok(outcome!(3))),
         };
         GetJobStateCounts(5) => {
@@ -817,7 +823,7 @@ mod tests {
             }),
         };
 
-        LocalWorker(WorkerToBroker(jid!(0, 2), Ok(outcome!(2)))) => {
+        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 2), Ok(outcome!(2)))) => {
             JobDone(cjid!(2), Ok(outcome!(2))),
         };
         GetJobStateCounts(6) => {
@@ -829,7 +835,7 @@ mod tests {
             }),
         };
 
-        LocalWorker(WorkerToBroker(jid!(0, 1), Ok(outcome!(1)))) => {
+        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 1), Ok(outcome!(1)))) => {
             JobDone(cjid!(1), Ok(outcome!(1))),
         };
         GetJobStateCounts(7) => {
@@ -841,7 +847,7 @@ mod tests {
             }),
         };
 
-        LocalWorker(WorkerToBroker(jid!(0, 0), Ok(outcome!(0)))) => {
+        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
             JobDone(cjid!(0), Ok(outcome!(0))),
         };
         GetJobStateCounts(8) => {
@@ -924,7 +930,7 @@ mod tests {
             }),
         };
 
-        LocalWorker(WorkerToBroker(jid!(0, 0), Ok(outcome!(0)))) => {
+        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
             JobDone(cjid!(0), Ok(outcome!(0))),
         };
         Broker(BrokerToClient::JobStateCountsResponse(enum_map! {

@@ -30,7 +30,9 @@ pub enum BrokerToWorker {
 /// [`BrokerToWorker::EnqueueJob`] messages. After sending the initial [`Hello`], a worker will
 /// send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct WorkerToBroker(pub JobId, pub JobOutcomeResult);
+pub enum WorkerToBroker {
+    JobResponse(JobId, JobOutcomeResult),
+}
 
 /// Message sent from the broker to a client. The broker won't send a message until it has recevied
 /// a [`Hello`] and determined the type of its interlocutor.
