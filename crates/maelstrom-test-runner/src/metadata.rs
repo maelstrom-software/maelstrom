@@ -283,31 +283,18 @@ where
         maelstrom_test_toml: &str,
     ) -> Result<Self> {
         struct MaelstromTestTomlFile;
-        let path1 = project_dir
+        let path = project_dir
             .as_ref()
             .join::<MaelstromTestTomlFile>(maelstrom_test_toml);
-        if let Some(contents) = Fs::new().read_to_string_if_exists(&path1)? {
+        if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
             return Self::from_str(&contents)
-                .with_context(|| format!("parsing {}", path1.display()));
-        }
-
-        let path2 = project_dir
-            .as_ref()
-            .join::<MaelstromTestTomlFile>("maelstrom-test.toml");
-        if let Some(contents) = Fs::new().read_to_string_if_exists(&path2)? {
-            slog::warn!(
-                log,
-                "use of `maelstrom-test.toml` file is deprecated and support will \
-                be removed in future releases. Please rename it to `{maelstrom_test_toml}`."
-            );
-            return Self::from_str(&contents)
-                .with_context(|| format!("parsing {}", path2.display()));
+                .with_context(|| format!("parsing {}", path.display()));
         }
 
         slog::debug!(
             log,
             "no test metadata configuration found, using default";
-            "search_paths" => ?[path1, path2]
+            "search_path" => ?path,
         );
         Ok(Default::default())
     }
@@ -397,30 +384,6 @@ mod tests {
             }
         );
         assert_eq!(log_lines.len(), 0, "{log_lines:?}");
-    }
-
-    #[test]
-    fn load_deprecated_file() {
-        let fs = Fs::new();
-        let t = tempfile::tempdir().unwrap();
-        fs.write(t.path().join("maelstrom-test.toml"), "[[directives]]")
-            .unwrap();
-
-        let (res, log_lines) = load_test(&t);
-
-        assert_eq!(
-            res,
-            AllMetadata {
-                directives: vec![TestDirective::default()]
-            }
-        );
-        assert_eq!(log_lines.len(), 1, "{log_lines:?}");
-        assert_eq!(
-            log_lines[0]["msg"],
-            "use of `maelstrom-test.toml` file is deprecated and support will be removed in \
-            future releases. Please rename it to `simple-test.toml`."
-        );
-        assert_eq!(log_lines[0]["level"], "WARN");
     }
 
     #[test]
