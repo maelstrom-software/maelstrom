@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--vet` option added to `maelstrom-go-test`
 - `--short` flag added to `maelstrom-go-test`
 - `--fullpath` flag added to `maelstrom-go-test`
+- `extra-test-binary-args` option added to `maelstrom-go-test`
 
 #### Changed
 - `ui` test-runner configuration option value now matches the same casing as the CLI option

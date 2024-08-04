@@ -26,6 +26,7 @@ string  | `--frob-name string`
 number  | `--frob-size=42`
 number  | `--frob-size 42`
 boolean | `--enable-frobs`
+list    | `--frob-name=a --frob-name=b` or `-- a b c`
 
 There is currently no way to set a boolean configuration value to `false` from
 the command-line.
@@ -46,9 +47,12 @@ string  | `MAELSTROM_PROG_FROB_NAME=string`
 number  | `MAELSTROM_PROG_FROB_SIZE=42`
 boolean | `MAELSTROM_PROG_ENABLE_FROBS=true`
 boolean | `MAELSTROM_PROG_ENABLE_FROBS=false`
+list    | `MAELSTROM_PROG_FROBS="a b c"`
 
 Note that you don't put quotation marks around string values. You also can set
 boolean values to either `true` or `false`.
+
+List values are white-space delimited. Any extra white-space between entries is ignored.
 
 ## Configuration Files
 
@@ -61,6 +65,7 @@ frob-name = "string"
 frob-size = 42
 enable-frobs = true
 enable-qux = false
+frobs = ["a", "b"]
 ```
 
 Maelstrom programs support the existence of multiple configuration files. In

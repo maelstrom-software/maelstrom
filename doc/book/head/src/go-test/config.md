@@ -18,6 +18,7 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`vet`</span>                        | string  | [control `go test` `-vet` flag_value](#vet)                                                 | `go test`'s default
 <span style="white-space: nowrap;">`short`</span>                      | boolean | [tells long running tests to shorten their times](#short)                                   | `false`
 <span style="white-space: nowrap;">`fullpath`</span>                   | boolean | [shows the full file name in error messages](#fullpath)                                     | `false`
+<span style="white-space: nowrap;">`extra-test-binary-args`</span>     | list    | [pass arbitrary arguments to test binary](#extra-test-binary-args)                          | no args
 
 ## `cache-size`
 
@@ -108,3 +109,20 @@ test binaries. See `go help testflag` for more information.
 
 Shows the full file name in error messages. This flag is forwarded to test
 binaries. See `go help testflag` for more information.
+
+## `extra-test-binary-args`
+
+This allows passing of arbitrary command-line arguments to the Go test binary. See `go help
+testflag` for what are accepted normally. Since these arguments are passed directly and not
+interpreted, this can also be used for custom command-line arguments interpreted by the test.
+
+These arguments are added last after `short` and `fullpath`. It could be possible to interfere with
+the operation of those flags by the addition of certain arguments.
+
+When provided on the command-line these arguments are positional and come after any other arguments.
+To avoid ambiguity, `--` should be used to denote the end of normal command-line arguments, and the
+beginning these arguments like follows:
+
+```bash
+maelstrom-go-test -- -test.parallel 12
+```

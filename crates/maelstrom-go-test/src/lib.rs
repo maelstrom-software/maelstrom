@@ -244,24 +244,23 @@ impl TestArtifact for GoTestArtifact {
         _case_metadata: &NoCaseMetadata,
     ) -> (Utf8PathBuf, Vec<String>) {
         let binary_name = self.path().file_name().unwrap().to_str().unwrap();
-        (
-            format!("/{binary_name}").into(),
-            vec![
-                "-test.run".into(),
-                // This argument is a regular expression and we want an exact match for our test
-                // name. We shouldn't have to worry about escaping the test name.
-                format!("^{case_name}$"),
-                // We have our own mechanism for timeouts, so we disable the one built into the
-                // test binary.
-                "-test.timeout=0".into(),
-                // Print out more information, in particular this include whether or not the test
-                // was skipped.
-                "-test.v".into(),
-                // Plumb these options through
-                format!("-test.short={}", self.options.short),
-                format!("-test.fullpath={}", self.options.fullpath),
-            ],
-        )
+        let mut args = vec![
+            "-test.run".into(),
+            // This argument is a regular expression and we want an exact match for our test
+            // name. We shouldn't have to worry about escaping the test name.
+            format!("^{case_name}$"),
+            // We have our own mechanism for timeouts, so we disable the one built into the
+            // test binary.
+            "-test.timeout=0".into(),
+            // Print out more information, in particular this include whether or not the test
+            // was skipped.
+            "-test.v".into(),
+            // Plumb these options through
+            format!("-test.short={}", self.options.short),
+            format!("-test.fullpath={}", self.options.fullpath),
+        ];
+        args.extend(self.options.extra_test_binary_args.clone());
+        (format!("/{binary_name}").into(), args)
     }
 
     fn format_case(

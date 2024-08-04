@@ -52,6 +52,52 @@ impl ConfigBag {
         self.args
     }
 
+    fn get_from_args<T>(&self, key: &str) -> Result<Option<T>>
+    where
+        T: FromStr,
+        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    {
+        self.args
+            .try_get_one::<String>(key)
+            .with_context(|| {
+                format!("error getting matches data for command-line option `--{key}`")
+            })?
+            .map(String::as_str)
+            .map(T::from_str)
+            .transpose()
+            .with_context(|| format!("error parsing command-line option `--{key}`"))
+    }
+
+    fn get_from_env<T>(&self, env_var: &str) -> Result<Option<T>>
+    where
+        T: FromStr,
+        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    {
+        self.env
+            .get(env_var)
+            .map(String::as_str)
+            .map(T::from_str)
+            .transpose()
+            .with_context(|| format!("error parsing environment variable `{env_var}`"))
+    }
+
+    fn get_from_file<T>(&self, key: &str) -> Result<Option<T>>
+    where
+        T: for<'a> Deserialize<'a>,
+    {
+        for (path, table) in &self.files {
+            if let Some(value) = table.get(key) {
+                return Ok(Some(T::deserialize(value.clone()).with_context(|| {
+                    format!(
+                        "error parsing value for key `{key}` in config file `{}`",
+                        path.to_string_lossy()
+                    )
+                })?));
+            }
+        }
+        Ok(None)
+    }
+
     fn get_internal<T>(&self, field: &str) -> Result<GetResult<T>>
     where
         T: FromStr + for<'a> Deserialize<'a>,
@@ -60,42 +106,16 @@ impl ConfigBag {
         let key = field.to_kebab_case();
         let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
 
-        let mut value = self
-            .args
-            .try_get_one::<String>(&key)
-            .with_context(|| {
-                format!("error getting matches data for command-line option `--{key}`")
-            })?
-            .map(String::as_str)
-            .map(T::from_str)
-            .transpose()
-            .with_context(|| format!("error parsing command-line option `--{key}`"))?;
-        if let Some(value) = value {
+        if let Some(value) = self.get_from_args(&key)? {
             return Ok(GetResult::Some(value));
         }
 
-        value = self
-            .env
-            .get(&env_var)
-            .map(String::as_str)
-            .map(T::from_str)
-            .transpose()
-            .with_context(|| format!("error parsing environment variable `{env_var}`"))?;
-        if let Some(value) = value {
+        if let Some(value) = self.get_from_env(&env_var)? {
             return Ok(GetResult::Some(value));
         }
 
-        for (path, table) in &self.files {
-            if let Some(value) = table.get(&key) {
-                return Ok(GetResult::Some(
-                    T::deserialize(value.clone()).with_context(|| {
-                        format!(
-                            "error parsing value for key `{key}` in config file `{}`",
-                            path.to_string_lossy()
-                        )
-                    })?,
-                ));
-            }
+        if let Some(value) = self.get_from_file(&key)? {
+            return Ok(GetResult::Some(value));
         }
 
         Ok(GetResult::None { key, env_var })
@@ -139,6 +159,34 @@ impl ConfigBag {
         })
     }
 
+    fn get_flag_from_args<T>(&self, key: &str) -> Result<Option<T>>
+    where
+        T: From<bool>,
+    {
+        let Some(&args_result) = self.args.get_one::<bool>(key) else {
+            panic!("didn't expect None")
+        };
+        if args_result {
+            Ok(Some(T::from(args_result)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn get_flag_from_env<T>(&self, env_var: &str) -> Result<Option<T>>
+    where
+        T: From<bool>,
+    {
+        Ok(self
+            .env
+            .get(env_var)
+            .map(String::as_str)
+            .map(bool::from_str)
+            .transpose()
+            .with_context(|| format!("error parsing environment variable `{env_var}`"))?
+            .map(T::from))
+    }
+
     pub fn get_flag<T>(&self, field: &str) -> Result<Option<T>>
     where
         T: From<bool> + for<'a> Deserialize<'a>,
@@ -146,40 +194,68 @@ impl ConfigBag {
         let key = field.to_kebab_case();
         let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
 
-        let Some(&args_result) = self.args.get_one::<bool>(&key) else {
-            panic!("didn't expect None")
-        };
-        if args_result {
-            return Ok(Some(T::from(args_result)));
+        if let Some(v) = self.get_flag_from_args(&key)? {
+            return Ok(Some(v));
         }
 
-        let value = self
-            .env
-            .get(&env_var)
-            .map(String::as_str)
-            .map(bool::from_str)
-            .transpose()
-            .with_context(|| format!("error parsing environment variable `{env_var}`"))?
-            .map(T::from);
-
-        if value.is_some() {
-            return Ok(value);
+        if let Some(v) = self.get_flag_from_env(&env_var)? {
+            return Ok(Some(v));
         }
 
-        for (path, table) in &self.files {
-            if let Some(value) = table.get(&key) {
-                return Some(T::deserialize(value.clone()))
-                    .transpose()
-                    .with_context(|| {
-                        format!(
-                            "error parsing value for key `{key}` in config file `{}`",
-                            path.to_string_lossy(),
-                        )
-                    });
-            }
+        if let Some(v) = self.get_from_file(&key)? {
+            return Ok(Some(v));
         }
 
         Ok(None)
+    }
+
+    fn get_var_arg_from_args<T>(&self, key: &str) -> Result<Option<T>>
+    where
+        T: FromIterator<String>,
+    {
+        if let Some(args_result) = self.args.get_many::<String>(key) {
+            Ok(Some(args_result.cloned().collect()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn get_var_arg_from_env<T>(&self, env_var: &str) -> Result<Option<T>>
+    where
+        T: FromIterator<String>,
+    {
+        if let Some(v) = self.env.get(env_var) {
+            Ok(Some(
+                v.split(" ")
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_owned())
+                    .collect(),
+            ))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_var_arg<T>(&self, field: &str) -> Result<T>
+    where
+        T: FromIterator<String> + for<'a> Deserialize<'a> + Default,
+    {
+        let key = field.to_kebab_case();
+        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
+
+        if let Some(v) = self.get_var_arg_from_args(&key)? {
+            return Ok(v);
+        }
+
+        if let Some(v) = self.get_var_arg_from_env(&env_var)? {
+            return Ok(v);
+        }
+
+        if let Some(v) = self.get_from_file(&key)? {
+            return Ok(v);
+        }
+
+        Ok(Default::default())
     }
 }
 
@@ -278,6 +354,7 @@ impl CommandBuilder {
     fn _value(
         mut self,
         field: &'static str,
+        is_var_arg: bool,
         short: Option<char>,
         alias: Option<String>,
         value_name: &'static str,
@@ -294,10 +371,14 @@ impl CommandBuilder {
             format!("{help} [default: {default}] [env: {env_var}]")
         };
         let mut arg = Arg::new(name.clone())
-            .long(name)
             .value_name(value_name)
             .action(action)
             .help(help);
+        if is_var_arg {
+            arg = arg.trailing_var_arg(true);
+        } else {
+            arg = arg.long(name);
+        }
         if let Some(short) = short {
             arg = arg.short(short);
         }
@@ -319,6 +400,7 @@ impl CommandBuilder {
     ) -> Self {
         self._value(
             field,
+            false, /* is_var_arg */
             short,
             alias,
             value_name,
@@ -337,12 +419,32 @@ impl CommandBuilder {
     ) -> Self {
         self._value(
             field,
+            false, /* is_var_arg */
             short,
             alias,
             "",
             Some("false".to_string()),
             help,
             ArgAction::SetTrue,
+        )
+    }
+
+    pub fn var_arg(
+        self,
+        field: &'static str,
+        value_name: &'static str,
+        default: Option<String>,
+        help: &'static str,
+    ) -> Self {
+        self._value(
+            field,
+            true, /* is_var_arg */
+            None, /* short */
+            None,
+            value_name,
+            default,
+            help,
+            ArgAction::Append,
         )
     }
 

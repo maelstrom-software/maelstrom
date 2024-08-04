@@ -23,6 +23,15 @@ pub struct GoTestOptions {
     /// Shows the full file names in error messages. See `go help testflag` for details.
     #[config(flag)]
     pub fullpath: bool,
+
+    /// Extra arguments to pass to the test binary. See `go help testflag` for what it normally
+    /// accepts.
+    #[config(
+        var_arg,
+        value_name = "EXTRA-TEST-BINARY-ARGS",
+        default = r#""no args""#
+    )]
+    pub extra_test_binary_args: Vec<String>,
 }
 
 impl AsRef<maelstrom_test_runner::config::Config> for Config {

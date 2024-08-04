@@ -23,6 +23,8 @@ struct ConfigStructField {
     option: bool,
     #[darling(default)]
     flatten: bool,
+    #[darling(default)]
+    var_arg: bool,
     short: Option<char>,
     alias: Option<String>,
     value_name: Option<String>,
@@ -166,6 +168,35 @@ impl ConfigStructField {
         })
     }
 
+    fn gen_builder_var_arg_call(&self) -> Result<Expr> {
+        if self.short.is_some() {
+            return Err(syn::Error::new(
+                self.ident().span(),
+                "short not compatible with var_arg",
+            ));
+        }
+        if self.alias.is_some() {
+            return Err(syn::Error::new(
+                self.ident().span(),
+                "alias not compatible with var_arg",
+            ));
+        }
+
+        let name = self.ident().unraw().to_string();
+        let value_name = self.value_name()?;
+        let default = self.default_as_string_option();
+        let doc = self.doc_comment()?;
+        Ok(parse_quote! {
+            let builder = ::maelstrom_util::config::CommandBuilder::var_arg(
+                builder,
+                #name,
+                #value_name,
+                #default,
+                #doc,
+            )
+        })
+    }
+
     fn gen_flatten_add_command_line_options_call(&self) -> Expr {
         let field_type = &self.ty;
         parse_quote! {
@@ -211,6 +242,13 @@ impl ConfigStructField {
         }
     }
 
+    fn gen_config_bag_get_var_arg_call(&self) -> Expr {
+        let name = self.ident().unraw().to_string();
+        parse_quote! {
+            ::maelstrom_util::config::ConfigBag::get_var_arg(&config_bag, #name)?
+        }
+    }
+
     fn gen_flatten_from_config_bag_call(&self) -> Expr {
         let field_type = &self.ty;
         parse_quote! {
@@ -250,6 +288,8 @@ impl ConfigInput {
                     field.gen_builder_flag_value_call()
                 } else if field.option {
                     field.gen_builder_option_value_call()
+                } else if field.var_arg {
+                    field.gen_builder_var_arg_call()
                 } else {
                     field.gen_builder_value_call()
                 });
@@ -279,6 +319,8 @@ impl ConfigInput {
                 field.gen_config_bag_get_flag_call()
             } else if field.option {
                 field.gen_config_bag_get_option_call()
+            } else if field.var_arg {
+                field.gen_config_bag_get_var_arg_call()
             } else {
                 field.gen_config_bag_get_call()
             }
