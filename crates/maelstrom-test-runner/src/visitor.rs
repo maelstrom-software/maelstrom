@@ -149,6 +149,22 @@ fn was_ignored(
     was_ignored_fn(case_str, &lines)
 }
 
+fn split_test_output_into_lines(output: &[u8]) -> Vec<String> {
+    let mut cursor = output;
+
+    let mut lines = vec![];
+    while let Some(end) = cursor.iter().position(|&b| b == b'\n') {
+        lines.push(String::from_utf8_lossy(&cursor[..end]).into());
+        cursor = &cursor[end + 1..];
+    }
+
+    if !cursor.is_empty() {
+        lines.push(String::from_utf8_lossy(cursor).into());
+    }
+
+    lines
+}
+
 fn format_test_output(
     res: &JobOutputResult,
     name: &str,
@@ -161,21 +177,13 @@ fn format_test_output(
     match res {
         JobOutputResult::None => {}
         JobOutputResult::Inline(bytes) => {
-            test_output_lines.extend(
-                String::from_utf8_lossy(bytes)
-                    .split('\n')
-                    .map(ToOwned::to_owned),
-            );
+            test_output_lines.extend(split_test_output_into_lines(bytes));
             if name == "stdout" {
                 test_output_lines = remove_fixture_output(case_str, test_output_lines);
             }
         }
         JobOutputResult::Truncated { first, truncated } => {
-            test_output_lines.extend(
-                String::from_utf8_lossy(first)
-                    .split('\n')
-                    .map(ToOwned::to_owned),
-            );
+            test_output_lines.extend(split_test_output_into_lines(first));
             if name == "stdout" {
                 test_output_lines = remove_fixture_output(case_str, test_output_lines);
             }
