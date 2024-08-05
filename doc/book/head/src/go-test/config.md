@@ -120,8 +120,7 @@ These arguments are added last after `short` and `fullpath`. It could be possibl
 the operation of those flags by the addition of certain arguments.
 
 When provided on the command-line these arguments are positional and come after any other arguments.
-To avoid ambiguity, `--` should be used to denote the end of normal command-line arguments, and the
-beginning these arguments like follows:
+They must always be preceded by `--` like as follows:
 
 ```bash
 maelstrom-go-test -- -test.parallel 12

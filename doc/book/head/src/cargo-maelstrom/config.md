@@ -143,8 +143,7 @@ to run.  It could be possible to use these flags to somehow not run the test `ca
 intending to, producing confusing results.
 
 When provided on the command-line these arguments are positional and come after any other arguments.
-To avoid ambiguity, `--` should be used to denote the end of normal command-line arguments, and the
-beginning these arguments like follows:
+They must always be preceded by `--` like as follows:
 
 ```bash
 cargo maelstrom -- --force-run-in-process
