@@ -236,7 +236,7 @@ impl ConfigBag {
         }
     }
 
-    pub fn get_var_arg<T>(&self, field: &str) -> Result<T>
+    pub fn get_list<T>(&self, field: &str) -> Result<T>
     where
         T: FromIterator<String> + for<'a> Deserialize<'a> + Default,
     {
@@ -677,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn var_args_from_arg() {
+    fn list_from_arg() {
         let cmd =
             Command::new("command").arg(Arg::new("var-args").last(true).action(ArgAction::Append));
         let args = cmd
@@ -692,13 +692,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            config.get_var_arg::<Vec<String>>("var_args").unwrap(),
+            config.get_list::<Vec<String>>("var_args").unwrap(),
             vec!["--a".to_owned(), "--b".to_owned()]
         );
     }
 
     #[test]
-    fn var_args_from_env() {
+    fn list_from_env() {
         let cmd =
             Command::new("command").arg(Arg::new("var-args").last(true).action(ArgAction::Append));
         let args = cmd.clone().get_matches_from(["command"]);
@@ -711,13 +711,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            config.get_var_arg::<Vec<String>>("var_args").unwrap(),
+            config.get_list::<Vec<String>>("var_args").unwrap(),
             vec!["--a".to_owned(), "--b".to_owned()]
         );
     }
 
     #[test]
-    fn var_args_from_file() {
+    fn list_from_file() {
         let cmd =
             Command::new("command").arg(Arg::new("var-args").last(true).action(ArgAction::Append));
         let args = cmd.clone().get_matches_from(["command"]);
@@ -728,14 +728,14 @@ mod tests {
             [(
                 "config-1.toml",
                 indoc! {r#"
-                        var-args = ["--a", "--b"]
-                    "#},
+                    var-args = ["--a", "--b"]
+                "#},
             )],
         )
         .unwrap();
 
         assert_eq!(
-            config.get_var_arg::<Vec<String>>("var_args").unwrap(),
+            config.get_list::<Vec<String>>("var_args").unwrap(),
             vec!["--a".to_owned(), "--b".to_owned()]
         );
     }

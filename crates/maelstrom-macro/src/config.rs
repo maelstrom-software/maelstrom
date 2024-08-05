@@ -242,10 +242,10 @@ impl ConfigStructField {
         }
     }
 
-    fn gen_config_bag_get_var_arg_call(&self) -> Expr {
+    fn gen_config_bag_get_list_call(&self) -> Expr {
         let name = self.ident().unraw().to_string();
         parse_quote! {
-            ::maelstrom_util::config::ConfigBag::get_var_arg(&config_bag, #name)?
+            ::maelstrom_util::config::ConfigBag::get_list(&config_bag, #name)?
         }
     }
 
@@ -320,7 +320,7 @@ impl ConfigInput {
             } else if field.option {
                 field.gen_config_bag_get_option_call()
             } else if field.var_arg {
-                field.gen_config_bag_get_var_arg_call()
+                field.gen_config_bag_get_list_call()
             } else {
                 field.gen_config_bag_get_call()
             }
