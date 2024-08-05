@@ -375,7 +375,7 @@ impl CommandBuilder {
             .action(action)
             .help(help);
         if is_var_arg {
-            arg = arg.trailing_var_arg(true);
+            arg = arg.last(true);
         } else {
             arg = arg.long(name);
         }
@@ -678,11 +678,8 @@ mod tests {
 
     #[test]
     fn var_args_from_arg() {
-        let cmd = Command::new("command").arg(
-            Arg::new("var-args")
-                .trailing_var_arg(true)
-                .action(ArgAction::Append),
-        );
+        let cmd =
+            Command::new("command").arg(Arg::new("var-args").last(true).action(ArgAction::Append));
         let args = cmd
             .clone()
             .get_matches_from(["command", "--", "--a", "--b"]);
@@ -701,31 +698,9 @@ mod tests {
     }
 
     #[test]
-    fn var_args_from_arg_missing_dash_dash() {
-        let cmd = Command::new("command").arg(
-            Arg::new("var-args")
-                .trailing_var_arg(true)
-                .action(ArgAction::Append),
-        );
-        let args = cmd.clone().get_matches_from(["command", "a", "b"]);
-        let config = ConfigBag::new(
-            args,
-            "PREFIX_",
-            Vec::<(String, String)>::new(),
-            Vec::<(String, String)>::new(),
-        )
-        .unwrap();
-
-        config.get_var_arg::<Vec<String>>("var_args").unwrap_err();
-    }
-
-    #[test]
     fn var_args_from_env() {
-        let cmd = Command::new("command").arg(
-            Arg::new("var-args")
-                .trailing_var_arg(true)
-                .action(ArgAction::Append),
-        );
+        let cmd =
+            Command::new("command").arg(Arg::new("var-args").last(true).action(ArgAction::Append));
         let args = cmd.clone().get_matches_from(["command"]);
         let config = ConfigBag::new(
             args,
@@ -743,11 +718,8 @@ mod tests {
 
     #[test]
     fn var_args_from_file() {
-        let cmd = Command::new("command").arg(
-            Arg::new("var-args")
-                .trailing_var_arg(true)
-                .action(ArgAction::Append),
-        );
+        let cmd =
+            Command::new("command").arg(Arg::new("var-args").last(true).action(ArgAction::Append));
         let args = cmd.clone().get_matches_from(["command"]);
         let config = ConfigBag::new(
             args,
