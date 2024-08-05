@@ -165,6 +165,7 @@ impl<DepsT: Deps> Router<DepsT> {
                 self.counts[JobState::Complete] += 1;
                 self.receive_job_response(jid.cjid, result);
             }
+            Message::LocalWorker(WorkerToBroker::JobStatusUpdate(_jid, _status)) => {}
             Message::LocalWorkerStartArtifactFetch(digest, path) => {
                 self.deps.send_artifact_fetch_completed_to_local_worker(
                     digest.clone(),

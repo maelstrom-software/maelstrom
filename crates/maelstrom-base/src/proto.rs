@@ -2,7 +2,7 @@
 
 use crate::{
     stats::{BrokerStatistics, JobStateCounts},
-    ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
+    ClientJobId, JobId, JobOutcomeResult, JobSpec, JobWorkerStatus, Sha256Digest,
 };
 use bincode::Options;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,7 @@ pub enum BrokerToWorker {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum WorkerToBroker {
     JobResponse(JobId, JobOutcomeResult),
+    JobStatusUpdate(JobId, JobWorkerStatus),
 }
 
 /// Message sent from the broker to a client. The broker won't send a message until it has recevied

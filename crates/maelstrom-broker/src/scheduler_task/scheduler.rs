@@ -233,6 +233,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::FromWorker(wid, WorkerToBroker::JobResponse(jid, result)) => {
                 self.receive_worker_response(deps, wid, jid, result)
             }
+            Message::FromWorker(_wid, WorkerToBroker::JobStatusUpdate(_jid, _status)) => {}
             Message::GotArtifact(digest, size, path) => {
                 self.receive_got_artifact(deps, digest, size, path)
             }

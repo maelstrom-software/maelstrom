@@ -530,6 +530,13 @@ pub type JobResult<T, E> = Result<T, JobError<E>>;
 /// Worker, Broker, and Client.
 pub type JobOutcomeResult = JobResult<JobOutcome, String>;
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub enum JobWorkerStatus {
+    WaitingForLayers,
+    WaitingToExecute,
+    Executing,
+}
+
 /// ID of a worker connection. These share the same ID space as [`ClientId`].
 #[derive(
     Copy,
