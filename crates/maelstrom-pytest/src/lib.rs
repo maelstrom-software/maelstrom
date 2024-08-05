@@ -1,4 +1,5 @@
 pub mod cli;
+mod config;
 pub mod pattern;
 mod pytest;
 
@@ -13,7 +14,6 @@ use maelstrom_client::{
     ContainerImageDepotDir, ImageSpec, JobSpec, ProjectDir, StateDir,
 };
 use maelstrom_container::{DockerReference, ImageName};
-use maelstrom_macro::Config;
 use maelstrom_test_runner::{
     metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
     CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, TestArtifact,
@@ -33,37 +33,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fmt, io};
 
+pub use config::{Config, PytestConfigValues};
 pub use maelstrom_test_runner::Logger;
 
 pub const MAELSTROM_TEST_TOML: &str = "maelstrom-pytest.toml";
 pub const ADDED_DEFAULT_TEST_METADATA: &str = include_str!("added-default-test-metadata.toml");
-
-#[derive(Config, Debug, Default)]
-pub struct PytestConfigValues {
-    /// Collect tests from the provided module intead of using pytest's default collection
-    /// algorithm. This will pass the provided module to pytest along with the --pyargs flag.
-    #[config(
-        option,
-        value_name = "MODULE",
-        default = r#""pytest's default collection algorithm""#
-    )]
-    pub collect_from_module: Option<String>,
-}
-
-#[derive(Config, Debug)]
-pub struct Config {
-    #[config(flatten)]
-    pub parent: maelstrom_test_runner::config::Config,
-
-    #[config(flatten, next_help_heading = "Pytest Config Options")]
-    pub pytest_options: PytestConfigValues,
-}
-
-impl AsRef<maelstrom_test_runner::config::Config> for Config {
-    fn as_ref(&self) -> &maelstrom_test_runner::config::Config {
-        &self.parent
-    }
-}
 
 #[allow(clippy::too_many_arguments)]
 fn create_client(
