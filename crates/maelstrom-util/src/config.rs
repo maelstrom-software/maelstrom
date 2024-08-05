@@ -121,44 +121,6 @@ impl ConfigBag {
         Ok(GetResult::None { key, env_var })
     }
 
-    pub fn get<T>(&self, field: &str) -> Result<T>
-    where
-        T: FromStr + for<'a> Deserialize<'a>,
-        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
-    {
-        match self.get_internal(field) {
-            Err(err) => Err(err),
-            Ok(GetResult::Some(v)) => Ok(v),
-            Ok(GetResult::None { key, env_var }) => Err(anyhow!(
-                "config value `{key}` must be set via `--{key}` command-line option, \
-                `{env_var}` environment variable, or `{key}` key in config file"
-            )),
-        }
-    }
-
-    pub fn get_or_else<T, F>(&self, field: &str, mut default: F) -> Result<T>
-    where
-        T: FromStr + for<'a> Deserialize<'a>,
-        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
-        F: FnMut() -> T,
-    {
-        self.get_internal(field).map(|v| match v {
-            GetResult::Some(v) => v,
-            GetResult::None { .. } => default(),
-        })
-    }
-
-    pub fn get_option<T>(&self, field: &str) -> Result<Option<T>>
-    where
-        T: FromStr + for<'a> Deserialize<'a>,
-        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
-    {
-        self.get_internal(field).map(|v| match v {
-            GetResult::Some(v) => Some(v),
-            GetResult::None { .. } => None,
-        })
-    }
-
     fn get_flag_from_args<T>(&self, key: &str) -> Result<Option<T>>
     where
         T: From<bool>,
@@ -185,28 +147,6 @@ impl ConfigBag {
             .transpose()
             .with_context(|| format!("error parsing environment variable `{env_var}`"))?
             .map(T::from))
-    }
-
-    pub fn get_flag<T>(&self, field: &str) -> Result<Option<T>>
-    where
-        T: From<bool> + for<'a> Deserialize<'a>,
-    {
-        let key = field.to_kebab_case();
-        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
-
-        if let Some(v) = self.get_flag_from_args(&key)? {
-            return Ok(Some(v));
-        }
-
-        if let Some(v) = self.get_flag_from_env(&env_var)? {
-            return Ok(Some(v));
-        }
-
-        if let Some(v) = self.get_from_file(&key)? {
-            return Ok(Some(v));
-        }
-
-        Ok(None)
     }
 
     fn get_var_arg_from_args<T>(&self, key: &str) -> Result<Option<T>>
@@ -236,6 +176,76 @@ impl ConfigBag {
         }
     }
 
+    /// Get something which can be converted from a string from the bag. Returns an error if not
+    /// present.
+    pub fn get<T>(&self, field: &str) -> Result<T>
+    where
+        T: FromStr + for<'a> Deserialize<'a>,
+        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    {
+        match self.get_internal(field) {
+            Err(err) => Err(err),
+            Ok(GetResult::Some(v)) => Ok(v),
+            Ok(GetResult::None { key, env_var }) => Err(anyhow!(
+                "config value `{key}` must be set via `--{key}` command-line option, \
+                `{env_var}` environment variable, or `{key}` key in config file"
+            )),
+        }
+    }
+
+    /// Get something which can be converted from a string from the bag. Returns the result of
+    /// the `default` argument if not present.
+    pub fn get_or_else<T, F>(&self, field: &str, mut default: F) -> Result<T>
+    where
+        T: FromStr + for<'a> Deserialize<'a>,
+        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+        F: FnMut() -> T,
+    {
+        self.get_internal(field).map(|v| match v {
+            GetResult::Some(v) => v,
+            GetResult::None { .. } => default(),
+        })
+    }
+
+    /// Get something which can be converted from a string from the bag. Returns [`None`] if not
+    /// present.
+    pub fn get_option<T>(&self, field: &str) -> Result<Option<T>>
+    where
+        T: FromStr + for<'a> Deserialize<'a>,
+        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    {
+        self.get_internal(field).map(|v| match v {
+            GetResult::Some(v) => Some(v),
+            GetResult::None { .. } => None,
+        })
+    }
+
+    /// Get something which can be converted from a `bool` from the bag. Returns [`None`] if not
+    /// present.
+    pub fn get_flag<T>(&self, field: &str) -> Result<Option<T>>
+    where
+        T: From<bool> + for<'a> Deserialize<'a>,
+    {
+        let key = field.to_kebab_case();
+        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
+
+        if let Some(v) = self.get_flag_from_args(&key)? {
+            return Ok(Some(v));
+        }
+
+        if let Some(v) = self.get_flag_from_env(&env_var)? {
+            return Ok(Some(v));
+        }
+
+        if let Some(v) = self.get_from_file(&key)? {
+            return Ok(Some(v));
+        }
+
+        Ok(None)
+    }
+
+    /// Get something that can be converted from a list of strings from the bag.
+    /// Returns [`Default::default()`] if not present.
     pub fn get_list<T>(&self, field: &str) -> Result<T>
     where
         T: FromIterator<String> + for<'a> Deserialize<'a> + Default,
