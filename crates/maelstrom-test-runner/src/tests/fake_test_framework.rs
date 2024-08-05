@@ -254,10 +254,6 @@ impl TestArtifact for FakeTestArtifact {
         Ok(self.ignored_tests.clone())
     }
 
-    fn name(&self) -> &str {
-        &self.name
-    }
-
     fn build_command(
         &self,
         case_name: &str,

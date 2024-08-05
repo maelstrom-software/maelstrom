@@ -67,6 +67,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             manifest_path: Some(temp_dir.path().join("project/Cargo.toml")),
             ..Default::default()
         },
+        extra_test_binary_args: vec![],
     };
     let extra_options = ExtraCommandLineOptions {
         parent: maelstrom_test_runner::config::ExtraCommandLineOptions {

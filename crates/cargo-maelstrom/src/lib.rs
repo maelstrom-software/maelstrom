@@ -209,6 +209,7 @@ struct CargoOptions {
     feature_selection_options: cargo::FeatureSelectionOptions,
     compilation_options: cargo::CompilationOptions,
     manifest_options: cargo::ManifestOptions,
+    extra_test_binary_args: Vec<String>,
 }
 
 struct CargoTestCollector {
@@ -217,7 +218,10 @@ struct CargoTestCollector {
 }
 
 #[derive(Debug)]
-struct CargoTestArtifact(cargo_metadata::Artifact);
+struct CargoTestArtifact {
+    artifact: cargo_metadata::Artifact,
+    extra_test_binary_args: Vec<String>,
+}
 
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
 struct CargoPackageId(cargo_metadata::PackageId);
@@ -230,15 +234,15 @@ impl TestArtifact for CargoTestArtifact {
     type CaseMetadata = NoCaseMetadata;
 
     fn package(&self) -> CargoPackageId {
-        CargoPackageId(self.0.package_id.clone())
+        CargoPackageId(self.artifact.package_id.clone())
     }
 
     fn to_key(&self) -> CargoArtifactKey {
-        CargoArtifactKey::from(&self.0.target)
+        CargoArtifactKey::from(&self.artifact.target)
     }
 
     fn path(&self) -> &Path {
-        self.0.executable.as_ref().unwrap().as_ref()
+        self.artifact.executable.as_ref().unwrap().as_ref()
     }
 
     fn list_tests(&self) -> Result<Vec<(String, NoCaseMetadata)>> {
@@ -258,10 +262,10 @@ impl TestArtifact for CargoTestArtifact {
         _case_metadata: &NoCaseMetadata,
     ) -> (Utf8PathBuf, Vec<String>) {
         let binary_name = self.path().file_name().unwrap().to_str().unwrap();
-        (
-            format!("/{binary_name}").into(),
-            vec!["--exact".into(), "--nocapture".into(), case_name.into()],
-        )
+        let mut args = vec!["--exact".into(), "--nocapture".into()];
+        args.extend(self.extra_test_binary_args.clone());
+        args.push(case_name.into());
+        (format!("/{binary_name}").into(), args)
     }
 
     fn format_case(
@@ -273,7 +277,7 @@ impl TestArtifact for CargoTestArtifact {
         let mut s = package_name.to_string();
         s += " ";
 
-        let artifact_name = &self.0.target.name;
+        let artifact_name = &self.artifact.target.name;
         if artifact_name.replace('_', "-") != package_name {
             s += artifact_name;
             s += " ";
@@ -283,15 +287,21 @@ impl TestArtifact for CargoTestArtifact {
     }
 }
 
-struct CargoTestArtifactStream(cargo::TestArtifactStream);
+struct CargoTestArtifactStream {
+    stream: cargo::TestArtifactStream,
+    extra_test_binary_args: Vec<String>,
+}
 
 impl Iterator for CargoTestArtifactStream {
     type Item = Result<CargoTestArtifact>;
 
     fn next(&mut self) -> Option<Result<CargoTestArtifact>> {
-        match self.0.next() {
+        match self.stream.next() {
             Some(Err(e)) => Some(Err(e)),
-            Some(Ok(v)) => Some(Ok(CargoTestArtifact(v))),
+            Some(Ok(artifact)) => Some(Ok(CargoTestArtifact {
+                artifact,
+                extra_test_binary_args: self.extra_test_binary_args.clone(),
+            })),
             None => None,
         }
     }
@@ -347,7 +357,13 @@ impl CollectTests for CargoTestCollector {
             ui.clone(),
             self.log.clone(),
         )?;
-        Ok((handle, CargoTestArtifactStream(stream)))
+        Ok((
+            handle,
+            CargoTestArtifactStream {
+                stream,
+                extra_test_binary_args: options.extra_test_binary_args.clone(),
+            },
+        ))
     }
 
     fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {
@@ -566,6 +582,7 @@ pub fn main(
             feature_selection_options: config.cargo_feature_selection_options,
             compilation_options: config.cargo_compilation_options,
             manifest_options: config.cargo_manifest_options,
+            extra_test_binary_args: config.extra_test_binary_args,
         };
         let state = MainAppState::new(
             deps,

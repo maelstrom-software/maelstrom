@@ -25,6 +25,7 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`frozen`</span>                     | boolean | [require `Cargo.lock` and cache are up to date](#cargo)                                     | Cargo's default
 <span style="white-space: nowrap;">`locked`</span>                     | boolean | [require `Cargo.lock` is up to date](#cargo)                                                | Cargo's default
 <span style="white-space: nowrap;">`offline`</span>                    | boolean | [run without Cargo accessing the network](#cargo)                                           | Cargo's default
+<span style="white-space: nowrap;">`extra-test-binary-args`</span>     | list    | [pass arbitrary arguments to test binary](#extra-test-binary-args)                          | no args
 
 ## `cache-size`
 
@@ -131,3 +132,20 @@ the features into a single, comma-separated argument like this:
 
 <span style="white-space: nowrap;">`cargo-maelstrom`</span> doesn't accept the
 `--release` alias. Use `--profile=release` instead.
+
+## `extra-test-binary-args`
+
+This allows passing of arbitrary command-line arguments to the Rust test binary. See the help text
+for a test binary for what options are accepted normally.
+
+These arguments are added last after `--exact` and `--nocapture`, but before we pass the test case
+to run.  It could be possible to use these flags to somehow not run the test `cargo-maelstrom` was
+intending to, producing confusing results.
+
+When provided on the command-line these arguments are positional and come after any other arguments.
+To avoid ambiguity, `--` should be used to denote the end of normal command-line arguments, and the
+beginning these arguments like follows:
+
+```bash
+cargo maelstrom -- --force-run-in-process
+```
