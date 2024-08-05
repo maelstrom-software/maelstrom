@@ -617,7 +617,7 @@ mod tests {
     use indoc::indoc;
 
     fn get_config() -> ConfigBag {
-        let args = Command::new("command")
+        let cmd = Command::new("command")
             .arg(Arg::new("key-1").long("key-1").action(ArgAction::Set))
             .arg(Arg::new("key-2").long("key-2").action(ArgAction::Set))
             .arg(Arg::new("key-3").long("key-3").action(ArgAction::Set))
@@ -661,16 +661,17 @@ mod tests {
                 Arg::new("bool-key-4")
                     .long("bool-key-4")
                     .action(ArgAction::SetTrue),
-            )
-            .get_matches_from([
-                "command",
-                "--key-1=value-1",
-                "--int-key-1=1",
-                "--bool-key-1",
-            ]);
+            );
+        let args = cmd.clone().get_matches_from([
+            "command",
+            "--key-1=value-1",
+            "--int-key-1=1",
+            "--bool-key-1",
+        ]);
         ConfigBag::new(
             args,
-            false, /* dash_dash_arg_present */
+            true, /* dash_dash_arg_present */
+            cmd,
             "PREFIX_",
             [
                 ("PREFIX_KEY_2", "value-2"),
@@ -736,5 +737,105 @@ mod tests {
         assert_eq!(config.get_flag("bool_key_2").unwrap(), Some(true));
         assert_eq!(config.get_flag("bool_key_3").unwrap(), Some(true));
         assert_eq!(config.get_flag("bool_key_4").unwrap(), Some(true));
+    }
+
+    #[test]
+    fn var_args_from_arg() {
+        let cmd = Command::new("command").arg(
+            Arg::new("var-args")
+                .trailing_var_arg(true)
+                .action(ArgAction::Append),
+        );
+        let args = cmd
+            .clone()
+            .get_matches_from(["command", "--", "--a", "--b"]);
+        let config = ConfigBag::new(
+            args,
+            true, /* dash_dash_arg_present */
+            cmd,
+            "PREFIX_",
+            Vec::<(String, String)>::new(),
+            Vec::<(String, String)>::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.get_var_arg::<Vec<String>>("var_args").unwrap(),
+            vec!["--a".to_owned(), "--b".to_owned()]
+        );
+    }
+
+    #[test]
+    fn var_args_from_arg_missing_dash_dash() {
+        let cmd = Command::new("command").arg(
+            Arg::new("var-args")
+                .trailing_var_arg(true)
+                .action(ArgAction::Append),
+        );
+        let args = cmd.clone().get_matches_from(["command", "a", "b"]);
+        let config = ConfigBag::new(
+            args,
+            false, /* dash_dash_arg_present */
+            cmd,
+            "PREFIX_",
+            Vec::<(String, String)>::new(),
+            Vec::<(String, String)>::new(),
+        )
+        .unwrap();
+
+        config.get_var_arg::<Vec<String>>("var_args").unwrap_err();
+    }
+
+    #[test]
+    fn var_args_from_env() {
+        let cmd = Command::new("command").arg(
+            Arg::new("var-args")
+                .trailing_var_arg(true)
+                .action(ArgAction::Append),
+        );
+        let args = cmd.clone().get_matches_from(["command"]);
+        let config = ConfigBag::new(
+            args,
+            false, /* dash_dash_arg_present */
+            cmd,
+            "PREFIX_",
+            [("PREFIX_VAR_ARGS", "--a --b")],
+            Vec::<(String, String)>::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.get_var_arg::<Vec<String>>("var_args").unwrap(),
+            vec!["--a".to_owned(), "--b".to_owned()]
+        );
+    }
+
+    #[test]
+    fn var_args_from_file() {
+        let cmd = Command::new("command").arg(
+            Arg::new("var-args")
+                .trailing_var_arg(true)
+                .action(ArgAction::Append),
+        );
+        let args = cmd.clone().get_matches_from(["command"]);
+        let config = ConfigBag::new(
+            args,
+            false, /* dash_dash_arg_present */
+            cmd,
+            "PREFIX_",
+            Vec::<(String, String)>::new(),
+            [(
+                "config-1.toml",
+                indoc! {r#"
+                        var-args = ["--a", "--b"]
+                    "#},
+            )],
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.get_var_arg::<Vec<String>>("var_args").unwrap(),
+            vec!["--a".to_owned(), "--b".to_owned()]
+        );
     }
 }
