@@ -5,39 +5,14 @@ use clap::{Arg, ArgAction, ArgMatches, Args, Command, FromArgMatches};
 use heck::{ToKebabCase as _, ToShoutySnakeCase as _};
 use serde::Deserialize;
 use std::{
-    collections::HashMap,
-    env,
-    ffi::{OsStr, OsString},
-    fmt::Debug,
-    fs, iter,
-    path::PathBuf,
-    process, result,
+    collections::HashMap, env, ffi::OsString, fmt::Debug, fs, iter, path::PathBuf, process, result,
     str::FromStr,
 };
 use toml::Table;
 use xdg::BaseDirectories;
 
-/// Create an "unknown_argument" error in the same-enough way that the clap parser would.
-fn clap_unknown_argument_error(cmd: &Command, argument: &str) -> clap::error::Error {
-    let mut err = clap::error::Error::<clap::error::RichFormatter>::new(
-        clap::error::ErrorKind::UnknownArgument,
-    )
-    .with_cmd(cmd);
-    err.insert(
-        clap::error::ContextKind::InvalidArg,
-        clap::error::ContextValue::String(argument.into()),
-    );
-    err.insert(
-        clap::error::ContextKind::Usage,
-        clap::error::ContextValue::StyledStr(cmd.clone().render_usage()),
-    );
-    err
-}
-
 pub struct ConfigBag {
     args: ArgMatches,
-    dash_dash_arg_present: bool,
-    cmd: Command,
     env_prefix: String,
     env: HashMap<String, String>,
     files: Vec<(PathBuf, Table)>,
@@ -51,8 +26,6 @@ enum GetResult<T> {
 impl ConfigBag {
     pub fn new(
         args: ArgMatches,
-        dash_dash_arg_present: bool,
-        cmd: Command,
         env_prefix: impl Into<String>,
         env: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
         files: impl IntoIterator<Item = (impl Into<PathBuf>, impl Into<String>)>,
@@ -69,8 +42,6 @@ impl ConfigBag {
             .collect::<std::result::Result<_, _>>()?;
         Ok(Self {
             args,
-            dash_dash_arg_present,
-            cmd,
             env_prefix: env_prefix.into(),
             env,
             files,
@@ -242,12 +213,7 @@ impl ConfigBag {
     where
         T: FromIterator<String>,
     {
-        if let Some(mut args_result) = self.args.get_many::<String>(key) {
-            if !self.dash_dash_arg_present {
-                return Err(
-                    clap_unknown_argument_error(&self.cmd, args_result.next().unwrap()).into(),
-                );
-            }
+        if let Some(args_result) = self.args.get_many::<String>(key) {
             Ok(Some(args_result.cloned().collect()))
         } else {
             Ok(None)
@@ -492,17 +458,6 @@ impl CommandBuilder {
     }
 }
 
-/// Print and exit on a clap error in the same way that we would if we had gotten it earlier in
-/// `Command::get_matches_from`.
-fn maybe_exit_on_clap_error<RetT>(res: Result<RetT>) -> Result<RetT> {
-    if let Err(e) = &res {
-        if let Some(e) = e.downcast_ref::<clap::error::Error<clap::error::RichFormatter>>() {
-            e.exit();
-        }
-    }
-    res
-}
-
 pub fn new_config_with_extra_from_args<T, U, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
@@ -515,21 +470,12 @@ where
     AI: IntoIterator<Item = AT>,
     AT: Into<OsString> + Clone,
 {
-    let mut dash_dash_arg_present = false;
-    let args = args.into_iter().map(|a| {
-        let a: OsString = a.into();
-        if a == OsStr::new("--") {
-            dash_dash_arg_present = true
-        }
-        a
-    });
-
     let base_directories = BaseDirectories::with_prefix(base_directories_prefix)
         .context("searching for config files")?;
     let builder = CommandBuilder::new(command, &base_directories, env_var_prefix);
     let builder = T::add_command_line_options(builder, &base_directories);
     let command = U::augment_args(builder.build());
-    let mut args = command.clone().get_matches_from(args);
+    let mut args = command.get_matches_from(args);
     let env_var_prefix = env_var_prefix.to_string() + "_";
     let env = env::vars().filter(|(key, _)| key.starts_with(&env_var_prefix));
 
@@ -550,17 +496,10 @@ where
 
     let print_config = args.remove_one::<bool>("print-config").unwrap();
 
-    let mut config_bag = ConfigBag::new(
-        args,
-        dash_dash_arg_present,
-        command,
-        &env_var_prefix,
-        env,
-        files,
-    )
-    .context("loading configuration from environment variables and config files")?;
+    let mut config_bag = ConfigBag::new(args, &env_var_prefix, env, files)
+        .context("loading configuration from environment variables and config files")?;
 
-    let config = maybe_exit_on_clap_error(T::from_config_bag(&mut config_bag, &base_directories))?;
+    let config = T::from_config_bag(&mut config_bag, &base_directories)?;
     let extra = U::from_arg_matches(&config_bag.into_args())?;
 
     if print_config {
@@ -670,8 +609,6 @@ mod tests {
         ]);
         ConfigBag::new(
             args,
-            true, /* dash_dash_arg_present */
-            cmd,
             "PREFIX_",
             [
                 ("PREFIX_KEY_2", "value-2"),
@@ -751,8 +688,6 @@ mod tests {
             .get_matches_from(["command", "--", "--a", "--b"]);
         let config = ConfigBag::new(
             args,
-            true, /* dash_dash_arg_present */
-            cmd,
             "PREFIX_",
             Vec::<(String, String)>::new(),
             Vec::<(String, String)>::new(),
@@ -775,8 +710,6 @@ mod tests {
         let args = cmd.clone().get_matches_from(["command", "a", "b"]);
         let config = ConfigBag::new(
             args,
-            false, /* dash_dash_arg_present */
-            cmd,
             "PREFIX_",
             Vec::<(String, String)>::new(),
             Vec::<(String, String)>::new(),
@@ -796,8 +729,6 @@ mod tests {
         let args = cmd.clone().get_matches_from(["command"]);
         let config = ConfigBag::new(
             args,
-            false, /* dash_dash_arg_present */
-            cmd,
             "PREFIX_",
             [("PREFIX_VAR_ARGS", "--a --b")],
             Vec::<(String, String)>::new(),
@@ -820,8 +751,6 @@ mod tests {
         let args = cmd.clone().get_matches_from(["command"]);
         let config = ConfigBag::new(
             args,
-            false, /* dash_dash_arg_present */
-            cmd,
             "PREFIX_",
             Vec::<(String, String)>::new(),
             [(
