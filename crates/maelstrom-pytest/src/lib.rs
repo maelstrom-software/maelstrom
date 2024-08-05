@@ -330,7 +330,6 @@ impl<'client> PytestTestCollector<'client> {
 
 #[derive(Debug)]
 pub(crate) struct PytestTestArtifact {
-    name: String,
     path: PathBuf,
     tests: Vec<(String, PytestCaseMetadata)>,
     ignored_tests: Vec<String>,
@@ -375,10 +374,6 @@ impl TestArtifact for PytestTestArtifact {
 
     fn list_ignored_tests(&self) -> Result<Vec<String>> {
         Ok(self.ignored_tests.clone())
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 
     fn build_command(

@@ -124,7 +124,6 @@ pub trait TestArtifact: fmt::Debug {
     fn path(&self) -> &Path;
     fn list_tests(&self) -> Result<Vec<(String, Self::CaseMetadata)>>;
     fn list_ignored_tests(&self) -> Result<Vec<String>>;
-    fn name(&self) -> &str;
     fn package(&self) -> Self::PackageId;
     fn build_command(
         &self,

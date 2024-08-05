@@ -252,10 +252,6 @@ impl TestArtifact for CargoTestArtifact {
         cargo::get_cases_from_binary(self.path(), &Some("--ignored".into()))
     }
 
-    fn name(&self) -> &str {
-        &self.0.target.name
-    }
-
     fn build_command(
         &self,
         case_name: &str,
@@ -277,7 +273,7 @@ impl TestArtifact for CargoTestArtifact {
         let mut s = package_name.to_string();
         s += " ";
 
-        let artifact_name = self.name();
+        let artifact_name = &self.0.target.name;
         if artifact_name.replace('_', "-") != package_name {
             s += artifact_name;
             s += " ";

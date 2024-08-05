@@ -135,7 +135,6 @@ pub fn pytest_collect_tests(
         let path = Path::new(&case.file).strip_prefix(project_dir).unwrap();
         let path_str = path.to_str().unwrap().to_owned();
         let test = tests.entry(path_str.clone()).or_insert(PytestTestArtifact {
-            name: path_str,
             path: path.to_path_buf(),
             tests: vec![],
             ignored_tests: vec![],

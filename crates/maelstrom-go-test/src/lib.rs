@@ -234,10 +234,6 @@ impl TestArtifact for GoTestArtifact {
         Ok(vec![])
     }
 
-    fn name(&self) -> &str {
-        unimplemented!()
-    }
-
     fn build_command(
         &self,
         case_name: &str,
