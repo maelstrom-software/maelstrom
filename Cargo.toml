@@ -149,5 +149,6 @@ wasm-bindgen = "0.2"
 wasm-bindgen-cli-support = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-logger = "0.2"
+web-sys = "0.3"
 xdg = "2.5.2"
 zerocopy = { version = "0.7", features = ["derive"] }
