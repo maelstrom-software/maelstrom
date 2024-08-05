@@ -1,4 +1,6 @@
-use crate::{BuildDir, PytestCaseMetadata, PytestPackageId, PytestTestArtifact};
+use crate::{
+    BuildDir, PytestCaseMetadata, PytestConfigValues, PytestPackageId, PytestTestArtifact,
+};
 use anyhow::{anyhow, bail, Result};
 use maelstrom_client::ProjectDir;
 use maelstrom_util::{process::ExitCode, root::Root};
@@ -111,7 +113,7 @@ struct PytestCase {
 
 pub fn pytest_collect_tests(
     _color: bool,
-    pyargs: Option<&String>,
+    pytest_options: &PytestConfigValues,
     project_dir: &Root<ProjectDir>,
     build_dir: &Root<BuildDir>,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
@@ -124,7 +126,7 @@ pub fn pytest_collect_tests(
             .ok_or_else(|| anyhow!("non UTF-8 path"))?
             .to_owned(),
     ];
-    if let Some(arg) = pyargs {
+    if let Some(arg) = &pytest_options.collect_from_module {
         args.push("--pyargs".into());
         args.push(arg.into());
     }
@@ -139,6 +141,7 @@ pub fn pytest_collect_tests(
             tests: vec![],
             ignored_tests: vec![],
             package: PytestPackageId("default".into()),
+            pytest_options: pytest_options.clone(),
         });
         if case.skip {
             test.ignored_tests.push(case.name.clone());

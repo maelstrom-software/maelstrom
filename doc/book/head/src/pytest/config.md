@@ -15,7 +15,8 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`ui`</span>                         | string  | [UI style to use](#ui)                                                                      | `"auto"`
 <span style="white-space: nowrap;">`repeat`</span>                     | number  | [how many times to run each test](#repeat)                                                  | `1`
 <span style="white-space: nowrap;">`timeout`</span>                    | string  | [override timeout value tests](#timeout)                                                    | don't override
-<span style="white-space: nowrap;">`collect-from-module`</span>        | string  | [collect tests from the specified module](#collect-from-module)                                                    | don't override
+<span style="white-space: nowrap;">`collect-from-module`</span>        | string  | [collect tests from the specified module](#collect-from-module)                             | don't override
+<span style="white-space: nowrap;">`extra-pytest-args`</span>          | list    | [pass arbitrary arguments to pytest](#extra-pytest-args)                                    | no args
 
 ## `cache-size`
 
@@ -96,3 +97,20 @@ any value set in [`maelstrom-pytest.toml`](spec/fields.md#timeout).
 Collect tests from the provided module instead of using pytest's default
 collection algorithm. This will pass the provided module to pytest along with
 the `--pyargs` flag.
+
+## `extra-pytest-args`
+
+This allows passing of arbitrary command-line arguments to pytest when running a test. See `pytest
+--help` for what arguments are accepted normally. Since these arguments are passed directly and not
+interpreted, this can be used to interact with arbitrary pytest plugins.
+
+These arguments are added after the `--verbose` but before we pass the `nodeid` of which test to
+run. It could be possible to use these flags to somehow not run the test `maelstrom-pytest` was
+intending to, producing confusing results.
+
+When provided on the command-line these arguments are positional and come after any other arguments.
+They must always be preceded by `--` like as follows:
+
+```bash
+maelstrom-pytest -- -n1
+```

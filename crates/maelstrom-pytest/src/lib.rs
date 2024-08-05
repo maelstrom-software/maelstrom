@@ -92,7 +92,6 @@ impl<'client> DefaultMainAppDeps<'client> {
     pub fn new(
         project_dir: &Root<ProjectDir>,
         build_dir: &Root<BuildDir>,
-        collect_from_module: Option<String>,
         cache_dir: &Root<CacheDir>,
         client: &'client Client,
     ) -> Result<Self> {
@@ -103,7 +102,6 @@ impl<'client> DefaultMainAppDeps<'client> {
                 project_dir: project_dir.to_owned(),
                 build_dir: build_dir.to_owned(),
                 cache_dir: cache_dir.to_owned(),
-                collect_from_module,
             },
         })
     }
@@ -157,14 +155,11 @@ impl TestFilter for pattern::Pattern {
     }
 }
 
-struct PytestOptions;
-
 struct PytestTestCollector<'client> {
     project_dir: RootBuf<ProjectDir>,
     build_dir: RootBuf<BuildDir>,
     cache_dir: RootBuf<CacheDir>,
     client: &'client Client,
-    collect_from_module: Option<String>,
 }
 
 impl<'client> PytestTestCollector<'client> {
@@ -308,6 +303,7 @@ pub(crate) struct PytestTestArtifact {
     tests: Vec<(String, PytestCaseMetadata)>,
     ignored_tests: Vec<String>,
     package: PytestPackageId,
+    pytest_options: PytestConfigValues,
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
@@ -355,15 +351,10 @@ impl TestArtifact for PytestTestArtifact {
         _case_name: &str,
         case_metadata: &PytestCaseMetadata,
     ) -> (Utf8PathBuf, Vec<String>) {
-        (
-            "/usr/local/bin/python".into(),
-            vec![
-                "-m".into(),
-                "pytest".into(),
-                "--verbose".into(),
-                format!("{}", case_metadata.node_id),
-            ],
-        )
+        let mut args = vec!["-m".into(), "pytest".into(), "--verbose".into()];
+        args.extend(self.pytest_options.extra_pytest_args.clone());
+        args.push(case_metadata.node_id.clone());
+        ("/usr/local/bin/python".into(), args)
     }
 
     fn format_case(
@@ -410,22 +401,18 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
     type PackageId = PytestPackageId;
     type Package = PytestPackage;
     type ArtifactKey = PytestArtifactKey;
-    type Options = PytestOptions;
+    type Options = PytestConfigValues;
     type CaseMetadata = PytestCaseMetadata;
 
     fn start(
         &self,
         color: bool,
-        _options: &PytestOptions,
+        options: &PytestConfigValues,
         _packages: Vec<&PytestPackage>,
         _ui: &UiSender,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
-        let (handle, stream) = pytest::pytest_collect_tests(
-            color,
-            self.collect_from_module.as_ref(),
-            &self.project_dir,
-            &self.build_dir,
-        )?;
+        let (handle, stream) =
+            pytest::pytest_collect_tests(color, options, &self.project_dir, &self.build_dir)?;
         Ok((handle, stream))
     }
 
@@ -539,7 +526,7 @@ impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
         &self.test_collector
     }
 
-    fn get_template_vars(&self, _pytest_options: &PytestOptions) -> Result<TemplateVars> {
+    fn get_template_vars(&self, _pytest_options: &PytestConfigValues) -> Result<TemplateVars> {
         Ok(TemplateVars::new())
     }
 
@@ -635,13 +622,7 @@ pub fn main_with_stderr_and_project_dir(
         config.parent.accept_invalid_remote_container_tls_certs,
         log.clone(),
     )?;
-    let deps = DefaultMainAppDeps::new(
-        project_dir,
-        build_dir,
-        config.pytest_options.collect_from_module,
-        &cache_dir,
-        &client,
-    )?;
+    let deps = DefaultMainAppDeps::new(project_dir, build_dir, &cache_dir, &client)?;
 
     let state = MainAppState::new(
         deps,
@@ -652,7 +633,7 @@ pub fn main_with_stderr_and_project_dir(
         stderr_is_tty,
         project_dir,
         &state_dir,
-        PytestOptions,
+        config.pytest_options,
         log,
     )?;
 

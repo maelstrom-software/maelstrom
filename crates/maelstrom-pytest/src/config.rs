@@ -1,6 +1,6 @@
 use maelstrom_macro::Config;
 
-#[derive(Config, Debug, Default)]
+#[derive(Config, Clone, Debug, Default)]
 pub struct PytestConfigValues {
     /// Collect tests from the provided module instead of using pytest's default collection
     /// algorithm. This will pass the provided module to pytest along with the --pyargs flag.
@@ -10,6 +10,11 @@ pub struct PytestConfigValues {
         default = r#""pytest's default collection algorithm""#
     )]
     pub collect_from_module: Option<String>,
+
+    /// Extra arguments to pass to pytest when running the test. See `pytest --help` to see what it
+    /// accepts.
+    #[config(var_arg, value_name = "EXTRA-PYTEST-ARGS", default = r#""no args""#)]
+    pub extra_pytest_args: Vec<String>,
 }
 
 #[derive(Config, Debug)]
