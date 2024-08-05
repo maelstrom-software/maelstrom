@@ -19,7 +19,6 @@ bytesize-serde.workspace = true
 clap.workspace = true
 derive_more.workspace = true
 futures.workspace = true
-gethostname.workspace = true
 lru.workspace = true
 maelstrom-base.workspace = true
 maelstrom-fuse.workspace = true
@@ -35,7 +34,6 @@ serde.workspace = true
 sha2.workspace = true
 slog.workspace = true
 strum.workspace = true
-tar.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 xdg.workspace = true
 

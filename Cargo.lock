@@ -541,12 +541,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
-name = "atomicbox"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a9a3820bc9e9aaf60c8389c2a4808548599f4ff254ce6bdb608ac3631d4ad76"
-
-[[package]]
 name = "atspi"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2998,7 +2992,6 @@ dependencies = [
  "maelstrom-util",
  "maplit",
  "nonempty",
- "num_enum",
  "regex",
  "serde",
  "serde_json",
@@ -3032,7 +3025,6 @@ dependencies = [
  "prost",
  "protoc-bin-vendored",
  "serde",
- "serde_with",
  "toml",
  "tonic",
  "tonic-build",
@@ -3046,7 +3038,6 @@ version = "0.12.0-dev"
 dependencies = [
  "anyhow",
  "async-trait",
- "atomicbox",
  "bracoxide",
  "chrono",
  "colored-diff",
@@ -3111,7 +3102,6 @@ name = "maelstrom-fuse"
 version = "0.12.0-dev"
 dependencies = [
  "anyhow",
- "anyhow_trace",
  "async-trait",
  "derive_more",
  "futures",
@@ -3123,14 +3113,12 @@ dependencies = [
  "page_size",
  "serde",
  "serde_repr",
- "serde_with",
  "slog",
  "slog-async",
  "slog-term",
  "smallvec",
  "tempfile",
  "tokio",
- "tokio-tar",
  "zerocopy",
 ]
 
@@ -3140,7 +3128,6 @@ version = "0.12.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
- "cargo_metadata",
  "clap",
  "combine",
  "console",
@@ -3289,12 +3276,6 @@ dependencies = [
 [[package]]
 name = "maelstrom-test"
 version = "0.12.0-dev"
-dependencies = [
- "anyhow",
- "maelstrom-base",
- "maelstrom-util",
- "serde",
-]
 
 [[package]]
 name = "maelstrom-test-runner"
@@ -3326,7 +3307,6 @@ dependencies = [
  "pretty_assertions",
  "ratatui",
  "regex",
- "regex-macro",
  "serde",
  "serde_json",
  "serde_repr",
@@ -3336,7 +3316,6 @@ dependencies = [
  "slog-json",
  "slog-term",
  "strum 0.25.0",
- "tar",
  "tempfile",
  "throbber-widgets-tui",
  "toml",
@@ -3378,7 +3357,6 @@ dependencies = [
  "regex",
  "serde",
  "serde_test",
- "serde_with",
  "sha2",
  "slog",
  "slog-async",
@@ -3429,7 +3407,6 @@ dependencies = [
  "colored-diff",
  "derive_more",
  "futures",
- "gethostname",
  "indoc",
  "itertools 0.10.5",
  "lru",
@@ -3450,7 +3427,6 @@ dependencies = [
  "sha2",
  "slog",
  "strum 0.25.0",
- "tar",
  "tempfile",
  "tokio",
  "xdg",

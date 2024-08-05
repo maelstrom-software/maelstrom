@@ -30,7 +30,6 @@ serde.workspace = true
 serde_json.workspace = true
 serde_repr = "0.1"
 slog.workspace = true
-tempfile.workspace = true
 tokio-native-tls.workspace = true
 tokio-tar.workspace = true
 tokio-util.workspace = true
@@ -39,3 +38,4 @@ toml.workspace = true
 
 [dev-dependencies]
 maplit.workspace = true
+tempfile.workspace = true

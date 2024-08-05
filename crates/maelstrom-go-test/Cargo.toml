@@ -13,7 +13,6 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-cargo_metadata.workspace = true
 clap.workspace = true
 combine.workspace = true
 console.workspace = true
@@ -26,7 +25,6 @@ maelstrom-macro.workspace = true
 maelstrom-test-runner.workspace = true
 maelstrom-util.workspace = true
 regex.workspace = true
-regex-macro.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
@@ -41,5 +39,6 @@ maelstrom-broker.workspace = true
 maelstrom-test.workspace = true
 maelstrom-worker.workspace = true
 pretty_assertions.workspace = true
+regex-macro.workspace = true
 serde.workspace = true
 tempfile.workspace = true
