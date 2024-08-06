@@ -10,7 +10,8 @@ use maelstrom_base::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
-    ArtifactType, ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest, WorkerId,
+    ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
+    JobWorkerStatus, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
     duration,
@@ -233,7 +234,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::FromWorker(wid, WorkerToBroker::JobResponse(jid, result)) => {
                 self.receive_worker_response(deps, wid, jid, result)
             }
-            Message::FromWorker(_wid, WorkerToBroker::JobStatusUpdate(_jid, _status)) => {}
+            Message::FromWorker(wid, WorkerToBroker::JobStatusUpdate(jid, status)) => {
+                self.receive_worker_job_status_update(deps, wid, jid, status)
+            }
             Message::GotArtifact(digest, size, path) => {
                 self.receive_got_artifact(deps, digest, size, path)
             }
@@ -610,6 +613,24 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             let heap_index = worker.heap_index;
             self.worker_heap.sift_up(&mut self.workers, heap_index);
         }
+    }
+
+    fn receive_worker_job_status_update(
+        &mut self,
+        deps: &mut DepsT,
+        wid: WorkerId,
+        jid: JobId,
+        status: JobWorkerStatus,
+    ) {
+        if !self.workers.0.get(&wid).unwrap().pending.contains(&jid) {
+            // This indicates that the client isn't around anymore. Just ignore this status update.
+            return;
+        }
+        let client = self.clients.0.get_mut(&jid.cid).unwrap();
+        deps.send_message_to_client(
+            &mut client.sender,
+            BrokerToClient::JobStatusUpdate(jid.cjid, JobBrokerStatus::AtWorker(wid, status)),
+        );
     }
 
     fn ensure_manifest_artifacts_for_job(
@@ -2214,5 +2235,76 @@ mod tests {
                 }
             ))
         }
+    }
+
+    script_test! {
+        forward_job_status_update,
+        {
+            Fixture::new([
+                ((jid![1, 3], digest![1]), vec![GetArtifact::Success]),
+            ], [], [], [])
+        },
+        ClientConnected(cid![1], client_sender![1]) => {};
+        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec![1, Tar])) => {
+            CacheGetArtifact(jid![1, 3], digest![1]),
+            ToWorker(wid![2], EnqueueJob(jid![1, 3], spec![1, Tar])),
+        };
+        FromWorker(
+            wid![2],
+            WorkerToBroker::JobStatusUpdate(jid![1, 3], JobWorkerStatus::WaitingForLayers)
+        ) => {
+            ToClient(
+                cid![1],
+                BrokerToClient::JobStatusUpdate(
+                    cjid![3],
+                    JobBrokerStatus::AtWorker(wid![2], JobWorkerStatus::WaitingForLayers)
+                )
+            )
+        };
+        FromWorker(
+            wid![2],
+            WorkerToBroker::JobStatusUpdate(jid![1, 3], JobWorkerStatus::WaitingToExecute)
+        ) => {
+            ToClient(
+                cid![1],
+                BrokerToClient::JobStatusUpdate(
+                    cjid![3],
+                    JobBrokerStatus::AtWorker(wid![2], JobWorkerStatus::WaitingToExecute)
+                )
+            )
+        };
+        FromWorker(
+            wid![2],
+            WorkerToBroker::JobStatusUpdate(jid![1, 3], JobWorkerStatus::Executing)
+        ) => {
+            ToClient(
+                cid![1],
+                BrokerToClient::JobStatusUpdate(
+                    cjid![3],
+                    JobBrokerStatus::AtWorker(wid![2], JobWorkerStatus::Executing)
+                )
+            )
+        };
+    }
+
+    script_test! {
+        drop_unknown_job_status_update,
+        {
+            Fixture::new([], [], [], [])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        FromWorker(
+            wid![1],
+            WorkerToBroker::JobStatusUpdate(jid![2, 3], JobWorkerStatus::WaitingForLayers)
+        ) => {};
+        FromWorker(
+            wid![1],
+            WorkerToBroker::JobStatusUpdate(jid![2, 3], JobWorkerStatus::WaitingToExecute)
+        ) => {};
+        FromWorker(
+            wid![1],
+            WorkerToBroker::JobStatusUpdate(jid![2, 3], JobWorkerStatus::Executing)
+        ) => {};
     }
 }
