@@ -520,12 +520,18 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             self.ensure_artifact_for_job(deps, digest, jid, is_manifest);
         }
 
-        let job = self.clients.job_from_jid(jid);
+        let client = self.clients.0.get_mut(&jid.cid).unwrap();
+        let job = client.jobs.get(&jid.cjid).unwrap();
         let have_all_artifacts = job.missing_artifacts.is_empty();
         if have_all_artifacts {
             self.queued_jobs
                 .push(QueuedJob::new(jid, estimated_duration));
             self.possibly_start_jobs(deps, HashSet::from_iter([jid]));
+        } else {
+            deps.send_message_to_client(
+                &mut client.sender,
+                BrokerToClient::JobStatusUpdate(jid.cjid, JobBrokerStatus::WaitingForLayers),
+            );
         }
     }
 
@@ -1658,6 +1664,7 @@ mod tests {
             CacheGetArtifact(jid![1, 2], digest![43]),
             CacheGetArtifact(jid![1, 2], digest![44]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
         ClientDisconnected(cid![1]) => {
@@ -1719,6 +1726,7 @@ mod tests {
             CacheGetArtifact(jid![1, 2], digest![43]),
             CacheGetArtifact(jid![1, 2], digest![44]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
         GotArtifact(digest![43], 100, "/z/tmp/foo".into()) => {
@@ -1779,6 +1787,7 @@ mod tests {
         ) => {
             CacheGetArtifact(jid![1, 2], digest![42]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![42])),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
         GotArtifact(digest![42], 100, "/z/tmp/bar".into()) => {
@@ -1820,6 +1829,7 @@ mod tests {
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [(42, Manifest)]])) => {
             CacheGetArtifact(jid![1, 2], digest![42]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![42])),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
         GotArtifact(digest![42], 100, "/z/tmp/foo".into()) => {
@@ -1879,6 +1889,7 @@ mod tests {
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [(42, Manifest)]])) => {
             CacheGetArtifact(jid![1, 2], digest![42]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![42])),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
         GotArtifact(digest![42], 100, "/z/tmp/foo".into()) => {
@@ -1928,6 +1939,7 @@ mod tests {
             CacheGetArtifact(jid![1, 2], digest![42]),
             CacheGetArtifact(jid![1, 2], digest![43]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
         GotArtifact(digest![43], 100, "/z/tmp/bar".into()) => {
@@ -1971,6 +1983,7 @@ mod tests {
             CacheGetArtifact(jid![1, 2], digest![42]),
             CacheGetArtifact(jid![1, 2], digest![43]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
         GotArtifact(digest![43], 100, "/z/tmp/bar".into()) => {
@@ -2123,6 +2136,7 @@ mod tests {
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1, [(42, Tar)]])) => {
             CacheGetArtifact(jid![1, 1], digest![42]),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForLayers)),
         };
         StatisticsHeartbeat => {};
         FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
