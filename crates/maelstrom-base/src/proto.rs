@@ -2,7 +2,7 @@
 
 use crate::{
     stats::{BrokerStatistics, JobStateCounts},
-    ClientJobId, JobId, JobOutcomeResult, JobSpec, JobWorkerStatus, Sha256Digest,
+    ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec, JobWorkerStatus, Sha256Digest,
 };
 use bincode::Options;
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,7 @@ pub enum WorkerToBroker {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BrokerToClient {
     JobResponse(ClientJobId, JobOutcomeResult),
+    JobStatusUpdate(ClientJobId, JobBrokerStatus),
     TransferArtifact(Sha256Digest),
     StatisticsResponse(BrokerStatistics),
     JobStateCountsResponse(JobStateCounts),

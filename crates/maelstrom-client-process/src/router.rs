@@ -131,6 +131,7 @@ impl<DepsT: Deps> Router<DepsT> {
                 assert!(!self.standalone);
                 self.receive_job_response(cjid, result);
             }
+            Message::Broker(BrokerToClient::JobStatusUpdate(_cjid, _status)) => {}
             Message::Broker(BrokerToClient::TransferArtifact(digest)) => {
                 assert!(!self.standalone);
                 let path = self.artifacts.get(&digest).unwrap_or_else(|| {

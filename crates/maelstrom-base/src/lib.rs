@@ -537,6 +537,13 @@ pub enum JobWorkerStatus {
     Executing,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub enum JobBrokerStatus {
+    WaitingForLayers,
+    WaitingForWorker,
+    AtWorker(WorkerId, JobWorkerStatus),
+}
+
 /// ID of a worker connection. These share the same ID space as [`ClientId`].
 #[derive(
     Copy,
