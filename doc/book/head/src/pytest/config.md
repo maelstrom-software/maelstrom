@@ -17,6 +17,8 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`timeout`</span>                    | string  | [override timeout value tests](#timeout)                                                    | don't override
 <span style="white-space: nowrap;">`collect-from-module`</span>        | string  | [collect tests from the specified module](#collect-from-module)                             | don't override
 <span style="white-space: nowrap;">`extra-pytest-args`</span>          | list    | [pass arbitrary arguments to pytest](#extra-pytest-args)                                    | no args
+<span style="white-space: nowrap;">`extra-pytest-collect-args`</span>  | list    | [pass arbitrary arguments to pytest when collecting](#extra-pytest-collect-args)            | no args
+<span style="white-space: nowrap;">`extra-pytest-test-args`</span>     | list    | [pass arbitrary arguments to pytest when running a test](#extra-pytest-test-args)           | no args
 
 ## `cache-size`
 
@@ -99,6 +101,20 @@ collection algorithm. This will pass the provided module to pytest along with
 the `--pyargs` flag.
 
 ## `extra-pytest-args`
+
+This allows passing of arbitrary command-line arguments to pytest when collecting tests and running
+a test. These arguments are added in to both `extra-pytest-collect-args` and
+`extra-pytest-test-args` at the beginning. See those individual configuration values for details.
+
+## `extra-pytest-collect-args`
+
+This allows passing of arbitrary command-line arguments to pytest when collecting tests. See `pytest
+--help` for what arguments are accepted normally. Since these arguments are passed directly and not
+interpreted, this can be used to interact with arbitrary pytest plugins.
+
+These arguments are added after `--co` and `--pyargs`.
+
+## `extra-pytest-test-args`
 
 This allows passing of arbitrary command-line arguments to pytest when running a test. See `pytest
 --help` for what arguments are accepted normally. Since these arguments are passed directly and not

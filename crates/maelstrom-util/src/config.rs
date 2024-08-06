@@ -450,7 +450,28 @@ impl CommandBuilder {
             field,
             true, /* is_var_arg */
             None, /* short */
-            None,
+            None, /* alias */
+            value_name,
+            default,
+            help,
+            ArgAction::Append,
+        )
+    }
+
+    pub fn list(
+        self,
+        field: &'static str,
+        short: Option<char>,
+        alias: Option<String>,
+        value_name: &'static str,
+        default: Option<String>,
+        help: &'static str,
+    ) -> Self {
+        self._value(
+            field,
+            false, /* is_var_arg */
+            short,
+            alias,
             value_name,
             default,
             help,

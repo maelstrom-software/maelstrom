@@ -130,6 +130,8 @@ pub fn pytest_collect_tests(
         args.push("--pyargs".into());
         args.push(arg.into());
     }
+    args.extend(pytest_options.extra_pytest_args.clone());
+    args.extend(pytest_options.extra_pytest_collect_args.clone());
     let output = run_python(include_str!("py/collect_tests.py"), project_dir, args)?;
     let mut tests = HashMap::new();
     for line in output.split('\n').filter(|l| !l.is_empty()) {

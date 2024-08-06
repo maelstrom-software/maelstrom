@@ -11,10 +11,24 @@ pub struct PytestConfigValues {
     )]
     pub collect_from_module: Option<String>,
 
-    /// Extra arguments to pass to pytest when running the test. See `pytest --help` to see what it
-    /// accepts.
-    #[config(var_arg, value_name = "EXTRA-PYTEST-ARGS", default = r#""no args""#)]
+    /// Extra arguments to pass to pytest when collecting tests and when running a test. See
+    /// `pytest --help` to see what it accepts.
+    #[config(list, value_name = "ARGS", default = r#""no args""#)]
     pub extra_pytest_args: Vec<String>,
+
+    /// Extra arguments to pass to pytest when collecting tests. See `pytest --help` to see what it
+    /// accepts.
+    #[config(list, value_name = "ARGS", default = r#""no args""#)]
+    pub extra_pytest_collect_args: Vec<String>,
+
+    /// Extra arguments to pass to pytest when running a test. See `pytest --help` to see what it
+    /// accepts.
+    #[config(
+        var_arg,
+        value_name = "EXTRA-PYTEST-TEST-ARGS",
+        default = r#""no args""#
+    )]
+    pub extra_pytest_test_args: Vec<String>,
 }
 
 #[derive(Config, Debug)]

@@ -353,6 +353,7 @@ impl TestArtifact for PytestTestArtifact {
     ) -> (Utf8PathBuf, Vec<String>) {
         let mut args = vec!["-m".into(), "pytest".into(), "--verbose".into()];
         args.extend(self.pytest_options.extra_pytest_args.clone());
+        args.extend(self.pytest_options.extra_pytest_test_args.clone());
         args.push(case_metadata.node_id.clone());
         ("/usr/local/bin/python".into(), args)
     }
