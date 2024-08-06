@@ -334,6 +334,14 @@ pub enum Layer {
     Stubs { stubs: Vec<String> },
     #[proto(other_type = proto::SymlinksLayer)]
     Symlinks { symlinks: Vec<SymlinkSpec> },
+    #[proto(other_type = proto::SharedLibraryDependenciesLayer)]
+    SharedLibraryDependencies {
+        #[serde(rename = "shared-library-dependencies")]
+        binary_paths: Vec<Utf8PathBuf>,
+        #[serde(flatten)]
+        #[proto(option)]
+        prefix_options: PrefixOptions,
+    },
 }
 
 impl Layer {
@@ -355,6 +363,11 @@ impl Layer {
                 for SymlinkSpec { link, target } in symlinks {
                     *link = replace_template_vars(link.as_str(), vars)?.into();
                     *target = replace_template_vars(target.as_str(), vars)?.into();
+                }
+            }
+            Self::SharedLibraryDependencies { binary_paths, .. } => {
+                for path in binary_paths {
+                    *path = replace_template_vars(path.as_str(), vars)?.into();
                 }
             }
         }

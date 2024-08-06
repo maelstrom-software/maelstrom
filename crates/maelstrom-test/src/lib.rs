@@ -380,6 +380,87 @@ macro_rules! paths_layer {
 }
 
 #[macro_export]
+macro_rules! so_deps_layer {
+    (
+        _internal,
+        [$($path:expr),*],
+        $strip_prefix:expr,
+        $prepend_prefix:expr,
+        $canonicalize:expr,
+        $follow_symlinks:expr
+    ) => {
+        ::maelstrom_client::spec::Layer::SharedLibraryDependencies {
+            binary_paths: vec![$(utf8_path_buf!($path)),*],
+            prefix_options: ::maelstrom_client::spec::PrefixOptions {
+                strip_prefix: $strip_prefix,
+                prepend_prefix: $prepend_prefix,
+                canonicalize: $canonicalize,
+                follow_symlinks: $follow_symlinks,
+            },
+        }
+    };
+    ([$($path:expr),*]) => {
+        so_deps_layer!(_internal, [$($path),*], None, None, false, false)
+    };
+    ([$($path:expr),*], strip_prefix = $strip_prefix:expr) => {
+        so_deps_layer!(
+            _internal,
+            [$($path),*],
+            Some(::std::convert::Into::into($strip_prefix)),
+            None,
+            false,
+            false
+        )
+    };
+    ([$($path:expr),*], prepend_prefix = $prepend_prefix:expr) => {
+        so_deps_layer!(
+            _internal,
+            [$($path),*],
+            None,
+            Some(::std::convert::Into::into($prepend_prefix)),
+            false,
+            false
+        )
+    };
+    ([$($path:expr),*], canonicalize = $canonicalize:expr) => {
+        so_deps_layer!(
+            _internal,
+            [$($path),*],
+            None,
+            None,
+            $canonicalize,
+            false
+        )
+    };
+    ([$($path:expr),*], follow_symlinks = $follow_symlinks:expr) => {
+        so_deps_layer!(
+            _internal,
+            [$($path),*],
+            None,
+            None,
+            false,
+            follow_symlinks
+        )
+    };
+    (
+        [$($path:expr),*],
+        strip_prefix = $strip_prefix:expr,
+        prepend_prefix = $prepend_prefix:expr,
+        canonicalize = $canonicalize:expr,
+        follow_symlinks = $follow_symlinks:expr
+    ) => {
+        so_deps_layer!(
+            _internal,
+            [$($path),*],
+            Some(::std::convert::Into::into($strip_prefix)),
+            Some(::std::convert::Into::into($prepend_prefix)),
+            $canonicalize,
+            $follow_symlinks
+        )
+    };
+}
+
+#[macro_export]
 macro_rules! timeout {
     ($n:literal) => {
         maelstrom_base::Timeout::new($n)

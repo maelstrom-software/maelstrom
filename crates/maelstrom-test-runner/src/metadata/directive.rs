@@ -261,7 +261,9 @@ mod tests {
     use indoc::indoc;
     use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
     use maelstrom_client::spec::SymlinkSpec;
-    use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
+    use maelstrom_test::{
+        glob_layer, paths_layer, so_deps_layer, string, tar_layer, utf8_path_buf,
+    };
     use toml::de::Error as TomlError;
 
     fn parse_test_directive(file: &str) -> Result<TestDirective<String>> {
@@ -845,6 +847,61 @@ mod tests {
                         target: "/there".into()
                     }],
                 }])),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn layers_shared_library_dependencies() {
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [
+                    { shared-library-dependencies = ["/bin/bash", "/bin/sh"] }
+                ]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!([
+                    "/bin/bash",
+                    "/bin/sh"
+                ])])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [
+                    { shared-library-dependencies = ["/bin/bash", "/bin/sh"], prepend_prefix = "/usr" }
+                ]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
+                    ["/bin/bash", "/bin/sh"],
+                    prepend_prefix = "/usr"
+                )])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [
+                    { shared-library-dependencies = ["/bin/bash", "/bin/sh"], canonicalize = true }
+                ]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
+                    ["/bin/bash", "/bin/sh"],
+                    canonicalize = true
+                )])),
                 ..Default::default()
             }
         );

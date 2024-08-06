@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use futures::StreamExt as _;
 use itertools::Itertools as _;
 use maelstrom_base::{
@@ -274,6 +274,9 @@ impl LayerBuilder {
             Layer::Symlinks { symlinks } => {
                 let manifest_path = self.build_symlink_manifest(symlinks).await?;
                 (manifest_path, ArtifactType::Manifest)
+            }
+            Layer::SharedLibraryDependencies { .. } => {
+                bail!("SharedLibraryDependencies layer not yet implemented")
             }
         })
     }

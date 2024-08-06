@@ -48,6 +48,11 @@ message SymlinksLayer {
     repeated SymlinkSpec symlinks = 1;
 }
 
+message SharedLibraryDependenciesLayer {
+    repeated string binary_paths = 1;
+    PrefixOptions prefix_options = 2;
+}
+
 message AddLayerRequest {
     oneof Layer {
         TarLayer tar = 1;
@@ -55,6 +60,7 @@ message AddLayerRequest {
         PathsLayer paths = 3;
         StubsLayer stubs = 4;
         SymlinksLayer symlinks = 5;
+        SharedLibraryDependenciesLayer shared_library_dependencies = 6;
     }
 }
 
