@@ -1,4 +1,6 @@
-use anyhow::{anyhow, bail, Result};
+mod shared_libraries;
+
+use anyhow::{anyhow, Result};
 use futures::StreamExt as _;
 use itertools::Itertools as _;
 use maelstrom_base::{
@@ -18,6 +20,7 @@ use maelstrom_util::{
     root::RootBuf,
 };
 use sha2::{Digest as _, Sha256};
+use shared_libraries::get_shared_library_dependencies;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -275,8 +278,19 @@ impl LayerBuilder {
                 let manifest_path = self.build_symlink_manifest(symlinks).await?;
                 (manifest_path, ArtifactType::Manifest)
             }
-            Layer::SharedLibraryDependencies { .. } => {
-                bail!("SharedLibraryDependencies layer not yet implemented")
+            Layer::SharedLibraryDependencies {
+                binary_paths,
+                prefix_options,
+            } => {
+                let paths = get_shared_library_dependencies(&binary_paths).await?;
+                let manifest_path = self
+                    .build_manifest(
+                        futures::stream::iter(paths.iter().map(Ok)),
+                        prefix_options,
+                        data_upload,
+                    )
+                    .await?;
+                (manifest_path, ArtifactType::Manifest)
             }
         })
     }
