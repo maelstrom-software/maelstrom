@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fixed issue with test-runner fancy UI where it would crash if the summary was too large.
 - Fixed issue with test-runners including extra trailing line in test output
+- Fixed issue where the helpful extra comments in the file written by test runners with `--init`
+  weren't being added.
 
 ### Removed
 - Removed support for the deprecated `maelstrom-test.toml` file.
