@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use maelstrom_base::Utf8PathBuf;
+use maelstrom_base::{Sha256Digest, Utf8PathBuf};
 use maelstrom_util::async_fs::Fs;
 use maelstrom_util::elf::read_shared_libraries;
 use std::collections::BTreeSet;
@@ -8,22 +8,21 @@ use std::os::unix::ffi::OsStringExt as _;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
-fn so_listing_path_from_binary_path(path: &Path) -> PathBuf {
-    let mut path = path.to_owned();
-    path.set_extension("so_listing");
-    path
+fn so_listing_path_from_binary_path(so_listings_path: &Path, digest: &Sha256Digest) -> PathBuf {
+    so_listings_path.join(digest.to_string())
 }
 
-async fn check_for_cached_so_listing(fs: &Fs, binary_path: &Path) -> Result<Option<Vec<PathBuf>>> {
-    let listing_path = so_listing_path_from_binary_path(binary_path);
+async fn check_for_cached_so_listing(
+    fs: &Fs,
+    so_listings_path: &Path,
+    binary_digest: &Sha256Digest,
+) -> Result<Option<Vec<PathBuf>>> {
+    let listing_path = so_listing_path_from_binary_path(so_listings_path, binary_digest);
     if fs.exists(&listing_path).await {
-        let listing_mtime = fs.metadata(&listing_path).await?.modified()?;
-        let binary_mtime = fs.metadata(binary_path).await?.modified()?;
-        if binary_mtime < listing_mtime {
-            return Ok(Some(decode_paths(fs.open_file(listing_path).await?).await?));
-        }
+        Ok(Some(decode_paths(fs.open_file(listing_path).await?).await?))
+    } else {
+        Ok(None)
     }
-    Ok(None)
 }
 
 async fn encode_paths(paths: &[PathBuf], mut out: impl AsyncWrite + Unpin) -> Result<()> {
@@ -54,23 +53,40 @@ async fn decode_paths(mut input: impl AsyncRead + Unpin) -> Result<Vec<PathBuf>>
     Ok(paths)
 }
 
-pub async fn get_shared_library_dependencies(binary_paths: &[Utf8PathBuf]) -> Result<Vec<PathBuf>> {
+pub async fn get_shared_library_dependencies(
+    project_dir: &Path,
+    so_listings_path: &Path,
+    data_upload: &mut impl super::DataUpload,
+    binary_paths: &[Utf8PathBuf],
+) -> Result<Vec<PathBuf>> {
     let fs = Fs::new();
+
+    fs.create_dir_all(so_listings_path).await?;
 
     let mut all_paths = BTreeSet::new();
     for binary_path in binary_paths {
-        let binary_path = binary_path.as_std_path();
-        if let Some(paths) = check_for_cached_so_listing(&fs, binary_path).await? {
+        let binary_path = project_dir.join(binary_path.as_std_path());
+
+        // Even though we don't include the binary in the manifest we create, we use this to get a
+        // cached digest of the contents for caching.
+        let binary_digest = data_upload.upload(&binary_path).await?;
+
+        if let Some(paths) =
+            check_for_cached_so_listing(&fs, so_listings_path, &binary_digest).await?
+        {
             all_paths.extend(paths);
         } else {
-            let binary_path_clone = binary_path.to_owned();
+            let binary_path_clone = binary_path.clone();
             let paths =
                 tokio::task::spawn_blocking(move || read_shared_libraries(&binary_path_clone))
                     .await??;
             encode_paths(
                 &paths,
-                fs.create_file(so_listing_path_from_binary_path(binary_path))
-                    .await?,
+                fs.create_file(so_listing_path_from_binary_path(
+                    so_listings_path,
+                    &binary_digest,
+                ))
+                .await?,
             )
             .await?;
             all_paths.extend(paths);

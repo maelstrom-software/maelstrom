@@ -12,7 +12,7 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
-    CacheDir, ProjectDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    CacheDir, ProjectDir, MANIFEST_DIR, SO_LISTINGS_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_util::{
     async_fs,
@@ -234,7 +234,7 @@ impl LayerBuilder {
     pub async fn build_layer(
         &self,
         layer: Layer,
-        data_upload: impl DataUpload,
+        mut data_upload: impl DataUpload,
     ) -> Result<(PathBuf, ArtifactType)> {
         Ok(match layer {
             Layer::Tar { path } => (path.into_std_path_buf(), ArtifactType::Tar),
@@ -282,7 +282,13 @@ impl LayerBuilder {
                 binary_paths,
                 prefix_options,
             } => {
-                let paths = get_shared_library_dependencies(&binary_paths).await?;
+                let paths = get_shared_library_dependencies(
+                    &self.project_dir,
+                    &(**self.cache_dir).join(SO_LISTINGS_DIR),
+                    &mut data_upload,
+                    &binary_paths,
+                )
+                .await?;
                 let manifest_path = self
                     .build_manifest(
                         futures::stream::iter(paths.iter().map(Ok)),

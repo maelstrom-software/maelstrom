@@ -44,6 +44,7 @@ pub struct CacheDir;
 pub const MANIFEST_DIR: &str = "manifests";
 pub const STUB_MANIFEST_DIR: &str = "manifests/stubs";
 pub const SYMLINK_MANIFEST_DIR: &str = "manifests/symlinks";
+pub const SO_LISTINGS_DIR: &str = "so_listings";
 
 impl From<proto::Error> for anyhow::Error {
     fn from(e: proto::Error) -> Self {
