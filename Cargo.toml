@@ -2,6 +2,12 @@
 resolver = "2"
 members = [ "crates/*" ]
 
+# Reduce debug-symbol information for dependencies by default. This saves a significant amount of
+# disk space on the dev profile while still retaining the ability to backtrace.
+# Comment these lines out are rebuild if you need to park a debugger in the code of a dependency.
+[profile.dev.package."*"]
+debug = "line-tables-only"
+
 [profile.dev]
 panic = "abort"
 
