@@ -559,7 +559,6 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         self.worker_heap
             .remove(&mut self.workers, worker.heap_index);
 
-        // We sort the requests to keep our tests deterministic.
         for jid in worker.pending.drain() {
             self.queued_jobs.push(QueuedJob::new(
                 jid,
