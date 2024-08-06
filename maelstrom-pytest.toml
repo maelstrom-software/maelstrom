@@ -3,13 +3,15 @@ image.name = "docker://python:3.11-slim"
 image.use = ["layers", "environment"]
 added_layers = [
     { glob = "**.py" },
-    { paths = ["py/maelstrom_client/maelstrom-client"], follow_symlinks = true },
-    { stubs = ["/tmp/", "/proc/", "/sys/", "/dev/{full,null,urandom,random,zero}", "/.pytest_cache/"] }
+    { paths = ["py/maelstrom_client/maelstrom-client", "crates/maelstrom-worker/src/executor-test-deps.tar"], follow_symlinks = true },
+    { shared-library-dependencies = ["py/maelstrom_client/maelstrom-client"], follow_symlinks = true },
+    { stubs = ["/tmp/", "/proc/", "/sys/", "/dev/{full,fuse,null,urandom,random,zero}", "/py/.pytest_cache/", "/root"] }
 ]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
-    { type = "tmp", mount_point = "/.pytest_cache" },
+    { type = "tmp", mount_point = "/py/.pytest_cache" },
+    { type = "tmp", mount_point = "/root" },
     { type = "proc", mount_point = "/proc" },
     { type = "sys", mount_point = "/sys" },
-    { type = "devices", devices = ["full", "null", "urandom", "random", "zero"] },
+    { type = "devices", devices = ["full", "fuse", "null", "urandom", "random", "zero"] },
 ]
