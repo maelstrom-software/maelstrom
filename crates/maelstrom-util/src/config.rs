@@ -166,7 +166,7 @@ impl ConfigBag {
     {
         if let Some(v) = self.env.get(env_var) {
             Ok(Some(
-                v.split(" ")
+                v.split(' ')
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_owned())
                     .collect(),

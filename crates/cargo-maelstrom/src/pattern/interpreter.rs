@@ -62,15 +62,6 @@ pub struct Artifact {
     pub name: String,
 }
 
-impl Artifact {
-    pub fn from_target(t: &CargoTarget) -> Self {
-        Self {
-            name: t.name.clone(),
-            kind: ArtifactKind::from_target(t),
-        }
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Case {
     pub name: String,
