@@ -50,7 +50,6 @@ let
       pkg-config
       llvmPackages.bintools
       mypy
-      openssl.dev
       protobuf
       python3
       python311Packages.grpcio-tools
