@@ -91,6 +91,13 @@ layers = [{ stubs = ["/tmp/"] }]
 mounts = [{ type = "tmp", mount_point = "/tmp" }]
 
 [[directives]]
+filter = "package.equals(maelstrom-client-process)"
+added_layers = [
+    { glob = "crates/maelstrom-client-process/src/client/layer_builder/so_test_files/**", canonicalize = true },
+    { paths = ["/lib64/ld-linux-x86-64.so.2"], follow_symlinks = true }
+]
+
+[[directives]]
 filter = "package.equals(maelstrom-container)"
 network = "loopback"
 layers = [{ stubs = ["/tmp/"] }, { paths = ["crates/maelstrom-container/src/busybox.tar"], canonicalize = true }]

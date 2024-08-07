@@ -467,6 +467,11 @@ mod tests {
 
             artifact_path
         }
+
+        async fn hash_file(&self, path: &Path) -> Sha256Digest {
+            let data = self.fs.read(path).await.unwrap();
+            hash_data(&data)
+        }
     }
 
     #[tokio::test]
@@ -891,6 +896,54 @@ mod tests {
                 0o444,
                 ManifestEntryData::Symlink(b"/bar".to_vec()),
             )],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn shared_library_dependencies_test() {
+        let fix = Fixture::new().await;
+
+        let manifest_dir: &Utf8Path = env!("CARGO_MANIFEST_DIR").into();
+        let so_test_files = manifest_dir.join("src/client/layer_builder/so_test_files");
+        let test_binary = so_test_files.join("main");
+
+        let liba_path = so_test_files.join("liba.so");
+        let libb_path = so_test_files.join("libb.so");
+        let ld_linux_path: &Utf8Path = "/lib64/ld-linux-x86-64.so.2".into();
+
+        let liba_hash = fix.hash_file(liba_path.as_std_path()).await;
+        let libb_hash = fix.hash_file(libb_path.as_std_path()).await;
+        let ld_linux_hash = fix.hash_file(ld_linux_path.as_std_path()).await;
+
+        let manifest = fix
+            .build_layer(Layer::SharedLibraryDependencies {
+                binary_paths: vec![test_binary.into()],
+                prefix_options: PrefixOptions {
+                    follow_symlinks: true,
+                    ..Default::default()
+                },
+            })
+            .await;
+        verify_manifest(
+            &manifest,
+            vec![
+                ExpectedManifestEntry::new(
+                    liba_path.as_str(),
+                    0o100775,
+                    ManifestEntryData::File(ManifestFileData::Digest(liba_hash)),
+                ),
+                ExpectedManifestEntry::new(
+                    libb_path.as_str(),
+                    0o100775,
+                    ManifestEntryData::File(ManifestFileData::Digest(libb_hash)),
+                ),
+                ExpectedManifestEntry::new(
+                    ld_linux_path.as_str(),
+                    0o100755,
+                    ManifestEntryData::File(ManifestFileData::Digest(ld_linux_hash)),
+                ),
+            ],
         )
         .await;
     }
