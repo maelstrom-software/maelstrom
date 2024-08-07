@@ -8,6 +8,8 @@ if [ $STATUS -ne 0 ]; then
 	exit $STATUS
 fi
 
+py/protobuf_compile.sh
+
 TEMPFILE=$(mktemp --tmpdir run-tests-on-maelstrom-broker-stderr.XXXXXX)
 cargo run --release --bin maelstrom-broker 2> >(tee "$TEMPFILE" >&2) &
 BROKER_PID=$!
@@ -19,6 +21,8 @@ PORT=$( \
 cargo run --release --bin maelstrom-worker -- --broker=localhost:$PORT &
 cargo run --release --bin cargo-maelstrom -- \
     --broker=localhost:$PORT --profile=release
+cargo run --release --bin maelstrom-pytest -- \
+    --broker=localhost:$PORT
 CARGO_MAELSTROM_STATUS=$?
 kill -9 $BROKER_PID
 rm "$TEMPFILE"
