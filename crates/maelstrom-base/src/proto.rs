@@ -1,8 +1,8 @@
 //! Messages sent between various binaries.
 
 use crate::{
-    stats::{BrokerStatistics, JobStateCounts},
-    ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec, JobWorkerStatus, Sha256Digest,
+    stats::BrokerStatistics, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
+    JobWorkerStatus, Sha256Digest,
 };
 use bincode::Options;
 use serde::{Deserialize, Serialize};
@@ -43,7 +43,6 @@ pub enum BrokerToClient {
     JobStatusUpdate(ClientJobId, JobBrokerStatus),
     TransferArtifact(Sha256Digest),
     StatisticsResponse(BrokerStatistics),
-    JobStateCountsResponse(JobStateCounts),
 }
 
 /// Message sent from a client to the broker. After sending the initial [`Hello`], a client will
@@ -53,7 +52,6 @@ pub enum BrokerToClient {
 pub enum ClientToBroker {
     JobRequest(ClientJobId, JobSpec),
     StatisticsRequest,
-    JobStateCountsRequest,
 }
 
 /// Message sent from the broker to an artifact fetcher. This will be in response to an

@@ -3,12 +3,13 @@ use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{JobState, JobStateCounts},
-    ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
+    ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec, JobWorkerStatus,
+    Sha256Digest,
 };
-use maelstrom_util::{config::common::Slots, ext::OptionExt as _, fs::Fs, sync};
+use maelstrom_util::{ext::OptionExt as _, fs::Fs, sync};
 use maelstrom_worker::local_worker;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     path::{Path, PathBuf},
 };
 use tokio::{
@@ -28,7 +29,6 @@ pub trait Deps {
 
     // Only in remote broker mode.
     fn send_job_request_to_broker(&self, cjid: ClientJobId, spec: JobSpec);
-    fn send_job_state_counts_request_to_broker(&self);
     fn start_artifact_transfer_to_broker(&self, digest: Sha256Digest, path: PathBuf);
 
     // Only in standalone mode.
@@ -57,37 +57,55 @@ pub enum Message<DepsT: Deps> {
     Shutdown(Error),
 }
 
+enum JobStatus {
+    None,
+    AtBroker(JobBrokerStatus),
+    AtLocalWorker(JobWorkerStatus),
+}
+
+struct JobEntry<HandleT> {
+    handle: HandleT,
+    status: JobStatus,
+}
+
+impl<HandleT> JobEntry<HandleT> {
+    fn new(handle: HandleT) -> Self {
+        Self {
+            handle,
+            status: JobStatus::None,
+        }
+    }
+}
+
 struct Router<DepsT: Deps> {
     deps: DepsT,
     standalone: bool,
-    slots: Slots,
     artifacts: HashMap<Sha256Digest, PathBuf>,
     next_client_job_id: u32,
-    job_handles: HashMap<ClientJobId, DepsT::JobHandle>,
-    job_state_counts_handles: VecDeque<DepsT::JobStateCountsHandle>,
-    counts: JobStateCounts,
+    jobs: HashMap<ClientJobId, JobEntry<DepsT::JobHandle>>,
+    completed_jobs: u64,
 }
 
 impl<DepsT: Deps> Router<DepsT> {
-    fn new(deps: DepsT, standalone: bool, slots: Slots) -> Self {
+    fn new(deps: DepsT, standalone: bool) -> Self {
         Self {
             deps,
             standalone,
-            slots,
             artifacts: Default::default(),
             next_client_job_id: Default::default(),
-            job_handles: Default::default(),
-            job_state_counts_handles: Default::default(),
-            counts: Default::default(),
+            jobs: Default::default(),
+            completed_jobs: Default::default(),
         }
     }
 
     fn receive_job_response(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
         let handle = self
-            .job_handles
+            .jobs
             .remove(&cjid)
-            .unwrap_or_else(|| panic!("received response for unknown job {cjid}"));
+            .unwrap_or_else(|| panic!("received response for unknown job {cjid}"))
+            .handle;
         self.deps.job_done(handle, cjid, result);
+        self.completed_jobs += 1;
     }
 
     fn receive_message(&mut self, message: Message<DepsT>) {
@@ -99,14 +117,11 @@ impl<DepsT: Deps> Router<DepsT> {
                 let cjid = self.next_client_job_id.into();
                 self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
 
-                self.job_handles.insert(cjid, handle).assert_is_none();
+                self.jobs
+                    .insert(cjid, JobEntry::new(handle))
+                    .assert_is_none();
 
                 if self.standalone || spec.must_be_run_locally() {
-                    if self.counts[JobState::Running] < *self.slots.inner() as u64 {
-                        self.counts[JobState::Running] += 1;
-                    } else {
-                        self.counts[JobState::Pending] += 1;
-                    }
                     self.deps.send_enqueue_job_to_local_worker(
                         JobId {
                             cid: ClientId::from(0),
@@ -119,19 +134,46 @@ impl<DepsT: Deps> Router<DepsT> {
                 }
             }
             Message::GetJobStateCounts(handle) => {
-                if self.standalone {
-                    assert!(self.job_state_counts_handles.is_empty());
-                    self.deps.job_state_counts(handle, self.counts);
-                } else {
-                    self.job_state_counts_handles.push_back(handle);
-                    self.deps.send_job_state_counts_request_to_broker();
+                let mut counts = JobStateCounts::default();
+                counts[JobState::Complete] = self.completed_jobs;
+                for entry in self.jobs.values() {
+                    let state = match entry.status {
+                        JobStatus::None => JobState::WaitingForArtifacts,
+                        JobStatus::AtBroker(JobBrokerStatus::WaitingForLayers) => {
+                            JobState::WaitingForArtifacts
+                        }
+                        JobStatus::AtBroker(JobBrokerStatus::WaitingForWorker) => JobState::Pending,
+                        JobStatus::AtBroker(JobBrokerStatus::AtWorker(
+                            _,
+                            JobWorkerStatus::WaitingForLayers,
+                        ))
+                        | JobStatus::AtLocalWorker(JobWorkerStatus::WaitingForLayers) => {
+                            JobState::WaitingForArtifacts
+                        }
+                        JobStatus::AtBroker(JobBrokerStatus::AtWorker(
+                            _,
+                            JobWorkerStatus::WaitingToExecute,
+                        ))
+                        | JobStatus::AtLocalWorker(JobWorkerStatus::WaitingToExecute) => {
+                            JobState::Pending
+                        }
+                        JobStatus::AtBroker(JobBrokerStatus::AtWorker(
+                            _,
+                            JobWorkerStatus::Executing,
+                        ))
+                        | JobStatus::AtLocalWorker(JobWorkerStatus::Executing) => JobState::Running,
+                    };
+                    counts[state] += 1;
                 }
+                self.deps.job_state_counts(handle, counts);
             }
             Message::Broker(BrokerToClient::JobResponse(cjid, result)) => {
                 assert!(!self.standalone);
                 self.receive_job_response(cjid, result);
             }
-            Message::Broker(BrokerToClient::JobStatusUpdate(_cjid, _status)) => {}
+            Message::Broker(BrokerToClient::JobStatusUpdate(cjid, status)) => {
+                self.jobs.get_mut(&cjid).unwrap().status = JobStatus::AtBroker(status);
+            }
             Message::Broker(BrokerToClient::TransferArtifact(digest)) => {
                 assert!(!self.standalone);
                 let path = self.artifacts.get(&digest).unwrap_or_else(|| {
@@ -143,30 +185,12 @@ impl<DepsT: Deps> Router<DepsT> {
             Message::Broker(BrokerToClient::StatisticsResponse(_)) => {
                 panic!("got unexpected statistics response")
             }
-            Message::Broker(BrokerToClient::JobStateCountsResponse(mut counts)) => {
-                assert!(!self.standalone);
-                for (state, count) in &self.counts {
-                    counts[state] += count;
-                }
-                self.deps.job_state_counts(
-                    self.job_state_counts_handles
-                        .pop_front()
-                        .unwrap_or_else(|| {
-                            panic!("got JobStateCountsResponse with no requests outstanding")
-                        }),
-                    counts,
-                );
-            }
             Message::LocalWorker(WorkerToBroker::JobResponse(jid, result)) => {
-                if self.counts[JobState::Pending] > 0 {
-                    self.counts[JobState::Pending] -= 1;
-                } else {
-                    self.counts[JobState::Running] -= 1;
-                }
-                self.counts[JobState::Complete] += 1;
                 self.receive_job_response(jid.cjid, result);
             }
-            Message::LocalWorker(WorkerToBroker::JobStatusUpdate(_jid, _status)) => {}
+            Message::LocalWorker(WorkerToBroker::JobStatusUpdate(jid, status)) => {
+                self.jobs.get_mut(&jid.cjid).unwrap().status = JobStatus::AtLocalWorker(status);
+            }
             Message::LocalWorkerStartArtifactFetch(digest, path) => {
                 self.deps.send_artifact_fetch_completed_to_local_worker(
                     digest.clone(),
@@ -224,12 +248,6 @@ impl Deps for Adapter {
             .send(ClientToBroker::JobRequest(cjid, spec));
     }
 
-    fn send_job_state_counts_request_to_broker(&self) {
-        let _ = self
-            .broker_sender
-            .send(ClientToBroker::JobStateCountsRequest);
-    }
-
     fn start_artifact_transfer_to_broker(&self, digest: Sha256Digest, path: PathBuf) {
         let _ = self
             .artifact_pusher_sender
@@ -276,14 +294,13 @@ pub fn channel() -> (Sender, Receiver) {
 pub fn start_task(
     join_set: &mut JoinSet<Result<()>>,
     standalone: bool,
-    slots: Slots,
     receiver: Receiver,
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: artifact_pusher::Sender,
     local_worker_sender: maelstrom_worker::DispatcherSender,
 ) {
     let adapter = Adapter::new(broker_sender, artifact_pusher_sender, local_worker_sender);
-    let mut router = Router::new(adapter, standalone, slots);
+    let mut router = Router::new(adapter, standalone);
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
         router.receive_message(msg)
     }));
@@ -304,7 +321,6 @@ mod tests {
         JobDone(ClientJobId, JobOutcomeResult),
         JobStateCountsResponse(i32, JobStateCounts),
         JobRequestToBroker(ClientJobId, JobSpec),
-        JobStatesCountRequestToBroker,
         StartArtifactTransferToBroker(Sha256Digest, PathBuf),
         EnqueueJobToLocalWorker(JobId, JobSpec),
         ArtifactFetchCompletedToLocalWorker(Sha256Digest, result::Result<u64, String>),
@@ -338,12 +354,6 @@ mod tests {
             self.borrow_mut()
                 .messages
                 .push(TestMessage::JobRequestToBroker(cjid, spec));
-        }
-
-        fn send_job_state_counts_request_to_broker(&self) {
-            self.borrow_mut()
-                .messages
-                .push(TestMessage::JobStatesCountRequestToBroker);
         }
 
         fn start_artifact_transfer_to_broker(&self, digest: Sha256Digest, path: PathBuf) {
@@ -404,7 +414,6 @@ mod tests {
     impl Fixture {
         fn new<'a>(
             standalone: bool,
-            slots: u16,
             link_artifact_for_local_worker_returns: impl IntoIterator<Item = (&'a str, &'a str, u64)>,
         ) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
@@ -414,7 +423,7 @@ mod tests {
                     .map(|(from, to, result)| ((from.into(), to.into()), result))
                     .collect(),
             }));
-            let router = Router::new(test_state.clone(), standalone, slots.try_into().unwrap());
+            let router = Router::new(test_state.clone(), standalone);
             Fixture { test_state, router }
         }
 
@@ -454,7 +463,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_unknown_standalone,
-        Fixture::new(true, 1, []),
+        Fixture::new(true, []),
         LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
             ArtifactFetchCompletedToLocalWorker(
                 digest!(1),
@@ -465,7 +474,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_known_link_error_standalone,
-        Fixture::new(true, 1, []),
+        Fixture::new(true, []),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
             LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
@@ -478,7 +487,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_known_standalone,
-        Fixture::new(true, 1, [("bar", "foo", 1234)]),
+        Fixture::new(true, [("bar", "foo", 1234)]),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
             LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
@@ -488,7 +497,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_last_add_artifact_wins_standalone,
-        Fixture::new(true, 1, [("bar", "foo", 1234)]),
+        Fixture::new(true, [("bar", "foo", 1234)]),
         AddArtifact(path_buf!("baz"), digest!(1)) => {};
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
@@ -499,7 +508,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_unknown_clustered,
-        Fixture::new(false, 1, []),
+        Fixture::new(false, []),
         LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
             ArtifactFetchCompletedToLocalWorker(
                 digest!(1),
@@ -510,7 +519,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_known_link_error_clustered,
-        Fixture::new(false, 1, []),
+        Fixture::new(false, []),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
             LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
@@ -523,7 +532,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_known_clustered,
-        Fixture::new(false, 1, [("bar", "foo", 1234)]),
+        Fixture::new(false, [("bar", "foo", 1234)]),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
             LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
@@ -533,7 +542,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_last_add_artifact_wins_clustered,
-        Fixture::new(false, 1, [("bar", "foo", 1234)]),
+        Fixture::new(false, [("bar", "foo", 1234)]),
         AddArtifact(path_buf!("baz"), digest!(1)) => {};
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
@@ -545,7 +554,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn broker_transfer_artifact_standalone() {
-        let mut fixture = Fixture::new(true, 1, []);
+        let mut fixture = Fixture::new(true, []);
         fixture
             .router
             .receive_message(Broker(TransferArtifact(digest!(1))));
@@ -556,7 +565,7 @@ mod tests {
         expected = "got request for unknown artifact with digest 0000000000000000000000000000000000000000000000000000000000000001"
     )]
     fn broker_transfer_artifact_unknown_clustered() {
-        let mut fixture = Fixture::new(false, 1, []);
+        let mut fixture = Fixture::new(false, []);
         fixture
             .router
             .receive_message(Broker(TransferArtifact(digest!(1))));
@@ -564,7 +573,7 @@ mod tests {
 
     script_test! {
         broker_transfer_artifact_known_clustered,
-        Fixture::new(false, 1, []),
+        Fixture::new(false, []),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         Broker(TransferArtifact(digest!(1))) => {
             StartArtifactTransferToBroker(digest!(1), path_buf!("bar")),
@@ -573,7 +582,7 @@ mod tests {
 
     script_test! {
         broker_transfer_artifact_last_add_artifact_wins_clustered,
-        Fixture::new(false, 1, []),
+        Fixture::new(false, []),
         AddArtifact(path_buf!("baz"), digest!(1)) => {};
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         Broker(TransferArtifact(digest!(1))) => {
@@ -583,7 +592,7 @@ mod tests {
 
     script_test! {
         run_job_standalone,
-        Fixture::new(true, 1, []),
+        Fixture::new(true, []),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
@@ -594,7 +603,7 @@ mod tests {
 
     script_test! {
         shutdown,
-        Fixture::new(true, 1, []),
+        Fixture::new(true, []),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
@@ -608,7 +617,7 @@ mod tests {
 
     script_test! {
         run_job_clustered,
-        Fixture::new(false, 1, []),
+        Fixture::new(false, []),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
@@ -619,7 +628,7 @@ mod tests {
 
     script_test! {
         run_job_must_be_local_clustered,
-        Fixture::new(false, 1, []),
+        Fixture::new(false, []),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
@@ -631,7 +640,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "received response for unknown job 1")]
     fn job_response_from_local_worker_unknown_standalone() {
-        let mut fixture = Fixture::new(true, 1, []);
+        let mut fixture = Fixture::new(true, []);
         // Give it a job just so it doesn't crash subracting the job counts.
         fixture
             .router
@@ -646,7 +655,7 @@ mod tests {
 
     script_test! {
         job_response_from_local_worker_known_standalone,
-        Fixture::new(true, 1, []),
+        Fixture::new(true, []),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
@@ -658,7 +667,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "received response for unknown job 1")]
     fn job_response_from_local_worker_unknown_clustered() {
-        let mut fixture = Fixture::new(false, 1, []);
+        let mut fixture = Fixture::new(false, []);
         // Give it a job just so it doesn't crash subracting the job counts.
         fixture
             .router
@@ -673,7 +682,7 @@ mod tests {
 
     script_test! {
         job_response_from_local_worker_known_clustered,
-        Fixture::new(false, 1, []),
+        Fixture::new(false, []),
         RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar).network(JobNetwork::Local)),
         };
@@ -685,7 +694,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn job_response_from_broker_unknown_standalone() {
-        let mut fixture = Fixture::new(true, 1, []);
+        let mut fixture = Fixture::new(true, []);
         fixture
             .router
             .receive_message(Broker(BrokerToClient::JobResponse(
@@ -697,7 +706,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn job_response_from_broker_known_standalone() {
-        let mut fixture = Fixture::new(true, 1, []);
+        let mut fixture = Fixture::new(true, []);
         fixture
             .router
             .receive_message(RunJob(spec!(0, Tar), cjid!(0)));
@@ -712,7 +721,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "received response for unknown job 0")]
     fn job_response_from_broker_unknown_clustered() {
-        let mut fixture = Fixture::new(false, 1, []);
+        let mut fixture = Fixture::new(false, []);
         fixture
             .router
             .receive_message(Broker(BrokerToClient::JobResponse(
@@ -723,7 +732,7 @@ mod tests {
 
     script_test! {
         job_response_from_broker_known_clustered,
-        Fixture::new(false, 1, []),
+        Fixture::new(false, []),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
@@ -734,28 +743,7 @@ mod tests {
 
     script_test! {
         get_job_state_counts_standalone,
-        Fixture::new(true, 1, []),
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 0,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-    }
-
-    script_test! {
-        get_job_state_counts_clustered,
-        Fixture::new(false, 1, []),
-        GetJobStateCounts(0) => {
-            JobStatesCountRequestToBroker,
-        }
-    }
-
-    script_test! {
-        get_job_state_counts_lies_in_standalone_to_simulate_jobs_being_on_broker,
-        Fixture::new(true, 2, []),
+        Fixture::new(true, []),
         GetJobStateCounts(0) => {
             TestMessage::JobStateCountsResponse(0, enum_map! {
                 JobState::WaitingForArtifacts => 0,
@@ -768,11 +756,11 @@ mod tests {
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
-        GetJobStateCounts(1) => {
-            TestMessage::JobStateCountsResponse(1, enum_map! {
-                JobState::WaitingForArtifacts => 0,
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 1,
                 JobState::Pending => 0,
-                JobState::Running => 1,
+                JobState::Running => 0,
                 JobState::Complete => 0,
             }),
         };
@@ -780,172 +768,153 @@ mod tests {
         RunJob(spec!(1, Tar), cjid!(1)) => {
             EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar)),
         };
-        GetJobStateCounts(2) => {
-            TestMessage::JobStateCountsResponse(2, enum_map! {
-                JobState::WaitingForArtifacts => 0,
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 2,
                 JobState::Pending => 0,
-                JobState::Running => 2,
+                JobState::Running => 0,
                 JobState::Complete => 0,
             }),
         };
 
-        RunJob(spec!(2, Tar), cjid!(2)) => {
-            EnqueueJobToLocalWorker(jid!(0, 2), spec!(2, Tar)),
+        LocalWorker(WorkerToBroker::JobStatusUpdate(jid!(0, 0), JobWorkerStatus::WaitingForLayers)) => {};
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 2,
+                JobState::Pending => 0,
+                JobState::Running => 0,
+                JobState::Complete => 0,
+            }),
         };
-        GetJobStateCounts(3) => {
-            TestMessage::JobStateCountsResponse(3, enum_map! {
-                JobState::WaitingForArtifacts => 0,
+
+        LocalWorker(WorkerToBroker::JobStatusUpdate(jid!(0, 0), JobWorkerStatus::WaitingToExecute)) => {};
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 1,
                 JobState::Pending => 1,
-                JobState::Running => 2,
+                JobState::Running => 0,
                 JobState::Complete => 0,
             }),
         };
 
-        RunJob(spec!(3, Tar), cjid!(3)) => {
-            EnqueueJobToLocalWorker(jid!(0, 3), spec!(3, Tar)),
-        };
-        GetJobStateCounts(4) => {
-            TestMessage::JobStateCountsResponse(4, enum_map! {
-                JobState::WaitingForArtifacts => 0,
-                JobState::Pending => 2,
-                JobState::Running => 2,
+        LocalWorker(WorkerToBroker::JobStatusUpdate(jid!(0, 0), JobWorkerStatus::Executing)) => {};
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 1,
+                JobState::Pending => 0,
+                JobState::Running => 1,
                 JobState::Complete => 0,
             }),
         };
 
-        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 3), Ok(outcome!(3)))) => {
-            JobDone(cjid!(3), Ok(outcome!(3))),
+        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
+            JobDone(cjid!(0), Ok(outcome!(0))),
         };
-        GetJobStateCounts(5) => {
-            TestMessage::JobStateCountsResponse(5, enum_map! {
-                JobState::WaitingForArtifacts => 0,
-                JobState::Pending => 1,
-                JobState::Running => 2,
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 1,
+                JobState::Pending => 0,
+                JobState::Running => 0,
                 JobState::Complete => 1,
             }),
         };
-
-        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 2), Ok(outcome!(2)))) => {
-            JobDone(cjid!(2), Ok(outcome!(2))),
-        };
-        GetJobStateCounts(6) => {
-            TestMessage::JobStateCountsResponse(6, enum_map! {
-                JobState::WaitingForArtifacts => 0,
-                JobState::Pending => 0,
-                JobState::Running => 2,
-                JobState::Complete => 2,
-            }),
-        };
-
-        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 1), Ok(outcome!(1)))) => {
-            JobDone(cjid!(1), Ok(outcome!(1))),
-        };
-        GetJobStateCounts(7) => {
-            TestMessage::JobStateCountsResponse(7, enum_map! {
-                JobState::WaitingForArtifacts => 0,
-                JobState::Pending => 0,
-                JobState::Running => 1,
-                JobState::Complete => 3,
-            }),
-        };
-
-        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
-            JobDone(cjid!(0), Ok(outcome!(0))),
-        };
-        GetJobStateCounts(8) => {
-            TestMessage::JobStateCountsResponse(8, enum_map! {
-                JobState::WaitingForArtifacts => 0,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 4,
-            }),
-        };
-    }
-
-    #[test]
-    #[should_panic(expected = "assertion failed: !self.standalone")]
-    fn job_states_response_from_broker_standalone() {
-        let mut fixture = Fixture::new(true, 1, []);
-        fixture
-            .router
-            .receive_message(Broker(BrokerToClient::JobStateCountsResponse(enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 2,
-                JobState::Running => 3,
-                JobState::Complete => 4,
-            })));
-    }
-
-    #[test]
-    #[should_panic(expected = "got JobStateCountsResponse with no requests outstanding")]
-    fn job_states_response_from_broker_no_requests_outstanding_clustered() {
-        let mut fixture = Fixture::new(false, 1, []);
-        fixture
-            .router
-            .receive_message(Broker(BrokerToClient::JobStateCountsResponse(enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 2,
-                JobState::Running => 3,
-                JobState::Complete => 4,
-            })));
     }
 
     script_test! {
-        job_states_response_from_broker_clustered,
-        Fixture::new(false, 1, []),
+        get_job_state_counts_clustered,
+        Fixture::new(false, []),
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 0,
+                JobState::Pending => 0,
+                JobState::Running => 0,
+                JobState::Complete => 0,
+            }),
+        };
 
-        GetJobStateCounts(0) => { JobStatesCountRequestToBroker };
-        GetJobStateCounts(1) => { JobStatesCountRequestToBroker };
-        GetJobStateCounts(2) => { JobStatesCountRequestToBroker };
-
-        Broker(BrokerToClient::JobStateCountsResponse(enum_map! {
-            JobState::WaitingForArtifacts => 1,
-            JobState::Pending => 2,
-            JobState::Running => 3,
-            JobState::Complete => 4,
-        })) => {
+        RunJob(spec!(0, Tar), cjid!(0)) => {
+            JobRequestToBroker(cjid!(0), spec!(0, Tar)),
+        };
+        GetJobStateCounts(0) => {
             TestMessage::JobStateCountsResponse(0, enum_map! {
                 JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 2,
-                JobState::Running => 3,
-                JobState::Complete => 4,
+                JobState::Pending => 0,
+                JobState::Running => 0,
+                JobState::Complete => 0,
             }),
         };
 
-        RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)) => {
-            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar).network(JobNetwork::Local)),
+        RunJob(spec!(1, Tar), cjid!(1)) => {
+            JobRequestToBroker(cjid!(1), spec!(1, Tar)),
         };
-        RunJob(spec!(1, Tar).network(JobNetwork::Local), cjid!(1)) => {
-            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar).network(JobNetwork::Local)),
-        };
-        Broker(BrokerToClient::JobStateCountsResponse(enum_map! {
-            JobState::WaitingForArtifacts => 2,
-            JobState::Pending => 3,
-            JobState::Running => 4,
-            JobState::Complete => 5,
-        })) => {
-            TestMessage::JobStateCountsResponse(1, enum_map! {
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
                 JobState::WaitingForArtifacts => 2,
-                JobState::Pending => 4,
-                JobState::Running => 5,
-                JobState::Complete => 5,
+                JobState::Pending => 0,
+                JobState::Running => 0,
+                JobState::Complete => 0,
             }),
         };
 
-        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
+        Broker(BrokerToClient::JobStatusUpdate(cjid!(0), JobBrokerStatus::WaitingForLayers)) => {};
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 2,
+                JobState::Pending => 0,
+                JobState::Running => 0,
+                JobState::Complete => 0,
+            }),
+        };
+
+        Broker(BrokerToClient::JobStatusUpdate(cjid!(0), JobBrokerStatus::WaitingForWorker)) => {};
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 1,
+                JobState::Pending => 1,
+                JobState::Running => 0,
+                JobState::Complete => 0,
+            }),
+        };
+
+        Broker(BrokerToClient::JobStatusUpdate(cjid!(0), JobBrokerStatus::AtWorker(wid!(0), JobWorkerStatus::WaitingForLayers))) => {};
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 2,
+                JobState::Pending => 0,
+                JobState::Running => 0,
+                JobState::Complete => 0,
+            }),
+        };
+
+        Broker(BrokerToClient::JobStatusUpdate(cjid!(0), JobBrokerStatus::AtWorker(wid!(0), JobWorkerStatus::WaitingToExecute))) => {};
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 1,
+                JobState::Pending => 1,
+                JobState::Running => 0,
+                JobState::Complete => 0,
+            }),
+        };
+
+        Broker(BrokerToClient::JobStatusUpdate(cjid!(0), JobBrokerStatus::AtWorker(wid!(0), JobWorkerStatus::Executing))) => {};
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 1,
+                JobState::Pending => 0,
+                JobState::Running => 1,
+                JobState::Complete => 0,
+            }),
+        };
+
+        Broker(BrokerToClient::JobResponse(cjid!(0), Ok(outcome!(0)))) => {
             JobDone(cjid!(0), Ok(outcome!(0))),
         };
-        Broker(BrokerToClient::JobStateCountsResponse(enum_map! {
-            JobState::WaitingForArtifacts => 3,
-            JobState::Pending => 4,
-            JobState::Running => 5,
-            JobState::Complete => 6,
-        })) => {
-            TestMessage::JobStateCountsResponse(2, enum_map! {
-                JobState::WaitingForArtifacts => 3,
-                JobState::Pending => 4,
-                JobState::Running => 6,
-                JobState::Complete => 7,
+        GetJobStateCounts(0) => {
+            TestMessage::JobStateCountsResponse(0, enum_map! {
+                JobState::WaitingForArtifacts => 1,
+                JobState::Pending => 0,
+                JobState::Running => 0,
+                JobState::Complete => 1,
             }),
         };
     }
@@ -953,7 +922,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "got unexpected statistics response")]
     fn statistic_response_panics() {
-        let mut fixture = Fixture::new(false, 1, []);
+        let mut fixture = Fixture::new(false, []);
         fixture
             .router
             .receive_message(Broker(StatisticsResponse(BrokerStatistics::default())));

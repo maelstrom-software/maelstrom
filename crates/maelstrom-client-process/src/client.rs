@@ -331,7 +331,6 @@ impl Client {
             router::start_task(
                 &mut join_set,
                 standalone,
-                slots,
                 local_broker_receiver,
                 broker_sender,
                 artifact_pusher_sender,
