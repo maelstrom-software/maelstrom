@@ -3,13 +3,13 @@ use crate::{
     test_listing::TestListing,
     ui::{self},
     BuildDir, CollectTests, NoCaseMetadata, SimpleFilter, StringArtifactKey, StringPackage,
-    TestArtifact, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
+    TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,
 };
 use anyhow::Result;
 use maelstrom_base::{
     stats::JobState, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobStatus, Utf8PathBuf,
 };
-use maelstrom_client::spec::JobSpec;
+use maelstrom_client::spec::{JobSpec, Layer};
 use maelstrom_util::{fs::Fs, root::RootBuf};
 use pretty_assertions::assert_eq;
 use std::{
@@ -357,8 +357,13 @@ impl CollectTests for TestCollector {
         Ok((WaitForNothing, artifacts.into_iter()))
     }
 
-    fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &ui::UiSender) -> Result<TestLayers> {
-        Ok(TestLayers::GenerateForBinary)
+    fn get_test_layers(
+        &self,
+        _artifact: &FakeTestArtifact,
+        _metadata: &TestMetadata,
+        _ind: &ui::UiSender,
+    ) -> Result<Vec<Layer>> {
+        Ok(vec![])
     }
 
     fn remove_fixture_output(case_str: &str, lines: Vec<String>) -> Vec<String> {

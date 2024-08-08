@@ -17,7 +17,7 @@ use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
     metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
     CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, TestArtifact,
-    TestArtifactKey, TestCaseMetadata, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
+    TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -417,28 +417,33 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         Ok((handle, stream))
     }
 
-    fn get_test_layers(&self, metadata: &TestMetadata, ind: &UiSender) -> Result<TestLayers> {
+    fn get_test_layers(
+        &self,
+        _artifact: &PytestTestArtifact,
+        metadata: &TestMetadata,
+        ind: &UiSender,
+    ) -> Result<Vec<Layer>> {
         match &metadata.image {
             Some(image) => {
                 let image_name: ImageName = image.name.parse()?;
                 let ImageName::Docker(ref_) = image_name else {
-                    return Ok(TestLayers::Provided(vec![]));
+                    return Ok(vec![]);
                 };
                 if ref_.name() != "python" {
-                    return Ok(TestLayers::Provided(vec![]));
+                    return Ok(vec![]);
                 }
 
                 let packages_path = self.get_pip_packages(image.clone(), &ref_, ind)?;
                 let packages_path = packages_path.strip_prefix(&self.project_dir).unwrap();
-                Ok(TestLayers::Provided(vec![Layer::Glob {
+                Ok(vec![Layer::Glob {
                     glob: format!("{packages_path}/**"),
                     prefix_options: PrefixOptions {
                         strip_prefix: Some(packages_path.into()),
                         ..Default::default()
                     },
-                }]))
+                }])
             }
-            _ => Ok(TestLayers::Provided(vec![])),
+            _ => Ok(vec![]),
         }
     }
 

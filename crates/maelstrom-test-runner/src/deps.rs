@@ -111,11 +111,6 @@ impl TestArtifactKey for StringArtifactKey {}
 
 pub trait TestPackageId: Clone + Ord + fmt::Debug {}
 
-pub enum TestLayers {
-    GenerateForBinary,
-    Provided(Vec<Layer>),
-}
-
 pub trait TestArtifact: fmt::Debug {
     type ArtifactKey: TestArtifactKey;
     type PackageId: TestPackageId;
@@ -176,7 +171,12 @@ pub trait CollectTests {
         ui: &ui::UiSender,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
 
-    fn get_test_layers(&self, metadata: &TestMetadata, ind: &ui::UiSender) -> Result<TestLayers>;
+    fn get_test_layers(
+        &self,
+        artifact: &Self::Artifact,
+        metadata: &TestMetadata,
+        ind: &ui::UiSender,
+    ) -> Result<Vec<Layer>>;
 
     fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
         lines
