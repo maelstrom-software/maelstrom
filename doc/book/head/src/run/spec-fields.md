@@ -17,7 +17,7 @@ If it's an object, then it must have a string `name` field and it may have an
 optional `use` field. The `name` field specifies the URI of the image to use,
 as documented [here](../container-images.html#container-image-uris).
 
-The `use` fiels must be a list of strings specifying what parts of the
+The `use` fields must be a list of strings specifying what parts of the
 container image to use for the job spec. It must contain a non-empty subset of:
   - `layers`<a id="image-use-layers">: This sets the
 	[`use_layers`](../spec.md#use_layers) field in the job spec's image value.

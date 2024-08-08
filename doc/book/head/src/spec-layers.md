@@ -26,6 +26,10 @@ pub enum Layer {
     },
     Stubs { stubs: Vec<String> },
     Symlinks { symlinks: Vec<SymlinkSpec> },
+    SharedLibraryDependencies {
+        binary_paths: Vec<Utf8PathBuf>,
+        prefix_options: PrefixOptions,
+    },
 }
 ```
 
@@ -186,3 +190,23 @@ pub struct SymlinkSpec {
 The `Symlinks` layer is used to create symlinks. The specified `link`s will be
 created, pointing to the specified `target`s. Any parent directories will also
 be created, as necessary.
+
+## `SharedLibraryDependencies`
+```rust
+pub enum Layer {
+    // ...
+    SharedLibraryDependencies {
+        binary_paths: Vec<Utf8PathBuf>,
+        prefix_options: PrefixOptions,
+    },
+}
+```
+
+The `SharedLibraryDependencies` layer is used to include the shared libraries required to run some
+binaries. The given paths to local binaries are inspected and the closure of shared libraries they
+rely on are included in the layer. This set of libraries includes `libc` and the dynamic linker. It
+will fail to create the layer if any of the binaries have missing libraries. The layer does not
+include the binaries themselves, to include them use a separate layer.
+
+The `prefix_options` are applied to the paths to the shared libraries, as [described
+above](#prefixoptions).
