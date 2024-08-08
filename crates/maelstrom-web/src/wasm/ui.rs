@@ -1,11 +1,11 @@
-use crate::wasm::rpc::ClientConnection;
+use crate::wasm::rpc::MonitorConnection;
 use anyhow::{bail, Result};
 use eframe::{App, CreationContext, Frame};
 use egui::{Align2, CentralPanel, CollapsingHeader, Color32, Context, ScrollArea, Ui};
 use egui_gauge::Gauge;
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 use maelstrom_base::{
-    proto::{BrokerToClient, ClientToBroker},
+    proto::{BrokerToMonitor, MonitorToBroker},
     stats::{BrokerStatistics, JobState, JobStateCounts, BROKER_STATISTICS_INTERVAL},
 };
 use maelstrom_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
@@ -78,7 +78,7 @@ impl LineStacker {
     }
 }
 
-impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
+impl<RpcConnectionT: MonitorConnection> UiHandler<RpcConnectionT> {
     pub fn new(rpc: RpcConnectionT, _cc: &CreationContext<'_>) -> Self {
         Self {
             rpc: Some(rpc),
@@ -217,13 +217,13 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         if let Some(rpc) = self.rpc.as_mut() {
             let now = crate::wasm::window().performance().unwrap().now();
             if now - self.freshness > REFRESH_INTERVAL.as_millis() as f64 {
-                rpc.send(ClientToBroker::StatisticsRequest)?;
+                rpc.send(MonitorToBroker::StatisticsRequest)?;
                 self.freshness = now;
             }
 
             if let Some(msg) = rpc.try_recv()? {
                 match msg {
-                    BrokerToClient::StatisticsResponse(stats) => self.stats = Some(stats),
+                    BrokerToMonitor::StatisticsResponse(stats) => self.stats = Some(stats),
                     r => bail!("unexpected response: {r:?}"),
                 }
             }
@@ -244,7 +244,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
     }
 }
 
-impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
+impl<RpcConnectionT: MonitorConnection> App for UiHandler<RpcConnectionT> {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         CentralPanel::default().show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {

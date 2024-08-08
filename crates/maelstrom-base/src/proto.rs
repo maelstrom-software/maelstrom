@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub enum Hello {
     Client,
     Worker { slots: u32 },
+    Monitor,
     ArtifactPusher,
     ArtifactFetcher,
 }
@@ -42,7 +43,6 @@ pub enum BrokerToClient {
     JobResponse(ClientJobId, JobOutcomeResult),
     JobStatusUpdate(ClientJobId, JobBrokerStatus),
     TransferArtifact(Sha256Digest),
-    StatisticsResponse(BrokerStatistics),
 }
 
 /// Message sent from a client to the broker. After sending the initial [`Hello`], a client will
@@ -51,6 +51,19 @@ pub enum BrokerToClient {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ClientToBroker {
     JobRequest(ClientJobId, JobSpec),
+}
+
+/// Message sent from the broker to a monitor. The broker won't send a message until it has
+/// recevied a [`Hello`] and determined the type of its interlocutor.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum BrokerToMonitor {
+    StatisticsResponse(BrokerStatistics),
+}
+
+/// Message sent from a monitor to the broker. After sending the initial [`Hello`], a monitor will
+/// send a stream of these messages.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum MonitorToBroker {
     StatisticsRequest,
 }
 

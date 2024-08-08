@@ -5,13 +5,16 @@ use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWo
 use anyhow::Result;
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
-    proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
+    proto::{
+        BrokerToClient, BrokerToMonitor, BrokerToWorker, ClientToBroker, MonitorToBroker,
+        WorkerToBroker,
+    },
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
     ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
-    JobWorkerStatus, Sha256Digest, WorkerId,
+    JobWorkerStatus, MonitorId, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
     duration,
@@ -42,9 +45,16 @@ use std::{
 pub trait SchedulerDeps {
     type ClientSender;
     type WorkerSender;
+    type MonitorSender;
     type WorkerArtifactFetcherSender;
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
     fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker);
+    #[allow(dead_code)]
+    fn send_message_to_monitor(
+        &mut self,
+        sender: &mut Self::MonitorSender,
+        message: BrokerToMonitor,
+    );
     fn send_message_to_worker_artifact_fetcher(
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
@@ -141,6 +151,15 @@ pub enum Message<DepsT: SchedulerDeps> {
     /// The given worker has sent us the given message.
     FromWorker(WorkerId, WorkerToBroker),
 
+    /// The given monitor connected, and messages can be sent to it on the given sender.
+    MonitorConnected(MonitorId, DepsT::MonitorSender),
+
+    /// The given monitor disconnected.
+    MonitorDisconnected(MonitorId),
+
+    /// The given client has sent us the given message.
+    FromMonitor(MonitorId, MonitorToBroker),
+
     /// An artifact has been pushed to us. The artifact has the given digest and length. It is
     /// temporarily stored at the given path.
     GotArtifact(Sha256Digest, u64, PathBuf),
@@ -181,6 +200,15 @@ impl<DepsT: SchedulerDeps> Debug for Message<DepsT> {
             Message::FromWorker(wid, msg) => {
                 f.debug_tuple("FromWorker").field(wid).field(msg).finish()
             }
+            Message::MonitorConnected(mid, _sender) => {
+                f.debug_tuple("MonitorConnected").field(mid).finish()
+            }
+            Message::MonitorDisconnected(mid) => {
+                f.debug_tuple("MonitorDisconnected").field(mid).finish()
+            }
+            Message::FromMonitor(mid, msg) => {
+                f.debug_tuple("FromMonitor").field(mid).field(msg).finish()
+            }
             Message::GotArtifact(digest, size, path) => f
                 .debug_tuple("GotArtifact")
                 .field(digest)
@@ -206,6 +234,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             cache,
             clients: ClientMap(HashMap::default()),
             workers: WorkerMap(HashMap::default()),
+            monitors: HashMap::default(),
             queued_jobs: BinaryHeap::default(),
             worker_heap: Heap::default(),
             job_statistics: JobStatisticsTimeSeries::default(),
@@ -221,9 +250,6 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::FromClient(cid, ClientToBroker::JobRequest(cjid, spec)) => {
                 self.receive_client_job_request(deps, cid, cjid, spec)
             }
-            Message::FromClient(cid, ClientToBroker::StatisticsRequest) => {
-                self.receive_client_statistics_request(deps, cid)
-            }
             Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
             }
@@ -233,6 +259,11 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             }
             Message::FromWorker(wid, WorkerToBroker::JobStatusUpdate(jid, status)) => {
                 self.receive_worker_job_status_update(deps, wid, jid, status)
+            }
+            Message::MonitorConnected(id, sender) => self.receive_monitor_connected(id, sender),
+            Message::MonitorDisconnected(id) => self.receive_monitor_disconnected(id),
+            Message::FromMonitor(mid, MonitorToBroker::StatisticsRequest) => {
+                self.receive_monitor_statistics_request(deps, mid)
             }
             Message::GotArtifact(digest, size, path) => {
                 self.receive_got_artifact(deps, digest, size, path)
@@ -391,6 +422,7 @@ pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
     cache: CacheT,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
+    monitors: HashMap<MonitorId, DepsT::MonitorSender>,
     queued_jobs: BinaryHeap<QueuedJob>,
     worker_heap: Heap<WorkerMap<DepsT>>,
     job_statistics: JobStatisticsTimeSeries,
@@ -532,17 +564,6 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         }
     }
 
-    fn receive_client_statistics_request(&mut self, deps: &mut DepsT, cid: ClientId) {
-        let worker_iter = self.workers.0.iter();
-        let resp = BrokerToClient::StatisticsResponse(BrokerStatistics {
-            worker_statistics: worker_iter
-                .map(|(id, w)| (*id, WorkerStatistics { slots: w.slots }))
-                .collect(),
-            job_statistics: self.job_statistics.clone(),
-        });
-        deps.send_message_to_client(&mut self.clients.0.get_mut(&cid).unwrap().sender, resp);
-    }
-
     fn receive_worker_connected(
         &mut self,
         deps: &mut DepsT,
@@ -635,6 +656,25 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             &mut client.sender,
             BrokerToClient::JobStatusUpdate(jid.cjid, JobBrokerStatus::AtWorker(wid, status)),
         );
+    }
+
+    fn receive_monitor_connected(&mut self, id: MonitorId, sender: DepsT::MonitorSender) {
+        self.monitors.insert(id, sender).assert_is_none();
+    }
+
+    fn receive_monitor_disconnected(&mut self, id: MonitorId) {
+        self.monitors.remove(&id).unwrap();
+    }
+
+    fn receive_monitor_statistics_request(&mut self, deps: &mut DepsT, mid: MonitorId) {
+        let worker_iter = self.workers.0.iter();
+        let resp = BrokerToMonitor::StatisticsResponse(BrokerStatistics {
+            worker_statistics: worker_iter
+                .map(|(id, w)| (*id, WorkerStatistics { slots: w.slots }))
+                .collect(),
+            job_statistics: self.job_statistics.clone(),
+        });
+        deps.send_message_to_monitor(self.monitors.get_mut(&mid).unwrap(), resp);
     }
 
     fn ensure_manifest_artifacts_for_job(
@@ -767,6 +807,7 @@ mod tests {
     enum TestMessage {
         ToClient(ClientId, BrokerToClient),
         ToWorker(WorkerId, BrokerToWorker),
+        ToMonitor(MonitorId, BrokerToMonitor),
         ToWorkerArtifactFetcher(u32, Result<(PathBuf, u64), GetArtifactForWorkerError>),
         CacheGetArtifact(JobId, Sha256Digest),
         CacheGotArtifact(Sha256Digest, u64, PathBuf),
@@ -779,6 +820,7 @@ mod tests {
 
     struct TestClientSender(ClientId);
     struct TestWorkerSender(WorkerId);
+    struct TestMonitorSender(MonitorId);
     struct TestWorkerArtifactFetcherSender(u32);
 
     #[derive(Default)]
@@ -859,6 +901,7 @@ mod tests {
     impl SchedulerDeps for Rc<RefCell<TestState>> {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
+        type MonitorSender = TestMonitorSender;
         type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
 
         fn send_message_to_client(
@@ -875,6 +918,16 @@ mod tests {
             message: BrokerToWorker,
         ) {
             self.borrow_mut().messages.push(ToWorker(sender.0, message));
+        }
+
+        fn send_message_to_monitor(
+            &mut self,
+            sender: &mut TestMonitorSender,
+            message: BrokerToMonitor,
+        ) {
+            self.borrow_mut()
+                .messages
+                .push(ToMonitor(sender.0, message));
         }
 
         fn send_message_to_worker_artifact_fetcher(
@@ -956,6 +1009,10 @@ mod tests {
 
     macro_rules! worker_sender {
         [$n:expr] => { TestWorkerSender(wid![$n]) };
+    }
+
+    macro_rules! monitor_sender {
+        [$n:expr] => { TestMonitorSender(mid![$n]) };
     }
 
     macro_rules! worker_artifact_fetcher_sender {
@@ -2125,13 +2182,14 @@ mod tests {
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
+        MonitorConnected(mid![1], monitor_sender![1]) => {};
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1, [(42, Tar)]])) => {
             CacheGetArtifact(jid![1, 1], digest![42]),
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForLayers)),
         };
         StatisticsHeartbeat => {};
-        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
-            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+        FromMonitor(mid![1], MonitorToBroker::StatisticsRequest) => {
+            ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap! {
                     wid![1] => WorkerStatistics { slots: 2 }
                 },
@@ -2157,13 +2215,14 @@ mod tests {
             ], [], [], [])
         },
         ClientConnected(cid![1], client_sender![1]) => {};
+        MonitorConnected(mid![1], monitor_sender![1]) => {};
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1, Tar])) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForWorker)),
         };
         StatisticsHeartbeat => {};
-        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
-            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+        FromMonitor(mid![1], MonitorToBroker::StatisticsRequest) => {
+            ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap!{},
                 job_statistics: [JobStatisticsSample {
                     client_to_stats: hashmap! {
@@ -2188,13 +2247,14 @@ mod tests {
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
+        MonitorConnected(mid![1], monitor_sender![1]) => {};
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1, Tar])) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec![1, Tar])),
         };
         StatisticsHeartbeat => {};
-        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
-            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+        FromMonitor(mid![1], MonitorToBroker::StatisticsRequest) => {
+            ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap! {
                     wid![1] => WorkerStatistics { slots: 2 }
                 },
@@ -2221,6 +2281,7 @@ mod tests {
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
+        MonitorConnected(mid![1], monitor_sender![1]) => {};
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1, Tar])) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec![1, Tar])),
@@ -2230,8 +2291,8 @@ mod tests {
             CacheDecrementRefcount(digest![1]),
         };
         StatisticsHeartbeat => {};
-        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
-            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+        FromMonitor(mid![1], MonitorToBroker::StatisticsRequest) => {
+            ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap! {
                     wid![1] => WorkerStatistics { slots: 2 }
                 },

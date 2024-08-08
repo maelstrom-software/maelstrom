@@ -26,7 +26,7 @@ use std::{
 };
 use strum::EnumIter;
 
-/// ID of a client connection. These share the same ID space as [`WorkerId`].
+/// ID of a client connection. These share the same ID space as [`WorkerId`] and [`MonitorId`].
 #[derive(
     Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
@@ -544,7 +544,7 @@ pub enum JobBrokerStatus {
     AtWorker(WorkerId, JobWorkerStatus),
 }
 
-/// ID of a worker connection. These share the same ID space as [`ClientId`].
+/// ID of a worker connection. These share the same ID space as [`ClientId`] and [`MonitorId`].
 #[derive(
     Copy,
     Clone,
@@ -561,6 +561,18 @@ pub enum JobBrokerStatus {
     Serialize,
 )]
 pub struct WorkerId(u32);
+
+/// ID of a monitor connection. These share the same ID space as [`ClientId`] and [`WorkerId`].
+#[derive(
+    Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
+pub struct MonitorId(u32);
+
+impl MonitorId {
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
 
 /// A SHA-256 digest.
 #[derive(Clone, Constructor, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]

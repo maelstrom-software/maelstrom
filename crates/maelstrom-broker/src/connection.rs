@@ -6,7 +6,7 @@ use crate::{
 use anyhow::Result;
 use maelstrom_base::{
     proto::{ClientToBroker, Hello},
-    ClientId, WorkerId,
+    ClientId, MonitorId, WorkerId,
 };
 use maelstrom_util::net;
 use serde::Serialize;
@@ -179,6 +179,42 @@ async fn unassigned_connection_main(
             )
             .await;
             info!(log, "worker disconnected");
+        }
+        Ok(Hello::Monitor) => {
+            let (read_stream, write_stream) = socket.into_split();
+            let read_stream = BufReader::new(read_stream);
+            let id: MonitorId = id_vendor.vend();
+            let log = log.new(o!("mid" => id.to_string()));
+            let log_clone = log.clone();
+            let log_clone2 = log.clone();
+            debug!(log, "monitor connected");
+            connection_main(
+                scheduler_sender,
+                id,
+                SchedulerMessage::MonitorConnected,
+                SchedulerMessage::MonitorDisconnected,
+                |scheduler_sender| async move {
+                    net::async_socket_reader(read_stream, scheduler_sender, |msg| {
+                        debug!(log_clone, "received monitor message"; "msg" => ?msg);
+                        SchedulerMessage::FromMonitor(id, msg)
+                    })
+                    .await
+                    .unwrap_or_else(
+                        |err| debug!(log_clone, "error reading monitor message"; "err" => ?err),
+                    );
+                },
+                |scheduler_receiver| async move {
+                    net::async_socket_writer(scheduler_receiver, write_stream, |msg| {
+                        debug!(log_clone2, "sending monitor message"; "msg" => ?msg);
+                    })
+                    .await
+                    .unwrap_or_else(
+                        |err| debug!(log_clone2, "error writing monitor message"; "err" => ?err),
+                    );
+                },
+            )
+            .await;
+            debug!(log, "monitor disconnected");
         }
         Ok(Hello::ArtifactFetcher) => {
             let log = log.clone();

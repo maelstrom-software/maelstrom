@@ -5,7 +5,7 @@
 //! First, it serves up the actual website. This is prebuilt, including all of the Wasm, and put in
 //! a tar file. The tar file is then embedded in this module as compile time.
 //!
-//! Second, it handles WebSockets. These are treated just like client connections.
+//! Second, it handles WebSockets. These are treated just like monitor connections.
 use crate::{
     connection,
     scheduler_task::{SchedulerMessage, SchedulerSender},
@@ -19,8 +19,8 @@ use futures::{
 use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Request, Response};
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
 use maelstrom_base::{
-    proto::{self, BrokerToClient},
-    ClientId,
+    proto::{self, BrokerToMonitor},
+    MonitorId,
 };
 use maelstrom_web::WASM_TAR;
 use slog::{debug, error, o, Logger};
@@ -98,7 +98,7 @@ impl TarHandler {
 /// Looping reading from `scheduler_receiver` and writing to `socket`. If an error is encountered,
 /// return immediately.
 async fn websocket_writer(
-    mut scheduler_receiver: UnboundedReceiver<BrokerToClient>,
+    mut scheduler_receiver: UnboundedReceiver<BrokerToMonitor>,
     mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
 ) {
     while let Some(msg) = scheduler_receiver.recv().await {
@@ -117,14 +117,14 @@ async fn websocket_writer(
 async fn websocket_reader(
     mut socket: SplitStream<WebSocketStream<Upgraded>>,
     scheduler_sender: SchedulerSender,
-    id: ClientId,
+    id: MonitorId,
 ) {
     while let Some(Ok(Message::Binary(msg))) = socket.next().await {
         let Ok(msg) = proto::deserialize(&msg) else {
             break;
         };
         if scheduler_sender
-            .send(SchedulerMessage::FromClient(id, msg))
+            .send(SchedulerMessage::FromMonitor(id, msg))
             .is_err()
         {
             break;
@@ -143,22 +143,22 @@ async fn websocket_main(
         return;
     };
     let (write_stream, read_stream) = websocket.split();
-    let id: ClientId = id_vendor.vend();
-    let log = log.new(o!("cid" => id.to_string(), "websocket" => true));
+    let id: MonitorId = id_vendor.vend();
+    let log = log.new(o!("mid" => id.to_string(), "websocket" => true));
     debug!(
         log,
-        "http connection upgraded to websocket client connection"
+        "http connection upgraded to websocket monitor connection"
     );
     connection::connection_main(
         scheduler_sender,
         id,
-        SchedulerMessage::ClientConnected,
-        SchedulerMessage::ClientDisconnected,
+        SchedulerMessage::MonitorConnected,
+        SchedulerMessage::MonitorDisconnected,
         |scheduler_sender| websocket_reader(read_stream, scheduler_sender, id),
         |scheduler_receiver| websocket_writer(scheduler_receiver, write_stream),
     )
     .await;
-    debug!(log, "received websocket client disconnect")
+    debug!(log, "received websocket monitor disconnect")
 }
 
 struct Handler {

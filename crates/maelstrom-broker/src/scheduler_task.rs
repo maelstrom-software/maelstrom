@@ -4,7 +4,7 @@ mod scheduler;
 pub use cache::CacheDir;
 
 use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
-use maelstrom_base::proto::{BrokerToClient, BrokerToWorker};
+use maelstrom_base::proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker};
 use maelstrom_util::{config::common::CacheSize, root::RootBuf, sync};
 use scheduler::{Message, Scheduler, SchedulerDeps};
 use slog::Logger;
@@ -22,6 +22,7 @@ pub struct PassThroughDeps;
 impl SchedulerDeps for PassThroughDeps {
     type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
     type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
+    type MonitorSender = tokio_mpsc::UnboundedSender<BrokerToMonitor>;
     type WorkerArtifactFetcherSender =
         std_mpsc::Sender<Result<(PathBuf, u64), GetArtifactForWorkerError>>;
 
@@ -30,6 +31,14 @@ impl SchedulerDeps for PassThroughDeps {
     }
 
     fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker) {
+        sender.send(message).ok();
+    }
+
+    fn send_message_to_monitor(
+        &mut self,
+        sender: &mut Self::MonitorSender,
+        message: BrokerToMonitor,
+    ) {
         sender.send(message).ok();
     }
 

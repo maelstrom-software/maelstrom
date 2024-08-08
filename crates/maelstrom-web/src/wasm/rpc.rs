@@ -5,13 +5,13 @@ use futures::{
 };
 use gloo_net::websocket::{futures::WebSocket, Message};
 use gloo_utils::errors::JsError;
-use maelstrom_base::proto::{self, BrokerToClient, ClientToBroker};
+use maelstrom_base::proto::{self, BrokerToMonitor, MonitorToBroker};
 use std::cell::RefCell;
 use wasm_bindgen_futures::spawn_local;
 
-pub trait ClientConnection {
-    fn send(&self, message: ClientToBroker) -> Result<()>;
-    fn try_recv(&self) -> Result<Option<BrokerToClient>>;
+pub trait MonitorConnection {
+    fn send(&self, message: MonitorToBroker) -> Result<()>;
+    fn try_recv(&self) -> Result<Option<BrokerToMonitor>>;
 }
 
 pub struct RpcConnection {
@@ -50,15 +50,15 @@ impl RpcConnection {
     }
 }
 
-impl ClientConnection for RpcConnection {
-    fn send(&self, message: ClientToBroker) -> Result<()> {
+impl MonitorConnection for RpcConnection {
+    fn send(&self, message: MonitorToBroker) -> Result<()> {
         self.send
             .borrow_mut()
             .try_send(Message::Bytes(proto::serialize(&message).unwrap()))?;
         Ok(())
     }
 
-    fn try_recv(&self) -> Result<Option<BrokerToClient>> {
+    fn try_recv(&self) -> Result<Option<BrokerToMonitor>> {
         match self.recv.borrow_mut().try_next() {
             Ok(Some(Message::Bytes(b))) => Ok(Some(proto::deserialize(&b)?)),
             Ok(Some(Message::Text(_))) => Err(anyhow!("Unexpected Message::Text")),

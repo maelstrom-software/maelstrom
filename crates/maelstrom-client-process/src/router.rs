@@ -182,9 +182,6 @@ impl<DepsT: Deps> Router<DepsT> {
                 self.deps
                     .start_artifact_transfer_to_broker(digest, path.to_owned());
             }
-            Message::Broker(BrokerToClient::StatisticsResponse(_)) => {
-                panic!("got unexpected statistics response")
-            }
             Message::LocalWorker(WorkerToBroker::JobResponse(jid, result)) => {
                 self.receive_job_response(jid.cjid, result);
             }
@@ -310,7 +307,7 @@ pub fn start_task(
 mod tests {
     use super::{Message::*, *};
     use enum_map::enum_map;
-    use maelstrom_base::{stats::BrokerStatistics, JobNetwork};
+    use maelstrom_base::JobNetwork;
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc, result};
     use BrokerToClient::*;
@@ -917,14 +914,5 @@ mod tests {
                 JobState::Complete => 1,
             }),
         };
-    }
-
-    #[test]
-    #[should_panic(expected = "got unexpected statistics response")]
-    fn statistic_response_panics() {
-        let mut fixture = Fixture::new(false, []);
-        fixture
-            .router
-            .receive_message(Broker(StatisticsResponse(BrokerStatistics::default())));
     }
 }

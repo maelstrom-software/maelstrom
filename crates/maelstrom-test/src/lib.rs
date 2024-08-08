@@ -16,6 +16,11 @@ macro_rules! wid {
 }
 
 #[macro_export]
+macro_rules! mid {
+    [$n:expr] => { maelstrom_base::MonitorId::from($n) };
+}
+
+#[macro_export]
 macro_rules! jid {
     [$n:expr] => {
         jid!($n, $n)
