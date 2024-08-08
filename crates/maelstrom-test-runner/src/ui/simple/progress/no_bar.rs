@@ -1,7 +1,6 @@
 use super::{PrintWidthCb, ProgressIndicator, Terminal};
 use anyhow::Result;
 
-#[derive(Clone)]
 pub struct NoBar<TermT> {
     term: TermT,
 }

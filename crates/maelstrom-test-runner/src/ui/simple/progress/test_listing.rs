@@ -1,17 +1,15 @@
 use super::{ProgressIndicator, Terminal};
 use crate::ui::PrintWidthCb;
 use indicatif::ProgressBar;
-use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 struct State {
     done_queuing_jobs: bool,
 }
 
-#[derive(Clone)]
 pub struct TestListingProgress<TermT> {
     enqueue_spinner: ProgressBar,
-    state: Arc<Mutex<State>>,
+    state: State,
     term: TermT,
 }
 
@@ -46,9 +44,7 @@ where
     }
 
     fn tick(&mut self) {
-        let state = self.state.lock().unwrap();
-
-        if state.done_queuing_jobs {
+        if self.state.done_queuing_jobs {
             return;
         }
 
@@ -56,8 +52,7 @@ where
     }
 
     fn done_queuing_jobs(&mut self) {
-        let mut state = self.state.lock().unwrap();
-        state.done_queuing_jobs = true;
+        self.state.done_queuing_jobs = true;
 
         self.enqueue_spinner.finish_and_clear();
     }

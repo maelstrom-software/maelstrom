@@ -6,7 +6,6 @@ use maelstrom_client::{IntrospectResponse, RemoteProgress};
 use std::{
     cmp::max,
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
 };
 
 #[derive(Default)]
@@ -15,10 +14,11 @@ struct RemoteProgressBarTracker {
 }
 
 impl RemoteProgressBarTracker {
-    fn update<TermT>(&mut self, ind: &MultipleProgressBars<TermT>, states: Vec<RemoteProgress>)
-    where
-        TermT: Terminal,
-    {
+    fn update(
+        &mut self,
+        mut new_side_progress: impl FnMut(String) -> ProgressBar,
+        states: Vec<RemoteProgress>,
+    ) {
         let mut existing = HashSet::new();
         for state in states {
             existing.insert(state.name.clone());
@@ -26,9 +26,7 @@ impl RemoteProgressBarTracker {
             let prog = match self.bars.get(&state.name) {
                 Some(prog) => prog.clone(),
                 None => {
-                    let Some(prog) = ind.new_side_progress(&state.name) else {
-                        continue;
-                    };
+                    let prog = new_side_progress(state.name.clone());
                     self.bars.insert(state.name, prog.clone());
                     prog
                 }
@@ -63,13 +61,12 @@ struct State {
     finished: u64,
 }
 
-#[derive(Clone)]
 pub struct MultipleProgressBars<TermT> {
     multi_bar: MultiProgress,
     bars: HashMap<JobState, ProgressBar>,
     enqueue_spinner: ProgressBar,
-    state: Arc<Mutex<State>>,
-    remote_bar_tracker: Arc<Mutex<RemoteProgressBarTracker>>,
+    state: State,
+    remote_bar_tracker: RemoteProgressBarTracker,
     term: TermT,
 }
 
@@ -101,23 +98,14 @@ where
         }
     }
 
-    fn new_side_progress(&self, msg: impl Into<String>) -> Option<ProgressBar> {
-        Some(
-            self.multi_bar
-                .insert(1, super::make_side_progress_bar("white", msg, 21)),
-        )
-    }
-
     fn update_job_states(&self, counts: JobStateCounts) {
-        let state = self.state.lock().unwrap();
-
         for job_state in JobState::iter().filter(|s| s != &JobState::Complete) {
             let jobs = JobState::iter()
                 .filter(|s| s >= &job_state)
                 .map(|s| counts[s])
                 .sum();
             let bar = self.bars.get(&job_state).unwrap();
-            let pos = max(jobs, state.finished);
+            let pos = max(jobs, self.state.finished);
             bar.set_position(pos);
         }
     }
@@ -137,18 +125,16 @@ where
     }
 
     fn job_finished(&mut self) {
-        let mut state = self.state.lock().unwrap();
-        state.finished += 1;
+        self.state.finished += 1;
 
         for bar in self.bars.values() {
-            let pos = max(bar.position(), state.finished);
+            let pos = max(bar.position(), self.state.finished);
             bar.set_position(pos);
         }
     }
 
     fn update_length(&mut self, new_length: u64) {
-        let mut state = self.state.lock().unwrap();
-        state.length = new_length;
+        self.state.length = new_length;
 
         for bar in self.bars.values() {
             bar.set_length(new_length);
@@ -156,9 +142,7 @@ where
     }
 
     fn tick(&mut self) {
-        let state = self.state.lock().unwrap();
-
-        if state.done_queuing_jobs {
+        if self.state.done_queuing_jobs {
             return;
         }
 
@@ -172,13 +156,16 @@ where
     fn update_introspect_state(&mut self, resp: IntrospectResponse) {
         let mut states = resp.artifact_uploads;
         states.extend(resp.image_downloads);
-        self.remote_bar_tracker.lock().unwrap().update(self, states);
+        let new_side_progress = |msg| {
+            self.multi_bar
+                .insert(1, super::make_side_progress_bar("white", msg, 21))
+        };
+        self.remote_bar_tracker.update(new_side_progress, states);
         self.update_job_states(resp.job_state_counts)
     }
 
     fn done_queuing_jobs(&mut self) {
-        let mut state = self.state.lock().unwrap();
-        state.done_queuing_jobs = true;
+        self.state.done_queuing_jobs = true;
 
         self.enqueue_spinner.finish_and_clear();
     }

@@ -2,7 +2,6 @@ use super::{PrintWidthCb, ProgressIndicator, Terminal};
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressDrawTarget};
 
-#[derive(Clone)]
 pub struct QuietProgressBar<TermT> {
     bar: ProgressBar,
     term: TermT,
