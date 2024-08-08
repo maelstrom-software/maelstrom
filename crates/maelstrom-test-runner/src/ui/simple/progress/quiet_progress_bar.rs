@@ -1,4 +1,4 @@
-use super::{NullPrinter, PrintWidthCb, ProgressIndicator, Terminal};
+use super::{PrintWidthCb, ProgressIndicator, Terminal};
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressDrawTarget};
 
@@ -26,12 +26,8 @@ impl<TermT> ProgressIndicator for QuietProgressBar<TermT>
 where
     TermT: Terminal,
 {
-    type Printer<'a> = NullPrinter;
-
-    fn lock_printing(&self) -> Self::Printer<'_> {
-        // quiet mode doesn't print anything
-        NullPrinter
-    }
+    fn println(&self, _msg: String) {}
+    fn println_width(&self, _cb: impl PrintWidthCb<String>) {}
 
     fn job_finished(&self) {
         self.bar.inc(1);

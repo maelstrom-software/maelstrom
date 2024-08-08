@@ -7,8 +7,8 @@ use colored::Colorize as _;
 use derive_more::From;
 use indicatif::TermLike;
 use progress::{
-    MultipleProgressBars, NoBar, ProgressIndicator, ProgressPrinter as _, QuietNoBar,
-    QuietProgressBar, TestListingProgress, TestListingProgressNoSpinner,
+    MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar,
+    TestListingProgress, TestListingProgressNoSpinner,
 };
 use slog::Drain as _;
 use std::io::{self, Write as _};
@@ -91,7 +91,6 @@ fn job_finished<ProgressIndicatorT>(prog: &ProgressIndicatorT, res: UiJobResult)
 where
     ProgressIndicatorT: ProgressIndicator,
 {
-    let printer = prog.lock_printing();
     let result_str = match &res.status {
         UiJobStatus::Ok => "OK".green(),
         UiJobStatus::Failure(_) => "FAIL".red(),
@@ -100,7 +99,7 @@ where
         UiJobStatus::Ignored => "IGNORED".yellow(),
     };
 
-    printer.println_width(move |width| {
+    prog.println_width(move |width| {
         let duration_str = res
             .duration
             .map(|d| format!("{:.3}s", d.as_secs_f64()))
@@ -125,16 +124,15 @@ where
     });
 
     if let Some(details) = res.status.details() {
-        printer.println(details);
+        prog.println(details);
     }
     for line in res.stdout {
-        printer.println(line);
+        prog.println(line);
     }
     for line in res.stderr {
-        printer.eprintln(line);
+        prog.eprintln(line);
     }
 
-    drop(printer);
     prog.job_finished();
 }
 
@@ -225,7 +223,7 @@ where
         if let Some(p) = self.line.bytes().position(|b| b == b'\n') {
             let remaining = self.line.split_off(p);
             let line = std::mem::replace(&mut self.line, remaining[1..].into());
-            self.prog.lock_printing().println(line);
+            self.prog.println(line);
         }
         Ok(buf.len())
     }
@@ -332,7 +330,7 @@ where
 
         match recv.recv_timeout(Duration::from_millis(500)) {
             Ok(msg) => match msg {
-                UiMessage::List(line) => prog.lock_printing().println(line),
+                UiMessage::List(line) => prog.println(line),
                 UiMessage::BuildOutputLine(_) => {}
                 UiMessage::BuildOutputChunk(_) => {}
                 UiMessage::SlogRecord(r) => {

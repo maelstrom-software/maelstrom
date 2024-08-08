@@ -1,6 +1,4 @@
-use super::{
-    PrintWidthCb, ProgressBarPrinter, ProgressIndicator, ProgressPrinter as _, Terminal, COLORS,
-};
+use super::{PrintWidthCb, ProgressIndicator, Terminal, COLORS};
 use anyhow::Result;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget};
 use maelstrom_base::stats::{JobState, JobStateCounts};
@@ -71,7 +69,6 @@ pub struct MultipleProgressBars<TermT> {
     bars: HashMap<JobState, ProgressBar>,
     enqueue_spinner: ProgressBar,
     state: Arc<Mutex<State>>,
-    print_lock: Arc<Mutex<()>>,
     remote_bar_tracker: Arc<Mutex<RemoteProgressBarTracker>>,
     term: TermT,
 }
@@ -99,7 +96,6 @@ where
             bars,
             enqueue_spinner,
             state: Default::default(),
-            print_lock: Default::default(),
             remote_bar_tracker: Default::default(),
             term,
         }
@@ -131,14 +127,13 @@ impl<TermT> ProgressIndicator for MultipleProgressBars<TermT>
 where
     TermT: Terminal,
 {
-    type Printer<'a> = ProgressBarPrinter<'a>;
+    fn println(&self, msg: String) {
+        let com = self.bars.get(&JobState::Complete).unwrap();
+        com.println(msg);
+    }
 
-    fn lock_printing(&self) -> Self::Printer<'_> {
-        ProgressBarPrinter {
-            out: self.bars.get(&JobState::Complete).unwrap().clone(),
-            _guard: self.print_lock.lock().unwrap(),
-            width: self.term.width() as usize,
-        }
+    fn println_width(&self, cb: impl PrintWidthCb<String>) {
+        self.println(cb(self.term.width() as usize));
     }
 
     fn job_finished(&self) {
@@ -194,9 +189,8 @@ where
         }
         self.enqueue_spinner.finish_and_clear();
 
-        let printer = self.lock_printing();
         for line in summary(self.term.width() as usize) {
-            printer.println(line);
+            self.println(line);
         }
         Ok(())
     }

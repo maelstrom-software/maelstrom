@@ -1,17 +1,14 @@
-use super::{PrintWidthCb, ProgressIndicator, ProgressPrinter as _, TermPrinter, Terminal};
+use super::{PrintWidthCb, ProgressIndicator, Terminal};
 use anyhow::Result;
-use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct NoBar<TermT> {
-    term: Arc<Mutex<TermT>>,
+    term: TermT,
 }
 
 impl<TermT> NoBar<TermT> {
     pub fn new(term: TermT) -> Self {
-        Self {
-            term: Arc::new(Mutex::new(term)),
-        }
+        Self { term }
     }
 }
 
@@ -19,18 +16,18 @@ impl<TermT> ProgressIndicator for NoBar<TermT>
 where
     TermT: Terminal,
 {
-    type Printer<'a> = TermPrinter<'a, TermT>;
+    fn println(&self, msg: String) {
+        let _ = self.term.write_line(&msg);
+        let _ = self.term.flush();
+    }
 
-    fn lock_printing(&self) -> Self::Printer<'_> {
-        TermPrinter {
-            out: self.term.lock().unwrap(),
-        }
+    fn println_width(&self, cb: impl PrintWidthCb<String>) {
+        self.println(cb(self.term.width() as usize));
     }
 
     fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
-        let printer = self.lock_printing();
-        for line in summary(printer.out.width() as usize) {
-            printer.println(line)
+        for line in summary(self.term.width() as usize) {
+            self.println(line)
         }
         Ok(())
     }

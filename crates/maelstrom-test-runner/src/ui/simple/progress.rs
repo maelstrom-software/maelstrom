@@ -16,9 +16,8 @@ use anyhow::Result;
 use colored::Colorize as _;
 use indicatif::{ProgressBar, ProgressStyle};
 use maelstrom_client::IntrospectResponse;
-use std::sync::MutexGuard;
 
-pub trait ProgressPrinter {
+pub trait ProgressIndicator {
     /// Prints a line to stdout while not interfering with any progress bars
     fn println(&self, msg: String);
 
@@ -32,16 +31,6 @@ pub trait ProgressPrinter {
             self.println(format!("{} {line}", "stderr:".red()))
         }
     }
-}
-
-pub trait ProgressIndicator {
-    type Printer<'a>: ProgressPrinter
-    where
-        Self: 'a;
-
-    /// Begin outputting some messages to the terminal. While the given object exists, it holds a
-    /// lock on outputting messages like this.
-    fn lock_printing(&self) -> Self::Printer<'_>;
 
     /// Meant to be called with the job is complete, it updates the complete bar with this status
     fn job_finished(&self) {}
@@ -88,42 +77,4 @@ fn make_side_progress_bar(color: &str, message: impl Into<String>, msg_len: usiz
         .unwrap()
         .progress_chars("##-"),
     )
-}
-
-pub struct ProgressBarPrinter<'a> {
-    out: ProgressBar,
-    width: usize,
-    _guard: MutexGuard<'a, ()>,
-}
-
-impl<'a> ProgressPrinter for ProgressBarPrinter<'a> {
-    fn println(&self, msg: String) {
-        self.out.println(msg);
-    }
-
-    fn println_width(&self, cb: impl PrintWidthCb<String>) {
-        self.println(cb(self.width));
-    }
-}
-
-pub struct NullPrinter;
-
-impl ProgressPrinter for NullPrinter {
-    fn println(&self, _msg: String) {}
-    fn println_width(&self, _cb: impl PrintWidthCb<String>) {}
-}
-
-pub struct TermPrinter<'a, TermT> {
-    out: MutexGuard<'a, TermT>,
-}
-
-impl<'a, TermT: Terminal> ProgressPrinter for TermPrinter<'a, TermT> {
-    fn println(&self, msg: String) {
-        let _ = self.out.write_line(&msg);
-        let _ = self.out.flush();
-    }
-
-    fn println_width(&self, cb: impl FnOnce(usize) -> String + Send + Sync + 'static) {
-        self.println(cb(self.out.width() as usize))
-    }
 }

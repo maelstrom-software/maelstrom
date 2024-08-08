@@ -1,4 +1,4 @@
-use super::{NullPrinter, PrintWidthCb, ProgressIndicator, Terminal};
+use super::{PrintWidthCb, ProgressIndicator, Terminal};
 use anyhow::Result;
 
 #[derive(Clone)]
@@ -16,12 +16,8 @@ impl<TermT> ProgressIndicator for QuietNoBar<TermT>
 where
     TermT: Terminal,
 {
-    type Printer<'a> = NullPrinter;
-
-    fn lock_printing(&self) -> Self::Printer<'_> {
-        // quiet mode doesn't print anything
-        NullPrinter
-    }
+    fn println(&self, _msg: String) {}
+    fn println_width(&self, _cb: impl PrintWidthCb<String>) {}
 
     fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
         for line in summary(self.term.width() as usize) {

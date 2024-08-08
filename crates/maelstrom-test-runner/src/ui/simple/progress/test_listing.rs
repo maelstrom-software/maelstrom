@@ -1,4 +1,5 @@
-use super::{ProgressBarPrinter, ProgressIndicator, TermPrinter, Terminal};
+use super::{ProgressIndicator, Terminal};
+use crate::ui::PrintWidthCb;
 use indicatif::ProgressBar;
 use std::sync::{Arc, Mutex};
 
@@ -11,7 +12,6 @@ struct State {
 pub struct TestListingProgress<TermT> {
     enqueue_spinner: ProgressBar,
     state: Arc<Mutex<State>>,
-    print_lock: Arc<Mutex<()>>,
     term: TermT,
 }
 
@@ -24,7 +24,6 @@ where
         Self {
             enqueue_spinner,
             state: Default::default(),
-            print_lock: Default::default(),
             term,
         }
     }
@@ -34,14 +33,12 @@ impl<TermT> ProgressIndicator for TestListingProgress<TermT>
 where
     TermT: Terminal,
 {
-    type Printer<'a> = ProgressBarPrinter<'a>;
+    fn println(&self, msg: String) {
+        self.enqueue_spinner.println(msg);
+    }
 
-    fn lock_printing(&self) -> Self::Printer<'_> {
-        ProgressBarPrinter {
-            out: self.enqueue_spinner.clone(),
-            _guard: self.print_lock.lock().unwrap(),
-            width: self.term.width() as usize,
-        }
+    fn println_width(&self, cb: impl PrintWidthCb<String>) {
+        self.println(cb(self.term.width() as usize));
     }
 
     fn update_enqueue_status(&self, msg: impl Into<String>) {
@@ -68,14 +65,12 @@ where
 
 #[derive(Clone)]
 pub struct TestListingProgressNoSpinner<TermT> {
-    term: Arc<Mutex<TermT>>,
+    term: TermT,
 }
 
 impl<TermT> TestListingProgressNoSpinner<TermT> {
     pub fn new(term: TermT) -> Self {
-        Self {
-            term: Arc::new(Mutex::new(term)),
-        }
+        Self { term }
     }
 }
 
@@ -83,11 +78,12 @@ impl<TermT> ProgressIndicator for TestListingProgressNoSpinner<TermT>
 where
     TermT: Terminal,
 {
-    type Printer<'a> = TermPrinter<'a, TermT>;
+    fn println(&self, msg: String) {
+        let _ = self.term.write_line(&msg);
+        let _ = self.term.flush();
+    }
 
-    fn lock_printing(&self) -> Self::Printer<'_> {
-        TermPrinter {
-            out: self.term.lock().unwrap(),
-        }
+    fn println_width(&self, cb: impl PrintWidthCb<String>) {
+        self.println(cb(self.term.width() as usize));
     }
 }
