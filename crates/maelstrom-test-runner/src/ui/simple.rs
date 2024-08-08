@@ -195,18 +195,18 @@ where
     })
 }
 
-pub struct ProgressSlogRecordDecorator<ProgressIndicatorT> {
+pub struct ProgressSlogRecordDecorator<'a, ProgressIndicatorT> {
     level: slog::Level,
-    prog: ProgressIndicatorT,
+    prog: &'a ProgressIndicatorT,
     line: String,
     use_color: bool,
 }
 
-impl<ProgressIndicatorT> ProgressSlogRecordDecorator<ProgressIndicatorT>
+impl<'a, ProgressIndicatorT> ProgressSlogRecordDecorator<'a, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
-    pub fn new(level: slog::Level, prog: ProgressIndicatorT, use_color: bool) -> Self {
+    pub fn new(level: slog::Level, prog: &'a ProgressIndicatorT, use_color: bool) -> Self {
         Self {
             level,
             prog,
@@ -216,7 +216,7 @@ where
     }
 }
 
-impl<ProgressIndicatorT> io::Write for ProgressSlogRecordDecorator<ProgressIndicatorT>
+impl<'a, ProgressIndicatorT> io::Write for ProgressSlogRecordDecorator<'a, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
@@ -235,8 +235,8 @@ where
     }
 }
 
-impl<ProgressIndicatorT> slog_term::RecordDecorator
-    for ProgressSlogRecordDecorator<ProgressIndicatorT>
+impl<'a, ProgressIndicatorT> slog_term::RecordDecorator
+    for ProgressSlogRecordDecorator<'a, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
@@ -283,18 +283,18 @@ where
     }
 }
 
-struct ProgressSlogDecorator<ProgressIndicatorT> {
-    prog: ProgressIndicatorT,
+struct ProgressSlogDecorator<'a, ProgressIndicatorT> {
+    prog: &'a ProgressIndicatorT,
     use_color: bool,
 }
 
-impl<ProgressIndicatorT> ProgressSlogDecorator<ProgressIndicatorT> {
-    fn new(prog: ProgressIndicatorT, use_color: bool) -> Self {
+impl<'a, ProgressIndicatorT> ProgressSlogDecorator<'a, ProgressIndicatorT> {
+    fn new(prog: &'a ProgressIndicatorT, use_color: bool) -> Self {
         Self { prog, use_color }
     }
 }
 
-impl<ProgressIndicatorT> slog_term::Decorator for ProgressSlogDecorator<ProgressIndicatorT>
+impl<'a, ProgressIndicatorT> slog_term::Decorator for ProgressSlogDecorator<'a, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
@@ -307,8 +307,7 @@ where
     where
         F: FnOnce(&mut dyn slog_term::RecordDecorator) -> io::Result<()>,
     {
-        let mut d =
-            ProgressSlogRecordDecorator::new(record.level(), self.prog.clone(), self.use_color);
+        let mut d = ProgressSlogRecordDecorator::new(record.level(), self.prog, self.use_color);
         f(&mut d)
     }
 }
@@ -321,7 +320,7 @@ fn run_simple_ui<ProgressIndicatorT>(
 where
     ProgressIndicatorT: ProgressIndicator,
 {
-    let slog_dec = ProgressSlogDecorator::new(prog.clone(), stdout_is_tty);
+    let slog_dec = ProgressSlogDecorator::new(prog, stdout_is_tty);
     let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
 
     let mut last_tick = Instant::now();

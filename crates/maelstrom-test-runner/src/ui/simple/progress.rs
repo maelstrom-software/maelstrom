@@ -16,10 +16,7 @@ use anyhow::Result;
 use colored::Colorize as _;
 use indicatif::{ProgressBar, ProgressStyle};
 use maelstrom_client::IntrospectResponse;
-use std::{
-    panic::{RefUnwindSafe, UnwindSafe},
-    sync::MutexGuard,
-};
+use std::sync::MutexGuard;
 
 pub trait ProgressPrinter {
     /// Prints a line to stdout while not interfering with any progress bars
@@ -37,8 +34,10 @@ pub trait ProgressPrinter {
     }
 }
 
-pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {
-    type Printer<'a>: ProgressPrinter;
+pub trait ProgressIndicator {
+    type Printer<'a>: ProgressPrinter
+    where
+        Self: 'a;
 
     /// Begin outputting some messages to the terminal. While the given object exists, it holds a
     /// lock on outputting messages like this.
