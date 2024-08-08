@@ -102,7 +102,8 @@ layers = [
     { paths = ["layers/a/b.bin", "layers/a/c.bin"], strip_prefix = "layers/a/" },
     { glob = "layers/b/**", strip_prefix = "layers/b/" },
     { stubs = ["/dev/{null, full}", "/proc/"] },
-    { symlinks = [{ link = "/dev/stdout", target = "/proc/self/fd/1" }] }
+    { symlinks = [{ link = "/dev/stdout", target = "/proc/self/fd/1" }] },
+    { shared-library-dependencies = ["/bin/bash"], prepend_prefix = "/usr" }
 ]
 ```
 
@@ -125,9 +126,12 @@ Each element of the list must be a table with one of the following keys:
   - `symlinks`: The value must be a list of tables of `link`/`target` pairs.
     These strings are used to create a [symlinks](../../spec-layers.md#symlinks)
     layer.
+  - `shared-library-dependencies`: The value must be list of strings, indicating local paths of
+    binaries. This layer includes the set of shared libraries the binaries depend on. This
+    includes `libc` and the dynamic linker. This doesn't include the binary itself.
 
-If the layer is a `paths` or `glob` layer, then the table can have any of the
-following extra fields used to provide the
+If the layer is a `paths`, `glob`, or `shared-library-dependencies` layer, then the table can have
+any of the following extra fields used to provide the
 [`prefix_options`](../../spec-layers.md#prefix_options):
   - `follow_symlinks`: A boolean value. Used to specify [`follow_symlinks`](../../spec-layers.md#follow_symlinks).
   - `canonicalize`: A boolean value. Used to specify [`canonicalize`](../../spec-layers.md#canonicalize).

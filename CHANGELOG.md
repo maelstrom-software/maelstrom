@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `extra-pytest-args` config value added to `maelstrom-pytest`
 - `extra-pytest-collect-args` config value added to `maelstrom-pytest`
 - `extra-pytest-test-args` config value added to `maelstrom-pytest`
+- `shared-library-dependencies` layer type added
 
 #### Changed
 - `ui` test-runner configuration option value now matches the same casing as the CLI option
