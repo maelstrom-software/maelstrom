@@ -19,39 +19,39 @@ use maelstrom_client::IntrospectResponse;
 
 pub trait ProgressIndicator {
     /// Prints a line to stdout while not interfering with any progress bars
-    fn println(&self, msg: String);
+    fn println(&mut self, msg: String);
 
     /// Prints a line to stdout while not interfering with any progress bars
-    fn println_width(&self, cb: impl PrintWidthCb<String>);
+    fn println_width(&mut self, cb: impl PrintWidthCb<String>);
 
     /// Prints a line to stdout while not interfering with any progress bars. Prefixes line with
     /// "stderr"
-    fn eprintln(&self, msg: impl AsRef<str>) {
+    fn eprintln(&mut self, msg: impl AsRef<str>) {
         for line in msg.as_ref().lines() {
             self.println(format!("{} {line}", "stderr:".red()))
         }
     }
 
     /// Meant to be called with the job is complete, it updates the complete bar with this status
-    fn job_finished(&self) {}
+    fn job_finished(&mut self) {}
 
     /// Update the number of pending jobs indicated
-    fn update_length(&self, _new_length: u64) {}
+    fn update_length(&mut self, _new_length: u64) {}
 
     /// Update progress with new introspect data.
-    fn update_introspect_state(&self, _resp: IntrospectResponse) {}
+    fn update_introspect_state(&mut self, _resp: IntrospectResponse) {}
 
     /// Tick any spinners.
-    fn tick(&self) {}
+    fn tick(&mut self) {}
 
     /// Update the message for the spinner which indicates jobs are being enqueued
-    fn update_enqueue_status(&self, _msg: impl Into<String>) {}
+    fn update_enqueue_status(&mut self, _msg: impl Into<String>) {}
 
     /// Called when all jobs are running
-    fn done_queuing_jobs(&self) {}
+    fn done_queuing_jobs(&mut self) {}
 
     /// Called when all jobs are done
-    fn finished(&self, _summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+    fn finished(&mut self, _summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
         Ok(())
     }
 }

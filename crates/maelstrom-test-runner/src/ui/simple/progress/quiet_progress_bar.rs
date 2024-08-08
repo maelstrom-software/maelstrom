@@ -26,18 +26,18 @@ impl<TermT> ProgressIndicator for QuietProgressBar<TermT>
 where
     TermT: Terminal,
 {
-    fn println(&self, _msg: String) {}
-    fn println_width(&self, _cb: impl PrintWidthCb<String>) {}
+    fn println(&mut self, _msg: String) {}
+    fn println_width(&mut self, _cb: impl PrintWidthCb<String>) {}
 
-    fn job_finished(&self) {
+    fn job_finished(&mut self) {
         self.bar.inc(1);
     }
 
-    fn update_length(&self, new_length: u64) {
+    fn update_length(&mut self, new_length: u64) {
         self.bar.set_length(new_length);
     }
 
-    fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+    fn finished(&mut self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
         self.bar.finish_and_clear();
         for line in summary(self.term.width() as usize) {
             self.term.write_line(&line)?;

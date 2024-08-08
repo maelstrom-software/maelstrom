@@ -16,10 +16,10 @@ impl<TermT> ProgressIndicator for QuietNoBar<TermT>
 where
     TermT: Terminal,
 {
-    fn println(&self, _msg: String) {}
-    fn println_width(&self, _cb: impl PrintWidthCb<String>) {}
+    fn println(&mut self, _msg: String) {}
+    fn println_width(&mut self, _cb: impl PrintWidthCb<String>) {}
 
-    fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+    fn finished(&mut self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
         for line in summary(self.term.width() as usize) {
             self.term.write_line(&line)?;
         }

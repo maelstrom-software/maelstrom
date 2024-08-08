@@ -11,6 +11,7 @@ use progress::{
     TestListingProgress, TestListingProgressNoSpinner,
 };
 use slog::Drain as _;
+use std::cell::RefCell;
 use std::io::{self, Write as _};
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -87,7 +88,7 @@ where
     }
 }
 
-fn job_finished<ProgressIndicatorT>(prog: &ProgressIndicatorT, res: UiJobResult)
+fn job_finished<ProgressIndicatorT>(prog: &mut ProgressIndicatorT, res: UiJobResult)
 where
     ProgressIndicatorT: ProgressIndicator,
 {
@@ -137,7 +138,7 @@ where
 }
 
 fn all_jobs_finished<ProgressIndicatorT>(
-    prog: &ProgressIndicatorT,
+    prog: &mut ProgressIndicatorT,
     summary: UiJobSummary,
 ) -> Result<()>
 where
@@ -195,7 +196,7 @@ where
 
 pub struct ProgressSlogRecordDecorator<'a, ProgressIndicatorT> {
     level: slog::Level,
-    prog: &'a ProgressIndicatorT,
+    prog: &'a mut ProgressIndicatorT,
     line: String,
     use_color: bool,
 }
@@ -204,7 +205,7 @@ impl<'a, ProgressIndicatorT> ProgressSlogRecordDecorator<'a, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
-    pub fn new(level: slog::Level, prog: &'a ProgressIndicatorT, use_color: bool) -> Self {
+    pub fn new(level: slog::Level, prog: &'a mut ProgressIndicatorT, use_color: bool) -> Self {
         Self {
             level,
             prog,
@@ -282,13 +283,16 @@ where
 }
 
 struct ProgressSlogDecorator<'a, ProgressIndicatorT> {
-    prog: &'a ProgressIndicatorT,
+    prog: RefCell<&'a mut ProgressIndicatorT>,
     use_color: bool,
 }
 
 impl<'a, ProgressIndicatorT> ProgressSlogDecorator<'a, ProgressIndicatorT> {
-    fn new(prog: &'a ProgressIndicatorT, use_color: bool) -> Self {
-        Self { prog, use_color }
+    fn new(prog: &'a mut ProgressIndicatorT, use_color: bool) -> Self {
+        Self {
+            prog: RefCell::new(prog),
+            use_color,
+        }
     }
 }
 
@@ -305,22 +309,20 @@ where
     where
         F: FnOnce(&mut dyn slog_term::RecordDecorator) -> io::Result<()>,
     {
-        let mut d = ProgressSlogRecordDecorator::new(record.level(), self.prog, self.use_color);
+        let mut prog = self.prog.borrow_mut();
+        let mut d = ProgressSlogRecordDecorator::new(record.level(), *prog, self.use_color);
         f(&mut d)
     }
 }
 
 fn run_simple_ui<ProgressIndicatorT>(
-    prog: &ProgressIndicatorT,
+    prog: &mut ProgressIndicatorT,
     recv: Receiver<UiMessage>,
     stdout_is_tty: bool,
 ) -> Result<()>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
-    let slog_dec = ProgressSlogDecorator::new(prog, stdout_is_tty);
-    let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
-
     let mut last_tick = Instant::now();
     loop {
         if last_tick.elapsed() > Duration::from_millis(500) {
@@ -334,6 +336,8 @@ where
                 UiMessage::BuildOutputLine(_) => {}
                 UiMessage::BuildOutputChunk(_) => {}
                 UiMessage::SlogRecord(r) => {
+                    let slog_dec = ProgressSlogDecorator::new(prog, stdout_is_tty);
+                    let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
                     let _ = r.log_to(&slog_drain);
                 }
                 UiMessage::JobFinished(res) => job_finished(prog, res),

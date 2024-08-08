@@ -33,19 +33,19 @@ impl<TermT> ProgressIndicator for TestListingProgress<TermT>
 where
     TermT: Terminal,
 {
-    fn println(&self, msg: String) {
+    fn println(&mut self, msg: String) {
         self.enqueue_spinner.println(msg);
     }
 
-    fn println_width(&self, cb: impl PrintWidthCb<String>) {
+    fn println_width(&mut self, cb: impl PrintWidthCb<String>) {
         self.println(cb(self.term.width() as usize));
     }
 
-    fn update_enqueue_status(&self, msg: impl Into<String>) {
+    fn update_enqueue_status(&mut self, msg: impl Into<String>) {
         self.enqueue_spinner.set_message(msg.into());
     }
 
-    fn tick(&self) {
+    fn tick(&mut self) {
         let state = self.state.lock().unwrap();
 
         if state.done_queuing_jobs {
@@ -55,7 +55,7 @@ where
         self.enqueue_spinner.tick();
     }
 
-    fn done_queuing_jobs(&self) {
+    fn done_queuing_jobs(&mut self) {
         let mut state = self.state.lock().unwrap();
         state.done_queuing_jobs = true;
 
@@ -78,12 +78,12 @@ impl<TermT> ProgressIndicator for TestListingProgressNoSpinner<TermT>
 where
     TermT: Terminal,
 {
-    fn println(&self, msg: String) {
+    fn println(&mut self, msg: String) {
         let _ = self.term.write_line(&msg);
         let _ = self.term.flush();
     }
 
-    fn println_width(&self, cb: impl PrintWidthCb<String>) {
+    fn println_width(&mut self, cb: impl PrintWidthCb<String>) {
         self.println(cb(self.term.width() as usize));
     }
 }

@@ -16,16 +16,16 @@ impl<TermT> ProgressIndicator for NoBar<TermT>
 where
     TermT: Terminal,
 {
-    fn println(&self, msg: String) {
+    fn println(&mut self, msg: String) {
         let _ = self.term.write_line(&msg);
         let _ = self.term.flush();
     }
 
-    fn println_width(&self, cb: impl PrintWidthCb<String>) {
+    fn println_width(&mut self, cb: impl PrintWidthCb<String>) {
         self.println(cb(self.term.width() as usize));
     }
 
-    fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+    fn finished(&mut self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
         for line in summary(self.term.width() as usize) {
             self.println(line)
         }

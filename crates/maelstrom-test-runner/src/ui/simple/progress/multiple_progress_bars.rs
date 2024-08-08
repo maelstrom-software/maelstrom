@@ -127,16 +127,16 @@ impl<TermT> ProgressIndicator for MultipleProgressBars<TermT>
 where
     TermT: Terminal,
 {
-    fn println(&self, msg: String) {
+    fn println(&mut self, msg: String) {
         let com = self.bars.get(&JobState::Complete).unwrap();
         com.println(msg);
     }
 
-    fn println_width(&self, cb: impl PrintWidthCb<String>) {
+    fn println_width(&mut self, cb: impl PrintWidthCb<String>) {
         self.println(cb(self.term.width() as usize));
     }
 
-    fn job_finished(&self) {
+    fn job_finished(&mut self) {
         let mut state = self.state.lock().unwrap();
         state.finished += 1;
 
@@ -146,7 +146,7 @@ where
         }
     }
 
-    fn update_length(&self, new_length: u64) {
+    fn update_length(&mut self, new_length: u64) {
         let mut state = self.state.lock().unwrap();
         state.length = new_length;
 
@@ -155,7 +155,7 @@ where
         }
     }
 
-    fn tick(&self) {
+    fn tick(&mut self) {
         let state = self.state.lock().unwrap();
 
         if state.done_queuing_jobs {
@@ -165,25 +165,25 @@ where
         self.enqueue_spinner.tick();
     }
 
-    fn update_enqueue_status(&self, msg: impl Into<String>) {
+    fn update_enqueue_status(&mut self, msg: impl Into<String>) {
         self.enqueue_spinner.set_message(msg.into());
     }
 
-    fn update_introspect_state(&self, resp: IntrospectResponse) {
+    fn update_introspect_state(&mut self, resp: IntrospectResponse) {
         let mut states = resp.artifact_uploads;
         states.extend(resp.image_downloads);
         self.remote_bar_tracker.lock().unwrap().update(self, states);
         self.update_job_states(resp.job_state_counts)
     }
 
-    fn done_queuing_jobs(&self) {
+    fn done_queuing_jobs(&mut self) {
         let mut state = self.state.lock().unwrap();
         state.done_queuing_jobs = true;
 
         self.enqueue_spinner.finish_and_clear();
     }
 
-    fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+    fn finished(&mut self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
         for bar in self.bars.values() {
             bar.finish_and_clear();
         }
