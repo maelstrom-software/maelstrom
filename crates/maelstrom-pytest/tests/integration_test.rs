@@ -19,24 +19,32 @@ fn spawn_bg_proc() -> ClientBgProcess {
     ClientBgProcess::new_from_bin(&bin_path, &["--client-bg-proc"]).unwrap()
 }
 
-fn sh(script: &str) -> Result<()> {
+fn sh(script: &str, description: &str) -> Result<()> {
     let mut cmd = Command::new("/bin/sh");
     cmd.args(["-c", script])
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .stdout(Stdio::null());
     let mut child = cmd.spawn()?;
+
+    let mut stderr = child.stderr.take().unwrap();
+    let stderr_handle = std::thread::spawn(move || -> String {
+        let mut stderr_buffer = vec![];
+        let _ = std::io::copy(&mut stderr, &mut stderr_buffer);
+        String::from_utf8_lossy(&stderr_buffer).into()
+    });
 
     let exit_status = child.wait()?;
     if exit_status.success() {
         Ok(())
     } else {
-        bail!("sh failed")
+        let stderr_str = stderr_handle.join().unwrap();
+        bail!("{description} failed with: {exit_status}, and stderr = {stderr_str}")
     }
 }
 
 fn maybe_install_pytest() {
-    if sh("python -c 'import pytest'").is_err() {
-        sh("pip install pytest==8.1.1").unwrap()
+    if sh("python -c 'import pytest'", "").is_err() {
+        sh("pip install pytest==8.1.1", "pip install").unwrap()
     }
 }
 
