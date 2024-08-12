@@ -63,71 +63,74 @@ fn into_proto_buf_unit_enum(
 fn into_proto_buf_enum(
     self_path: Path,
     proto_buf_type: Path,
+    enum_type: Path,
     variants: Vec<IntoProtoBufEnumVariant>,
 ) -> Result<ItemImpl> {
-    let arms = variants.iter().map(|v| -> Result<Arm> {
-        let variant_ident = &v.ident;
-        let field_idents1 = v.fields.iter().map(|f| &f.ident);
-        let field_idents2 = field_idents1.clone();
-        Ok(match v.fields.style {
-            darling::ast::Style::Unit => {
-                parse_quote! {
-                    Self::#variant_ident => #proto_buf_type::#variant_ident(super::Void {}),
-                }
-            }
-            darling::ast::Style::Tuple => {
-                let num_fields = v.fields.len();
-                let void = parse_quote!(super::Void);
-                if num_fields == 1 && v.fields.fields.first().unwrap().ty == void {
-                    return Ok(parse_quote! {
-                        Self::#variant_ident => #proto_buf_type::#variant_ident(super::Void {}),
-                    });
-                }
-
-                let field_idents1 = (0..num_fields).map(|n| {
-                    Ident::new(&format!("f{n}"), Span::call_site())
-                });
-                let field_idents2 = field_idents1.clone();
-                parse_quote! {
-                    Self::#variant_ident(#(#field_idents1),*) => #proto_buf_type::#variant_ident(
-                        #(crate::IntoProtoBuf::into_proto_buf(#field_idents2)),*
-                    )
-                }
-            }
-            darling::ast::Style::Struct => {
-                let variant_type = v
-                    .other_type
-                    .as_ref()
-                    .ok_or(Error::new(variant_ident.span(), "missing other_type"))?;
-                let field_exprs = v.fields.iter().map(|v| -> Expr {
-                    let ident = &v.ident;
-                    if v.option {
-                        parse_quote!{ ::std::option::Option::Some(
-                            crate::IntoProtoBuf::into_proto_buf(#ident)
-                        ) }
-                    } else {
-                        parse_quote!{ crate::IntoProtoBuf::into_proto_buf(#ident) }
+    let arms = variants
+        .iter()
+        .map(|v| -> Result<Arm> {
+            let variant_ident = &v.ident;
+            let field_idents1 = v.fields.iter().map(|f| &f.ident);
+            let field_idents2 = field_idents1.clone();
+            Ok(match v.fields.style {
+                darling::ast::Style::Unit => {
+                    parse_quote! {
+                        Self::#variant_ident => #enum_type::#variant_ident(super::Void {}),
                     }
-                });
-                parse_quote! {
-                    Self::#variant_ident { #(#field_idents1),* } => #proto_buf_type::#variant_ident(
-                        #variant_type {
-                            #(#field_idents2: #field_exprs),*
-                        }
-                    )
                 }
-            }
+                darling::ast::Style::Tuple => {
+                    let num_fields = v.fields.len();
+                    let void = parse_quote!(super::Void);
+                    if num_fields == 1 && v.fields.fields.first().unwrap().ty == void {
+                        return Ok(parse_quote! {
+                            Self::#variant_ident => #enum_type::#variant_ident(super::Void {}),
+                        });
+                    }
+
+                    let field_idents1 =
+                        (0..num_fields).map(|n| Ident::new(&format!("f{n}"), Span::call_site()));
+                    let field_idents2 = field_idents1.clone();
+                    parse_quote! {
+                        Self::#variant_ident(#(#field_idents1),*) => #enum_type::#variant_ident(
+                            #(crate::IntoProtoBuf::into_proto_buf(#field_idents2)),*
+                        )
+                    }
+                }
+                darling::ast::Style::Struct => {
+                    let variant_type = v
+                        .other_type
+                        .as_ref()
+                        .ok_or(Error::new(variant_ident.span(), "missing other_type"))?;
+                    let field_exprs = v.fields.iter().map(|v| -> Expr {
+                        let ident = &v.ident;
+                        if v.option {
+                            parse_quote! { ::std::option::Option::Some(
+                                crate::IntoProtoBuf::into_proto_buf(#ident)
+                            ) }
+                        } else {
+                            parse_quote! { crate::IntoProtoBuf::into_proto_buf(#ident) }
+                        }
+                    });
+                    parse_quote! {
+                        Self::#variant_ident { #(#field_idents1),* } => #enum_type::#variant_ident(
+                            #variant_type {
+                                #(#field_idents2: #field_exprs),*
+                            }
+                        )
+                    }
+                }
+            })
         })
-    }).collect::<Result<Vec<Arm>>>()?;
+        .collect::<Result<Vec<Arm>>>()?;
 
     Ok(parse_quote! {
         impl crate::IntoProtoBuf for #self_path {
             type ProtoBufType = #proto_buf_type;
 
             fn into_proto_buf(self) -> Self::ProtoBufType {
-                match self {
+                <#proto_buf_type as ::std::convert::From<#enum_type>>::from(match self {
                     #(#arms),*
-                }
+                })
             }
         }
     })
@@ -154,7 +157,8 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
             if all_unit {
                 into_proto_buf_unit_enum(self_path, proto_buf_type, variants)
             } else {
-                into_proto_buf_enum(self_path, proto_buf_type, variants)
+                let enum_type = input.enum_type.unwrap_or(proto_buf_type.clone());
+                into_proto_buf_enum(self_path, proto_buf_type, enum_type, variants)
             }
         }
     }
@@ -183,7 +187,12 @@ struct IntoProtoBufEnumVariant {
 struct IntoProtoBufInput {
     ident: Ident,
     data: darling::ast::Data<IntoProtoBufEnumVariant, IntoProtoBufStructField>,
+    /// This is the protobuf type we are converting from
     other_type: Path,
+    /// If the protobuf type isn't an enum, but instead a struct containing an enum, this can be
+    /// used convert the resulting enum into the struct. It causes the code to generate this type
+    /// and then call `From` on it to convert it to the protobuf type.
+    enum_type: Option<Path>,
     #[darling(default)]
     remote: bool,
     #[darling(default)]

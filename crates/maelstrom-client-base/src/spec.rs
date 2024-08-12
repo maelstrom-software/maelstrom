@@ -308,7 +308,7 @@ pub struct SymlinkSpec {
 #[derive(
     IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize,
 )]
-#[proto(other_type = proto::add_layer_request::Layer)]
+#[proto(other_type = "proto::Layer", enum_type = "proto::layer::Layer")]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Layer {
     #[proto(other_type = proto::TarLayer)]

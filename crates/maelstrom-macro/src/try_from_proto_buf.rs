@@ -68,70 +68,73 @@ fn try_from_proto_buf_unit_enum(
 fn try_from_proto_buf_enum(
     self_path: Path,
     proto_buf_type: Path,
+    enum_type: Path,
     variants: Vec<TryFromProtoBufEnumVariant>,
 ) -> Result<ItemImpl> {
     let self_name = self_path.segments.last().unwrap().ident.to_string();
-    let arms = variants.iter().map(|v| -> Result<Arm> {
-        let variant_ident = &v.ident;
-        Ok(match v.fields.style {
-            darling::ast::Style::Unit => {
-                return Err(Error::new(variant_ident.span(), "unit not allowed here"));
-            }
-            darling::ast::Style::Tuple => {
-                let num_fields = v.fields.len();
-                let void = parse_quote!(super::Void);
-                if num_fields == 1 && v.fields.fields.first().unwrap().ty == void {
-                    return Ok(parse_quote! {
-                        #proto_buf_type::#variant_ident(_) => Ok(Self::#variant_ident)
-                    });
+    let arms = variants
+        .iter()
+        .map(|v| -> Result<Arm> {
+            let variant_ident = &v.ident;
+            Ok(match v.fields.style {
+                darling::ast::Style::Unit => {
+                    return Err(Error::new(variant_ident.span(), "unit not allowed here"));
                 }
+                darling::ast::Style::Tuple => {
+                    let num_fields = v.fields.len();
+                    let void = parse_quote!(super::Void);
+                    if num_fields == 1 && v.fields.fields.first().unwrap().ty == void {
+                        return Ok(parse_quote! {
+                            #enum_type::#variant_ident(_) => Ok(Self::#variant_ident)
+                        });
+                    }
 
-                let field_idents1 = (0..num_fields).map(|n| {
-                    Ident::new(&format!("f{n}"), Span::call_site())
-                });
-                let field_idents2 = field_idents1.clone();
-                parse_quote! {
-                    #proto_buf_type::#variant_ident(#(#field_idents1),*) => Ok(Self::#variant_ident(
-                        #(crate::TryFromProtoBuf::try_from_proto_buf(#field_idents2)?),*
-                    ))
+                    let field_idents1 =
+                        (0..num_fields).map(|n| Ident::new(&format!("f{n}"), Span::call_site()));
+                    let field_idents2 = field_idents1.clone();
+                    parse_quote! {
+                        #enum_type::#variant_ident(#(#field_idents1),*) => Ok(Self::#variant_ident(
+                            #(crate::TryFromProtoBuf::try_from_proto_buf(#field_idents2)?),*
+                        ))
+                    }
                 }
-            }
-            darling::ast::Style::Struct => {
-                let field_idents1 = v.fields.iter().map(|f| &f.ident);
-                let field_idents2 = field_idents1.clone();
-                let variant_type = v
-                    .other_type
-                    .as_ref()
-                    .ok_or(Error::new(variant_ident.span(), "missing path_type"))?;
-                let field_exprs = v.fields.iter().map(|v| -> Expr {
-                    let ident = &v.ident;
-                    if v.option {
-                        parse_quote!{
-                            crate::TryFromProtoBuf::try_from_proto_buf(
-                                #ident.ok_or(::anyhow::anyhow!("malformed `{}`", #self_name))?
-                            )?
+                darling::ast::Style::Struct => {
+                    let field_idents1 = v.fields.iter().map(|f| &f.ident);
+                    let field_idents2 = field_idents1.clone();
+                    let variant_type = v
+                        .other_type
+                        .as_ref()
+                        .ok_or(Error::new(variant_ident.span(), "missing path_type"))?;
+                    let field_exprs = v.fields.iter().map(|v| -> Expr {
+                        let ident = &v.ident;
+                        if v.option {
+                            parse_quote! {
+                                crate::TryFromProtoBuf::try_from_proto_buf(
+                                    #ident.ok_or(::anyhow::anyhow!("malformed `{}`", #self_name))?
+                                )?
+                            }
+                        } else {
+                            parse_quote! { crate::TryFromProtoBuf::try_from_proto_buf(#ident)? }
                         }
-                    } else {
-                        parse_quote!{ crate::TryFromProtoBuf::try_from_proto_buf(#ident)? }
-                    }
-                });
-                parse_quote! {
-                    #proto_buf_type::#variant_ident(#variant_type { #(#field_idents1),* }) => {
-                        Ok(Self::#variant_ident {
-                            #(#field_idents2: #field_exprs),*
-                        })
+                    });
+                    parse_quote! {
+                        #enum_type::#variant_ident(#variant_type { #(#field_idents1),* }) => {
+                            Ok(Self::#variant_ident {
+                                #(#field_idents2: #field_exprs),*
+                            })
+                        }
                     }
                 }
-            }
+            })
         })
-    }).collect::<Result<Vec<Arm>>>()?;
+        .collect::<Result<Vec<Arm>>>()?;
 
     Ok(parse_quote! {
         impl crate::TryFromProtoBuf for #self_path {
             type ProtoBufType = #proto_buf_type;
 
             fn try_from_proto_buf(p: Self::ProtoBufType) -> ::anyhow::Result<Self> {
-                match p {
+                match <#enum_type as ::std::convert::TryFrom<#proto_buf_type>>::try_from(p)? {
                     #(#arms,)*
                     _ => Err(::anyhow::anyhow!("malformed `{}`", #self_name))
                 }
@@ -162,7 +165,8 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
             if all_unit {
                 try_from_proto_buf_unit_enum(self_path, proto_buf_type, variants)
             } else {
-                try_from_proto_buf_enum(self_path, proto_buf_type, variants)
+                let enum_type = input.enum_type.unwrap_or(proto_buf_type.clone());
+                try_from_proto_buf_enum(self_path, proto_buf_type, enum_type, variants)
             }
         }
     }
@@ -191,7 +195,12 @@ struct TryFromProtoBufEnumVariant {
 struct TryFromProtoBufInput {
     ident: Ident,
     data: darling::ast::Data<TryFromProtoBufEnumVariant, TryFromProtoBufStructField>,
+    /// This is the protobuf type we are converting from
     other_type: Path,
+    /// If the protobuf type isn't an enum, but instead a struct containing an enum, this can be
+    /// used to unpack the struct. It causes the code to use TryFrom on the protobuf to convert to
+    /// this enum type, and uses this type for the conversion.
+    enum_type: Option<Path>,
     #[darling(default)]
     remote: bool,
     #[darling(default)]

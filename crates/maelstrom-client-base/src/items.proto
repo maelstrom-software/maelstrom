@@ -53,8 +53,8 @@ message SharedLibraryDependenciesLayer {
     PrefixOptions prefix_options = 2;
 }
 
-message AddLayerRequest {
-    oneof Layer {
+message Layer {
+    oneof layer {
         TarLayer tar = 1;
         GlobLayer glob = 2;
         PathsLayer paths = 3;
@@ -278,7 +278,7 @@ message IntrospectResponse {
 
 service ClientProcess {
     rpc Start(StartRequest) returns (Void);
-    rpc AddLayer(AddLayerRequest) returns (AddLayerResponse);
+    rpc AddLayer(Layer) returns (AddLayerResponse);
     rpc RunJob(RunJobRequest) returns (RunJobResponse);
     rpc Introspect(Void) returns (IntrospectResponse);
 }

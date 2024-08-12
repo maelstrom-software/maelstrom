@@ -328,6 +328,20 @@ impl TryFromProtoBuf for maelstrom_base::Sha256Digest {
     }
 }
 
+impl From<proto::layer::Layer> for proto::Layer {
+    fn from(layer: proto::layer::Layer) -> Self {
+        Self { layer: Some(layer) }
+    }
+}
+
+impl TryFrom<proto::Layer> for proto::layer::Layer {
+    type Error = anyhow::Error;
+
+    fn try_from(layer: proto::Layer) -> Result<Self> {
+        layer.layer.ok_or_else(|| anyhow!("malformed Layer"))
+    }
+}
+
 impl IntoProtoBuf for (maelstrom_base::Sha256Digest, maelstrom_base::ArtifactType) {
     type ProtoBufType = proto::LayerSpec;
 
