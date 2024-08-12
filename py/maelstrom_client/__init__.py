@@ -1,7 +1,6 @@
 from .client import Client, RunJobFuture, LayerType
 
 from .items_pb2 import (
-    AddLayerRequest,
     BindMount,
     Duration,
     EnvironmentSpec,
@@ -11,7 +10,7 @@ from .items_pb2 import (
     JobMount,
     JobNetwork,
     JobSpec,
-    LayerSpec,
+    Layer,
     PathsLayer,
     PrefixOptions,
     ProcMount,

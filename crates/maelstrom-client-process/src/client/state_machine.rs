@@ -88,6 +88,7 @@ impl<LatentT, ActiveT> StateMachine<LatentT, ActiveT> {
     /// reference is valid as long as the state machine is. Even if the state machine transitions
     /// to `Failed`, this reference will continue to be valid. We don't destroy the started value
     /// until the state machine is destroyed.
+    #[allow(dead_code)]
     pub fn active(&self) -> Result<&ActiveT> {
         self.active_value(*self.sender.borrow())
     }

@@ -69,11 +69,6 @@ enum ArtifactType {
     Manifest = 1;
 }
 
-message LayerSpec {
-    bytes digest = 1;
-    ArtifactType type = 2;
-}
-
 enum JobDevice {
     Full = 0;
     Fuse = 1;
@@ -172,7 +167,7 @@ message JobSpec {
     string program = 1;
     repeated string arguments = 2;
     optional ImageSpec image = 3;
-    repeated LayerSpec layers = 4;
+    repeated Layer layers = 4;
     optional JobRootOverlay root_overlay = 15;
     repeated EnvironmentSpec environment = 6;
     optional string working_directory = 7;
@@ -191,10 +186,6 @@ message RunJobRequest {
 
 message Error {
     string message_ = 1;
-}
-
-message AddLayerResponse {
-    LayerSpec spec = 1;
 }
 
 message JobError {
@@ -278,7 +269,6 @@ message IntrospectResponse {
 
 service ClientProcess {
     rpc Start(StartRequest) returns (Void);
-    rpc AddLayer(Layer) returns (AddLayerResponse);
     rpc RunJob(RunJobRequest) returns (RunJobResponse);
     rpc Introspect(Void) returns (IntrospectResponse);
 }

@@ -1,6 +1,6 @@
 use crate::{metadata::TestMetadata, ui};
 use anyhow::Result;
-use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Utf8PathBuf};
+use maelstrom_base::{ClientJobId, JobOutcomeResult, Utf8PathBuf};
 use maelstrom_client::{
     spec::{JobSpec, Layer},
     IntrospectResponse,
@@ -19,7 +19,6 @@ pub trait Wait {
 }
 
 pub trait ClientTrait: Sync {
-    fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)>;
     fn introspect(&self) -> Result<IntrospectResponse>;
     fn add_job(
         &self,
@@ -29,10 +28,6 @@ pub trait ClientTrait: Sync {
 }
 
 impl ClientTrait for maelstrom_client::Client {
-    fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        maelstrom_client::Client::add_layer(self, layer)
-    }
-
     fn introspect(&self) -> Result<IntrospectResponse> {
         maelstrom_client::Client::introspect(self)
     }

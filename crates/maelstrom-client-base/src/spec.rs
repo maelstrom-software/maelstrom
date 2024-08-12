@@ -10,8 +10,7 @@ use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    enum_set, ArtifactType, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Sha256Digest,
-    Timeout, UserId, Utf8PathBuf,
+    enum_set, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Deserializer, Serialize};
@@ -168,14 +167,14 @@ pub fn environment_eval(
         .collect())
 }
 
-#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq)]
 #[proto(other_type = "proto::JobSpec")]
 pub struct JobSpec {
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub image: Option<ImageSpec>,
     pub environment: Vec<EnvironmentSpec>,
-    pub layers: Vec<(Sha256Digest, ArtifactType)>,
+    pub layers: Vec<Layer>,
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
     pub root_overlay: JobRootOverlay,
@@ -188,10 +187,7 @@ pub struct JobSpec {
 }
 
 impl JobSpec {
-    pub fn new(
-        program: impl Into<String>,
-        layers: impl Into<Vec<(Sha256Digest, ArtifactType)>>,
-    ) -> Self {
+    pub fn new(program: impl Into<String>, layers: impl Into<Vec<Layer>>) -> Self {
         JobSpec {
             program: program.into().into(),
             layers: layers.into(),
@@ -306,7 +302,7 @@ pub struct SymlinkSpec {
 }
 
 #[derive(
-    IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize,
+    Clone, Debug, Deserialize, Eq, Hash, IntoProtoBuf, PartialEq, Serialize, TryFromProtoBuf,
 )]
 #[proto(other_type = "proto::Layer", enum_type = "proto::layer::Layer")]
 #[serde(untagged, deny_unknown_fields)]
@@ -479,9 +475,8 @@ impl ConvertedImage {
 
     /// Return an iterator of layers for the image. If there is no image, the iterator will be
     /// empty.
-    pub fn layers(&self) -> Result<impl Iterator<Item = Layer>> {
-        Ok(self
-            .layers
+    pub fn layers(&self) -> Result<Vec<Layer>> {
+        self.layers
             .iter()
             .map(|p| {
                 Ok(Layer::Tar {
@@ -490,8 +485,7 @@ impl ConvertedImage {
                     })?,
                 })
             })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter())
+            .collect()
     }
 
     /// Return a [`BTreeMap`] of environment variables for the image. If the image doesn't have any

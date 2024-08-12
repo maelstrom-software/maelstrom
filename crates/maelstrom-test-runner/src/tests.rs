@@ -16,14 +16,10 @@ use indicatif::InMemoryTerm;
 use indoc::indoc;
 use maelstrom_base::{
     stats::{JobState, JobStateCounts},
-    ArtifactType, ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutcomeResult,
-    JobOutputResult, JobStatus, Sha256Digest,
+    ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutcomeResult, JobOutputResult,
+    JobStatus,
 };
-use maelstrom_client::{
-    spec::{JobSpec, Layer},
-    IntrospectResponse, ProjectDir, StateDir,
-};
-use maelstrom_test::digest;
+use maelstrom_client::{spec::JobSpec, IntrospectResponse, ProjectDir, StateDir};
 use maelstrom_util::{
     fs::Fs,
     log::test_logger,
@@ -68,10 +64,6 @@ struct TestClient {
 }
 
 impl ClientTrait for TestClient {
-    fn add_layer(&self, _layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        Ok((digest!(42), ArtifactType::Manifest))
-    }
-
     fn introspect(&self) -> Result<IntrospectResponse> {
         todo!()
     }

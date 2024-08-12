@@ -216,14 +216,14 @@ impl<'client> PytestTestCollector<'client> {
 
         // Run a local job to install the packages
         let layers = vec![
-            self.client.add_layer(Layer::Paths {
+            Layer::Paths {
                 paths: vec![source_req_path.clone().try_into()?],
                 prefix_options: Default::default(),
-            })?,
-            self.client.add_layer(Layer::Stubs {
+            },
+            Layer::Stubs {
                 stubs: vec!["/dev/null".into()],
-            })?,
-            self.client.add_layer(Layer::Paths {
+            },
+            Layer::Paths {
                 paths: vec![resolv_conf.clone().try_into()?],
                 prefix_options: PrefixOptions {
                     strip_prefix: Some(resolv_conf.parent().unwrap().to_owned().try_into()?),
@@ -231,7 +231,7 @@ impl<'client> PytestTestCollector<'client> {
                     canonicalize: false,
                     follow_symlinks: false,
                 },
-            })?,
+            },
         ];
         let (sender, receiver) = std::sync::mpsc::channel();
         self.client.add_job(

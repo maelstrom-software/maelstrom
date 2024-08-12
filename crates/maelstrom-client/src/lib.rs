@@ -7,7 +7,7 @@ pub use maelstrom_client_base::{
 pub use maelstrom_container::ContainerImageDepotDir;
 
 use anyhow::{anyhow, Context as _, Result};
-use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest};
+use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
@@ -18,7 +18,6 @@ use maelstrom_util::{
     log::LoggerFactory,
     root::Root,
 };
-use spec::Layer;
 use std::{
     future::Future,
     io::{BufRead as _, BufReader, Read as _},
@@ -271,21 +270,6 @@ impl Client {
         self.send_async(builder)?
             .recv()
             .with_context(|| "receiving RPC response from client process")?
-    }
-
-    pub fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        slog::debug!(self.log, "client.add_layer"; "layer" => ?layer);
-        let msg = proto::AddLayerRequest {
-            layer: Some(layer.clone().into_proto_buf()),
-        };
-        let spec = self
-            .send_sync(move |mut client| async move { client.add_layer(msg).await })
-            .with_context(|| format!("adding layer {layer:#?}"))?;
-        slog::debug!(self.log, "client.add_layer complete");
-        Ok((
-            TryFromProtoBuf::try_from_proto_buf(spec.digest)?,
-            TryFromProtoBuf::try_from_proto_buf(spec.r#type)?,
-        ))
     }
 
     pub fn add_job(

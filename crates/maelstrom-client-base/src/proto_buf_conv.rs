@@ -342,28 +342,6 @@ impl TryFrom<proto::Layer> for proto::layer::Layer {
     }
 }
 
-impl IntoProtoBuf for (maelstrom_base::Sha256Digest, maelstrom_base::ArtifactType) {
-    type ProtoBufType = proto::LayerSpec;
-
-    fn into_proto_buf(self) -> proto::LayerSpec {
-        proto::LayerSpec {
-            digest: self.0.into_proto_buf(),
-            r#type: self.1.into_proto_buf(),
-        }
-    }
-}
-
-impl TryFromProtoBuf for (maelstrom_base::Sha256Digest, maelstrom_base::ArtifactType) {
-    type ProtoBufType = proto::LayerSpec;
-
-    fn try_from_proto_buf(p: Self::ProtoBufType) -> Result<Self> {
-        Ok((
-            TryFromProtoBuf::try_from_proto_buf(p.digest)?,
-            TryFromProtoBuf::try_from_proto_buf(p.r#type)?,
-        ))
-    }
-}
-
 impl IntoProtoBuf for maelstrom_base::UserId {
     type ProtoBufType = u32;
 

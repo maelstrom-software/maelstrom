@@ -17,12 +17,12 @@ use clap::{Args, Command};
 use config::Repeat;
 use derive_more::From;
 use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
-use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout, Utf8PathBuf};
+use maelstrom_base::{JobRootOverlay, Timeout, Utf8PathBuf};
 use maelstrom_client::{spec::JobSpec, ClientBgProcess, ProjectDir, StateDir};
 use maelstrom_util::{
     config::common::LogLevel, config::Config, fs::Fs, process::ExitCode, root::Root,
 };
-use metadata::{AllMetadata, TestMetadata};
+use metadata::AllMetadata;
 use slog::Drain as _;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -228,20 +228,6 @@ where
         })
     }
 
-    fn calculate_job_layers(
-        &mut self,
-        test_metadata: &TestMetadata,
-    ) -> Result<Vec<(Sha256Digest, ArtifactType)>> {
-        test_metadata
-            .layers
-            .iter()
-            .map(|layer| {
-                slog::debug!(self.log, "adding layer"; "layer" => ?layer);
-                self.deps.client().add_layer(layer.clone())
-            })
-            .collect::<Result<Vec<_>>>()
-    }
-
     fn build_job_from_case(
         &mut self,
         case_name: &str,
@@ -290,15 +276,12 @@ where
         self.ui
             .update_enqueue_status(format!("calculating layers for {case_str}"));
         slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
-        let mut layers = self.calculate_job_layers(&test_metadata)?;
-
-        let layer_specs =
-            self.deps
-                .test_collector()
-                .get_test_layers(&self.artifact, &test_metadata, &self.ui)?;
-        for layer_spec in layer_specs {
-            layers.push(self.deps.client().add_layer(layer_spec)?);
-        }
+        let mut layers = test_metadata.layers.clone();
+        layers.extend(self.deps.test_collector().get_test_layers(
+            &self.artifact,
+            &test_metadata,
+            &self.ui,
+        )?);
 
         let estimated_duration = self
             .queuing_state

@@ -5,13 +5,11 @@ import subprocess
 
 from typing import Optional, Union, Protocol, Sequence
 from .items_pb2 import (
-    AddLayerRequest,
     ArtifactType,
     GlobLayer,
     ImageSpec,
     JobMount,
     JobSpec,
-    LayerSpec,
     PathsLayer,
     RunJobRequest,
     RunJobResponse,
@@ -62,21 +60,6 @@ class Client:
                 ).encode(),
             )
         )
-
-    def add_layer(self, layer: LayerType) -> LayerSpec:
-        if isinstance(layer, TarLayer):
-            req = AddLayerRequest(tar=layer)
-        elif isinstance(layer, GlobLayer):
-            req = AddLayerRequest(glob=layer)
-        elif isinstance(layer, PathsLayer):
-            req = AddLayerRequest(paths=layer)
-        elif isinstance(layer, StubsLayer):
-            req = AddLayerRequest(stubs=layer)
-        elif isinstance(layer, SymlinksLayer):
-            req = AddLayerRequest(symlinks=layer)
-        else:
-            raise RuntimeError(f"unknown layer type {layer!r}")
-        return self.stub.AddLayer(req).spec
 
     def run_job(
         self,

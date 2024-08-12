@@ -753,7 +753,7 @@ fn main_with_logger(
         config.accept_invalid_remote_container_tls_certs,
         log,
     )?;
-    let mut job_specs = spec::job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
+    let mut job_specs = spec::job_spec_iter_from_reader(reader);
     if extra_options.one_or_tty.any() {
         if extra_options.one_or_tty.tty {
             // Unblock the signals for the local thread. We'll re-block them again once we've read

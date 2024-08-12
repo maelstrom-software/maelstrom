@@ -543,10 +543,6 @@ impl Client {
         }
     }
 
-    pub async fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        self.state_machine.active()?.add_layer(layer).await
-    }
-
     pub async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
@@ -564,10 +560,7 @@ impl Client {
             };
             let image = ConvertedImage::new(&image_spec.name, image_config);
             if image_spec.use_layers {
-                let end = mem::take(&mut layers);
-                for layer in image.layers()? {
-                    layers.push(state.add_layer(layer).await?);
-                }
+                let end = mem::replace(&mut layers, image.layers()?);
                 layers.extend(end);
             }
             if image_spec.use_environment {
@@ -583,11 +576,18 @@ impl Client {
 
         let working_directory = image_working_directory.or(spec.working_directory);
 
+        let mut converted_layers = vec![];
+        for layer in layers {
+            converted_layers.push(state.add_layer(layer).await?);
+        }
+
         let spec = maelstrom_base::JobSpec {
             program: spec.program,
             arguments: spec.arguments,
             environment: environment_eval(initial_env, spec.environment, std_env_lookup)?,
-            layers: layers.try_into().map_err(|_| anyhow!("missing layers"))?,
+            layers: converted_layers
+                .try_into()
+                .map_err(|_| anyhow!("missing layers"))?,
             mounts: spec.mounts,
             network: spec.network,
             root_overlay: spec.root_overlay,

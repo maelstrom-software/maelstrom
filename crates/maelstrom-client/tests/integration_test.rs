@@ -1,7 +1,6 @@
 use assert_matches::assert_matches;
 use maelstrom_base::{
-    ArtifactType, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobStatus, Sha256Digest,
-    Utf8Path, Utf8PathBuf,
+    JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
@@ -29,7 +28,7 @@ fn spawn_bg_proc() -> ClientBgProcess {
 
 struct ClientFixture {
     client: Client,
-    layers: Vec<(Sha256Digest, ArtifactType)>,
+    layers: Vec<Layer>,
     self_path: Utf8PathBuf,
     test_line: u32,
     temp_dir: tempfile::TempDir,
@@ -71,31 +70,23 @@ impl ClientFixture {
         let mut layers = vec![];
         let self_path = fs.read_link("/proc/self/exe").unwrap();
         let sos = read_shared_libraries(&self_path).unwrap();
-        layers.push(
-            client
-                .add_layer(Layer::Paths {
-                    paths: sos
-                        .into_iter()
-                        .map(|p| Utf8PathBuf::from_path_buf(p).unwrap())
-                        .collect(),
-                    prefix_options: PrefixOptions {
-                        strip_prefix: Some("/".into()),
-                        follow_symlinks: true,
-                        ..Default::default()
-                    },
-                })
-                .unwrap(),
-        );
+        layers.push(Layer::Paths {
+            paths: sos
+                .into_iter()
+                .map(|p| Utf8PathBuf::from_path_buf(p).unwrap())
+                .collect(),
+            prefix_options: PrefixOptions {
+                strip_prefix: Some("/".into()),
+                follow_symlinks: true,
+                ..Default::default()
+            },
+        });
 
         let self_path = Utf8PathBuf::from_path_buf(self_path).unwrap();
-        layers.push(
-            client
-                .add_layer(Layer::Paths {
-                    paths: vec![self_path.clone()],
-                    prefix_options: PrefixOptions::default(),
-                })
-                .unwrap(),
-        );
+        layers.push(Layer::Paths {
+            paths: vec![self_path.clone()],
+            prefix_options: PrefixOptions::default(),
+        });
         Self {
             fs,
             client,
@@ -106,7 +97,7 @@ impl ClientFixture {
         }
     }
 
-    fn run_job(&self, added_layers: Vec<(Sha256Digest, ArtifactType)>) -> String {
+    fn run_job(&self, added_layers: Vec<Layer>) -> String {
         let mut layers = self.layers.clone();
         layers.extend(added_layers);
         let spec = JobSpec::new(self.self_path.clone(), layers)
@@ -175,12 +166,9 @@ fn tar_test(fix: &ClientFixture) {
         .unwrap();
     tar.finish().unwrap();
 
-    let layer = fix
-        .client
-        .add_layer(Layer::Tar {
-            path: Utf8PathBuf::from_path_buf(tar_path.clone()).unwrap(),
-        })
-        .unwrap();
+    let layer = Layer::Tar {
+        path: Utf8PathBuf::from_path_buf(tar_path.clone()).unwrap(),
+    };
     let output = fix.run_job(vec![layer]);
     assert_eq!(output, "hello world\n");
 }
@@ -202,7 +190,6 @@ fn paths_test(fix: &ClientFixture, create: &[&str], layer: Layer, expected: &[&s
         }
         fix.fs.write(root.join(path), b"").unwrap();
     }
-    let layer = fix.client.add_layer(layer).unwrap();
 
     let mut output: Vec<String> = serde_json::from_str(&fix.run_job(vec![layer])).unwrap();
     output.sort();

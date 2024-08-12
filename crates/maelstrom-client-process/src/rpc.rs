@@ -70,24 +70,6 @@ impl ClientProcess for Handler {
         .map_to_tonic()
     }
 
-    async fn add_layer(
-        &self,
-        request: Request<proto::AddLayerRequest>,
-    ) -> TonicResponse<proto::AddLayerResponse> {
-        async {
-            let layer = request.into_inner().into_result()?;
-            let layer = TryFromProtoBuf::try_from_proto_buf(layer)?;
-            self.client
-                .add_layer(layer)
-                .await
-                .map(|spec| proto::AddLayerResponse {
-                    spec: Some(spec.into_proto_buf()),
-                })
-        }
-        .await
-        .map_to_tonic()
-    }
-
     async fn run_job(
         &self,
         request: Request<proto::RunJobRequest>,
