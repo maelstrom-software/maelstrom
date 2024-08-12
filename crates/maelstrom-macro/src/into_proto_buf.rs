@@ -3,15 +3,11 @@ use proc_macro2::Span;
 use syn::{parse_quote, Arm, DeriveInput, Error, Expr, Ident, ItemImpl, Path, Result, Type};
 
 fn into_proto_buf_struct(
-    mut self_ident: Path,
+    self_ident: Path,
     option_all: bool,
-    remote: bool,
-    mut proto_buf_type: Path,
+    proto_buf_type: Path,
     fields: darling::ast::Fields<IntoProtoBufStructField>,
 ) -> Result<ItemImpl> {
-    if remote {
-        std::mem::swap(&mut self_ident, &mut proto_buf_type);
-    }
     let field_idents = fields.fields.iter().map(|f| f.ident.as_ref().unwrap());
     let exprs = fields.fields.iter().map(|f| -> Expr {
         let field = f.ident.as_ref().unwrap();
@@ -40,15 +36,10 @@ fn into_proto_buf_struct(
 }
 
 fn into_proto_buf_unit_enum(
-    mut self_path: Path,
-    remote: bool,
-    mut proto_buf_type: Path,
+    self_path: Path,
+    proto_buf_type: Path,
     variants: Vec<IntoProtoBufEnumVariant>,
 ) -> Result<ItemImpl> {
-    if remote {
-        std::mem::swap(&mut self_path, &mut proto_buf_type);
-    }
-
     let arms = variants.iter().map(|v| -> Arm {
         let variant_ident = &v.ident;
         parse_quote! {
@@ -70,15 +61,10 @@ fn into_proto_buf_unit_enum(
 }
 
 fn into_proto_buf_enum(
-    mut self_path: Path,
-    remote: bool,
-    mut proto_buf_type: Path,
+    self_path: Path,
+    proto_buf_type: Path,
     variants: Vec<IntoProtoBufEnumVariant>,
 ) -> Result<ItemImpl> {
-    if remote {
-        std::mem::swap(&mut self_path, &mut proto_buf_type);
-    }
-
     let arms = variants.iter().map(|v| -> Result<Arm> {
         let variant_ident = &v.ident;
         let field_idents1 = v.fields.iter().map(|f| &f.ident);
@@ -150,23 +136,25 @@ fn into_proto_buf_enum(
 pub fn main(input: DeriveInput) -> Result<ItemImpl> {
     let input = IntoProtoBufInput::from_derive_input(&input)?;
 
-    let self_path = input.ident.into();
+    let mut self_path = input.ident.into();
+    let mut proto_buf_type = input.other_type;
+
+    if input.remote {
+        std::mem::swap(&mut self_path, &mut proto_buf_type);
+    }
+
     match input.data {
-        darling::ast::Data::Struct(fields) => into_proto_buf_struct(
-            self_path,
-            input.option_all,
-            input.remote,
-            input.other_type,
-            fields,
-        ),
+        darling::ast::Data::Struct(fields) => {
+            into_proto_buf_struct(self_path, input.option_all, proto_buf_type, fields)
+        }
         darling::ast::Data::Enum(variants) => {
             let all_unit = variants
                 .iter()
                 .all(|f| f.fields.style == darling::ast::Style::Unit);
             if all_unit {
-                into_proto_buf_unit_enum(self_path, input.remote, input.other_type, variants)
+                into_proto_buf_unit_enum(self_path, proto_buf_type, variants)
             } else {
-                into_proto_buf_enum(self_path, input.remote, input.other_type, variants)
+                into_proto_buf_enum(self_path, proto_buf_type, variants)
             }
         }
     }
