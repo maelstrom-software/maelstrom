@@ -87,56 +87,68 @@ impl CleanUpWork {
     }
 }
 
-#[async_trait]
-impl<'a> maelstrom_util::manifest::DataUpload for &'a ClientState {
-    async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
-        self.add_artifact(path).await
-    }
+struct Uploader<'a> {
+    log: &'a slog::Logger,
+    local_broker_sender: &'a router::Sender,
+    locked: &'a mut ClientStateLocked,
 }
 
-impl ClientState {
-    async fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
+impl<'a> Uploader<'a> {
+    async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
         debug!(self.log, "add_artifact"; "path" => ?path);
 
         let fs = async_fs::Fs::new();
         let path = fs.canonicalize(path).await?;
 
-        let mut locked = self.locked.lock().await;
-        let digest = if let Some(digest) = locked.digest_repo.get(&path).await? {
+        let digest = if let Some(digest) = self.locked.digest_repo.get(&path).await? {
             digest
         } else {
             let (mtime, digest) = crate::calculate_digest(&path).await?;
-            locked
+            self.locked
                 .digest_repo
                 .add(path.clone(), mtime, digest.clone())
                 .await?;
             digest
         };
-        if !locked.processed_artifact_paths.contains(&path) {
-            locked.processed_artifact_paths.insert(path.clone());
+        if !self.locked.processed_artifact_paths.contains(&path) {
+            self.locked.processed_artifact_paths.insert(path.clone());
             self.local_broker_sender
                 .send(router::Message::AddArtifact(path, digest.clone()))?;
         }
         Ok(digest)
     }
+}
 
+#[async_trait]
+impl<'a, 'b> maelstrom_util::manifest::DataUpload for &'a mut Uploader<'b> {
+    async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
+        Uploader::upload(self, path).await
+    }
+}
+
+impl ClientState {
     async fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         debug!(self.log, "add_layer"; "layer" => ?layer);
 
-        if let Some(l) = self.locked.lock().await.cached_layers.get(&layer) {
+        let mut locked = self.locked.lock().await;
+
+        if let Some(l) = locked.cached_layers.get(&layer) {
             return Ok(l.clone());
         }
+        let mut uploader = Uploader {
+            log: &self.log,
+            local_broker_sender: &self.local_broker_sender,
+            locked: &mut locked,
+        };
 
-        let (artifact_path, artifact_type) =
-            self.layer_builder.build_layer(layer.clone(), self).await?;
-        let artifact_digest = self.add_artifact(&artifact_path).await?;
+        let (artifact_path, artifact_type) = self
+            .layer_builder
+            .build_layer(layer.clone(), &mut uploader)
+            .await?;
+        let artifact_digest = uploader.upload(&artifact_path).await?;
         let res = (artifact_digest, artifact_type);
 
-        self.locked
-            .lock()
-            .await
-            .cached_layers
-            .insert(layer, res.clone());
+        locked.cached_layers.insert(layer, res.clone());
         Ok(res)
     }
 
