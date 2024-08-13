@@ -9,8 +9,10 @@ use crate::{
     router,
 };
 use anyhow::{anyhow, bail, Context as _, Result};
+use assert_matches::assert_matches;
 use async_trait::async_trait;
 use layer_builder::LayerBuilder;
+use layer_cache::{CacheResult, LayerCache};
 use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
     ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest,
@@ -36,7 +38,7 @@ use state_machine::StateMachine;
 use std::future::Future;
 use std::pin::Pin;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     mem,
     path::{Path, PathBuf},
     sync::Arc,
@@ -55,18 +57,18 @@ pub struct Client {
 
 struct ClientState {
     local_broker_sender: router::Sender,
-    layer_builder: LayerBuilder,
+    layer_builder: Arc<LayerBuilder>,
     artifact_upload_tracker: ProgressTracker,
     image_download_tracker: ProgressTracker,
     container_image_depot: ContainerImageDepot,
     log: Logger,
-    locked: Mutex<ClientStateLocked>,
+    locked: Arc<Mutex<ClientStateLocked>>,
 }
 
 struct ClientStateLocked {
     digest_repo: DigestRepository,
     processed_artifact_paths: HashSet<PathBuf>,
-    cached_layers: HashMap<Layer, (Sha256Digest, ArtifactType)>,
+    cached_layers: LayerCache,
 }
 
 #[derive(Default)]
@@ -88,31 +90,33 @@ impl CleanUpWork {
     }
 }
 
-struct Uploader<'a> {
-    log: &'a slog::Logger,
-    local_broker_sender: &'a router::Sender,
-    locked: &'a mut ClientStateLocked,
+#[derive(Clone)]
+struct Uploader {
+    log: slog::Logger,
+    local_broker_sender: router::Sender,
+    locked: Arc<Mutex<ClientStateLocked>>,
 }
 
-impl<'a> Uploader<'a> {
-    async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
+impl Uploader {
+    async fn upload(&self, path: &Path) -> Result<Sha256Digest> {
         debug!(self.log, "add_artifact"; "path" => ?path);
 
         let fs = async_fs::Fs::new();
         let path = fs.canonicalize(path).await?;
 
-        let digest = if let Some(digest) = self.locked.digest_repo.get(&path).await? {
+        let mut locked = self.locked.lock().await;
+        let digest = if let Some(digest) = locked.digest_repo.get(&path).await? {
             digest
         } else {
             let (mtime, digest) = crate::calculate_digest(&path).await?;
-            self.locked
+            locked
                 .digest_repo
                 .add(path.clone(), mtime, digest.clone())
                 .await?;
             digest
         };
-        if !self.locked.processed_artifact_paths.contains(&path) {
-            self.locked.processed_artifact_paths.insert(path.clone());
+        if !locked.processed_artifact_paths.contains(&path) {
+            locked.processed_artifact_paths.insert(path.clone());
             self.local_broker_sender
                 .send(router::Message::AddArtifact(path, digest.clone()))?;
         }
@@ -121,36 +125,70 @@ impl<'a> Uploader<'a> {
 }
 
 #[async_trait]
-impl<'a, 'b> maelstrom_util::manifest::DataUpload for &'a mut Uploader<'b> {
+impl<'a> maelstrom_util::manifest::DataUpload for &'a Uploader {
     async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
         Uploader::upload(self, path).await
     }
 }
 
 impl ClientState {
-    async fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        debug!(self.log, "add_layer"; "layer" => ?layer);
+    fn build_layer(&self, layer: Layer) {
+        let uploader = Uploader {
+            log: self.log.clone(),
+            local_broker_sender: self.local_broker_sender.clone(),
+            locked: self.locked.clone(),
+        };
+        let layer_builder = self.layer_builder.clone();
+        let locked = self.locked.clone();
+        tokio::task::spawn(async move {
+            let build_fn = async {
+                let (artifact_path, artifact_type) =
+                    layer_builder.build_layer(layer.clone(), &uploader).await?;
+                let artifact_digest = uploader.upload(&artifact_path).await?;
+                Result::<_>::Ok((artifact_digest, artifact_type))
+            };
+            match build_fn.await {
+                Ok(res) => {
+                    locked.lock().await.cached_layers.fill_success(&layer, res);
+                }
+                Err(_) => {
+                    locked.lock().await.cached_layers.fill_failure(&layer);
+                }
+            }
+        });
+    }
+
+    async fn get_layers(&self, layers: Vec<Layer>) -> Result<Vec<(Sha256Digest, ArtifactType)>> {
+        debug!(self.log, "get_layers"; "layers" => ?layers);
 
         let mut locked = self.locked.lock().await;
+        let mut cache_results: Vec<_> = layers
+            .iter()
+            .map(|layer| locked.cached_layers.get(layer))
+            .collect();
+        drop(locked);
 
-        if let Some(l) = locked.cached_layers.get(&layer) {
-            return Ok(l.clone());
+        // Kick off tasks to build any layers that need to be
+        for (result, layer) in cache_results.iter_mut().zip(&layers) {
+            if let CacheResult::Build(r) = result {
+                *result = CacheResult::Wait(r.clone());
+                self.build_layer(layer.clone());
+            }
         }
-        let mut uploader = Uploader {
-            log: &self.log,
-            local_broker_sender: &self.local_broker_sender,
-            locked: &mut locked,
-        };
 
-        let (artifact_path, artifact_type) = self
-            .layer_builder
-            .build_layer(layer.clone(), &mut uploader)
-            .await?;
-        let artifact_digest = uploader.upload(&artifact_path).await?;
-        let res = (artifact_digest, artifact_type);
+        // Wait for any layers being built to complete
+        for result in &mut cache_results {
+            if let CacheResult::Wait(w) = result {
+                let res = w.recv().await?;
+                *result = CacheResult::Success(res);
+            }
+        }
 
-        locked.cached_layers.insert(layer, res.clone());
-        Ok(res)
+        // Now we should have all the layers
+        Ok(cache_results
+            .into_iter()
+            .map(|r| assert_matches!(r, CacheResult::Success(r) => r))
+            .collect())
     }
 
     async fn get_container_image(&self, name: &str) -> Result<ContainerImage> {
@@ -470,16 +508,20 @@ impl Client {
             Ok((
                 ClientState {
                     local_broker_sender,
-                    layer_builder: LayerBuilder::new(cache_dir, project_dir, MANIFEST_INLINE_LIMIT),
+                    layer_builder: Arc::new(LayerBuilder::new(
+                        cache_dir,
+                        project_dir,
+                        MANIFEST_INLINE_LIMIT,
+                    )),
                     artifact_upload_tracker,
                     image_download_tracker,
                     container_image_depot,
                     log,
-                    locked: Mutex::new(ClientStateLocked {
+                    locked: Arc::new(Mutex::new(ClientStateLocked {
                         digest_repo,
                         processed_artifact_paths: HashSet::default(),
-                        cached_layers: HashMap::new(),
-                    }),
+                        cached_layers: LayerCache::new(),
+                    })),
                 },
                 join_set,
                 worker_handle,
@@ -594,11 +636,7 @@ impl Client {
         }
 
         let working_directory = image_working_directory.or(spec.working_directory);
-
-        let mut converted_layers = vec![];
-        for layer in layers {
-            converted_layers.push(state.add_layer(layer).await?);
-        }
+        let converted_layers = state.get_layers(layers).await?;
 
         let spec = maelstrom_base::JobSpec {
             program: spec.program,

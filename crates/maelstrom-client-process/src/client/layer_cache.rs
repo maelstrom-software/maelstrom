@@ -22,11 +22,9 @@ impl LayerSender {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LayerReceiver(watch::Receiver<Option<BuiltLayer>>);
 
-#[allow(dead_code)]
 impl LayerReceiver {
     pub async fn recv(&mut self) -> Result<BuiltLayer> {
         self.0
@@ -42,7 +40,6 @@ enum CacheEntry {
     Cached(BuiltLayer),
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum CacheResult {
     /// The layer was already built and in the cache
@@ -50,16 +47,14 @@ pub enum CacheResult {
     /// The layer is currently being built. The caller can wait on the channel for it to finish.
     Wait(LayerReceiver),
     /// The layer is not in the cache and not being built, it is up to the caller to build it.
-    Build,
+    Build(LayerReceiver),
 }
 
-#[allow(dead_code)]
 #[derive(Default)]
 pub struct LayerCache {
     cache: HashMap<Layer, CacheEntry>,
 }
 
-#[allow(dead_code)]
 impl LayerCache {
     pub fn new() -> Self {
         Default::default()
@@ -70,9 +65,10 @@ impl LayerCache {
             Some(CacheEntry::Pending(r)) => CacheResult::Wait(r.subscribe()),
             Some(CacheEntry::Cached(l)) => CacheResult::Success(l.clone()),
             None => {
-                self.cache
-                    .insert(layer.clone(), CacheEntry::Pending(LayerSender::new()));
-                CacheResult::Build
+                let s = LayerSender::new();
+                let r = s.subscribe();
+                self.cache.insert(layer.clone(), CacheEntry::Pending(s));
+                CacheResult::Build(r)
             }
         }
     }
@@ -101,7 +97,7 @@ mod tests {
     async fn fill_success() {
         let mut cache = LayerCache::new();
         let layer = paths_layer!(["/a"]);
-        assert_matches!(cache.get(&layer), CacheResult::Build);
+        assert_matches!(cache.get(&layer), CacheResult::Build(_));
         let mut r1 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
         let mut r2 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
         let built = (digest![1], ArtifactType::Manifest);
@@ -127,8 +123,8 @@ mod tests {
         let layer1 = paths_layer!(["/a"]);
         let layer2 = paths_layer!(["/b"]);
 
-        assert_matches!(cache.get(&layer1), CacheResult::Build);
-        assert_matches!(cache.get(&layer2), CacheResult::Build);
+        assert_matches!(cache.get(&layer1), CacheResult::Build(_));
+        assert_matches!(cache.get(&layer2), CacheResult::Build(_));
 
         let mut r1 = assert_matches!(cache.get(&layer1), CacheResult::Wait(r) => r);
         let mut r2 = assert_matches!(cache.get(&layer2), CacheResult::Wait(r) => r);
@@ -156,7 +152,7 @@ mod tests {
     async fn fill_failure() {
         let mut cache = LayerCache::new();
         let layer = paths_layer!(["/a"]);
-        assert_matches!(cache.get(&layer), CacheResult::Build);
+        assert_matches!(cache.get(&layer), CacheResult::Build(_));
         let mut r1 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
         let mut r2 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
 
@@ -164,7 +160,7 @@ mod tests {
         let r2_task = tokio::task::spawn(async move { r2.recv().await.unwrap_err() });
 
         cache.fill_failure(&layer);
-        assert_matches!(cache.get(&layer), CacheResult::Build);
+        assert_matches!(cache.get(&layer), CacheResult::Build(_));
 
         r1_task.await.unwrap();
         r2_task.await.unwrap();

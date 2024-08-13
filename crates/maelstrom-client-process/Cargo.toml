@@ -13,6 +13,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+assert_matches.workspace = true
 async-trait.workspace = true
 bracoxide.workspace = true
 chrono.workspace = true
@@ -36,7 +37,6 @@ toml.workspace = true
 tonic.workspace = true
 
 [dev-dependencies]
-assert_matches.workspace = true
 colored-diff.workspace = true
 enum-map.workspace = true
 maelstrom-test.workspace = true
