@@ -37,6 +37,7 @@ slog-async.workspace = true
 slog-term.workspace = true
 slog.workspace = true
 strum.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["net", "sync", "time"] }
 toml.workspace = true
 walkdir.workspace = true
@@ -48,7 +49,6 @@ indoc.workspace = true
 maelstrom-simex.workspace = true
 rand.workspace = true
 serde_test.workspace = true
-tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "time"] }
 
 [[bin]]

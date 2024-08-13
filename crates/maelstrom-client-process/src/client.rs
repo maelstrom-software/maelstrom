@@ -18,7 +18,7 @@ use maelstrom_base::{
 use maelstrom_client_base::{
     spec::{environment_eval, std_env_lookup, ConvertedImage, ImageConfig, JobSpec, Layer},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, StateDir,
-    STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{
     self as container, ContainerImage, ContainerImageDepot, ContainerImageDepotDir,
@@ -246,6 +246,12 @@ impl Client {
                 "inline_limit" => ?inline_limit,
                 "slots" => ?slots,
             );
+
+            // We recreate all the manifests every time. We delete it here to clean-up unused
+            // manifests and leaked temporary files.
+            if fs.exists((**cache_dir).join(MANIFEST_DIR)).await {
+                fs.remove_dir_all((**cache_dir).join(MANIFEST_DIR)).await?;
+            }
 
             // Ensure all of the appropriate subdirectories have been created in the cache
             // directory.

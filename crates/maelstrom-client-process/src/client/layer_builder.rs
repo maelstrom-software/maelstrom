@@ -111,6 +111,18 @@ impl LayerBuilder {
             .join(format!("{name}.manifest"))
     }
 
+    async fn temp_manifest_path(&self) -> Result<PathBuf> {
+        let manifest_dir = (**self.cache_dir).join(MANIFEST_DIR);
+        tokio::task::spawn_blocking(move || {
+            let (_, p) = tempfile::Builder::new()
+                .prefix(".tmp")
+                .tempfile_in(manifest_dir)?
+                .keep()?;
+            Ok(p)
+        })
+        .await?
+    }
+
     fn build_stub_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         (**self.cache_dir)
             .join(STUB_MANIFEST_DIR)
@@ -130,7 +142,7 @@ impl LayerBuilder {
         data_upload: impl DataUpload,
     ) -> Result<PathBuf> {
         let fs = async_fs::Fs::new();
-        let tmp_file_path = self.build_manifest_path(&".temp");
+        let tmp_file_path = self.temp_manifest_path().await?;
         let mut manifest_file = fs.create_file(&tmp_file_path).await?;
         let follow_symlinks = prefix_options.follow_symlinks;
         let mut builder = ManifestBuilder::new(
@@ -170,7 +182,7 @@ impl LayerBuilder {
 
     async fn build_stub_manifest(&self, stubs: Vec<String>) -> Result<PathBuf> {
         let fs = async_fs::Fs::new();
-        let tmp_file_path = self.build_manifest_path(&".temp");
+        let tmp_file_path = self.temp_manifest_path().await?;
         let mut file = fs.create_file(&tmp_file_path).await?;
         let mut writer = AsyncManifestWriter::new(&mut file).await?;
         let mut path_hasher = PathHasher::new();
@@ -204,7 +216,7 @@ impl LayerBuilder {
 
     async fn build_symlink_manifest(&self, symlinks: Vec<SymlinkSpec>) -> Result<PathBuf> {
         let fs = async_fs::Fs::new();
-        let tmp_file_path = self.build_manifest_path(&".temp");
+        let tmp_file_path = self.temp_manifest_path().await?;
         let mut file = fs.create_file(&tmp_file_path).await?;
         let mut writer = AsyncManifestWriter::new(&mut file).await?;
         let mut path_hasher = PathHasher::new();
