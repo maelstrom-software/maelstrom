@@ -172,6 +172,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fill_failure_multi_key() {
+        let mut cache = LayerCache::new();
+        let layer1 = paths_layer!(["/a"]);
+        let layer2 = paths_layer!(["/b"]);
+
+        assert_matches!(cache.get(&layer1), CacheResult::Build(_));
+        assert_matches!(cache.get(&layer2), CacheResult::Build(_));
+
+        let mut r1 = assert_matches!(cache.get(&layer1), CacheResult::Wait(r) => r);
+        let mut r2 = assert_matches!(cache.get(&layer2), CacheResult::Wait(r) => r);
+
+        let r1_task = tokio::task::spawn(async move {
+            assert_eq!(r1.recv().await.unwrap_err().to_string(), "test error 1")
+        });
+        let r2_task = tokio::task::spawn(async move {
+            assert_eq!(r2.recv().await.unwrap_err().to_string(), "test error 2")
+        });
+
+        cache.fill(&layer1, Err(anyhow!("test error 1")));
+        assert_matches!(cache.get(&layer1), CacheResult::Build(_));
+
+        cache.fill(&layer2, Err(anyhow!("test error 2")));
+        assert_matches!(cache.get(&layer2), CacheResult::Build(_));
+
+        r1_task.await.unwrap();
+        r2_task.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn cache_destroyed() {
         let mut cache = LayerCache::new();
         let layer = paths_layer!(["/a"]);
