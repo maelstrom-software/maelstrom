@@ -20,6 +20,10 @@ use stream_wrapper::StreamWrapper;
 use tokio::net::UnixStream as TokioUnixStream;
 use tonic::transport::Server;
 
+// This hack makes some macros in maelstrom_test work correctly
+#[cfg(test)]
+extern crate maelstrom_client_base as maelstrom_client;
+
 async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let fs = async_fs::Fs::new();
     let mut f = fs.open_file(path).await?;

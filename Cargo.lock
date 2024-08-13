@@ -3037,6 +3037,7 @@ name = "maelstrom-client-process"
 version = "0.12.0-dev"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-trait",
  "bracoxide",
  "chrono",
