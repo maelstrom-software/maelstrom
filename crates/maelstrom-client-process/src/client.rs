@@ -147,14 +147,8 @@ impl ClientState {
                 let artifact_digest = uploader.upload(&artifact_path).await?;
                 Result::<_>::Ok((artifact_digest, artifact_type))
             };
-            match build_fn.await {
-                Ok(res) => {
-                    locked.lock().await.cached_layers.fill_success(&layer, res);
-                }
-                Err(_) => {
-                    locked.lock().await.cached_layers.fill_failure(&layer);
-                }
-            }
+            let res = build_fn.await;
+            locked.lock().await.cached_layers.fill(&layer, res);
         });
     }
 

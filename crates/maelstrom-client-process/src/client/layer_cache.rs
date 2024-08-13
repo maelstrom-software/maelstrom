@@ -5,15 +5,17 @@ use std::collections::HashMap;
 use tokio::sync::watch;
 
 type BuiltLayer = (Sha256Digest, ArtifactType);
+type StringResult<T> = std::result::Result<T, String>;
 
-struct LayerSender(watch::Sender<Option<BuiltLayer>>);
+struct LayerSender(watch::Sender<Option<StringResult<BuiltLayer>>>);
 
 impl LayerSender {
     fn new() -> Self {
         Self(watch::Sender::new(None))
     }
 
-    fn send(&self, res: BuiltLayer) {
+    fn send(&self, res: &Result<BuiltLayer>) {
+        let res = res.as_ref().map_err(|e| format!("{e:?}")).cloned();
         let _ = self.0.send(Some(res));
     }
 
@@ -23,15 +25,16 @@ impl LayerSender {
 }
 
 #[derive(Clone, Debug)]
-pub struct LayerReceiver(watch::Receiver<Option<BuiltLayer>>);
+pub struct LayerReceiver(watch::Receiver<Option<StringResult<BuiltLayer>>>);
 
 impl LayerReceiver {
     pub async fn recv(&mut self) -> Result<BuiltLayer> {
         self.0
             .wait_for(|v| v.is_some())
             .await
-            .map_err(|_| anyhow!("failed to build layer"))?;
-        Ok(self.0.borrow().as_ref().unwrap().clone())
+            .map_err(|_| anyhow!("building layer canceled"))?;
+        let sent = self.0.borrow().as_ref().unwrap().clone();
+        sent.map_err(|e| anyhow!("{e}"))
     }
 }
 
@@ -73,17 +76,15 @@ impl LayerCache {
         }
     }
 
-    pub fn fill_success(&mut self, layer: &Layer, cached: BuiltLayer) {
+    pub fn fill(&mut self, layer: &Layer, res: Result<BuiltLayer>) {
         if let Some(CacheEntry::Pending(r)) = self.cache.remove(layer) {
-            r.send(cached.clone());
-            self.cache.insert(layer.clone(), CacheEntry::Cached(cached));
+            r.send(&res);
+            if let Ok(cached) = res {
+                self.cache.insert(layer.clone(), CacheEntry::Cached(cached));
+            }
         } else {
             panic!("unexpected cache fill");
         }
-    }
-
-    pub fn fill_failure(&mut self, layer: &Layer) {
-        self.cache.remove(layer);
     }
 }
 
@@ -110,7 +111,7 @@ mod tests {
         let r2_task =
             tokio::task::spawn(async move { assert_eq!(r2.recv().await.unwrap(), built_clone) });
 
-        cache.fill_success(&layer, built.clone());
+        cache.fill(&layer, Ok(built.clone()));
         assert_matches!(cache.get(&layer), CacheResult::Success(ref b) if b == &built);
 
         r1_task.await.unwrap();
@@ -139,11 +140,11 @@ mod tests {
         let r2_task =
             tokio::task::spawn(async move { assert_eq!(r2.recv().await.unwrap(), built2_clone) });
 
-        cache.fill_success(&layer1, built1.clone());
+        cache.fill(&layer1, Ok(built1.clone()));
         assert_matches!(cache.get(&layer1), CacheResult::Success(ref b) if b == &built1);
         r1_task.await.unwrap();
 
-        cache.fill_success(&layer2, built2.clone());
+        cache.fill(&layer2, Ok(built2.clone()));
         assert_matches!(cache.get(&layer2), CacheResult::Success(ref b) if b == &built2);
         r2_task.await.unwrap();
     }
@@ -156,10 +157,14 @@ mod tests {
         let mut r1 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
         let mut r2 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
 
-        let r1_task = tokio::task::spawn(async move { r1.recv().await.unwrap_err() });
-        let r2_task = tokio::task::spawn(async move { r2.recv().await.unwrap_err() });
+        let r1_task = tokio::task::spawn(async move {
+            assert_eq!(r1.recv().await.unwrap_err().to_string(), "test error")
+        });
+        let r2_task = tokio::task::spawn(async move {
+            assert_eq!(r2.recv().await.unwrap_err().to_string(), "test error")
+        });
 
-        cache.fill_failure(&layer);
+        cache.fill(&layer, Err(anyhow!("test error")));
         assert_matches!(cache.get(&layer), CacheResult::Build(_));
 
         r1_task.await.unwrap();
