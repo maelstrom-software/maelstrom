@@ -170,4 +170,31 @@ mod tests {
         r1_task.await.unwrap();
         r2_task.await.unwrap();
     }
+
+    #[tokio::test]
+    async fn cache_destroyed() {
+        let mut cache = LayerCache::new();
+        let layer = paths_layer!(["/a"]);
+        assert_matches!(cache.get(&layer), CacheResult::Build(_));
+        let mut r1 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
+        let mut r2 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
+
+        let r1_task = tokio::task::spawn(async move {
+            assert_eq!(
+                r1.recv().await.unwrap_err().to_string(),
+                "building layer canceled"
+            )
+        });
+        let r2_task = tokio::task::spawn(async move {
+            assert_eq!(
+                r2.recv().await.unwrap_err().to_string(),
+                "building layer canceled"
+            )
+        });
+
+        drop(cache);
+
+        r1_task.await.unwrap();
+        r2_task.await.unwrap();
+    }
 }
