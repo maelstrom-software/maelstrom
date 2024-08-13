@@ -98,8 +98,7 @@ mod tests {
     async fn fill_success() {
         let mut cache = LayerCache::new();
         let layer = paths_layer!(["/a"]);
-        assert_matches!(cache.get(&layer), CacheResult::Build(_));
-        let mut r1 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
+        let mut r1 = assert_matches!(cache.get(&layer), CacheResult::Build(r) => r);
         let mut r2 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
         let built = (digest![1], ArtifactType::Manifest);
 
@@ -153,8 +152,7 @@ mod tests {
     async fn fill_failure() {
         let mut cache = LayerCache::new();
         let layer = paths_layer!(["/a"]);
-        assert_matches!(cache.get(&layer), CacheResult::Build(_));
-        let mut r1 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
+        let mut r1 = assert_matches!(cache.get(&layer), CacheResult::Build(r) => r);
         let mut r2 = assert_matches!(cache.get(&layer), CacheResult::Wait(r) => r);
 
         let r1_task = tokio::task::spawn(async move {
