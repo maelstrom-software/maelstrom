@@ -18,7 +18,10 @@ use config::Repeat;
 use derive_more::From;
 use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use maelstrom_base::{JobRootOverlay, Timeout, Utf8PathBuf};
-use maelstrom_client::{spec::JobSpec, ClientBgProcess, ProjectDir, StateDir};
+use maelstrom_client::{
+    spec::{ContainerSpec, JobSpec},
+    ClientBgProcess, ProjectDir, StateDir,
+};
 use maelstrom_util::{
     config::common::LogLevel, config::Config, fs::Fs, process::ExitCode, root::Root,
 };
@@ -293,26 +296,29 @@ where
             .get_timing(self.package.name(), &self.artifact.to_key(), case_name);
 
         let (program, arguments) = self.artifact.build_command(case_name, case_metadata);
+        let container = ContainerSpec {
+            image: test_metadata.image,
+            environment: test_metadata.environment,
+            layers,
+            mounts: test_metadata.mounts,
+            network: test_metadata.network,
+            root_overlay: if test_metadata.enable_writable_file_system {
+                JobRootOverlay::Tmp
+            } else {
+                JobRootOverlay::None
+            },
+            working_directory: test_metadata.working_directory,
+            user: test_metadata.user,
+            group: test_metadata.group,
+        };
         Ok(TestToEnqueue {
             package_name: self.package.name().into(),
             case: case_name.into(),
             case_str,
             spec: JobSpec {
+                container,
                 program,
                 arguments,
-                image: test_metadata.image,
-                environment: test_metadata.environment,
-                layers,
-                mounts: test_metadata.mounts,
-                network: test_metadata.network,
-                root_overlay: if test_metadata.enable_writable_file_system {
-                    JobRootOverlay::Tmp
-                } else {
-                    JobRootOverlay::None
-                },
-                working_directory: test_metadata.working_directory,
-                user: test_metadata.user,
-                group: test_metadata.group,
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
                 estimated_duration,
                 allocate_tty: None,

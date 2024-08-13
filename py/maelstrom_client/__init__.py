@@ -2,6 +2,7 @@ from .client import Client, RunJobFuture, LayerType
 
 from .items_pb2 import (
     BindMount,
+    ContainerSpec,
     Duration,
     EnvironmentSpec,
     GlobLayer,

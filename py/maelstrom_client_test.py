@@ -3,11 +3,12 @@ import pytest
 
 from maelstrom_client import (
     Client,
+    ContainerSpec,
     JobSpec,
+    Layer,
     PathsLayer,
     PrefixOptions,
     TarLayer,
-    Layer,
 )
 from pathlib import Path
 
@@ -37,11 +38,11 @@ def test_simple_job(fixture: Fixture, tmp_path: Path) -> None:
         Layer(paths=PathsLayer(paths=[test_script], prefix_options=options))
     )
 
+    container = ContainerSpec(working_directory="/", layers=layers)
     spec = JobSpec(
+        container=container,
         program="/usr/bin/python3",
         arguments=["/test.py"],
-        working_directory="/",
-        layers=layers,
     )
     job_future = fixture.client.run_job(spec)
     result = job_future.result()

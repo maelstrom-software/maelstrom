@@ -603,10 +603,10 @@ impl Client {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         debug!(state.log, "run_job"; "spec" => ?spec);
 
-        let mut layers = spec.layers;
+        let mut layers = spec.container.layers;
         let mut initial_env = Default::default();
         let mut image_working_directory = None;
-        if let Some(image_spec) = spec.image {
+        if let Some(image_spec) = spec.container.image {
             let image = state.get_container_image(&image_spec.name).await?;
             let image_config = ImageConfig {
                 layers: image.layers.clone(),
@@ -625,26 +625,26 @@ impl Client {
                 image_working_directory = Some(image.working_directory()?);
             }
         }
-        if image_working_directory.is_some() && spec.working_directory.is_some() {
+        if image_working_directory.is_some() && spec.container.working_directory.is_some() {
             bail!("can't provide both `working_directory` and `image.use_working_directory`");
         }
 
-        let working_directory = image_working_directory.or(spec.working_directory);
+        let working_directory = image_working_directory.or(spec.container.working_directory);
         let converted_layers = state.get_layers(layers).await?;
 
         let spec = maelstrom_base::JobSpec {
             program: spec.program,
             arguments: spec.arguments,
-            environment: environment_eval(initial_env, spec.environment, std_env_lookup)?,
+            environment: environment_eval(initial_env, spec.container.environment, std_env_lookup)?,
             layers: converted_layers
                 .try_into()
                 .map_err(|_| anyhow!("missing layers"))?,
-            mounts: spec.mounts,
-            network: spec.network,
-            root_overlay: spec.root_overlay,
+            mounts: spec.container.mounts,
+            network: spec.container.network,
+            root_overlay: spec.container.root_overlay,
             working_directory,
-            user: spec.user,
-            group: spec.group,
+            user: spec.container.user,
+            group: spec.container.group,
             timeout: spec.timeout,
             estimated_duration: spec.estimated_duration,
             allocate_tty: spec.allocate_tty,

@@ -163,21 +163,25 @@ message JobTty {
     WindowSize window_size = 2;
 }
 
+message ContainerSpec {
+    optional ImageSpec image = 1;
+    repeated Layer layers = 2;
+    optional JobRootOverlay root_overlay = 3;
+    repeated EnvironmentSpec environment = 4;
+    optional string working_directory = 5;
+    repeated JobMount mounts = 6;
+    JobNetwork network = 7;
+    optional uint32 user = 8;
+    optional uint32 group = 9;
+}
+
 message JobSpec {
-    string program = 1;
-    repeated string arguments = 2;
-    optional ImageSpec image = 3;
-    repeated Layer layers = 4;
-    optional JobRootOverlay root_overlay = 15;
-    repeated EnvironmentSpec environment = 6;
-    optional string working_directory = 7;
-    repeated JobMount mounts = 9;
-    JobNetwork network = 10;
-    optional uint32 user = 11;
-    optional uint32 group = 12;
-    optional uint32 timeout = 13;
-    optional Duration estimated_duration = 14;
-    optional JobTty allocate_tty = 16;
+    ContainerSpec container = 1;
+    string program = 2;
+    repeated string arguments = 3;
+    optional uint32 timeout = 4;
+    optional Duration estimated_duration = 5;
+    optional JobTty allocate_tty = 6;
 }
 
 message RunJobRequest {

@@ -4,8 +4,8 @@ use maelstrom_base::{
     Utf8PathBuf,
 };
 use maelstrom_client::spec::{
-    incompatible, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment, JobSpec, Layer,
-    PossiblyImage,
+    incompatible, ContainerSpec, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment,
+    JobSpec, Layer, PossiblyImage,
 };
 use serde::de::Error as _;
 use serde::{de, Deserialize, Deserializer};
@@ -104,9 +104,7 @@ impl Job {
                 None
             }
         };
-        Ok(JobSpec {
-            program: self.program,
-            arguments: self.arguments.unwrap_or_default(),
+        let container = ContainerSpec {
             image,
             environment,
             layers,
@@ -125,6 +123,11 @@ impl Job {
             working_directory,
             user: self.user,
             group: self.group,
+        };
+        Ok(JobSpec {
+            container,
+            program: self.program,
+            arguments: self.arguments.unwrap_or_default(),
             timeout: self.timeout.and_then(Timeout::new),
             estimated_duration: None,
             allocate_tty: None,

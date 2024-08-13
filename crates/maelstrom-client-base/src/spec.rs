@@ -168,19 +168,26 @@ pub fn environment_eval(
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq)]
-#[proto(other_type = "proto::JobSpec")]
-pub struct JobSpec {
-    pub program: Utf8PathBuf,
-    pub arguments: Vec<String>,
+#[proto(other_type = "proto::ContainerSpec")]
+pub struct ContainerSpec {
     pub image: Option<ImageSpec>,
-    pub environment: Vec<EnvironmentSpec>,
     pub layers: Vec<Layer>,
+    pub root_overlay: JobRootOverlay,
+    pub environment: Vec<EnvironmentSpec>,
+    pub working_directory: Option<Utf8PathBuf>,
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
-    pub root_overlay: JobRootOverlay,
-    pub working_directory: Option<Utf8PathBuf>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq)]
+#[proto(other_type = "proto::JobSpec")]
+pub struct JobSpec {
+    #[proto(option)]
+    pub container: ContainerSpec,
+    pub program: Utf8PathBuf,
+    pub arguments: Vec<String>,
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
     pub allocate_tty: Option<JobTty>,
@@ -189,17 +196,19 @@ pub struct JobSpec {
 impl JobSpec {
     pub fn new(program: impl Into<String>, layers: impl Into<Vec<Layer>>) -> Self {
         JobSpec {
+            container: ContainerSpec {
+                layers: layers.into(),
+                image: None,
+                environment: Default::default(),
+                mounts: Default::default(),
+                network: Default::default(),
+                root_overlay: Default::default(),
+                working_directory: None,
+                user: None,
+                group: None,
+            },
             program: program.into().into(),
-            layers: layers.into(),
-            image: None,
             arguments: Default::default(),
-            environment: Default::default(),
-            mounts: Default::default(),
-            network: Default::default(),
-            root_overlay: Default::default(),
-            working_directory: None,
-            user: None,
-            group: None,
             timeout: None,
             estimated_duration: None,
             allocate_tty: None,
@@ -207,7 +216,7 @@ impl JobSpec {
     }
 
     pub fn image(mut self, image: ImageSpec) -> Self {
-        self.image = Some(image);
+        self.container.image = Some(image);
         self
     }
 
@@ -221,37 +230,37 @@ impl JobSpec {
     }
 
     pub fn environment(mut self, environment: impl IntoEnvironment) -> Self {
-        self.environment = environment.into_environment();
+        self.container.environment = environment.into_environment();
         self
     }
 
     pub fn mounts(mut self, mounts: impl IntoIterator<Item = JobMount>) -> Self {
-        self.mounts = mounts.into_iter().collect();
+        self.container.mounts = mounts.into_iter().collect();
         self
     }
 
     pub fn network(mut self, network: JobNetwork) -> Self {
-        self.network = network;
+        self.container.network = network;
         self
     }
 
     pub fn root_overlay(mut self, root_overlay: JobRootOverlay) -> Self {
-        self.root_overlay = root_overlay;
+        self.container.root_overlay = root_overlay;
         self
     }
 
     pub fn working_directory(mut self, working_directory: Option<impl Into<Utf8PathBuf>>) -> Self {
-        self.working_directory = working_directory.map(Into::into);
+        self.container.working_directory = working_directory.map(Into::into);
         self
     }
 
     pub fn user(mut self, user: Option<impl Into<UserId>>) -> Self {
-        self.user = user.map(Into::into);
+        self.container.user = user.map(Into::into);
         self
     }
 
     pub fn group(mut self, group: Option<impl Into<GroupId>>) -> Self {
-        self.group = group.map(Into::into);
+        self.container.group = group.map(Into::into);
         self
     }
 
