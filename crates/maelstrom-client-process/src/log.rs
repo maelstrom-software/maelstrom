@@ -24,6 +24,7 @@ impl slog::Drain for RpcLogSink {
         values: &slog::OwnedKVList,
     ) -> Result<Self::Ok, Self::Err> {
         let mut s = Serializer::default();
+        record.kv().serialize(record, &mut s).unwrap();
         values.serialize(record, &mut s).unwrap();
         let _ = self.sender.unbounded_send(RpcLogMessage {
             message: record.msg().to_string(),
