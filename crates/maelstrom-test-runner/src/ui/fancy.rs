@@ -266,15 +266,22 @@ fn format_running_test(name: &str, time: &Instant) -> Row<'static> {
 
 #[derive(From)]
 enum PrintAbove {
+    #[from]
     StatusLine(Row<'static>, Vec<Constraint>),
-    Output(Line<'static>),
+    Output(Paragraph<'static>),
+}
+
+impl From<Line<'static>> for PrintAbove {
+    fn from(l: Line<'static>) -> Self {
+        Self::Output(Paragraph::new(l).wrap(Wrap { trim: true }))
+    }
 }
 
 impl PrintAbove {
     fn height(&self, width: u16) -> u16 {
         match self {
             Self::StatusLine(_, _) => 1,
-            Self::Output(l) => (l.width() as u16).div_ceil(width),
+            Self::Output(l) => l.line_count(width).try_into().unwrap_or(u16::MAX),
         }
     }
 }
@@ -291,9 +298,7 @@ impl Widget for PrintAbove {
     fn render(self, area: Rect, buf: &mut Buffer) {
         match self {
             Self::StatusLine(row, constraints) => Table::new([row], constraints).render(area, buf),
-            Self::Output(l) => Paragraph::new(l)
-                .wrap(Wrap { trim: true })
-                .render(area, buf),
+            Self::Output(p) => p.render(area, buf),
         }
     }
 }

@@ -115,7 +115,7 @@ proc-macro2 = "1"
 prost = "0.12"
 protoc-bin-vendored = "3.0.0"
 quote = "1"
-ratatui = "0.27"
+ratatui = { version = "0.27", features = ["unstable-rendered-line-info"] }
 rand = "0.8.5"
 regex = "1.8.3"
 regex-macro = "0.2"
