@@ -183,9 +183,8 @@ where
 
 async fn handle_log_messages(
     log: &slog::Logger,
-    stream: TonicResponse<tonic::Streaming<proto::LogMessage>>,
+    mut stream: tonic::Streaming<proto::LogMessage>,
 ) -> Result<()> {
-    let mut stream = flatten_rpc_result(stream)?;
     while let Some(message) = stream.next().await {
         let message = RpcLogMessage::try_from_proto_buf(message.map_err(map_tonic_error)?)?;
         message.log_to(log);
@@ -221,11 +220,16 @@ impl Client {
 
         slog::debug!(s.log, "opening log stream");
         let rpc_log = s.log.clone();
-        s.send_async(|mut client| async move {
-            let log_stream = client.stream_log_messages(proto::Void {}).await;
-            if let Err(e) = handle_log_messages(&rpc_log, log_stream).await {
-                slog::error!(&rpc_log, "remote logging failed"; "error" => ?e);
-            }
+        s.send_sync(|mut client| async move {
+            let log_stream = client
+                .stream_log_messages(proto::Void {})
+                .await?
+                .into_inner();
+            tokio::task::spawn(async move {
+                if let Err(e) = handle_log_messages(&rpc_log, log_stream).await {
+                    slog::error!(&rpc_log, "remote logging failed"; "error" => ?e);
+                }
+            });
             Ok(tonic::Response::new(proto::Void {}))
         })?;
 
