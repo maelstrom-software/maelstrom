@@ -43,7 +43,7 @@ use state_machine::StateMachine;
 use std::future::Future;
 use std::pin::Pin;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     mem,
     path::{Path, PathBuf},
     sync::Arc,
@@ -74,6 +74,7 @@ struct ClientStateLocked {
     digest_repo: DigestRepository,
     processed_artifact_paths: HashSet<PathBuf>,
     cached_layers: LayerCache,
+    containers: HashMap<String, ContainerSpec>,
 }
 
 #[derive(Default)]
@@ -521,6 +522,7 @@ impl Client {
                         digest_repo,
                         processed_artifact_paths: HashSet::default(),
                         cached_layers: LayerCache::new(),
+                        containers: HashMap::new(),
                     })),
                 },
                 join_set,
@@ -667,8 +669,15 @@ impl Client {
         watcher.wait(receiver).await
     }
 
-    pub async fn add_container(&self, _name: String, _container: ContainerSpec) -> Result<()> {
-        unimplemented!()
+    pub async fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {
+        let state = self.state_machine.active()?;
+        let mut locked = state.locked.lock().await;
+
+        debug!(state.log, "add_container"; "name" => ?name, "container" => ?container);
+        if let Some(existing) = locked.containers.insert(name, container) {
+            debug!(state.log, "add_container replacing existing"; "existing" => ?existing);
+        }
+        Ok(())
     }
 
     pub async fn introspect(&self) -> Result<IntrospectResponse> {
