@@ -200,10 +200,12 @@ impl DispatcherAdapter {
         layer_fs_path: PathBuf,
         kill_event_receiver: EventReceiver,
     ) -> Result<()> {
-        let log = self
-            .log
-            .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
-        debug!(log, "job starting");
+        debug!(self.log, "job starting"; "spec" => ?spec);
+        let log = self.log.new(o!(
+            "jid" => format!("{jid:?}"),
+            "program" => format!("{:?}", spec.program),
+            "args" => format!("{:?}", spec.arguments)
+        ));
 
         let layer_fs = LayerFs::from_path(&layer_fs_path, self.blob_dir.as_root())?;
         let layer_fs_cache = self.layer_fs_cache.clone();
