@@ -20,8 +20,8 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{
-        environment_eval, std_env_lookup, ContainerSpec, ConvertedImage, ImageConfig, JobSpec,
-        Layer,
+        environment_eval, std_env_lookup, ContainerRef, ContainerSpec, ConvertedImage, ImageConfig,
+        JobSpec, Layer,
     },
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, StateDir,
     MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
@@ -617,10 +617,22 @@ impl Client {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         debug!(state.log, "run_job"; "spec" => ?spec);
 
-        let mut layers = spec.container.layers;
+        let container = match spec.container {
+            ContainerRef::Name(n) => {
+                let locked = state.locked.lock().await;
+                locked
+                    .containers
+                    .get(&n)
+                    .ok_or_else(|| anyhow!("container {n:?} unknown"))?
+                    .clone()
+            }
+            ContainerRef::Inline(c) => c,
+        };
+
+        let mut layers = container.layers;
         let mut initial_env = Default::default();
         let mut image_working_directory = None;
-        if let Some(image_spec) = spec.container.image {
+        if let Some(image_spec) = container.image {
             let image = state.get_container_image(&image_spec.name).await?;
             let image_config = ImageConfig {
                 layers: image.layers.clone(),
@@ -639,26 +651,26 @@ impl Client {
                 image_working_directory = Some(image.working_directory()?);
             }
         }
-        if image_working_directory.is_some() && spec.container.working_directory.is_some() {
+        if image_working_directory.is_some() && container.working_directory.is_some() {
             bail!("can't provide both `working_directory` and `image.use_working_directory`");
         }
 
-        let working_directory = image_working_directory.or(spec.container.working_directory);
+        let working_directory = image_working_directory.or(container.working_directory);
         let converted_layers = state.get_layers(layers).await?;
 
         let spec = maelstrom_base::JobSpec {
             program: spec.program,
             arguments: spec.arguments,
-            environment: environment_eval(initial_env, spec.container.environment, std_env_lookup)?,
+            environment: environment_eval(initial_env, container.environment, std_env_lookup)?,
             layers: converted_layers
                 .try_into()
                 .map_err(|_| anyhow!("missing layers"))?,
-            mounts: spec.container.mounts,
-            network: spec.container.network,
-            root_overlay: spec.container.root_overlay,
+            mounts: container.mounts,
+            network: container.network,
+            root_overlay: container.root_overlay,
             working_directory,
-            user: spec.container.user,
-            group: spec.container.group,
+            user: container.user,
+            group: container.group,
             timeout: spec.timeout,
             estimated_duration: spec.estimated_duration,
             allocate_tty: spec.allocate_tty,

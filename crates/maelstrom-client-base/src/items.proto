@@ -170,8 +170,15 @@ message ContainerSpec {
     optional uint32 group = 9;
 }
 
+message ContainerRef {
+    oneof ref {
+        string name = 1;
+        ContainerSpec inline = 2;
+    }
+}
+
 message JobSpec {
-    ContainerSpec container = 1;
+    ContainerRef container = 1;
     string program = 2;
     repeated string arguments = 3;
     optional uint32 timeout = 4;

@@ -3,6 +3,7 @@ import pytest
 
 from maelstrom_client import (
     Client,
+    ContainerRef,
     ContainerSpec,
     JobSpec,
     Layer,
@@ -40,7 +41,7 @@ def test_simple_job(fixture: Fixture, tmp_path: Path) -> None:
 
     container = ContainerSpec(working_directory="/", layers=layers)
     spec = JobSpec(
-        container=container,
+        container=ContainerRef(inline=container),
         program="/usr/bin/python3",
         arguments=["/test.py"],
     )

@@ -310,7 +310,8 @@ where
             working_directory: test_metadata.working_directory,
             user: test_metadata.user,
             group: test_metadata.group,
-        };
+        }
+        .into();
         Ok(TestToEnqueue {
             package_name: self.package.name().into(),
             case: case_name.into(),
