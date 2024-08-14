@@ -16,11 +16,22 @@ This is what the `JobSpec` looks like:
 
 ```rust
 pub struct JobSpec {
+    pub container: ContainerSpec,
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
+    pub timeout: Option<Timeout>,
+    pub estimated_duration: Option<Duration>,
+    pub allocate_tty: Option<JobTty>,
+}
+```
+
+This is what the `ContainerSpec` looks like:
+
+```rust
+pub struct ContainerSpec {
     pub image: Option<ImageSpec>,
     pub environment: Vec<EnvironmentSpec>,
-    pub layers: Vec<(Sha256Digest, ArtifactType)>,
+    pub layers: Vec<Layer>,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
@@ -28,9 +39,6 @@ pub struct JobSpec {
     pub working_directory: Option<Utf8PathBuf>,
     pub user: UserId,
     pub group: GroupId,
-    pub timeout: Option<Timeout>,
-    pub estimated_duration: Option<Duration>,
-    pub allocate_tty: Option<JobTty>,
 }
 ```
 
@@ -80,7 +88,7 @@ to `"cat"` and `arguments` to `["foo", "bar"]`.
 ## `image`
 
 ```rust
-pub struct JobSpec {
+pub struct ContainerSpec {
     // ...
     pub image: Option<ImageSpec>,
     // ...
@@ -126,7 +134,7 @@ directory.
 ## `environment`
 
 ```rust
-pub struct JobSpec {
+pub struct ContainerSpec {
     // ...
     pub environment: Vec<EnvironmentSpec>,
     // ...
@@ -266,15 +274,8 @@ execvpe](https://man7.org/linux/man-pages/man3/exec.3.html).
 ```rust
 pub struct JobSpec {
     // ...
-    pub layers: Vec<(Sha256Digest, ArtifactType)>,
+    pub layers: Vec<Layer>,
     // ...
-}
-
-pub enum ArtifactType {
-    /// A .tar file
-    Tar,
-    /// A serialized `Manifest`
-    Manifest,
 }
 ```
 
@@ -282,54 +283,18 @@ The file system layers specify what file system the program will be run with.
 They are stacked on top of each other, starting with the first layer, with
 later layers overriding earlier layers.
 
-Each layer will be a tar file, or Maelstrom's equivalent called a "manifest
-file". These `LayerSpec` objects are usually generated with an
-`AddLayerRequest`, which is described [in the next chapter](spec-layers.md).
-[Test runners](cargo-maelstrom/spec.md) and
-[`maelstrom-run`](maelstrom-run/spec.md) provide ways to conveniently specify
-these, as described in their respective chapters.
+These `Layer` objects are described [in the next chapter](spec-layers.md). [Test
+runners](cargo-maelstrom/spec.md) and [`maelstrom-run`](maelstrom-run/spec.md) provide ways to
+conveniently specify these, as described in their respective chapters.
 
 If the [`image`](#image) field is provided, and it contains
 [`use_layers`](#use_layers), then the layers provided in this field are stacked
 on top of the layers provided by the image.
 
-## `devices`
-
-```rust
-pub struct JobSpec {
-    // ...
-    pub devices: EnumSet<JobDevice>,
-    // ...
-}
-
-pub enum JobDevice {
-    Full,
-    Fuse,
-    Null,
-    Random,
-    Shm,
-    Tty,
-    Urandom,
-    Zero,
-}
-```
-
-This field contains the set of device files from `/dev` to add to the job's
-environment. Any subset can be specified.
-
-Any specified device will be mounted in `/dev` based on its name. For example,
-`Null` would be mounted at `/dev/null`. For this to work, there must be a
-file located at the expected location in the container file system. In other
-words, if your job is going to specify `Null`, it also needs to have an empty
-file at `/dev/null` for the system to mount the device onto. This is one of the
-use cases for the "stubs" layer type.
-
-This field is deprecated. The [`Devices` mount type](#devices-mount) should be used instead.
-
 ## `mounts`
 
 ```rust
-pub struct JobSpec {
+pub struct ContainerSpec {
     // ...
     pub mounts: Vec<JobMount>,
     // ...
@@ -518,7 +483,7 @@ system at the provided mount point.
 ## `network`
 
 ```rust
-pub struct JobSpec {
+pub struct ContainerSpec {
     // ...
     pub network: JobNetwork,
     // ...
@@ -553,11 +518,11 @@ communicate on the network, it must use `Local`.
 ## `root_overlay`
 
 ```rust
-pub struct JobSpec {
+pub struct ContainerSpec {
     // ...
     pub root_overlay: JobRootOverlay,
     // ...
-} 
+}
 
 pub enum JobRootOverlay {
     None,
@@ -598,7 +563,7 @@ by `overlayfs`.
 ## `working_directory`
 
 ```rust
-pub struct JobSpec {
+pub struct ContainerSpec {
     // ...
     pub working_directory: Option<Utf8PathBuf>,
     // ...
@@ -612,7 +577,7 @@ this isn't provided, `/` is used.
 ## `user`
 
 ```rust
-pub struct JobSpec {
+pub struct ContainerSpec {
     // ...
     pub user: UserId,
     // ...
@@ -634,7 +599,7 @@ permissions within the container, which may be undesirable for some jobs.
 ## `group`
 
 ```rust
-pub struct JobSpec {
+pub struct ContainerSpec {
     // ...
     pub group: GroupId,
     // ...

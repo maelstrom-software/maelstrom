@@ -7,9 +7,7 @@ same.
 
 As a user, having to specify every layer as a tar file would be very painful.
 For this reason, Maelstrom provides some conveniences for creating layers based
-on specifications. There is an API function that clients can call where they
-provide a layer specification and get back a layer. A layer specification looks
-like this:
+on specifications. A layer specification looks like this:
 
 ```rust
 pub enum Layer {
