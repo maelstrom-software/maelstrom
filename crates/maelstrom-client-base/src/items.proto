@@ -65,19 +65,19 @@ message Layer {
 }
 
 enum ArtifactType {
-    Tar = 0;
-    Manifest = 1;
+    ARTIFACT_TYPE_TAR = 0;
+    ARTIFACT_TYPE_MANIFEST = 1;
 }
 
 enum JobDevice {
-    Full = 0;
-    Fuse = 1;
-    Null = 2;
-    Random = 3;
-    Shm = 4;
-    Tty = 5;
-    Urandom = 6;
-    Zero = 7;
+    JOB_DEVICE_FULL = 0;
+    JOB_DEVICE_FUSE = 1;
+    JOB_DEVICE_NULL = 2;
+    JOB_DEVICE_RANDOM = 3;
+    JOB_DEVICE_SHM = 4;
+    JOB_DEVICE_TTY = 5;
+    JOB_DEVICE_URANDOM = 6;
+    JOB_DEVICE_ZERO = 7;
 }
 
 message JobMount {
@@ -272,12 +272,12 @@ message IntrospectResponse {
 }
 
 enum LogLevel {
-    LevelCritical = 0;
-    LevelError = 1;
-    LevelWarning = 2;
-    LevelInfo = 3;
-    LevelDebug = 4;
-    LevelTrace = 5;
+    LOG_LEVEL_CRITICAL = 0;
+    LOG_LEVEL_ERROR = 1;
+    LOG_LEVEL_WARNING = 2;
+    LOG_LEVEL_INFO = 3;
+    LOG_LEVEL_DEBUG = 4;
+    LOG_LEVEL_TRACE = 5;
 }
 
 message LogKeyValue {

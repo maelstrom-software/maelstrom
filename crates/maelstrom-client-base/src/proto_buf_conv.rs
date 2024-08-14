@@ -288,12 +288,12 @@ impl IntoProtoBuf for slog::Level {
 
     fn into_proto_buf(self) -> Self::ProtoBufType {
         (match self {
-            slog::Level::Critical => proto::LogLevel::LevelCritical,
-            slog::Level::Error => proto::LogLevel::LevelError,
-            slog::Level::Warning => proto::LogLevel::LevelWarning,
-            slog::Level::Info => proto::LogLevel::LevelInfo,
-            slog::Level::Debug => proto::LogLevel::LevelDebug,
-            slog::Level::Trace => proto::LogLevel::LevelTrace,
+            slog::Level::Critical => proto::LogLevel::Critical,
+            slog::Level::Error => proto::LogLevel::Error,
+            slog::Level::Warning => proto::LogLevel::Warning,
+            slog::Level::Info => proto::LogLevel::Info,
+            slog::Level::Debug => proto::LogLevel::Debug,
+            slog::Level::Trace => proto::LogLevel::Trace,
         }) as i32
     }
 }
@@ -303,12 +303,12 @@ impl TryFromProtoBuf for slog::Level {
 
     fn try_from_proto_buf(p: Self::ProtoBufType) -> Result<Self> {
         Ok(match proto::LogLevel::try_from(p)? {
-            proto::LogLevel::LevelCritical => slog::Level::Critical,
-            proto::LogLevel::LevelError => slog::Level::Error,
-            proto::LogLevel::LevelWarning => slog::Level::Warning,
-            proto::LogLevel::LevelInfo => slog::Level::Info,
-            proto::LogLevel::LevelDebug => slog::Level::Debug,
-            proto::LogLevel::LevelTrace => slog::Level::Trace,
+            proto::LogLevel::Critical => slog::Level::Critical,
+            proto::LogLevel::Error => slog::Level::Error,
+            proto::LogLevel::Warning => slog::Level::Warning,
+            proto::LogLevel::Info => slog::Level::Info,
+            proto::LogLevel::Debug => slog::Level::Debug,
+            proto::LogLevel::Trace => slog::Level::Trace,
         })
     }
 }
