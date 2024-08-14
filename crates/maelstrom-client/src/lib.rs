@@ -1,6 +1,6 @@
 pub use maelstrom_client_base::{
     spec,
-    spec::{ImageSpec, JobSpec},
+    spec::{ContainerSpec, ImageSpec, JobSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, RemoteProgress,
     RpcLogMessage, StateDir, MANIFEST_DIR,
 };
@@ -332,6 +332,17 @@ impl Client {
             let _ = sender.send(result);
         })?;
         receiver.blocking_recv()?
+    }
+
+    pub fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {
+        self.send_sync(|mut client| async move {
+            client
+                .add_container(proto::AddContainerRequest {
+                    name: name.into_proto_buf(),
+                    container: Some(container.into_proto_buf()),
+                })
+                .await
+        })
     }
 
     pub fn introspect(&self) -> Result<IntrospectResponse> {

@@ -120,6 +120,14 @@ impl<T> IntoResult for tonic::Streaming<T> {
     }
 }
 
+impl IntoResult for String {
+    type Output = String;
+
+    fn into_result(self) -> Result<Self::Output> {
+        Ok(self)
+    }
+}
+
 #[derive(IntoProtoBuf, TryFromProtoBuf)]
 #[proto(other_type = "proto::RemoteProgress")]
 pub struct RemoteProgress {

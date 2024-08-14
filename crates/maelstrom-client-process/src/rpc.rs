@@ -4,6 +4,7 @@ use anyhow::Result;
 use futures::{Stream, StreamExt as _};
 use maelstrom_client_base::{
     proto::{self, client_process_server::ClientProcess},
+    spec::ContainerSpec,
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntoProtoBuf, IntoResult, ProjectDir, StateDir,
     TryFromProtoBuf,
 };
@@ -107,6 +108,24 @@ impl ClientProcess for Handler {
                     client_job_id: cjid.into_proto_buf(),
                     result: Some(res.into_proto_buf()),
                 })
+        }
+        .await
+        .map_to_tonic()
+    }
+
+    async fn add_container(
+        &self,
+        request: Request<proto::AddContainerRequest>,
+    ) -> TonicResponse<proto::Void> {
+        async {
+            let (name, container) = request.into_inner().into_result()?;
+            self.client
+                .add_container(
+                    String::try_from_proto_buf(name)?,
+                    ContainerSpec::try_from_proto_buf(container)?,
+                )
+                .await
+                .map(IntoProtoBuf::into_proto_buf)
         }
         .await
         .map_to_tonic()

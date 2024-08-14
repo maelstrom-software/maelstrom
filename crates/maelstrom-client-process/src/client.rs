@@ -19,7 +19,10 @@ use maelstrom_base::{
     ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::{environment_eval, std_env_lookup, ConvertedImage, ImageConfig, JobSpec, Layer},
+    spec::{
+        environment_eval, std_env_lookup, ContainerSpec, ConvertedImage, ImageConfig, JobSpec,
+        Layer,
+    },
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, StateDir,
     MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
@@ -662,6 +665,10 @@ impl Client {
             .local_broker_sender
             .send(router::Message::RunJob(spec, sender))?;
         watcher.wait(receiver).await
+    }
+
+    pub async fn add_container(&self, _name: String, _container: ContainerSpec) -> Result<()> {
+        unimplemented!()
     }
 
     pub async fn introspect(&self) -> Result<IntrospectResponse> {

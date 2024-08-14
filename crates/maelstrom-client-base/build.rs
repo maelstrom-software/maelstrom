@@ -2,12 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::str::from_utf8;
 
-const INTO_RESULT: [&str; 4] = [
-    "AddLayerRequest",
-    "AddLayerResponse",
-    "RunJobRequest",
-    "RunJobResponse",
-];
+const INTO_RESULT: [&str; 3] = ["AddContainerRequest", "RunJobRequest", "RunJobResponse"];
 
 const ENUM_PROTO: [(&str, &str); 5] = [
     ("JobDevice", "maelstrom_base::JobDevice"),

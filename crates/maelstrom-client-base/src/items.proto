@@ -287,9 +287,15 @@ message LogMessage {
     repeated LogKeyValue key_values = 4;
 }
 
+message AddContainerRequest {
+    string name = 1;
+    ContainerSpec container = 2;
+}
+
 service ClientProcess {
     rpc StreamLogMessages(Void) returns (stream LogMessage);
     rpc Start(StartRequest) returns (Void);
+    rpc AddContainer(AddContainerRequest) returns (Void);
     rpc RunJob(RunJobRequest) returns (RunJobResponse);
     rpc Introspect(Void) returns (IntrospectResponse);
 }
