@@ -5,6 +5,7 @@ mod state_machine;
 use crate::{
     artifact_pusher,
     digest_repo::DigestRepository,
+    log::RpcLogSink,
     progress::{LazyProgress, ProgressTracker},
     router,
 };
@@ -33,6 +34,7 @@ use maelstrom_util::{
     root::{Root, RootBuf},
 };
 use maelstrom_worker::local_worker;
+use slog::Drain as _;
 use slog::{debug, info, warn, Logger};
 use state_machine::StateMachine;
 use std::future::Future;
@@ -215,6 +217,7 @@ impl Client {
     #[allow(clippy::too_many_arguments)]
     pub async fn start(
         &self,
+        rpc_log_sink: Option<RpcLogSink>,
         broker_addr: Option<BrokerAddr>,
         project_dir: RootBuf<ProjectDir>,
         state_dir: RootBuf<StateDir>,
@@ -522,7 +525,13 @@ impl Client {
             ))
         }
 
-        let (log, activation_handle) = self.state_machine.try_to_begin_activation()?;
+        let (mut log, activation_handle) = self.state_machine.try_to_begin_activation()?;
+
+        // RPC initiated logging takes precedence
+        if let Some(rpc_log_sink) = rpc_log_sink {
+            let drain = slog_async::Async::new(rpc_log_sink).build().fuse();
+            log = LoggerFactory::FromLogger(slog::Logger::root(drain, slog::o!()));
+        }
 
         let result = try_to_start(
             log,

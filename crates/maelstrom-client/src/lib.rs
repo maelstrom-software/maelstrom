@@ -2,11 +2,12 @@ pub use maelstrom_client_base::{
     spec,
     spec::{ImageSpec, JobSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, RemoteProgress,
-    StateDir, MANIFEST_DIR,
+    RpcLogMessage, StateDir, MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
 use anyhow::{anyhow, Context as _, Result};
+use futures::stream::StreamExt as _;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
@@ -180,6 +181,18 @@ where
     res.map_err(map_tonic_error)?.into_inner().into_result()
 }
 
+async fn handle_log_messages(
+    log: &slog::Logger,
+    stream: TonicResponse<tonic::Streaming<proto::LogMessage>>,
+) -> Result<()> {
+    let mut stream = flatten_rpc_result(stream)?;
+    while let Some(message) = stream.next().await {
+        let message = RpcLogMessage::try_from_proto_buf(message.map_err(map_tonic_error)?)?;
+        message.log_to(log);
+    }
+    Ok(())
+}
+
 impl Client {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -205,7 +218,16 @@ impl Client {
             dispatcher_handle: Some(dispatcher_handle),
             log,
         };
-        slog::debug!(s.log, "finding maelstrom container dir");
+
+        slog::debug!(s.log, "opening log stream");
+        let rpc_log = s.log.clone();
+        s.send_async(|mut client| async move {
+            let log_stream = client.stream_log_messages(proto::Void {}).await;
+            if let Err(e) = handle_log_messages(&rpc_log, log_stream).await {
+                slog::error!(&rpc_log, "remote logging failed"; "error" => ?e);
+            }
+            Ok(tonic::Response::new(proto::Void {}))
+        })?;
 
         slog::debug!(s.log, "client sending start";
             "broker_addr" => ?broker_addr,

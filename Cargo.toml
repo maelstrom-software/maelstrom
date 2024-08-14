@@ -126,7 +126,7 @@ serde_repr = "0.1"
 serde_test = "1"
 serde_with = { version = "3.4", features = ["chrono"] }
 sha2 = "0.10.6"
-slog = { version = "2.7.0", features = ["max_level_debug", "release_max_level_debug"] }
+slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_debug", "release_max_level_debug"] }
 slog-async = "2.8.0"
 slog-json = "2.6"
 slog-term = "2.9.0"

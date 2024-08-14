@@ -26,6 +26,7 @@ maelstrom-container.workspace = true
 maelstrom-util.workspace = true
 maelstrom-worker.workspace = true
 pin-project.workspace = true
+slog-async.workspace = true
 slog.workspace = true
 serde.workspace = true
 serde_repr.workspace = true

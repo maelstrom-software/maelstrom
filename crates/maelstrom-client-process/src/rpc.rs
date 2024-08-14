@@ -1,5 +1,7 @@
 use crate::client::Client;
+use crate::log::RpcLogSink;
 use anyhow::Result;
+use futures::{Stream, StreamExt as _};
 use maelstrom_client_base::{
     proto::{self, client_process_server::ClientProcess},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntoProtoBuf, IntoResult, ProjectDir, StateDir,
@@ -10,7 +12,11 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
     root::RootBuf,
 };
-use std::{result, sync::Arc};
+use std::pin::Pin;
+use std::{
+    result,
+    sync::{Arc, Mutex},
+};
 use tonic::{Code, Request, Response, Status};
 
 type TonicResult<T> = result::Result<T, Status>;
@@ -18,12 +24,14 @@ type TonicResponse<T> = TonicResult<Response<T>>;
 
 pub struct Handler {
     client: Arc<Client>,
+    log_sink: Mutex<Option<RpcLogSink>>,
 }
 
 impl Handler {
     pub fn new(client: Client) -> Self {
         Self {
             client: Arc::new(client),
+            log_sink: Default::default(),
         }
     }
 }
@@ -44,11 +52,26 @@ impl<T> ResultExt<T> for Result<T> {
 #[allow(clippy::unit_arg)]
 #[tonic::async_trait]
 impl ClientProcess for Handler {
+    type StreamLogMessagesStream =
+        Pin<Box<dyn Stream<Item = TonicResult<proto::LogMessage>> + Send>>;
+
+    async fn stream_log_messages(
+        &self,
+        _request: Request<proto::Void>,
+    ) -> TonicResponse<Self::StreamLogMessagesStream> {
+        let (sink, outgoing) = RpcLogSink::new();
+        *self.log_sink.lock().unwrap() = Some(sink);
+        Ok(Box::pin(outgoing.map(|m| Ok(m.into_proto_buf()))) as Self::StreamLogMessagesStream)
+            .map_to_tonic()
+    }
+
     async fn start(&self, request: Request<proto::StartRequest>) -> TonicResponse<proto::Void> {
         async {
             let request = request.into_inner();
+            let log_sink = { self.log_sink.lock().unwrap().clone() };
             self.client
                 .start(
+                    log_sink,
                     Option::<BrokerAddr>::try_from_proto_buf(request.broker_addr)?,
                     RootBuf::<ProjectDir>::try_from_proto_buf(request.project_dir)?,
                     RootBuf::<StateDir>::try_from_proto_buf(request.state_dir)?,

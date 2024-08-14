@@ -112,6 +112,14 @@ impl<V> IntoResult for Vec<V> {
     }
 }
 
+impl<T> IntoResult for tonic::Streaming<T> {
+    type Output = Self;
+
+    fn into_result(self) -> Result<Self::Output> {
+        Ok(self)
+    }
+}
+
 #[derive(IntoProtoBuf, TryFromProtoBuf)]
 #[proto(other_type = "proto::RemoteProgress")]
 pub struct RemoteProgress {
@@ -158,5 +166,64 @@ impl IntoProtoBuf for AcceptInvalidRemoteContainerTlsCerts {
 
     fn into_proto_buf(self) -> bool {
         self.into_inner()
+    }
+}
+
+#[derive(Clone, IntoProtoBuf, TryFromProtoBuf)]
+#[proto(other_type = "proto::LogKeyValue")]
+pub struct RpcLogKeyValue {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Clone, IntoProtoBuf, TryFromProtoBuf)]
+#[proto(other_type = "proto::LogMessage")]
+pub struct RpcLogMessage {
+    pub message: String,
+    pub level: slog::Level,
+    pub tag: String,
+    pub key_values: Vec<RpcLogKeyValue>,
+}
+
+impl RpcLogMessage {
+    pub fn log_to(self, log: &slog::Logger) {
+        let location = slog::RecordLocation {
+            file: "<remote-file>",
+            line: 0,
+            column: 0,
+            function: "",
+            module: "<remote-module>",
+        };
+        let rs = slog::RecordStatic {
+            location: &location,
+            level: self.level,
+            tag: &self.tag,
+        };
+        let kv = SimpleKV(
+            self.key_values
+                .into_iter()
+                .map(|e| slog::SingleKV::from((e.key, e.value)))
+                .collect(),
+        );
+        log.log(&slog::Record::new(
+            &rs,
+            &format_args!("[client-process] {}", self.message),
+            slog::BorrowedKV(&kv),
+        ));
+    }
+}
+
+struct SimpleKV(Vec<slog::SingleKV<String>>);
+
+impl slog::KV for SimpleKV {
+    fn serialize(
+        &self,
+        record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        for e in &self.0 {
+            e.serialize(record, serializer)?;
+        }
+        Ok(())
     }
 }

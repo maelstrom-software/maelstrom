@@ -283,6 +283,36 @@ impl<V: TryFromProtoBuf + EnumSetType> TryFromProtoBuf for EnumSet<V> {
     }
 }
 
+impl IntoProtoBuf for slog::Level {
+    type ProtoBufType = i32;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        (match self {
+            slog::Level::Critical => proto::LogLevel::LevelCritical,
+            slog::Level::Error => proto::LogLevel::LevelError,
+            slog::Level::Warning => proto::LogLevel::LevelWarning,
+            slog::Level::Info => proto::LogLevel::LevelInfo,
+            slog::Level::Debug => proto::LogLevel::LevelDebug,
+            slog::Level::Trace => proto::LogLevel::LevelTrace,
+        }) as i32
+    }
+}
+
+impl TryFromProtoBuf for slog::Level {
+    type ProtoBufType = i32;
+
+    fn try_from_proto_buf(p: Self::ProtoBufType) -> Result<Self> {
+        Ok(match proto::LogLevel::try_from(p)? {
+            proto::LogLevel::LevelCritical => slog::Level::Critical,
+            proto::LogLevel::LevelError => slog::Level::Error,
+            proto::LogLevel::LevelWarning => slog::Level::Warning,
+            proto::LogLevel::LevelInfo => slog::Level::Info,
+            proto::LogLevel::LevelDebug => slog::Level::Debug,
+            proto::LogLevel::LevelTrace => slog::Level::Trace,
+        })
+    }
+}
+
 //                       _     _                             _
 //  _ __ ___   __ _  ___| |___| |_ _ __ ___  _ __ ___       | |__   __ _ ___  ___
 // | '_ ` _ \ / _` |/ _ \ / __| __| '__/ _ \| '_ ` _ \ _____| '_ \ / _` / __|/ _ \

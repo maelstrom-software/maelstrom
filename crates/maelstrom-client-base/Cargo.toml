@@ -22,6 +22,7 @@ maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
 prost.workspace = true
 serde.workspace = true
+slog.workspace = true
 tonic.workspace = true
 tuple.workspace = true
 
