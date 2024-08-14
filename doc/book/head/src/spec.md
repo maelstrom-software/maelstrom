@@ -16,7 +16,7 @@ This is what the `JobSpec` looks like:
 
 ```rust
 pub struct JobSpec {
-    pub container: ContainerSpec,
+    pub container: ContainerRef,
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub timeout: Option<Timeout>,
@@ -25,9 +25,14 @@ pub struct JobSpec {
 }
 ```
 
-This is what the `ContainerSpec` looks like:
+This is what `ContainerRef` and `ContainerSpec` looks like:
 
 ```rust
+pub enum ContainerRef {
+    Name(String),
+    Inline(ContainerSpec)
+}
+
 pub struct ContainerSpec {
     pub image: Option<ImageSpec>,
     pub environment: Vec<EnvironmentSpec>,
@@ -41,6 +46,9 @@ pub struct ContainerSpec {
     pub group: GroupId,
 }
 ```
+
+A `JobSpec` needs the information defined by a `ContainerSpec` to run, this information can be
+provided "inline" with the `JobSpec` or via the name of a previously saved `ContainerSpec`.
 
 ## `program`
 
