@@ -342,22 +342,6 @@ impl<V: TryFromProtoBuf> TryFromProtoBuf for maelstrom_base::NonEmpty<V> {
     }
 }
 
-impl IntoProtoBuf for maelstrom_base::Sha256Digest {
-    type ProtoBufType = Vec<u8>;
-
-    fn into_proto_buf(self) -> Vec<u8> {
-        self.into()
-    }
-}
-
-impl TryFromProtoBuf for maelstrom_base::Sha256Digest {
-    type ProtoBufType = Vec<u8>;
-
-    fn try_from_proto_buf(v: Vec<u8>) -> Result<Self> {
-        Ok(maelstrom_base::Sha256Digest::try_from(v)?)
-    }
-}
-
 impl From<proto::layer::Layer> for proto::Layer {
     fn from(layer: proto::layer::Layer) -> Self {
         Self { layer: Some(layer) }

@@ -9,10 +9,9 @@ const INTO_RESULT: [&str; 4] = [
     "RunJobResponse",
 ];
 
-const ENUM_PROTO: [(&str, &str); 6] = [
+const ENUM_PROTO: [(&str, &str); 5] = [
     ("JobDevice", "maelstrom_base::JobDevice"),
     ("BindMountFlag", "maelstrom_base::BindMountFlag"),
-    ("ArtifactType", "maelstrom_base::ArtifactType"),
     ("JobCompleted.status", "maelstrom_base::JobStatus"),
     ("JobNetwork", "maelstrom_base::JobNetwork"),
     ("BindMountAccess", "maelstrom_base::BindMountAccess"),

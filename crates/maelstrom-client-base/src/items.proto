@@ -64,11 +64,6 @@ message Layer {
     }
 }
 
-enum ArtifactType {
-    ARTIFACT_TYPE_TAR = 0;
-    ARTIFACT_TYPE_MANIFEST = 1;
-}
-
 enum JobDevice {
     JOB_DEVICE_FULL = 0;
     JOB_DEVICE_FUSE = 1;

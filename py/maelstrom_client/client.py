@@ -5,7 +5,6 @@ import subprocess
 
 from typing import Optional, Union, Protocol, Sequence
 from .items_pb2 import (
-    ArtifactType,
     GlobLayer,
     ImageSpec,
     JobMount,
