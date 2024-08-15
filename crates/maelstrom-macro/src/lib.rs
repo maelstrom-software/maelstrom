@@ -3,11 +3,12 @@
 mod config;
 mod into_proto_buf;
 mod into_result;
+mod pocket_definition;
 mod try_from_proto_buf;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{parse_macro_input, DeriveInput, Item};
 
 #[proc_macro_derive(IntoResult)]
 pub fn into_result(input: TokenStream) -> TokenStream {
@@ -42,5 +43,18 @@ pub fn config(input: TokenStream) -> TokenStream {
     match config::main(input) {
         Err(e) => e.into_compile_error().into(),
         Ok(v) => quote!(#v).into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn pocket_definition(attrs: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as Item);
+    match pocket_definition::main(&input, attrs.into()) {
+        Err(e) => e.into_compile_error().into(),
+        Ok(v) => quote! {
+            #input
+            #v
+        }
+        .into(),
     }
 }
