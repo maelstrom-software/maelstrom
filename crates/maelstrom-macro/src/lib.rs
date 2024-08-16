@@ -4,6 +4,7 @@ mod config;
 mod into_proto_buf;
 mod into_result;
 mod pocket_definition;
+mod remote_derive;
 mod try_from_proto_buf;
 
 use proc_macro::TokenStream;
@@ -56,5 +57,14 @@ pub fn pocket_definition(attrs: TokenStream, input: TokenStream) -> TokenStream 
             #v
         }
         .into(),
+    }
+}
+
+#[proc_macro]
+pub fn remote_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as remote_derive::Arguments);
+    match remote_derive::main(input) {
+        Err(e) => e.into_compile_error().into(),
+        Ok(v) => quote!(#v).into(),
     }
 }
