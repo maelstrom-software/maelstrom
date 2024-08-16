@@ -146,12 +146,8 @@ fn try_from_proto_buf_enum(
 pub fn main(input: DeriveInput) -> Result<ItemImpl> {
     let input = TryFromProtoBufInput::from_derive_input(&input)?;
 
-    let mut self_path = input.ident.into();
-    let mut proto_buf_type = input.other_type;
-
-    if input.remote {
-        std::mem::swap(&mut self_path, &mut proto_buf_type);
-    }
+    let self_path = input.ident.into();
+    let proto_buf_type = input.other_type;
 
     match input.data {
         darling::ast::Data::Struct(fields) => {
@@ -201,8 +197,6 @@ struct TryFromProtoBufInput {
     /// used to unpack the struct. It causes the code to use TryFrom on the protobuf to convert to
     /// this enum type, and uses this type for the conversion.
     enum_type: Option<Path>,
-    #[darling(default)]
-    remote: bool,
     #[darling(default)]
     option_all: bool,
 }

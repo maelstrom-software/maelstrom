@@ -139,12 +139,8 @@ fn into_proto_buf_enum(
 pub fn main(input: DeriveInput) -> Result<ItemImpl> {
     let input = IntoProtoBufInput::from_derive_input(&input)?;
 
-    let mut self_path = input.ident.into();
-    let mut proto_buf_type = input.other_type;
-
-    if input.remote {
-        std::mem::swap(&mut self_path, &mut proto_buf_type);
-    }
+    let self_path = input.ident.into();
+    let proto_buf_type = input.other_type;
 
     match input.data {
         darling::ast::Data::Struct(fields) => {
@@ -193,8 +189,6 @@ struct IntoProtoBufInput {
     /// used convert the resulting enum into the struct. It causes the code to generate this type
     /// and then call `From` on it to convert it to the protobuf type.
     enum_type: Option<Path>,
-    #[darling(default)]
-    remote: bool,
     #[darling(default)]
     option_all: bool,
 }
