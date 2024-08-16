@@ -3,6 +3,14 @@ use anyhow::{anyhow, Result};
 use enum_map::{enum_map, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::Utf8PathBuf;
+use maelstrom_base::{
+    job_device_call_with_definition, job_effects_call_with_definition,
+    job_network_call_with_definition, job_status_call_with_definition, JobDevice, JobEffects,
+    JobNetwork, JobStatus,
+};
+use maelstrom_macro::{
+    into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::hash::Hash;
@@ -470,6 +478,50 @@ impl TryFromProtoBuf for maelstrom_base::JobTty {
         })
     }
 }
+
+remote_derive!(
+    JobDevice,
+    IntoProtoBuf,
+    proto(other_type = "proto::JobDevice")
+);
+remote_derive!(
+    JobDevice,
+    TryFromProtoBuf,
+    proto(other_type = "proto::JobDevice")
+);
+
+remote_derive!(
+    JobStatus,
+    IntoProtoBuf,
+    proto(other_type = "proto::job_completed::Status")
+);
+remote_derive!(
+    JobStatus,
+    TryFromProtoBuf,
+    proto(other_type = "proto::job_completed::Status")
+);
+
+remote_derive!(
+    JobNetwork,
+    IntoProtoBuf,
+    proto(other_type = "proto::JobNetwork")
+);
+remote_derive!(
+    JobNetwork,
+    TryFromProtoBuf,
+    proto(other_type = "proto::JobNetwork")
+);
+
+remote_derive!(
+    JobEffects,
+    IntoProtoBuf,
+    proto(other_type = "proto::JobEffects", option_all)
+);
+remote_derive!(
+    JobEffects,
+    TryFromProtoBuf,
+    proto(other_type = "proto::JobEffects", option_all)
+);
 
 //      _       _
 //     | | ___ | |__ __/\__

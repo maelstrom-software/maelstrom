@@ -2939,6 +2939,7 @@ dependencies = [
  "enumset",
  "heck 0.5.0",
  "hex",
+ "maelstrom-macro",
  "nonempty",
  "serde",
  "serde_repr",

@@ -4,17 +4,6 @@ use std::str::from_utf8;
 
 const INTO_RESULT: [&str; 3] = ["AddContainerRequest", "RunJobRequest", "RunJobResponse"];
 
-const ENUM_PROTO: [(&str, &str); 5] = [
-    ("JobDevice", "maelstrom_base::JobDevice"),
-    ("BindMountFlag", "maelstrom_base::BindMountFlag"),
-    ("JobCompleted.status", "maelstrom_base::JobStatus"),
-    ("JobNetwork", "maelstrom_base::JobNetwork"),
-    ("BindMountAccess", "maelstrom_base::BindMountAccess"),
-];
-
-const MSG_PROTO: [(&str, &str, &str); 1] =
-    [("JobEffects", "maelstrom_base::JobEffects", "option_all")];
-
 fn test_for_protoc() -> Option<PathBuf> {
     if let Ok(o) = Command::new("protoc").arg("--version").output() {
         if let Ok(s) = from_utf8(&o.stdout[..]).map(str::trim) {
@@ -44,26 +33,6 @@ fn main() {
     let mut b = tonic_build::configure();
     for resp in INTO_RESULT {
         b = b.message_attribute(resp, "#[derive(maelstrom_macro::IntoResult)]");
-    }
-
-    for (name, other_type) in ENUM_PROTO {
-        b = b.enum_attribute(
-            name,
-            format!(
-                "#[derive(maelstrom_macro::IntoProtoBuf, maelstrom_macro::TryFromProtoBuf)] \
-                 #[proto(other_type = {other_type}, remote)]"
-            ),
-        );
-    }
-
-    for (name, other_type, extra) in MSG_PROTO {
-        b = b.message_attribute(
-            name,
-            format!(
-                "#[derive(maelstrom_macro::IntoProtoBuf, maelstrom_macro::TryFromProtoBuf)] \
-                 #[proto(other_type = {other_type}, remote, {extra})]"
-            ),
-        );
     }
 
     b = b.btree_map(["EnvironmentSpec.vars"]);

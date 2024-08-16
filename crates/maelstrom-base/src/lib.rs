@@ -14,6 +14,7 @@ pub use nonempty::{nonempty, NonEmpty};
 use derive_more::{Constructor, Display, From};
 use enumset::EnumSetType;
 use hex::{self, FromHexError};
+use maelstrom_macro::pocket_definition;
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
@@ -69,6 +70,7 @@ pub struct JobId {
     pub cjid: ClientJobId,
 }
 
+#[pocket_definition(export)]
 #[derive(Debug, Deserialize, EnumIter, EnumSetType, Serialize)]
 pub enum JobDevice {
     Full,
@@ -192,6 +194,7 @@ impl From<JobMountForTomlAndJson> for JobMount {
     }
 }
 
+#[pocket_definition(export)]
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum JobNetwork {
@@ -415,6 +418,7 @@ impl JobSpec {
 
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a
 /// signal.
+#[pocket_definition(export)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobStatus {
     Exited(u8),
@@ -476,6 +480,7 @@ impl fmt::Display for JobOutputResult {
 /// The output and duration of a job that ran for some amount of time. This is generated regardless
 /// of how the job terminated. From our point of view, it doesn't matter. We ran the job until it
 /// was terminated, and gathered its output.
+#[pocket_definition(export)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct JobEffects {
     pub stdout: JobOutputResult,

@@ -29,8 +29,26 @@ pub fn into_proto_buf(input: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro]
+pub fn into_proto_buf_remote_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match into_proto_buf::main(input) {
+        Err(e) => e.into_compile_error().into(),
+        Ok(v) => quote!(#v).into(),
+    }
+}
+
 #[proc_macro_derive(TryFromProtoBuf, attributes(proto))]
 pub fn try_from_proto_buf(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match try_from_proto_buf::main(input) {
+        Err(e) => e.into_compile_error().into(),
+        Ok(v) => quote!(#v).into(),
+    }
+}
+
+#[proc_macro]
+pub fn try_from_proto_buf_remote_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match try_from_proto_buf::main(input) {
         Err(e) => e.into_compile_error().into(),
