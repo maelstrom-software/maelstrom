@@ -112,12 +112,12 @@ pub fn main(args: Arguments) -> Result<ItemMacro> {
         let attrs = attrs.attrs.iter();
         Ok(parse_quote! {
             #call_with_definition!(
-                remote_derive_inner, #remote_derive, #((#attrs)),*
+                maelstrom_macro::remote_derive_inner, #remote_derive, #((#attrs)),*
             );
         })
     } else {
         Ok(parse_quote! {
-            #call_with_definition!(remote_derive_inner, #remote_derive);
+            #call_with_definition!(maelstrom_macro::remote_derive_inner, #remote_derive);
         })
     }
 }

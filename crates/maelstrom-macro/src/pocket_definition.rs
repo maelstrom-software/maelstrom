@@ -33,8 +33,8 @@ pub fn main(item: &Item, attrs: TokenStream) -> Result<ItemMacro> {
     Ok(parse_quote! {
         #macro_export
         macro_rules! #macro_name {
-            ($macro_name:tt $(, $args:tt)*) => {
-                $macro_name!(#item $(, $args)*);
+            ($($macro_name:tt)::* $(, $args:tt)*) => {
+                $($macro_name)::*!(#item $(, $args)*);
             }
         }
     })

@@ -1,4 +1,4 @@
-use maelstrom_macro::{pocket_definition, remote_derive, remote_derive_inner};
+use maelstrom_macro::{pocket_definition, remote_derive};
 
 #[pocket_definition]
 struct FooBar {
