@@ -61,6 +61,15 @@ pub fn pocket_definition(attrs: TokenStream, input: TokenStream) -> TokenStream 
 }
 
 #[proc_macro]
+pub fn remote_derive_inner(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as remote_derive::InnerArguments);
+    match remote_derive::inner_main(input) {
+        Err(e) => e.into_compile_error().into(),
+        Ok(v) => quote!(#v).into(),
+    }
+}
+
+#[proc_macro]
 pub fn remote_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as remote_derive::Arguments);
     match remote_derive::main(input) {
