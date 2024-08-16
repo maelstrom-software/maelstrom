@@ -22,6 +22,21 @@ fn struct_pocketed() {
     );
 }
 
+#[test]
+fn struct_pocketed_with_args() {
+    macro_rules! as_string {
+        ($($t:tt)*) => {
+            const S: &str = stringify!($($t)*);
+        }
+    }
+    foo_bar_call_with_definition!(as_string, other_arg);
+
+    assert_eq!(
+        S,
+        "#[allow(dead_code)] struct FooBar { a : u32, b : String, }, other_arg"
+    );
+}
+
 #[allow(dead_code)]
 #[pocket_definition]
 enum Baz {
