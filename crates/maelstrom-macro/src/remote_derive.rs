@@ -103,9 +103,9 @@ pub fn inner_main(args: InnerArguments) -> Result<ItemMacro> {
 pub fn main(args: Arguments) -> Result<Vec<ItemMacro>> {
     let mut items = vec![];
     for derive_macro in args.derive_macros {
-        let call_with_definition = Ident::new(
+        let pocket_definition = Ident::new(
             &format!(
-                "{}_call_with_definition",
+                "{}_pocket_definition",
                 args.remote_type.to_string().to_snake_case()
             ),
             Span::call_site(),
@@ -117,13 +117,13 @@ pub fn main(args: Arguments) -> Result<Vec<ItemMacro>> {
         if let Some(attrs) = &args.derive_attrs {
             let attrs = attrs.attrs.iter();
             items.push(parse_quote! {
-                #call_with_definition!(
+                #pocket_definition!(
                     maelstrom_macro::remote_derive_inner, #remote_derive, #((#attrs)),*
                 );
             });
         } else {
             items.push(parse_quote! {
-                #call_with_definition!(maelstrom_macro::remote_derive_inner, #remote_derive);
+                #pocket_definition!(maelstrom_macro::remote_derive_inner, #remote_derive);
             });
         }
     }

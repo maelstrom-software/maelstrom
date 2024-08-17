@@ -14,7 +14,7 @@ fn struct_pocketed() {
             const S: &str = stringify!($($t)*);
         }
     }
-    foo_bar_call_with_definition!(as_string);
+    foo_bar_pocket_definition!(as_string);
 
     assert_eq!(
         S,
@@ -29,7 +29,7 @@ fn struct_pocketed_with_args() {
             const S: &str = stringify!($($t)*);
         }
     }
-    foo_bar_call_with_definition!(as_string, other_arg);
+    foo_bar_pocket_definition!(as_string, other_arg);
 
     assert_eq!(
         S,
@@ -51,7 +51,7 @@ fn enum_pocketed() {
             const S: &str = stringify!($($t)*);
         }
     }
-    baz_call_with_definition!(as_string);
+    baz_pocket_definition!(as_string);
     assert_eq!(S, "#[allow(dead_code)] enum Baz { A(u32), B(String), }");
 }
 
@@ -69,6 +69,6 @@ fn trait_pocketed() {
             const S: &str = stringify!($($t)*);
         }
     }
-    bin_call_with_definition!(as_string);
+    bin_pocket_definition!(as_string);
     assert_eq!(S, "#[allow(dead_code)] trait Bin { fn a(); fn b(); }");
 }

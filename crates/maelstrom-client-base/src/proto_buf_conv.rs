@@ -4,9 +4,8 @@ use enum_map::{enum_map, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_base::{
-    job_device_call_with_definition, job_effects_call_with_definition,
-    job_network_call_with_definition, job_status_call_with_definition, JobDevice, JobEffects,
-    JobNetwork, JobStatus,
+    job_device_pocket_definition, job_effects_pocket_definition, job_network_pocket_definition,
+    job_status_pocket_definition, JobDevice, JobEffects, JobNetwork, JobStatus,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,

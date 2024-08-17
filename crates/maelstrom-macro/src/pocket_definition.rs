@@ -26,7 +26,7 @@ pub fn main(item: &Item, attrs: TokenStream) -> Result<ItemMacro> {
     let attrs = Attributes::from_list(&NestedMeta::parse_meta_list(attrs)?)?;
     let name = get_item_name(item)?;
     let macro_name = Ident::new(
-        &format!("{}_call_with_definition", name.to_string().to_snake_case()),
+        &format!("{}_pocket_definition", name.to_string().to_snake_case()),
         Span::call_site(),
     );
     let macro_export = attrs.export.then_some(quote!(#[macro_export]));
