@@ -6,12 +6,85 @@ use syn::{
     parse_quote,
     punctuated::Punctuated,
     token::Paren,
-    Attribute, DeriveInput, Ident, ItemMacro, Meta, Result, Token,
+    Attribute, Data, DeriveInput, Error, Ident, ItemMacro, Meta, Result, Token,
 };
+
+struct DeriveFieldAttribute {
+    at_token: Token![@],
+    field: Ident,
+    colon_token: Token![:],
+    attr: Meta,
+}
+
+impl Parse for DeriveFieldAttribute {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(Self {
+            at_token: input.parse()?,
+            field: input.parse()?,
+            colon_token: input.parse()?,
+            attr: input.parse()?,
+        })
+    }
+}
+
+impl quote::ToTokens for DeriveFieldAttribute {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        self.at_token.to_tokens(tokens);
+        self.field.to_tokens(tokens);
+        self.colon_token.to_tokens(tokens);
+        self.attr.to_tokens(tokens);
+    }
+}
+
+enum DeriveAttribute {
+    Container(Meta),
+    Field(DeriveFieldAttribute),
+}
+
+impl Parse for DeriveAttribute {
+    fn parse(input: ParseStream) -> Result<Self> {
+        if input.peek(Token![@]) {
+            Ok(Self::Field(input.parse()?))
+        } else {
+            Ok(Self::Container(input.parse()?))
+        }
+    }
+}
+
+impl quote::ToTokens for DeriveAttribute {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Self::Container(m) => m.to_tokens(tokens),
+            Self::Field(f) => f.to_tokens(tokens),
+        }
+    }
+}
 
 struct DeriveAttrs {
     _comma_token: Token![,],
-    attrs: Punctuated<Meta, Token![,]>,
+    attrs: Punctuated<DeriveAttribute, Token![,]>,
+}
+
+impl DeriveAttrs {
+    fn container_attrs(&self) -> impl Iterator<Item = &Meta> {
+        self.attrs.iter().filter_map(|a| {
+            if let DeriveAttribute::Container(a) = a {
+                Some(a)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn field_attrs(&self) -> impl Iterator<Item = &DeriveFieldAttribute> {
+        self.attrs.iter().filter_map(|a| {
+            if let DeriveAttribute::Field(a) = a {
+                Some(a)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 pub struct Arguments {
@@ -38,7 +111,7 @@ impl Parse for Arguments {
                 .then(|| -> Result<_> {
                     Ok(DeriveAttrs {
                         _comma_token: input.parse()?,
-                        attrs: input.parse_terminated(Meta::parse, Token![,])?,
+                        attrs: input.parse_terminated(DeriveAttribute::parse, Token![,])?,
                     })
                 })
                 .transpose()?,
@@ -68,7 +141,7 @@ impl Parse for InnerArguments {
                             |s| {
                                 let content;
                                 parenthesized!(content in s);
-                                Meta::parse(&content)
+                                DeriveAttribute::parse(&content)
                             },
                             Token![,],
                         )?,
@@ -79,17 +152,49 @@ impl Parse for InnerArguments {
     }
 }
 
+fn add_field_attribute(data: &mut Data, field_to_find: &Ident, attr: &Meta) -> Result<()> {
+    match data {
+        Data::Struct(s) => {
+            let mut found = false;
+            for f in s.fields.iter_mut() {
+                let field_ident = f.ident.as_ref().ok_or_else(|| {
+                    Error::new(
+                        Span::call_site(),
+                        "field attributes not supported for unnamed fields",
+                    )
+                })?;
+                if field_ident == field_to_find {
+                    f.attrs.push(parse_quote!(#[#attr]));
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                Err(Error::new(field_to_find.span(), "failed to find field"))
+            } else {
+                Ok(())
+            }
+        }
+        _ => Err(Error::new(
+            Span::call_site(),
+            "field attributes not supported for enum or union",
+        )),
+    }
+}
+
 pub fn inner_main(args: InnerArguments) -> Result<ItemMacro> {
     let remote_derive = &args.remote_derive;
-    let input = &args.input;
+    let mut input = args.input;
     if let Some(attrs) = args.derive_attrs {
-        let attrs = attrs
-            .attrs
-            .iter()
+        let container_attrs = attrs
+            .container_attrs()
             .map(|a| -> Attribute { parse_quote!(#[#a]) });
+        for f in attrs.field_attrs() {
+            add_field_attribute(&mut input.data, &f.field, &f.attr)?;
+        }
         Ok(parse_quote! {
             #remote_derive!(
-                #(#attrs)*
+                #(#container_attrs)*
                 #input
             );
         })

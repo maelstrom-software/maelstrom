@@ -50,7 +50,7 @@ fn remote_derive_multiple() {
     assert_eq!(Baz::as_string2(), "struct Baz { _a : u32, _b : u8 }");
 }
 
-macro_rules! as_string_attrs_remote_derive {
+macro_rules! foo_bar_as_string_attrs_remote_derive {
     ($($tokens:tt)*) => {
         impl FooBar {
             fn as_string_attrs() -> &'static str {
@@ -60,12 +60,32 @@ macro_rules! as_string_attrs_remote_derive {
     }
 }
 
-remote_derive!(FooBar, AsStringAttrs, attr1(a = "b"), attr2);
+remote_derive!(FooBar, FooBarAsStringAttrs, attr1(a = "b"), attr2);
 
 #[test]
 fn remote_derive_attrs() {
     assert_eq!(
         FooBar::as_string_attrs(),
         "#[attr1(a = \"b\")] #[attr2] struct FooBar { _a : u32, _b : String, }"
+    );
+}
+
+macro_rules! foo_bar_as_string_attrs2_remote_derive {
+    ($($tokens:tt)*) => {
+        impl FooBar {
+            fn as_string_attrs2() -> &'static str {
+                stringify!($($tokens)*)
+            }
+        }
+    }
+}
+
+remote_derive!(FooBar, FooBarAsStringAttrs2, attr1(a = "b"), @_b: attr2);
+
+#[test]
+fn remote_derive_field_attrs() {
+    assert_eq!(
+        FooBar::as_string_attrs2(),
+        "#[attr1(a = \"b\")] struct FooBar { _a : u32, #[attr2] _b : String, }"
     );
 }
