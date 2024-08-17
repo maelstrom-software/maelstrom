@@ -5,10 +5,11 @@ use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
     client_job_id_pocket_definition, group_id_pocket_definition, job_device_pocket_definition,
     job_effects_pocket_definition, job_mount_pocket_definition, job_network_pocket_definition,
-    job_root_overlay_pocket_definition, job_status_pocket_definition, job_tty_pocket_definition,
-    timeout_pocket_definition, user_id_pocket_definition, window_size_pocket_definition,
-    ClientJobId, GroupId, JobDevice, JobEffects, JobMount, JobNetwork, JobRootOverlay, JobStatus,
-    JobTty, Timeout, UserId, Utf8PathBuf, WindowSize,
+    job_output_result_pocket_definition, job_root_overlay_pocket_definition,
+    job_status_pocket_definition, job_tty_pocket_definition, timeout_pocket_definition,
+    user_id_pocket_definition, window_size_pocket_definition, ClientJobId, GroupId, JobDevice,
+    JobEffects, JobMount, JobNetwork, JobOutputResult, JobRootOverlay, JobStatus, JobTty, Timeout,
+    UserId, Utf8PathBuf, WindowSize,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -150,6 +151,22 @@ impl<const LEN: usize> TryFromProtoBuf for [u8; LEN] {
 
     fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self> {
         v.try_into().map_err(|_| anyhow!("malformed array"))
+    }
+}
+
+impl IntoProtoBuf for Box<[u8]> {
+    type ProtoBufType = Vec<u8>;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        self.into()
+    }
+}
+
+impl TryFromProtoBuf for Box<[u8]> {
+    type ProtoBufType = Vec<u8>;
+
+    fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self> {
+        Ok(v.into())
     }
 }
 
@@ -508,47 +525,19 @@ proto_struct_enum_conversion!(
     proto::job_root_overlay::Overlay,
     overlay
 );
-impl IntoProtoBuf for maelstrom_base::JobOutputResult {
-    type ProtoBufType = proto::JobOutputResult;
 
-    fn into_proto_buf(self) -> Self::ProtoBufType {
-        use proto::job_output_result::Result as ProtoJobOutputResult;
-        proto::JobOutputResult {
-            result: Some(match self {
-                Self::None => ProtoJobOutputResult::None(proto::Void {}),
-                Self::Inline(bytes) => ProtoJobOutputResult::Inline(bytes.into()),
-                Self::Truncated { first, truncated } => {
-                    ProtoJobOutputResult::Truncated(proto::JobOutputResultTruncated {
-                        first: first.into(),
-                        truncated,
-                    })
-                }
-            }),
-        }
-    }
-}
+remote_derive!(
+    JobOutputResult,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = "proto::JobOutputResult", enum_type = "proto::job_output_result::Result"),
+    @Truncated: proto(other_type = "proto::JobOutputResultTruncated"),
+);
 
-impl TryFromProtoBuf for maelstrom_base::JobOutputResult {
-    type ProtoBufType = proto::JobOutputResult;
-
-    fn try_from_proto_buf(v: proto::JobOutputResult) -> Result<Self> {
-        use proto::job_output_result::Result as ProtoJobOutputResult;
-        match v
-            .result
-            .ok_or_else(|| anyhow!("malformed JobOutputResult"))?
-        {
-            ProtoJobOutputResult::None(_) => Ok(Self::None),
-            ProtoJobOutputResult::Inline(bytes) => Ok(Self::Inline(bytes.into())),
-            ProtoJobOutputResult::Truncated(proto::JobOutputResultTruncated {
-                first,
-                truncated,
-            }) => Ok(Self::Truncated {
-                first: first.into(),
-                truncated,
-            }),
-        }
-    }
-}
+proto_struct_enum_conversion!(
+    proto::JobOutputResult,
+    proto::job_output_result::Result,
+    result
+);
 
 impl IntoProtoBuf for maelstrom_base::JobOutcome {
     type ProtoBufType = proto::JobOutcome;

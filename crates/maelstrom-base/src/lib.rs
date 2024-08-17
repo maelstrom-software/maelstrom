@@ -465,6 +465,7 @@ pub enum JobStatus {
 }
 
 /// The result for stdout or stderr for a job.
+#[pocket_definition(export)]
 #[derive(Clone, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobOutputResult {
     /// There was no output.
