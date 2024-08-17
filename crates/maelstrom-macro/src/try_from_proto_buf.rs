@@ -26,6 +26,14 @@ fn try_from_proto_buf_struct(
                     p.#field.ok_or(::anyhow::anyhow!("missing field {}", #field_name))?
                 )?
             }
+        } else if f.default {
+            parse_quote! {
+                if let ::std::option::Option::Some(v) = p.#field {
+                    crate::TryFromProtoBuf::try_from_proto_buf(v)?
+                } else {
+                    ::std::default::Default::default()
+                }
+            }
         } else {
             parse_quote! {
                 crate::TryFromProtoBuf::try_from_proto_buf(p.#field)?
@@ -143,6 +151,14 @@ fn try_from_proto_buf_enum(
                                     #ident.ok_or(::anyhow::anyhow!("malformed `{}`", #self_name))?
                                 )?
                             }
+                        } else if v.default {
+                            parse_quote! {
+                                if let ::std::option::Option::Some(v) = #ident {
+                                    crate::TryFromProtoBuf::try_from_proto_buf(v)?
+                                } else {
+                                    ::std::default::Default::default()
+                                }
+                            }
                         } else {
                             parse_quote! { crate::TryFromProtoBuf::try_from_proto_buf(#ident)? }
                         }
@@ -209,6 +225,8 @@ struct TryFromProtoBufStructField {
     ty: Type,
     #[darling(default)]
     option: bool,
+    #[darling(default)]
+    default: bool,
 }
 
 #[derive(Clone, Debug, FromVariant)]

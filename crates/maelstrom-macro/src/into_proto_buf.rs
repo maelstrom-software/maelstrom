@@ -19,7 +19,7 @@ fn into_proto_buf_struct(
         .collect::<Result<Vec<_>>>()?;
     let exprs = fields.fields.iter().map(|f| -> Expr {
         let field = f.ident.as_ref().unwrap();
-        if f.option || option_all {
+        if f.option || f.default || option_all {
             parse_quote! {
                 crate::IntoProtoBuf::into_proto_buf(::std::option::Option::Some(self.#field))
             }
@@ -123,7 +123,7 @@ fn into_proto_buf_enum(
                         .ok_or(Error::new(variant_ident.span(), "missing other_type"))?;
                     let field_exprs = v.fields.iter().map(|v| -> Expr {
                         let ident = &v.ident;
-                        if v.option {
+                        if v.option || v.default {
                             parse_quote! { ::std::option::Option::Some(
                                 crate::IntoProtoBuf::into_proto_buf(#ident)
                             ) }
@@ -191,6 +191,8 @@ struct IntoProtoBufStructField {
     ty: Type,
     #[darling(default)]
     option: bool,
+    #[darling(default)]
+    default: bool,
 }
 
 #[derive(Clone, Debug, FromVariant)]
