@@ -269,6 +269,7 @@ impl From<Timeout> for Duration {
 }
 
 /// The size of a terminal in characters.
+#[pocket_definition(export)]
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct WindowSize {
     pub rows: u16,

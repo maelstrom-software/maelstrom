@@ -5,7 +5,8 @@ use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_base::{
     job_device_pocket_definition, job_effects_pocket_definition, job_network_pocket_definition,
-    job_status_pocket_definition, JobDevice, JobEffects, JobNetwork, JobStatus,
+    job_status_pocket_definition, window_size_pocket_definition, JobDevice, JobEffects, JobNetwork,
+    JobStatus, WindowSize,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -68,6 +69,22 @@ impl IntoProtoBuf for u8 {
 }
 
 impl TryFromProtoBuf for u8 {
+    type ProtoBufType = u32;
+
+    fn try_from_proto_buf(v: u32) -> Result<Self> {
+        Ok(v.try_into()?)
+    }
+}
+
+impl IntoProtoBuf for u16 {
+    type ProtoBufType = u32;
+
+    fn into_proto_buf(self) -> u32 {
+        self as u32
+    }
+}
+
+impl TryFromProtoBuf for u16 {
     type ProtoBufType = u32;
 
     fn try_from_proto_buf(v: u32) -> Result<Self> {
@@ -427,28 +444,6 @@ impl TryFromProtoBuf for maelstrom_base::ClientJobId {
     }
 }
 
-impl IntoProtoBuf for maelstrom_base::WindowSize {
-    type ProtoBufType = proto::WindowSize;
-
-    fn into_proto_buf(self) -> Self::ProtoBufType {
-        Self::ProtoBufType {
-            rows: self.rows.into(),
-            columns: self.columns.into(),
-        }
-    }
-}
-
-impl TryFromProtoBuf for maelstrom_base::WindowSize {
-    type ProtoBufType = proto::WindowSize;
-
-    fn try_from_proto_buf(window_size: Self::ProtoBufType) -> Result<Self> {
-        Ok(Self {
-            rows: window_size.rows.try_into()?,
-            columns: window_size.columns.try_into()?,
-        })
-    }
-}
-
 impl IntoProtoBuf for maelstrom_base::JobTty {
     type ProtoBufType = proto::JobTty;
 
@@ -500,6 +495,12 @@ remote_derive!(
     JobEffects,
     (IntoProtoBuf, TryFromProtoBuf),
     proto(other_type = "proto::JobEffects", option_all)
+);
+
+remote_derive!(
+    WindowSize,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = "proto::WindowSize")
 );
 
 //      _       _
