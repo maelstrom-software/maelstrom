@@ -247,7 +247,7 @@ async fn output_reader(fd: OwnedFd, inline_limit: InlineLimit) -> Result<JobOutp
     // Make the read side of the pipe non-blocking so that we can use it with Tokio.
     linux::fcntl_setfl(&fd, OpenFlags::NONBLOCK).map_err(Error::from)?;
     let stream = AsyncFile::new(fd)?;
-    let mut take = stream.take(inline_limit.as_bytes());
+    let mut take = stream.take(inline_limit.into());
     take.read_to_end(&mut buf).await?;
     let buf = buf.into_boxed_slice();
     let truncated = io::copy(&mut take.into_inner(), &mut io::sink()).await?;
@@ -2818,7 +2818,7 @@ mod tests {
         let job_handle = task::spawn(async move {
             run(
                 test_spec(&program_string).allocate_tty(Some(JobTty::new(&path, window_size))),
-                InlineLimit::from_bytes(0),
+                0.into(),
             )
             .await
             .unwrap()

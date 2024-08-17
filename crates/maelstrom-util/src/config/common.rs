@@ -1,5 +1,7 @@
 use bytesize::ByteSize;
 use clap::ValueEnum;
+use derive_more::{From, Into};
+use maelstrom_macro::pocket_definition;
 use serde::{
     de::{self, Deserializer, Visitor},
     Deserialize, Serialize,
@@ -16,6 +18,7 @@ use std::{
 };
 use strum::EnumString;
 
+#[pocket_definition(export)]
 #[derive(Clone, Copy, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct BrokerAddr(SocketAddr);
@@ -42,6 +45,14 @@ impl FromStr for BrokerAddr {
         // It's not clear how we could end up with an empty iterator. We'll assume that's
         // impossible until proven wrong.
         Ok(BrokerAddr(*addrs.first().unwrap()))
+    }
+}
+
+impl TryFrom<String> for BrokerAddr {
+    type Error = io::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
     }
 }
 
@@ -106,27 +117,30 @@ impl Display for StringError {
     }
 }
 
+macro_rules! byte_size_u64_from_impls {
+    ($name:ident) => {
+        impl From<$name> for u64 {
+            fn from(l: $name) -> u64 {
+                (l.0).0
+            }
+        }
+
+        impl From<u64> for $name {
+            fn from(v: u64) -> Self {
+                ByteSize(v).into()
+            }
+        }
+    };
+}
+
 impl error::Error for StringError {}
 
-#[derive(Clone, Copy, Deserialize, Eq, PartialEq)]
+#[pocket_definition(export)]
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, From, Into)]
 #[serde(transparent)]
 pub struct CacheSize(#[serde(with = "bytesize_serde")] ByteSize);
 
-impl CacheSize {
-    pub fn as_bytes(self) -> u64 {
-        self.0 .0
-    }
-
-    pub fn from_bytes(bytes: u64) -> Self {
-        Self(ByteSize(bytes))
-    }
-}
-
-impl From<ByteSize> for CacheSize {
-    fn from(inner: ByteSize) -> Self {
-        Self(inner)
-    }
-}
+byte_size_u64_from_impls!(CacheSize);
 
 impl Debug for CacheSize {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -177,25 +191,12 @@ impl LogLevel {
     }
 }
 
-#[derive(Clone, Copy, Deserialize, Eq, PartialEq)]
+#[pocket_definition(export)]
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, From, Into)]
 #[serde(transparent)]
 pub struct InlineLimit(#[serde(with = "bytesize_serde")] ByteSize);
 
-impl InlineLimit {
-    pub fn as_bytes(self) -> u64 {
-        self.0 .0
-    }
-
-    pub fn from_bytes(bytes: u64) -> Self {
-        Self(ByteSize(bytes))
-    }
-}
-
-impl From<ByteSize> for InlineLimit {
-    fn from(inner: ByteSize) -> Self {
-        Self(inner)
-    }
-}
+byte_size_u64_from_impls!(InlineLimit);
 
 impl Debug for InlineLimit {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -224,8 +225,10 @@ impl FromStr for InlineLimit {
     }
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[pocket_definition(export)]
+#[derive(Clone, Copy, Deserialize, Into)]
 #[serde(try_from = "u16")]
+#[into(types(usize, u32))]
 pub struct Slots(u16);
 
 impl Slots {
@@ -252,19 +255,22 @@ impl TryFrom<u16> for Slots {
     }
 }
 
-impl TryFrom<usize> for Slots {
-    type Error = String;
+macro_rules! slots_try_from_impl {
+    ($($int_type:ty),*) => {$(
+        impl TryFrom<$int_type> for Slots {
+            type Error = String;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        if value < 1 {
-            Err("value must be at least 1".to_string())
-        } else if value > 1000 {
-            Err("value must be less than 1000".to_string())
-        } else {
-            Ok(Slots(value.try_into().unwrap()))
+            fn try_from(value: $int_type) -> Result<Self, Self::Error> {
+                let value: u16 = value
+                    .try_into()
+                    .map_err(|_| "value must be less than 1000".to_string())?;
+                value.try_into()
+            }
         }
-    }
+    )*}
 }
+
+slots_try_from_impl!(usize, u32);
 
 impl Debug for Slots {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

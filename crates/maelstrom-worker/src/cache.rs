@@ -257,7 +257,7 @@ impl<FsT: Fs> Cache<FsT> {
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
-            bytes_used_target: size.as_bytes(),
+            bytes_used_target: size.into(),
             log,
         }
     }

@@ -28,6 +28,7 @@ lddtree.workspace = true
 lru.workspace = true
 maelstrom-base.workspace = true
 maelstrom-linux = { workspace = true, features = ["std"] }
+maelstrom-macro.workspace = true
 num_cpus.workspace = true
 pin-project.workspace = true
 regex.workspace = true

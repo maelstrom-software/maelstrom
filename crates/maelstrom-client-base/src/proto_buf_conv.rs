@@ -2,16 +2,20 @@ use crate::proto;
 use anyhow::{anyhow, Result};
 use enum_map::{enum_map, EnumMap};
 use enumset::{EnumSet, EnumSetType};
-use maelstrom_base::Utf8PathBuf;
 use maelstrom_base::{
     client_job_id_pocket_definition, group_id_pocket_definition, job_device_pocket_definition,
     job_effects_pocket_definition, job_mount_pocket_definition, job_network_pocket_definition,
     job_status_pocket_definition, job_tty_pocket_definition, timeout_pocket_definition,
     user_id_pocket_definition, window_size_pocket_definition, ClientJobId, GroupId, JobDevice,
-    JobEffects, JobMount, JobNetwork, JobStatus, JobTty, Timeout, UserId, WindowSize,
+    JobEffects, JobMount, JobNetwork, JobStatus, JobTty, Timeout, UserId, Utf8PathBuf, WindowSize,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
+};
+use maelstrom_util::{
+    broker_addr_pocket_definition, cache_size_pocket_definition,
+    config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
+    inline_limit_pocket_definition, slots_pocket_definition,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
@@ -714,69 +718,29 @@ impl TryFromProtoBuf for EnumMap<maelstrom_base::stats::JobState, u64> {
 // |_| |_| |_|\__,_|\___|_|___/\__|_|  \___/|_| |_| |_|      \__,_|\__|_|_|
 //
 
-impl IntoProtoBuf for maelstrom_util::config::common::BrokerAddr {
-    type ProtoBufType = String;
+remote_derive!(
+    BrokerAddr,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = String, try_from_into),
+);
 
-    fn into_proto_buf(self) -> String {
-        self.into()
-    }
-}
+remote_derive!(
+    CacheSize,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = u64, try_from_into),
+);
 
-impl TryFromProtoBuf for maelstrom_util::config::common::BrokerAddr {
-    type ProtoBufType = String;
+remote_derive!(
+    InlineLimit,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = u64, try_from_into),
+);
 
-    fn try_from_proto_buf(v: String) -> Result<Self> {
-        Ok(v.parse()?)
-    }
-}
-
-impl IntoProtoBuf for maelstrom_util::config::common::CacheSize {
-    type ProtoBufType = u64;
-
-    fn into_proto_buf(self) -> u64 {
-        self.as_bytes()
-    }
-}
-
-impl TryFromProtoBuf for maelstrom_util::config::common::CacheSize {
-    type ProtoBufType = u64;
-
-    fn try_from_proto_buf(v: u64) -> Result<Self> {
-        Ok(Self::from_bytes(v))
-    }
-}
-
-impl IntoProtoBuf for maelstrom_util::config::common::InlineLimit {
-    type ProtoBufType = u64;
-
-    fn into_proto_buf(self) -> u64 {
-        self.as_bytes()
-    }
-}
-
-impl TryFromProtoBuf for maelstrom_util::config::common::InlineLimit {
-    type ProtoBufType = u64;
-
-    fn try_from_proto_buf(v: u64) -> Result<Self> {
-        Ok(Self::from_bytes(v))
-    }
-}
-
-impl IntoProtoBuf for maelstrom_util::config::common::Slots {
-    type ProtoBufType = u32;
-
-    fn into_proto_buf(self) -> u32 {
-        self.into_inner().into()
-    }
-}
-
-impl TryFromProtoBuf for maelstrom_util::config::common::Slots {
-    type ProtoBufType = u32;
-
-    fn try_from_proto_buf(v: u32) -> Result<Self> {
-        Self::try_from(u16::try_from(v)?).map_err(|s| anyhow!("error deserializing slots: {s}"))
-    }
-}
+remote_derive!(
+    Slots,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = u32, try_from_into),
+);
 
 impl<'a, T> IntoProtoBuf for &'a maelstrom_util::root::Root<T> {
     type ProtoBufType = <&'a Path as IntoProtoBuf>::ProtoBufType;

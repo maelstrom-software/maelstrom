@@ -3356,6 +3356,7 @@ dependencies = [
  "lru",
  "maelstrom-base",
  "maelstrom-linux",
+ "maelstrom-macro",
  "maelstrom-simex",
  "num_cpus",
  "pin-project",
