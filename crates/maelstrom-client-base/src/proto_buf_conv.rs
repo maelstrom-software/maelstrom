@@ -4,9 +4,11 @@ use enum_map::{enum_map, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_base::{
-    job_device_pocket_definition, job_effects_pocket_definition, job_network_pocket_definition,
-    job_status_pocket_definition, job_tty_pocket_definition, window_size_pocket_definition,
-    JobDevice, JobEffects, JobNetwork, JobStatus, JobTty, WindowSize,
+    client_job_id_pocket_definition, group_id_pocket_definition, job_device_pocket_definition,
+    job_effects_pocket_definition, job_network_pocket_definition, job_status_pocket_definition,
+    job_tty_pocket_definition, timeout_pocket_definition, user_id_pocket_definition,
+    window_size_pocket_definition, ClientJobId, GroupId, JobDevice, JobEffects, JobNetwork,
+    JobStatus, JobTty, Timeout, UserId, WindowSize,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -396,69 +398,29 @@ impl TryFrom<proto::Layer> for proto::layer::Layer {
     }
 }
 
-impl IntoProtoBuf for maelstrom_base::UserId {
-    type ProtoBufType = u32;
+remote_derive!(
+    UserId,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = u32, try_from_into)
+);
 
-    fn into_proto_buf(self) -> u32 {
-        self.as_u32()
-    }
-}
+remote_derive!(
+    GroupId,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = u32, try_from_into)
+);
 
-impl TryFromProtoBuf for maelstrom_base::UserId {
-    type ProtoBufType = u32;
+remote_derive!(
+    Timeout,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = u32, try_from_into)
+);
 
-    fn try_from_proto_buf(v: u32) -> Result<Self> {
-        Ok(Self::new(v))
-    }
-}
-
-impl IntoProtoBuf for maelstrom_base::GroupId {
-    type ProtoBufType = u32;
-
-    fn into_proto_buf(self) -> u32 {
-        self.as_u32()
-    }
-}
-
-impl TryFromProtoBuf for maelstrom_base::GroupId {
-    type ProtoBufType = u32;
-
-    fn try_from_proto_buf(v: u32) -> Result<Self> {
-        Ok(Self::new(v))
-    }
-}
-
-impl IntoProtoBuf for maelstrom_base::Timeout {
-    type ProtoBufType = u32;
-
-    fn into_proto_buf(self) -> u32 {
-        self.as_u32()
-    }
-}
-
-impl TryFromProtoBuf for maelstrom_base::Timeout {
-    type ProtoBufType = u32;
-
-    fn try_from_proto_buf(v: u32) -> Result<Self> {
-        Self::new(v).ok_or_else(|| anyhow!("malformed Timeout"))
-    }
-}
-
-impl IntoProtoBuf for maelstrom_base::ClientJobId {
-    type ProtoBufType = u32;
-
-    fn into_proto_buf(self) -> u32 {
-        self.as_u32()
-    }
-}
-
-impl TryFromProtoBuf for maelstrom_base::ClientJobId {
-    type ProtoBufType = u32;
-
-    fn try_from_proto_buf(v: u32) -> Result<Self> {
-        Ok(Self::from_u32(v))
-    }
-}
+remote_derive!(
+    ClientJobId,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = u32, try_from_into)
+);
 
 remote_derive!(
     JobDevice,

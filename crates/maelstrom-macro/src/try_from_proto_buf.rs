@@ -8,7 +8,15 @@ fn try_from_proto_buf_struct(
     proto_buf_type: Path,
     fields: darling::ast::Fields<TryFromProtoBufStructField>,
 ) -> Result<ItemImpl> {
-    let field_idents = fields.fields.iter().map(|f| f.ident.as_ref().unwrap());
+    let field_idents = fields
+        .fields
+        .iter()
+        .map(|f| {
+            f.ident
+                .as_ref()
+                .ok_or_else(|| Error::new(Span::call_site(), "named fields required"))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let exprs = fields.fields.iter().map(|f| -> Expr {
         let field = f.ident.as_ref().unwrap();
         if f.option || option_all {
@@ -33,6 +41,28 @@ fn try_from_proto_buf_struct(
                 Ok(Self {
                     #(#field_idents: #exprs),*
                 })
+            }
+        }
+    })
+}
+
+fn try_from_proto_buf_struct_try_from_into(
+    self_ident: Path,
+    proto_buf_type: Path,
+) -> Result<ItemImpl> {
+    Ok(parse_quote! {
+        impl crate::TryFromProtoBuf for #self_ident {
+            type ProtoBufType = #proto_buf_type;
+
+            fn try_from_proto_buf(p: Self::ProtoBufType) -> ::anyhow::Result<Self> {
+                ::std::result::Result::map_err(
+                    ::std::convert::TryFrom::try_from(p),
+                    |_| {
+                        ::anyhow::anyhow!(
+                            ::std::concat!("malformed ", ::std::stringify!(#self_ident))
+                        )
+                    }
+                )
             }
         }
     })
@@ -151,7 +181,11 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
 
     match input.data {
         darling::ast::Data::Struct(fields) => {
-            try_from_proto_buf_struct(self_path, input.option_all, proto_buf_type, fields)
+            if input.try_from_into {
+                try_from_proto_buf_struct_try_from_into(self_path, proto_buf_type)
+            } else {
+                try_from_proto_buf_struct(self_path, input.option_all, proto_buf_type, fields)
+            }
         }
         darling::ast::Data::Enum(variants) => {
             let all_unit = variants
@@ -186,7 +220,7 @@ struct TryFromProtoBufEnumVariant {
 }
 
 #[derive(Clone, Debug, FromDeriveInput)]
-#[darling(supports(struct_named, enum_any))]
+#[darling(supports(struct_any, enum_any))]
 #[darling(attributes(proto))]
 struct TryFromProtoBufInput {
     ident: Ident,
@@ -199,4 +233,6 @@ struct TryFromProtoBufInput {
     enum_type: Option<Path>,
     #[darling(default)]
     option_all: bool,
+    #[darling(default)]
+    try_from_into: bool,
 }

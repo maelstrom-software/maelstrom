@@ -11,7 +11,7 @@ pub use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 pub use enumset::{enum_set, EnumSet};
 pub use nonempty::{nonempty, NonEmpty};
 
-use derive_more::{Constructor, Display, From};
+use derive_more::{Constructor, Display, From, Into};
 use enumset::EnumSetType;
 use hex::{self, FromHexError};
 use maelstrom_macro::pocket_definition;
@@ -40,18 +40,27 @@ impl ClientId {
 }
 
 /// A client-relative job ID. Clients can assign these however they like.
+#[pocket_definition(export)]
 #[derive(
-    Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    Eq,
+    From,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Into,
 )]
 pub struct ClientJobId(u32);
 
 impl ClientJobId {
     pub fn from_u32(v: u32) -> Self {
         Self(v)
-    }
-
-    pub fn as_u32(&self) -> u32 {
-        self.0
     }
 }
 
@@ -217,8 +226,21 @@ pub enum JobRootOverlay {
 }
 
 /// ID of a user. This should be compatible with uid_t.
+#[pocket_definition(export)]
 #[derive(
-    Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    Eq,
+    From,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Into,
 )]
 pub struct UserId(u32);
 
@@ -226,15 +248,24 @@ impl UserId {
     pub fn new(v: u32) -> Self {
         Self(v)
     }
-
-    pub fn as_u32(&self) -> u32 {
-        self.0
-    }
 }
 
 /// ID of a group. This should be compatible with gid_t.
+#[pocket_definition(export)]
 #[derive(
-    Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    Eq,
+    From,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Into,
 )]
 pub struct GroupId(u32);
 
@@ -242,23 +273,27 @@ impl GroupId {
     pub fn new(v: u32) -> Self {
         Self(v)
     }
-
-    pub fn as_u32(&self) -> u32 {
-        self.0
-    }
 }
 
 /// A count of seconds.
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[pocket_definition(export)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Into,
+)]
+#[into(types(u32))]
 pub struct Timeout(NonZeroU32);
 
 impl Timeout {
     pub fn new(timeout: u32) -> Option<Self> {
-        NonZeroU32::new(timeout).map(Timeout)
+        NonZeroU32::new(timeout).map(Self)
     }
+}
 
-    pub fn as_u32(&self) -> u32 {
-        self.0.into()
+impl TryFrom<u32> for Timeout {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(timeout: u32) -> std::result::Result<Self, std::num::TryFromIntError> {
+        Ok(Self(timeout.try_into()?))
     }
 }
 
