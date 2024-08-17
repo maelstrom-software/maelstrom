@@ -5,6 +5,7 @@ use syn::{
     parse::{Parse, ParseStream},
     parse_quote,
     punctuated::Punctuated,
+    token::Paren,
     Attribute, DeriveInput, Ident, ItemMacro, Meta, Result, Token,
 };
 
@@ -16,7 +17,7 @@ struct DeriveAttrs {
 pub struct Arguments {
     remote_type: Ident,
     _comma_token: Token![,],
-    derive_macro: Ident,
+    derive_macros: Punctuated<Ident, Token![,]>,
     derive_attrs: Option<DeriveAttrs>,
 }
 
@@ -25,7 +26,13 @@ impl Parse for Arguments {
         Ok(Self {
             remote_type: input.parse()?,
             _comma_token: input.parse()?,
-            derive_macro: input.parse()?,
+            derive_macros: if input.peek(Paren) {
+                let content;
+                parenthesized!(content in input);
+                content.parse_terminated(Ident::parse, Token![,])?
+            } else {
+                [input.parse::<Ident>()?].into_iter().collect()
+            },
             derive_attrs: input
                 .peek(Token![,])
                 .then(|| -> Result<_> {
@@ -93,31 +100,32 @@ pub fn inner_main(args: InnerArguments) -> Result<ItemMacro> {
     }
 }
 
-pub fn main(args: Arguments) -> Result<ItemMacro> {
-    let call_with_definition = Ident::new(
-        &format!(
-            "{}_call_with_definition",
-            args.remote_type.to_string().to_snake_case()
-        ),
-        Span::call_site(),
-    );
-    let remote_derive = Ident::new(
-        &format!(
-            "{}_remote_derive",
-            args.derive_macro.to_string().to_snake_case(),
-        ),
-        Span::call_site(),
-    );
-    if let Some(attrs) = args.derive_attrs {
-        let attrs = attrs.attrs.iter();
-        Ok(parse_quote! {
-            #call_with_definition!(
-                maelstrom_macro::remote_derive_inner, #remote_derive, #((#attrs)),*
-            );
-        })
-    } else {
-        Ok(parse_quote! {
-            #call_with_definition!(maelstrom_macro::remote_derive_inner, #remote_derive);
-        })
+pub fn main(args: Arguments) -> Result<Vec<ItemMacro>> {
+    let mut items = vec![];
+    for derive_macro in args.derive_macros {
+        let call_with_definition = Ident::new(
+            &format!(
+                "{}_call_with_definition",
+                args.remote_type.to_string().to_snake_case()
+            ),
+            Span::call_site(),
+        );
+        let remote_derive = Ident::new(
+            &format!("{}_remote_derive", derive_macro.to_string().to_snake_case(),),
+            Span::call_site(),
+        );
+        if let Some(attrs) = &args.derive_attrs {
+            let attrs = attrs.attrs.iter();
+            items.push(parse_quote! {
+                #call_with_definition!(
+                    maelstrom_macro::remote_derive_inner, #remote_derive, #((#attrs)),*
+                );
+            });
+        } else {
+            items.push(parse_quote! {
+                #call_with_definition!(maelstrom_macro::remote_derive_inner, #remote_derive);
+            });
+        }
     }
+    Ok(items)
 }

@@ -16,6 +16,16 @@ macro_rules! as_string_remote_derive {
     }
 }
 
+macro_rules! as_string2_remote_derive {
+    (struct $name:ident { $($n:ident : $t:ty,)* }) => {
+        impl $name {
+            fn as_string2() -> &'static str {
+                stringify!(struct $name { $($n: $t),* })
+            }
+        }
+    }
+}
+
 remote_derive!(FooBar, AsString);
 
 #[test]
@@ -24,6 +34,20 @@ fn remote_derive() {
         FooBar::as_string(),
         "struct FooBar { _a : u32, _b : String }"
     );
+}
+
+#[pocket_definition]
+struct Baz {
+    _a: u32,
+    _b: u8,
+}
+
+remote_derive!(Baz, (AsString, AsString2));
+
+#[test]
+fn remote_derive_multiple() {
+    assert_eq!(Baz::as_string(), "struct Baz { _a : u32, _b : u8 }");
+    assert_eq!(Baz::as_string2(), "struct Baz { _a : u32, _b : u8 }");
 }
 
 macro_rules! as_string_attrs_remote_derive {

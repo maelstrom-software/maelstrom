@@ -481,45 +481,25 @@ impl TryFromProtoBuf for maelstrom_base::JobTty {
 
 remote_derive!(
     JobDevice,
-    IntoProtoBuf,
-    proto(other_type = "proto::JobDevice")
-);
-remote_derive!(
-    JobDevice,
-    TryFromProtoBuf,
+    (IntoProtoBuf, TryFromProtoBuf),
     proto(other_type = "proto::JobDevice")
 );
 
 remote_derive!(
     JobStatus,
-    IntoProtoBuf,
-    proto(other_type = "proto::job_completed::Status")
-);
-remote_derive!(
-    JobStatus,
-    TryFromProtoBuf,
+    (IntoProtoBuf, TryFromProtoBuf),
     proto(other_type = "proto::job_completed::Status")
 );
 
 remote_derive!(
     JobNetwork,
-    IntoProtoBuf,
-    proto(other_type = "proto::JobNetwork")
-);
-remote_derive!(
-    JobNetwork,
-    TryFromProtoBuf,
+    (IntoProtoBuf, TryFromProtoBuf),
     proto(other_type = "proto::JobNetwork")
 );
 
 remote_derive!(
     JobEffects,
-    IntoProtoBuf,
-    proto(other_type = "proto::JobEffects", option_all)
-);
-remote_derive!(
-    JobEffects,
-    TryFromProtoBuf,
+    (IntoProtoBuf, TryFromProtoBuf),
     proto(other_type = "proto::JobEffects", option_all)
 );
 

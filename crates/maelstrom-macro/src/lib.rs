@@ -92,6 +92,6 @@ pub fn remote_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as remote_derive::Arguments);
     match remote_derive::main(input) {
         Err(e) => e.into_compile_error().into(),
-        Ok(v) => quote!(#v).into(),
+        Ok(v) => quote!(#(#v)*).into(),
     }
 }
