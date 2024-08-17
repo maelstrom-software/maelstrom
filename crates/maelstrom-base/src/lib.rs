@@ -152,6 +152,7 @@ pub enum JobMountForTomlAndJson {
     },
 }
 
+#[pocket_definition(export)]
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum JobMount {
     Bind {

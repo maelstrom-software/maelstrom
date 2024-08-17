@@ -5,10 +5,10 @@ use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_base::{
     client_job_id_pocket_definition, group_id_pocket_definition, job_device_pocket_definition,
-    job_effects_pocket_definition, job_network_pocket_definition, job_status_pocket_definition,
-    job_tty_pocket_definition, timeout_pocket_definition, user_id_pocket_definition,
-    window_size_pocket_definition, ClientJobId, GroupId, JobDevice, JobEffects, JobNetwork,
-    JobStatus, JobTty, Timeout, UserId, WindowSize,
+    job_effects_pocket_definition, job_mount_pocket_definition, job_network_pocket_definition,
+    job_status_pocket_definition, job_tty_pocket_definition, timeout_pocket_definition,
+    user_id_pocket_definition, window_size_pocket_definition, ClientJobId, GroupId, JobDevice,
+    JobEffects, JobMount, JobNetwork, JobStatus, JobTty, Timeout, UserId, WindowSize,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -466,75 +466,30 @@ remote_derive!(
 //  \___/ \___/|_.__/  \/
 //
 
-impl IntoProtoBuf for maelstrom_base::JobMount {
-    type ProtoBufType = proto::JobMount;
+remote_derive!(
+    JobMount,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = "proto::JobMount", enum_type = "proto::job_mount::Mount"),
+    @Bind: proto(other_type = "proto::BindMount"),
+    @Devices: proto(other_type = "proto::DevicesMount"),
+    @Devpts: proto(other_type = "proto::DevptsMount"),
+    @Mqueue: proto(other_type = "proto::MqueueMount"),
+    @Proc: proto(other_type = "proto::ProcMount"),
+    @Sys: proto(other_type = "proto::SysMount"),
+    @Tmp: proto(other_type = "proto::TmpMount"),
+);
 
-    fn into_proto_buf(self) -> Self::ProtoBufType {
-        let mount = match self {
-            Self::Bind {
-                mount_point,
-                local_path,
-                read_only,
-            } => proto::job_mount::Mount::Bind(proto::BindMount {
-                mount_point: mount_point.into_proto_buf(),
-                local_path: local_path.into_proto_buf(),
-                read_only: read_only.into_proto_buf(),
-            }),
-            Self::Devices { devices } => proto::job_mount::Mount::Devices(proto::DevicesMount {
-                devices: devices.into_proto_buf(),
-            }),
-            Self::Devpts { mount_point } => proto::job_mount::Mount::Devpts(proto::DevptsMount {
-                mount_point: mount_point.into_proto_buf(),
-            }),
-            Self::Mqueue { mount_point } => proto::job_mount::Mount::Mqueue(proto::MqueueMount {
-                mount_point: mount_point.into_proto_buf(),
-            }),
-            Self::Proc { mount_point } => proto::job_mount::Mount::Proc(proto::ProcMount {
-                mount_point: mount_point.into_proto_buf(),
-            }),
-            Self::Sys { mount_point } => proto::job_mount::Mount::Sys(proto::SysMount {
-                mount_point: mount_point.into_proto_buf(),
-            }),
-            Self::Tmp { mount_point } => proto::job_mount::Mount::Tmp(proto::TmpMount {
-                mount_point: mount_point.into_proto_buf(),
-            }),
-        };
-        Self::ProtoBufType { mount: Some(mount) }
+impl From<proto::job_mount::Mount> for proto::JobMount {
+    fn from(m: proto::job_mount::Mount) -> Self {
+        proto::JobMount { mount: Some(m) }
     }
 }
 
-impl TryFromProtoBuf for maelstrom_base::JobMount {
-    type ProtoBufType = proto::JobMount;
+impl TryFrom<proto::JobMount> for proto::job_mount::Mount {
+    type Error = anyhow::Error;
 
-    fn try_from_proto_buf(protobuf: Self::ProtoBufType) -> Result<Self> {
-        let mount = protobuf
-            .mount
-            .ok_or_else(|| anyhow!("malformed JobMount"))?;
-        Ok(match mount {
-            proto::job_mount::Mount::Bind(bind_mount) => maelstrom_base::JobMount::Bind {
-                mount_point: TryFromProtoBuf::try_from_proto_buf(bind_mount.mount_point)?,
-                local_path: TryFromProtoBuf::try_from_proto_buf(bind_mount.local_path)?,
-                read_only: TryFromProtoBuf::try_from_proto_buf(bind_mount.read_only)?,
-            },
-            proto::job_mount::Mount::Devices(devices_mount) => maelstrom_base::JobMount::Devices {
-                devices: TryFromProtoBuf::try_from_proto_buf(devices_mount.devices)?,
-            },
-            proto::job_mount::Mount::Devpts(devpts_mount) => maelstrom_base::JobMount::Devpts {
-                mount_point: TryFromProtoBuf::try_from_proto_buf(devpts_mount.mount_point)?,
-            },
-            proto::job_mount::Mount::Mqueue(mqueue_mount) => maelstrom_base::JobMount::Mqueue {
-                mount_point: TryFromProtoBuf::try_from_proto_buf(mqueue_mount.mount_point)?,
-            },
-            proto::job_mount::Mount::Proc(proc_mount) => maelstrom_base::JobMount::Proc {
-                mount_point: TryFromProtoBuf::try_from_proto_buf(proc_mount.mount_point)?,
-            },
-            proto::job_mount::Mount::Sys(sys_mount) => maelstrom_base::JobMount::Sys {
-                mount_point: TryFromProtoBuf::try_from_proto_buf(sys_mount.mount_point)?,
-            },
-            proto::job_mount::Mount::Tmp(tmp_mount) => maelstrom_base::JobMount::Tmp {
-                mount_point: TryFromProtoBuf::try_from_proto_buf(tmp_mount.mount_point)?,
-            },
-        })
+    fn try_from(mount: proto::JobMount) -> Result<Self> {
+        mount.mount.ok_or_else(|| anyhow!("malformed JobMount"))
     }
 }
 
