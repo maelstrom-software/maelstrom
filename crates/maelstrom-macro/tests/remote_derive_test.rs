@@ -89,3 +89,29 @@ fn remote_derive_field_attrs() {
         "#[attr1(a = \"b\")] struct FooBar { _a : u32, #[attr2] _b : String, }"
     );
 }
+
+#[pocket_definition]
+enum Qux {
+    A(u32),
+    B(String),
+}
+
+macro_rules! qux_as_string_remote_derive {
+    ($($tokens:tt)*) => {
+        impl Qux {
+            fn as_string() -> &'static str {
+                stringify!($($tokens)*)
+            }
+        }
+    }
+}
+
+remote_derive!(Qux, QuxAsString, attr1(a = "b"), @B: attr2);
+
+#[test]
+fn remote_derive_variant_attrs() {
+    assert_eq!(
+        Qux::as_string(),
+        "#[attr1(a = \"b\")] enum Qux { A(u32), #[attr2] B(String), }"
+    );
+}

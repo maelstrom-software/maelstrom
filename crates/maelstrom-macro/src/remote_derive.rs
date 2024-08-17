@@ -11,7 +11,7 @@ use syn::{
 
 struct DeriveFieldAttribute {
     at_token: Token![@],
-    field: Ident,
+    field_or_variant: Ident,
     colon_token: Token![:],
     attr: Meta,
 }
@@ -20,7 +20,7 @@ impl Parse for DeriveFieldAttribute {
     fn parse(input: ParseStream) -> Result<Self> {
         Ok(Self {
             at_token: input.parse()?,
-            field: input.parse()?,
+            field_or_variant: input.parse()?,
             colon_token: input.parse()?,
             attr: input.parse()?,
         })
@@ -30,7 +30,7 @@ impl Parse for DeriveFieldAttribute {
 impl quote::ToTokens for DeriveFieldAttribute {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         self.at_token.to_tokens(tokens);
-        self.field.to_tokens(tokens);
+        self.field_or_variant.to_tokens(tokens);
         self.colon_token.to_tokens(tokens);
         self.attr.to_tokens(tokens);
     }
@@ -38,13 +38,13 @@ impl quote::ToTokens for DeriveFieldAttribute {
 
 enum DeriveAttribute {
     Container(Meta),
-    Field(DeriveFieldAttribute),
+    FieldOrVariant(DeriveFieldAttribute),
 }
 
 impl Parse for DeriveAttribute {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.peek(Token![@]) {
-            Ok(Self::Field(input.parse()?))
+            Ok(Self::FieldOrVariant(input.parse()?))
         } else {
             Ok(Self::Container(input.parse()?))
         }
@@ -55,7 +55,7 @@ impl quote::ToTokens for DeriveAttribute {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
             Self::Container(m) => m.to_tokens(tokens),
-            Self::Field(f) => f.to_tokens(tokens),
+            Self::FieldOrVariant(f) => f.to_tokens(tokens),
         }
     }
 }
@@ -76,9 +76,9 @@ impl DeriveAttrs {
         })
     }
 
-    fn field_attrs(&self) -> impl Iterator<Item = &DeriveFieldAttribute> {
+    fn field_or_variant_attrs(&self) -> impl Iterator<Item = &DeriveFieldAttribute> {
         self.attrs.iter().filter_map(|a| {
-            if let DeriveAttribute::Field(a) = a {
+            if let DeriveAttribute::FieldOrVariant(a) = a {
                 Some(a)
             } else {
                 None
@@ -152,7 +152,11 @@ impl Parse for InnerArguments {
     }
 }
 
-fn add_field_attribute(data: &mut Data, field_to_find: &Ident, attr: &Meta) -> Result<()> {
+fn add_field_or_variant_attribute(
+    data: &mut Data,
+    field_or_variant_to_find: &Ident,
+    attr: &Meta,
+) -> Result<()> {
     match data {
         Data::Struct(s) => {
             let mut found = false;
@@ -163,14 +167,35 @@ fn add_field_attribute(data: &mut Data, field_to_find: &Ident, attr: &Meta) -> R
                         "field attributes not supported for unnamed fields",
                     )
                 })?;
-                if field_ident == field_to_find {
+                if field_ident == field_or_variant_to_find {
                     f.attrs.push(parse_quote!(#[#attr]));
                     found = true;
                     break;
                 }
             }
             if !found {
-                Err(Error::new(field_to_find.span(), "failed to find field"))
+                Err(Error::new(
+                    field_or_variant_to_find.span(),
+                    "failed to find field",
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        Data::Enum(e) => {
+            let mut found = false;
+            for v in &mut e.variants {
+                if &v.ident == field_or_variant_to_find {
+                    v.attrs.push(parse_quote!(#[#attr]));
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                Err(Error::new(
+                    field_or_variant_to_find.span(),
+                    "failed to find variant",
+                ))
             } else {
                 Ok(())
             }
@@ -189,8 +214,8 @@ pub fn inner_main(args: InnerArguments) -> Result<ItemMacro> {
         let container_attrs = attrs
             .container_attrs()
             .map(|a| -> Attribute { parse_quote!(#[#a]) });
-        for f in attrs.field_attrs() {
-            add_field_attribute(&mut input.data, &f.field, &f.attr)?;
+        for f in attrs.field_or_variant_attrs() {
+            add_field_or_variant_attribute(&mut input.data, &f.field_or_variant, &f.attr)?;
         }
         Ok(parse_quote! {
             #remote_derive!(
