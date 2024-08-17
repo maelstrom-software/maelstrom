@@ -92,8 +92,8 @@ fn remote_derive_field_attrs() {
 
 #[pocket_definition]
 enum Qux {
-    A(u32),
-    B(String),
+    _A(u32),
+    _B(String),
 }
 
 macro_rules! qux_as_string_remote_derive {
@@ -106,12 +106,12 @@ macro_rules! qux_as_string_remote_derive {
     }
 }
 
-remote_derive!(Qux, QuxAsString, attr1(a = "b"), @B: attr2);
+remote_derive!(Qux, QuxAsString, attr1(a = "b"), @_B: attr2);
 
 #[test]
 fn remote_derive_variant_attrs() {
     assert_eq!(
         Qux::as_string(),
-        "#[attr1(a = \"b\")] enum Qux { A(u32), #[attr2] B(String), }"
+        "#[attr1(a = \"b\")] enum Qux { _A(u32), #[attr2] _B(String), }"
     );
 }
