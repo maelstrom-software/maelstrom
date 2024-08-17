@@ -530,6 +530,7 @@ pub struct JobEffects {
 
 /// The outcome of a completed job. That is, a job that ran to completion, instead of timing out,
 /// being canceled, etc.
+#[pocket_definition(export)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct JobCompleted {
     pub status: JobStatus,
@@ -537,6 +538,7 @@ pub struct JobCompleted {
 }
 
 /// The outcome of a job. This doesn't include error outcomes, which are handled with JobError.
+#[pocket_definition(export)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobOutcome {
     Completed(JobCompleted),

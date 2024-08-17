@@ -3,13 +3,14 @@ use anyhow::{anyhow, Result};
 use enum_map::{enum_map, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    client_job_id_pocket_definition, group_id_pocket_definition, job_device_pocket_definition,
-    job_effects_pocket_definition, job_mount_pocket_definition, job_network_pocket_definition,
+    client_job_id_pocket_definition, group_id_pocket_definition, job_completed_pocket_definition,
+    job_device_pocket_definition, job_effects_pocket_definition, job_mount_pocket_definition,
+    job_network_pocket_definition, job_outcome_pocket_definition,
     job_output_result_pocket_definition, job_root_overlay_pocket_definition,
     job_status_pocket_definition, job_tty_pocket_definition, timeout_pocket_definition,
-    user_id_pocket_definition, window_size_pocket_definition, ClientJobId, GroupId, JobDevice,
-    JobEffects, JobMount, JobNetwork, JobOutputResult, JobRootOverlay, JobStatus, JobTty, Timeout,
-    UserId, Utf8PathBuf, WindowSize,
+    user_id_pocket_definition, window_size_pocket_definition, ClientJobId, GroupId, JobCompleted,
+    JobDevice, JobEffects, JobMount, JobNetwork, JobOutcome, JobOutputResult, JobRootOverlay,
+    JobStatus, JobTty, Timeout, UserId, Utf8PathBuf, WindowSize,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -539,47 +540,22 @@ proto_struct_enum_conversion!(
     result
 );
 
-impl IntoProtoBuf for maelstrom_base::JobOutcome {
-    type ProtoBufType = proto::JobOutcome;
+remote_derive!(
+    JobOutcome,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(
+        other_type = "proto::JobOutcome",
+        enum_type = "proto::job_outcome::Outcome"
+    ),
+);
 
-    fn into_proto_buf(self) -> Self::ProtoBufType {
-        use proto::job_outcome::Outcome;
-        proto::JobOutcome {
-            outcome: Some(match self {
-                Self::Completed(maelstrom_base::JobCompleted { status, effects }) => {
-                    Outcome::Completed(proto::JobCompleted {
-                        status: Some(status.into_proto_buf()),
-                        effects: Some(effects.into_proto_buf()),
-                    })
-                }
-                Self::TimedOut(effects) => Outcome::TimedOut(effects.into_proto_buf()),
-            }),
-        }
-    }
-}
+proto_struct_enum_conversion!(proto::JobOutcome, proto::job_outcome::Outcome, outcome);
 
-impl TryFromProtoBuf for maelstrom_base::JobOutcome {
-    type ProtoBufType = proto::JobOutcome;
-
-    fn try_from_proto_buf(v: proto::JobOutcome) -> Result<Self> {
-        use proto::job_outcome::Outcome;
-        match v.outcome.ok_or_else(|| anyhow!("malformed JobOutcome"))? {
-            Outcome::Completed(proto::JobCompleted { status, effects }) => {
-                Ok(Self::Completed(maelstrom_base::JobCompleted {
-                    status: TryFromProtoBuf::try_from_proto_buf(
-                        status.ok_or_else(|| anyhow!("malformed JobOutcome::Completed"))?,
-                    )?,
-                    effects: TryFromProtoBuf::try_from_proto_buf(
-                        effects.ok_or_else(|| anyhow!("malformed JobOutcome::Completed"))?,
-                    )?,
-                }))
-            }
-            Outcome::TimedOut(effects) => Ok(Self::TimedOut(TryFromProtoBuf::try_from_proto_buf(
-                effects,
-            )?)),
-        }
-    }
-}
+remote_derive!(
+    JobCompleted,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = "proto::JobCompleted", option_all),
+);
 
 impl IntoProtoBuf for maelstrom_base::JobError<String> {
     type ProtoBufType = proto::JobError;
