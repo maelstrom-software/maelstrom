@@ -1,6 +1,6 @@
 use darling::{FromDeriveInput, FromField, FromVariant};
 use proc_macro2::Span;
-use syn::{parse_quote, Arm, DeriveInput, Error, Expr, Ident, ItemImpl, Path, Result, Type};
+use syn::{parse_quote, Arm, DeriveInput, Error, Expr, Ident, ItemImpl, Path, Result};
 
 fn into_proto_buf_struct(
     self_ident: Path,
@@ -95,18 +95,11 @@ fn into_proto_buf_enum(
             Ok(match v.fields.style {
                 darling::ast::Style::Unit => {
                     parse_quote! {
-                        Self::#variant_ident => #enum_type::#variant_ident(super::Void {}),
+                        Self::#variant_ident => #enum_type::#variant_ident(proto::Void {})
                     }
                 }
                 darling::ast::Style::Tuple => {
                     let num_fields = v.fields.len();
-                    let void = parse_quote!(super::Void);
-                    if num_fields == 1 && v.fields.fields.first().unwrap().ty == void {
-                        return Ok(parse_quote! {
-                            Self::#variant_ident => #enum_type::#variant_ident(super::Void {}),
-                        });
-                    }
-
                     let field_idents1 =
                         (0..num_fields).map(|n| Ident::new(&format!("f{n}"), Span::call_site()));
                     let field_idents2 = field_idents1.clone();
@@ -188,7 +181,6 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
 #[darling(attributes(proto))]
 struct IntoProtoBufStructField {
     ident: Option<Ident>,
-    ty: Type,
     #[darling(default)]
     option: bool,
     #[darling(default)]

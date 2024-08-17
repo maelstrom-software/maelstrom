@@ -173,6 +173,7 @@ pub fn environment_eval(
 pub struct ContainerSpec {
     pub image: Option<ImageSpec>,
     pub layers: Vec<Layer>,
+    #[proto(default)]
     pub root_overlay: JobRootOverlay,
     pub environment: Vec<EnvironmentSpec>,
     pub working_directory: Option<Utf8PathBuf>,

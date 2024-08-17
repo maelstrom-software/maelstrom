@@ -214,6 +214,7 @@ pub enum JobNetwork {
     Local,
 }
 
+#[pocket_definition(export)]
 #[derive(Clone, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum JobRootOverlay {

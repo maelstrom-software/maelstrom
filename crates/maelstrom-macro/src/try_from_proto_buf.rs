@@ -1,6 +1,6 @@
 use darling::{FromDeriveInput, FromField, FromVariant};
 use proc_macro2::Span;
-use syn::{parse_quote, Arm, DeriveInput, Error, Expr, Ident, ItemImpl, Path, Result, Type};
+use syn::{parse_quote, Arm, DeriveInput, Error, Expr, Ident, ItemImpl, Path, Result};
 
 fn try_from_proto_buf_struct(
     self_ident: Path,
@@ -116,17 +116,12 @@ fn try_from_proto_buf_enum(
             let variant_ident = &v.ident;
             Ok(match v.fields.style {
                 darling::ast::Style::Unit => {
-                    return Err(Error::new(variant_ident.span(), "unit not allowed here"));
+                    parse_quote! {
+                        #enum_type::#variant_ident(_) => Ok(Self::#variant_ident)
+                    }
                 }
                 darling::ast::Style::Tuple => {
                     let num_fields = v.fields.len();
-                    let void = parse_quote!(super::Void);
-                    if num_fields == 1 && v.fields.fields.first().unwrap().ty == void {
-                        return Ok(parse_quote! {
-                            #enum_type::#variant_ident(_) => Ok(Self::#variant_ident)
-                        });
-                    }
-
                     let field_idents1 =
                         (0..num_fields).map(|n| Ident::new(&format!("f{n}"), Span::call_site()));
                     let field_idents2 = field_idents1.clone();
@@ -222,7 +217,6 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
 #[darling(attributes(proto))]
 struct TryFromProtoBufStructField {
     ident: Option<Ident>,
-    ty: Type,
     #[darling(default)]
     option: bool,
     #[darling(default)]

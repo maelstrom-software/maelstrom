@@ -5,9 +5,10 @@ use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
     client_job_id_pocket_definition, group_id_pocket_definition, job_device_pocket_definition,
     job_effects_pocket_definition, job_mount_pocket_definition, job_network_pocket_definition,
-    job_status_pocket_definition, job_tty_pocket_definition, timeout_pocket_definition,
-    user_id_pocket_definition, window_size_pocket_definition, ClientJobId, GroupId, JobDevice,
-    JobEffects, JobMount, JobNetwork, JobStatus, JobTty, Timeout, UserId, Utf8PathBuf, WindowSize,
+    job_root_overlay_pocket_definition, job_status_pocket_definition, job_tty_pocket_definition,
+    timeout_pocket_definition, user_id_pocket_definition, window_size_pocket_definition,
+    ClientJobId, GroupId, JobDevice, JobEffects, JobMount, JobNetwork, JobRootOverlay, JobStatus,
+    JobTty, Timeout, UserId, Utf8PathBuf, WindowSize,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -497,50 +498,26 @@ impl TryFrom<proto::JobMount> for proto::job_mount::Mount {
     }
 }
 
-impl IntoProtoBuf for maelstrom_base::JobRootOverlay {
-    type ProtoBufType = Option<proto::JobRootOverlay>;
+remote_derive!(
+    JobRootOverlay,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = "proto::JobRootOverlay", enum_type = "proto::job_root_overlay::Overlay"),
+    @Local: proto(other_type = "proto::LocalJobRootOverlay"),
+);
 
-    fn into_proto_buf(self) -> Self::ProtoBufType {
-        let overlay = match self {
-            Self::None => proto::job_root_overlay::Overlay::None(proto::Void {}),
-            Self::Tmp => proto::job_root_overlay::Overlay::Tmp(proto::Void {}),
-            Self::Local { upper, work } => {
-                proto::job_root_overlay::Overlay::Local(proto::LocalJobRootOverlay {
-                    upper: upper.into_proto_buf(),
-                    work: work.into_proto_buf(),
-                })
-            }
-        };
-        Some(proto::JobRootOverlay {
-            overlay: Some(overlay),
-        })
+impl From<proto::job_root_overlay::Overlay> for proto::JobRootOverlay {
+    fn from(o: proto::job_root_overlay::Overlay) -> Self {
+        proto::JobRootOverlay { overlay: Some(o) }
     }
 }
 
-impl TryFromProtoBuf for maelstrom_base::JobRootOverlay {
-    type ProtoBufType = Option<proto::JobRootOverlay>;
+impl TryFrom<proto::JobRootOverlay> for proto::job_root_overlay::Overlay {
+    type Error = anyhow::Error;
 
-    fn try_from_proto_buf(protobuf: Self::ProtoBufType) -> Result<Self> {
-        let Some(overlay) = protobuf else {
-            return Ok(Default::default());
-        };
-        let overlay = overlay
+    fn try_from(overlay: proto::JobRootOverlay) -> Result<Self> {
+        overlay
             .overlay
-            .ok_or_else(|| anyhow!("malformed JobRootOverlay"))?;
-        Ok(match overlay {
-            proto::job_root_overlay::Overlay::None(proto::Void {}) => {
-                maelstrom_base::JobRootOverlay::None
-            }
-            proto::job_root_overlay::Overlay::Tmp(proto::Void {}) => {
-                maelstrom_base::JobRootOverlay::Tmp
-            }
-            proto::job_root_overlay::Overlay::Local(local) => {
-                maelstrom_base::JobRootOverlay::Local {
-                    upper: TryFromProtoBuf::try_from_proto_buf(local.upper)?,
-                    work: TryFromProtoBuf::try_from_proto_buf(local.work)?,
-                }
-            }
-        })
+            .ok_or_else(|| anyhow!("malformed JobRootOverlay"))
     }
 }
 
