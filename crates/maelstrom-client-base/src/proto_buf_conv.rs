@@ -5,8 +5,8 @@ use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_base::{
     job_device_pocket_definition, job_effects_pocket_definition, job_network_pocket_definition,
-    job_status_pocket_definition, window_size_pocket_definition, JobDevice, JobEffects, JobNetwork,
-    JobStatus, WindowSize,
+    job_status_pocket_definition, job_tty_pocket_definition, window_size_pocket_definition,
+    JobDevice, JobEffects, JobNetwork, JobStatus, JobTty, WindowSize,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -105,6 +105,22 @@ impl TryFromProtoBuf for u64 {
 
     fn try_from_proto_buf(v: u64) -> Result<Self> {
         Ok(v)
+    }
+}
+
+impl<const LEN: usize> IntoProtoBuf for [u8; LEN] {
+    type ProtoBufType = Vec<u8>;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        self.as_slice().to_owned()
+    }
+}
+
+impl<const LEN: usize> TryFromProtoBuf for [u8; LEN] {
+    type ProtoBufType = Vec<u8>;
+
+    fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self> {
+        v.try_into().map_err(|_| anyhow!("malformed array"))
     }
 }
 
@@ -444,35 +460,6 @@ impl TryFromProtoBuf for maelstrom_base::ClientJobId {
     }
 }
 
-impl IntoProtoBuf for maelstrom_base::JobTty {
-    type ProtoBufType = proto::JobTty;
-
-    fn into_proto_buf(self) -> Self::ProtoBufType {
-        Self::ProtoBufType {
-            socket_address: self.socket_address.as_slice().to_vec(),
-            window_size: Some(self.window_size.into_proto_buf()),
-        }
-    }
-}
-
-impl TryFromProtoBuf for maelstrom_base::JobTty {
-    type ProtoBufType = proto::JobTty;
-
-    fn try_from_proto_buf(job_tty: Self::ProtoBufType) -> Result<Self> {
-        Ok(Self {
-            socket_address: job_tty
-                .socket_address
-                .try_into()
-                .map_err(|_| anyhow!("malformed JobTty"))?,
-            window_size: maelstrom_base::WindowSize::try_from_proto_buf(
-                job_tty
-                    .window_size
-                    .ok_or_else(|| anyhow!("malformed JobTty"))?,
-            )?,
-        })
-    }
-}
-
 remote_derive!(
     JobDevice,
     (IntoProtoBuf, TryFromProtoBuf),
@@ -501,6 +488,13 @@ remote_derive!(
     WindowSize,
     (IntoProtoBuf, TryFromProtoBuf),
     proto(other_type = "proto::WindowSize")
+);
+
+remote_derive!(
+    JobTty,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(other_type = "proto::JobTty"),
+    @window_size: proto(option)
 );
 
 //      _       _

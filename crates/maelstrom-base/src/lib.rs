@@ -283,6 +283,7 @@ impl WindowSize {
 }
 
 /// The parameters for a TTY for a job.
+#[pocket_definition(export)]
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct JobTty {
     /// A Unix domain socket abstract address. We use exactly 6 bytes because that's how many bytes
