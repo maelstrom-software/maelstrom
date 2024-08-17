@@ -36,6 +36,28 @@ pub trait TryFromProtoBuf: Sized {
     fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self>;
 }
 
+macro_rules! proto_struct_enum_conversion {
+    ($struct_name:ty, $enum_name:ty, $field:ident) => {
+        impl From<$enum_name> for $struct_name {
+            fn from($field: $enum_name) -> Self {
+                Self {
+                    $field: Some($field),
+                }
+            }
+        }
+
+        impl TryFrom<$struct_name> for $enum_name {
+            type Error = anyhow::Error;
+
+            fn try_from($field: $struct_name) -> Result<Self> {
+                $field
+                    .$field
+                    .ok_or_else(|| anyhow!(concat!("malformed ", stringify!($struct_name))))
+            }
+        }
+    };
+}
+
 //  _           _ _ _        _
 // | |__  _   _(_) | |_     (_)_ __
 // | '_ \| | | | | | __|____| | '_ \
@@ -389,19 +411,7 @@ impl<V: TryFromProtoBuf> TryFromProtoBuf for maelstrom_base::NonEmpty<V> {
     }
 }
 
-impl From<proto::layer::Layer> for proto::Layer {
-    fn from(layer: proto::layer::Layer) -> Self {
-        Self { layer: Some(layer) }
-    }
-}
-
-impl TryFrom<proto::Layer> for proto::layer::Layer {
-    type Error = anyhow::Error;
-
-    fn try_from(layer: proto::Layer) -> Result<Self> {
-        layer.layer.ok_or_else(|| anyhow!("malformed Layer"))
-    }
-}
+proto_struct_enum_conversion!(proto::Layer, proto::layer::Layer, layer);
 
 remote_derive!(
     UserId,
@@ -484,19 +494,7 @@ remote_derive!(
     @Tmp: proto(other_type = "proto::TmpMount"),
 );
 
-impl From<proto::job_mount::Mount> for proto::JobMount {
-    fn from(m: proto::job_mount::Mount) -> Self {
-        proto::JobMount { mount: Some(m) }
-    }
-}
-
-impl TryFrom<proto::JobMount> for proto::job_mount::Mount {
-    type Error = anyhow::Error;
-
-    fn try_from(mount: proto::JobMount) -> Result<Self> {
-        mount.mount.ok_or_else(|| anyhow!("malformed JobMount"))
-    }
-}
+proto_struct_enum_conversion!(proto::JobMount, proto::job_mount::Mount, mount);
 
 remote_derive!(
     JobRootOverlay,
@@ -505,22 +503,11 @@ remote_derive!(
     @Local: proto(other_type = "proto::LocalJobRootOverlay"),
 );
 
-impl From<proto::job_root_overlay::Overlay> for proto::JobRootOverlay {
-    fn from(o: proto::job_root_overlay::Overlay) -> Self {
-        proto::JobRootOverlay { overlay: Some(o) }
-    }
-}
-
-impl TryFrom<proto::JobRootOverlay> for proto::job_root_overlay::Overlay {
-    type Error = anyhow::Error;
-
-    fn try_from(overlay: proto::JobRootOverlay) -> Result<Self> {
-        overlay
-            .overlay
-            .ok_or_else(|| anyhow!("malformed JobRootOverlay"))
-    }
-}
-
+proto_struct_enum_conversion!(
+    proto::JobRootOverlay,
+    proto::job_root_overlay::Overlay,
+    overlay
+);
 impl IntoProtoBuf for maelstrom_base::JobOutputResult {
     type ProtoBufType = proto::JobOutputResult;
 
