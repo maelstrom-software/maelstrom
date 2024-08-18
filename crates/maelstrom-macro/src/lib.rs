@@ -27,10 +27,10 @@ pub fn into_result(input: TokenStream) -> TokenStream {
 /// they may have some different meaning for the other macro.
 ///
 /// container attributes:
-/// - `other_type` (required) the type-path to the protobuf type we are converting into
+/// - `proto_buf_type` (required) the type-path to the protobuf type we are converting into
 /// - `enum_type` If we are deriving for an `enum` and the protobuf type is a `struct` containing
-///   an enum, convert ourselves into this given enum type and convert into `other_type` by calling
-///   [`std::convert::Into::into`].
+///   an enum, convert ourselves into this given enum type and convert into `proto_buf_type` by
+///   calling [`std::convert::Into::into`].
 /// - `option_all` applies the `option` field attribute to all fields
 /// - `try_from_into` Implement by forwarding to [`std::convert::Into::into`]
 ///
@@ -62,10 +62,10 @@ pub fn into_proto_buf_remote_derive(input: TokenStream) -> TokenStream {
 /// they may have some different meaning for the other macro.
 ///
 /// container attributes:
-/// - `other_type` (required) the type-path to the protobuf type we are converting from
+/// - `proto_buf_type` (required) the type-path to the protobuf type we are converting from
 /// - `enum_type` If we are deriving for an `enum` and the protobuf type is a `struct` containing
 ///   an enum, convert ourselves from this given enum type which we obtain by calling
-///   [`std::convert::TryFrom::try_from`] on `other_type`
+///   [`std::convert::TryFrom::try_from`] on `proto_buf_type`
 /// - `option_all` applies the `option` field attribute to all fields
 /// - `try_from_into` Implement by forwarding to [`std::convert::TryFrom::try_from`]
 ///

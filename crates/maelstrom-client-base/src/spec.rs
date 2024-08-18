@@ -48,7 +48,7 @@ where
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[proto(other_type = "proto::ImageSpec")]
+#[proto(proto_buf_type = "proto::ImageSpec")]
 pub struct ImageSpec {
     pub name: String,
     pub use_layers: bool,
@@ -68,7 +68,7 @@ pub struct ImageSpec {
     Serialize,
     Deserialize,
 )]
-#[proto(other_type = "proto::EnvironmentSpec")]
+#[proto(proto_buf_type = "proto::EnvironmentSpec")]
 pub struct EnvironmentSpec {
     pub vars: BTreeMap<String, String>,
     pub extend: bool,
@@ -169,7 +169,7 @@ pub fn environment_eval(
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq)]
-#[proto(other_type = "proto::ContainerSpec")]
+#[proto(proto_buf_type = "proto::ContainerSpec")]
 pub struct ContainerSpec {
     pub image: Option<ImageSpec>,
     pub layers: Vec<Layer>,
@@ -185,7 +185,7 @@ pub struct ContainerSpec {
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, From, Clone, Debug, PartialEq, Eq)]
 #[proto(
-    other_type = "proto::ContainerRef",
+    proto_buf_type = "proto::ContainerRef",
     enum_type = "proto::container_ref::Ref"
 )]
 pub enum ContainerRef {
@@ -226,7 +226,7 @@ impl TryFrom<proto::ContainerRef> for proto::container_ref::Ref {
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq)]
-#[proto(other_type = "proto::JobSpec")]
+#[proto(proto_buf_type = "proto::JobSpec")]
 pub struct JobSpec {
     #[proto(option)]
     pub container: ContainerRef,
@@ -328,7 +328,7 @@ impl JobSpec {
     PartialEq,
     Serialize,
 )]
-#[proto(other_type = "proto::PrefixOptions")]
+#[proto(proto_buf_type = "proto::PrefixOptions")]
 pub struct PrefixOptions {
     pub strip_prefix: Option<Utf8PathBuf>,
     pub prepend_prefix: Option<Utf8PathBuf>,
@@ -350,7 +350,7 @@ pub struct PrefixOptions {
     PartialEq,
     Serialize,
 )]
-#[proto(other_type = "proto::SymlinkSpec")]
+#[proto(proto_buf_type = "proto::SymlinkSpec")]
 pub struct SymlinkSpec {
     pub link: Utf8PathBuf,
     pub target: Utf8PathBuf,
@@ -359,33 +359,33 @@ pub struct SymlinkSpec {
 #[derive(
     Clone, Debug, Deserialize, Eq, Hash, IntoProtoBuf, PartialEq, Serialize, TryFromProtoBuf,
 )]
-#[proto(other_type = "proto::Layer", enum_type = "proto::layer::Layer")]
+#[proto(proto_buf_type = "proto::Layer", enum_type = "proto::layer::Layer")]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Layer {
-    #[proto(other_type = proto::TarLayer)]
+    #[proto(proto_buf_type = proto::TarLayer)]
     Tar {
         #[serde(rename = "tar")]
         path: Utf8PathBuf,
     },
-    #[proto(other_type = proto::GlobLayer)]
+    #[proto(proto_buf_type = proto::GlobLayer)]
     Glob {
         glob: String,
         #[serde(flatten)]
         #[proto(option)]
         prefix_options: PrefixOptions,
     },
-    #[proto(other_type = proto::PathsLayer)]
+    #[proto(proto_buf_type = proto::PathsLayer)]
     Paths {
         paths: Vec<Utf8PathBuf>,
         #[serde(flatten)]
         #[proto(option)]
         prefix_options: PrefixOptions,
     },
-    #[proto(other_type = proto::StubsLayer)]
+    #[proto(proto_buf_type = proto::StubsLayer)]
     Stubs { stubs: Vec<String> },
-    #[proto(other_type = proto::SymlinksLayer)]
+    #[proto(proto_buf_type = proto::SymlinksLayer)]
     Symlinks { symlinks: Vec<SymlinkSpec> },
-    #[proto(other_type = proto::SharedLibraryDependenciesLayer)]
+    #[proto(proto_buf_type = proto::SharedLibraryDependenciesLayer)]
     SharedLibraryDependencies {
         #[serde(rename = "shared-library-dependencies")]
         binary_paths: Vec<Utf8PathBuf>,

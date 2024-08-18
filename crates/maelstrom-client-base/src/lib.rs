@@ -129,7 +129,7 @@ impl IntoResult for String {
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf)]
-#[proto(other_type = "proto::RemoteProgress")]
+#[proto(proto_buf_type = "proto::RemoteProgress")]
 pub struct RemoteProgress {
     pub name: String,
     pub size: u64,
@@ -137,7 +137,7 @@ pub struct RemoteProgress {
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf)]
-#[proto(other_type = "proto::IntrospectResponse")]
+#[proto(proto_buf_type = "proto::IntrospectResponse")]
 pub struct IntrospectResponse {
     #[proto(option)]
     pub job_state_counts: EnumMap<maelstrom_base::stats::JobState, u64>,
@@ -178,14 +178,14 @@ impl IntoProtoBuf for AcceptInvalidRemoteContainerTlsCerts {
 }
 
 #[derive(Clone, IntoProtoBuf, TryFromProtoBuf)]
-#[proto(other_type = "proto::LogKeyValue")]
+#[proto(proto_buf_type = "proto::LogKeyValue")]
 pub struct RpcLogKeyValue {
     pub key: String,
     pub value: String,
 }
 
 #[derive(Clone, IntoProtoBuf, TryFromProtoBuf)]
-#[proto(other_type = "proto::LogMessage")]
+#[proto(proto_buf_type = "proto::LogMessage")]
 pub struct RpcLogMessage {
     pub message: String,
     pub level: slog::Level,

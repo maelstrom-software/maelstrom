@@ -111,9 +111,9 @@ fn into_proto_buf_enum(
                 }
                 darling::ast::Style::Struct => {
                     let variant_type = v
-                        .other_type
+                        .proto_buf_type
                         .as_ref()
-                        .ok_or(Error::new(variant_ident.span(), "missing other_type"))?;
+                        .ok_or(Error::new(variant_ident.span(), "missing proto_buf_type"))?;
                     let field_exprs = v.fields.iter().map(|v| -> Expr {
                         let ident = &v.ident;
                         if v.option || v.default {
@@ -153,7 +153,7 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
     let input = IntoProtoBufInput::from_derive_input(&input)?;
 
     let self_path = input.ident.into();
-    let proto_buf_type = input.other_type;
+    let proto_buf_type = input.proto_buf_type;
 
     match input.data {
         darling::ast::Data::Struct(fields) => {
@@ -192,7 +192,7 @@ struct IntoProtoBufStructField {
 struct IntoProtoBufEnumVariant {
     ident: Ident,
     fields: darling::ast::Fields<IntoProtoBufStructField>,
-    other_type: Option<Path>,
+    proto_buf_type: Option<Path>,
 }
 
 #[derive(Clone, Debug, FromDeriveInput)]
@@ -201,7 +201,7 @@ struct IntoProtoBufEnumVariant {
 struct IntoProtoBufInput {
     ident: Ident,
     data: darling::ast::Data<IntoProtoBufEnumVariant, IntoProtoBufStructField>,
-    other_type: Path,
+    proto_buf_type: Path,
     enum_type: Option<Path>,
     #[darling(default)]
     option_all: bool,

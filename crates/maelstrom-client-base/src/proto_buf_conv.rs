@@ -434,61 +434,61 @@ proto_struct_enum_conversion!(proto::Layer, proto::layer::Layer, layer);
 remote_derive!(
     UserId,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = u32, try_from_into)
+    proto(proto_buf_type = u32, try_from_into)
 );
 
 remote_derive!(
     GroupId,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = u32, try_from_into)
+    proto(proto_buf_type = u32, try_from_into)
 );
 
 remote_derive!(
     Timeout,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = u32, try_from_into)
+    proto(proto_buf_type = u32, try_from_into)
 );
 
 remote_derive!(
     ClientJobId,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = u32, try_from_into)
+    proto(proto_buf_type = u32, try_from_into)
 );
 
 remote_derive!(
     JobDevice,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::JobDevice")
+    proto(proto_buf_type = "proto::JobDevice")
 );
 
 remote_derive!(
     JobStatus,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::job_completed::Status")
+    proto(proto_buf_type = "proto::job_completed::Status")
 );
 
 remote_derive!(
     JobNetwork,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::JobNetwork")
+    proto(proto_buf_type = "proto::JobNetwork")
 );
 
 remote_derive!(
     JobEffects,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::JobEffects", option_all)
+    proto(proto_buf_type = "proto::JobEffects", option_all)
 );
 
 remote_derive!(
     WindowSize,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::WindowSize")
+    proto(proto_buf_type = "proto::WindowSize")
 );
 
 remote_derive!(
     JobTty,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::JobTty"),
+    proto(proto_buf_type = "proto::JobTty"),
     @window_size: proto(option)
 );
 
@@ -502,14 +502,14 @@ remote_derive!(
 remote_derive!(
     JobMount,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::JobMount", enum_type = "proto::job_mount::Mount"),
-    @Bind: proto(other_type = "proto::BindMount"),
-    @Devices: proto(other_type = "proto::DevicesMount"),
-    @Devpts: proto(other_type = "proto::DevptsMount"),
-    @Mqueue: proto(other_type = "proto::MqueueMount"),
-    @Proc: proto(other_type = "proto::ProcMount"),
-    @Sys: proto(other_type = "proto::SysMount"),
-    @Tmp: proto(other_type = "proto::TmpMount"),
+    proto(proto_buf_type = "proto::JobMount", enum_type = "proto::job_mount::Mount"),
+    @Bind: proto(proto_buf_type = "proto::BindMount"),
+    @Devices: proto(proto_buf_type = "proto::DevicesMount"),
+    @Devpts: proto(proto_buf_type = "proto::DevptsMount"),
+    @Mqueue: proto(proto_buf_type = "proto::MqueueMount"),
+    @Proc: proto(proto_buf_type = "proto::ProcMount"),
+    @Sys: proto(proto_buf_type = "proto::SysMount"),
+    @Tmp: proto(proto_buf_type = "proto::TmpMount"),
 );
 
 proto_struct_enum_conversion!(proto::JobMount, proto::job_mount::Mount, mount);
@@ -517,8 +517,11 @@ proto_struct_enum_conversion!(proto::JobMount, proto::job_mount::Mount, mount);
 remote_derive!(
     JobRootOverlay,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::JobRootOverlay", enum_type = "proto::job_root_overlay::Overlay"),
-    @Local: proto(other_type = "proto::LocalJobRootOverlay"),
+    proto(
+        proto_buf_type = "proto::JobRootOverlay",
+        enum_type = "proto::job_root_overlay::Overlay"
+    ),
+    @Local: proto(proto_buf_type = "proto::LocalJobRootOverlay"),
 );
 
 proto_struct_enum_conversion!(
@@ -530,8 +533,11 @@ proto_struct_enum_conversion!(
 remote_derive!(
     JobOutputResult,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::JobOutputResult", enum_type = "proto::job_output_result::Result"),
-    @Truncated: proto(other_type = "proto::JobOutputResultTruncated"),
+    proto(
+        proto_buf_type = "proto::JobOutputResult",
+        enum_type = "proto::job_output_result::Result"
+    ),
+    @Truncated: proto(proto_buf_type = "proto::JobOutputResultTruncated"),
 );
 
 proto_struct_enum_conversion!(
@@ -544,7 +550,7 @@ remote_derive!(
     JobOutcome,
     (IntoProtoBuf, TryFromProtoBuf),
     proto(
-        other_type = "proto::JobOutcome",
+        proto_buf_type = "proto::JobOutcome",
         enum_type = "proto::job_outcome::Outcome"
     ),
 );
@@ -554,7 +560,7 @@ proto_struct_enum_conversion!(proto::JobOutcome, proto::job_outcome::Outcome, ou
 remote_derive!(
     JobCompleted,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = "proto::JobCompleted", option_all),
+    proto(proto_buf_type = "proto::JobCompleted", option_all),
 );
 
 impl IntoProtoBuf for maelstrom_base::JobError<String> {
@@ -650,25 +656,25 @@ impl TryFromProtoBuf for EnumMap<maelstrom_base::stats::JobState, u64> {
 remote_derive!(
     BrokerAddr,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = String, try_from_into),
+    proto(proto_buf_type = String, try_from_into),
 );
 
 remote_derive!(
     CacheSize,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = u64, try_from_into),
+    proto(proto_buf_type = u64, try_from_into),
 );
 
 remote_derive!(
     InlineLimit,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = u64, try_from_into),
+    proto(proto_buf_type = u64, try_from_into),
 );
 
 remote_derive!(
     Slots,
     (IntoProtoBuf, TryFromProtoBuf),
-    proto(other_type = u32, try_from_into),
+    proto(proto_buf_type = u32, try_from_into),
 );
 
 impl<'a, T> IntoProtoBuf for &'a maelstrom_util::root::Root<T> {
