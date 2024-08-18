@@ -26,7 +26,7 @@ use syn::{parse_macro_input, DeriveInput, Item};
 ///
 /// field attributes:
 /// - `option` / `default` Indicates that this field is wrapped in an `Option` in the protobuf
-/// type. When converting the value will be wrapped in `Some`.
+///   type. When converting the value will be wrapped in `Some`.
 #[proc_macro_derive(IntoProtoBuf, attributes(proto))]
 pub fn into_proto_buf(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -61,9 +61,9 @@ pub fn into_proto_buf_remote_derive(input: TokenStream) -> TokenStream {
 ///
 /// field attributes:
 /// - `option` Indicates that this field is wrapped in an `Option` in the protobuf type. An error
-/// will occur during conversion if `None` is encoundered.
+///   will occur during conversion if `None` is encoundered.
 /// - `default` Indicates that this field is wrapped in an `Option` in the protobuf type. If `None`
-/// is encountered, the value of [`std::default::Default::default()`] will be used.
+///   is encountered, the value of [`std::default::Default::default()`] will be used.
 #[proc_macro_derive(TryFromProtoBuf, attributes(proto))]
 pub fn try_from_proto_buf(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
