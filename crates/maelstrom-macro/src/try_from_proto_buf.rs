@@ -237,11 +237,7 @@ struct TryFromProtoBufEnumVariant {
 struct TryFromProtoBufInput {
     ident: Ident,
     data: darling::ast::Data<TryFromProtoBufEnumVariant, TryFromProtoBufStructField>,
-    /// This is the protobuf type we are converting from
     other_type: Path,
-    /// If the protobuf type isn't an enum, but instead a struct containing an enum, this can be
-    /// used to unpack the struct. It causes the code to use TryFrom on the protobuf to convert to
-    /// this enum type, and uses this type for the conversion.
     enum_type: Option<Path>,
     #[darling(default)]
     option_all: bool,

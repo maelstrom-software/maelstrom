@@ -201,11 +201,7 @@ struct IntoProtoBufEnumVariant {
 struct IntoProtoBufInput {
     ident: Ident,
     data: darling::ast::Data<IntoProtoBufEnumVariant, IntoProtoBufStructField>,
-    /// This is the protobuf type we are converting from
     other_type: Path,
-    /// If the protobuf type isn't an enum, but instead a struct containing an enum, this can be
-    /// used convert the resulting enum into the struct. It causes the code to generate this type
-    /// and then call `From` on it to convert it to the protobuf type.
     enum_type: Option<Path>,
     #[darling(default)]
     option_all: bool,
