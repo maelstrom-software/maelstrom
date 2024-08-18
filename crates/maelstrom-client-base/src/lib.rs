@@ -157,7 +157,7 @@ impl slog::KV for SimpleKV {
 // |_|  \___|\__, |\__,_|\___||___/\__/_/ |_|  \___||___/ .__/ \___/|_| |_|___/\___|
 //              |_|                                     |_|
 
-#[derive(IntoProtoBuf, TryFromProtoBuf)]
+#[derive(Debug, IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::StartRequest")]
 pub struct StartRequest {
     pub broker_addr: Option<BrokerAddr>,

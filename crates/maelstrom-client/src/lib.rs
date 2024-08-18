@@ -232,17 +232,7 @@ impl Client {
             Ok(tonic::Response::new(proto::Void {}))
         })?;
 
-        slog::debug!(s.log, "client sending start";
-            "broker_addr" => ?broker_addr,
-            "project_dir" => ?project_dir.as_ref(),
-            "state_dir" => ?state_dir.as_ref(),
-            "cache_dir" => ?cache_dir.as_ref(),
-            "container_image_depot_cache_dir" => ?container_image_depot_dir.as_ref(),
-            "cache_size" => ?cache_size,
-            "inline_limit" => ?inline_limit,
-            "slots" => ?slots,
-        );
-        let msg = StartRequest {
+        let req = StartRequest {
             broker_addr,
             project_dir: project_dir.as_ref().to_owned(),
             state_dir: state_dir.as_ref().to_owned(),
@@ -252,9 +242,11 @@ impl Client {
             inline_limit,
             slots,
             accept_invalid_remote_container_tls_certs,
-        }
-        .into_proto_buf();
-        s.send_sync(|mut client| async move { client.start(msg).await })?;
+        };
+        slog::debug!(s.log, "client sending start"; "request" => ?req);
+
+        let req = req.into_proto_buf();
+        s.send_sync(|mut client| async move { client.start(req).await })?;
         slog::debug!(s.log, "client completed start");
 
         Ok(s)
