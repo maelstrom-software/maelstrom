@@ -36,7 +36,7 @@ pub enum WorkerToBroker {
     JobStatusUpdate(JobId, JobWorkerStatus),
 }
 
-/// Message sent from the broker to a client. The broker won't send a message until it has recevied
+/// Message sent from the broker to a client. The broker won't send a message until it has received
 /// a [`Hello`] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BrokerToClient {
