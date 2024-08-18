@@ -12,7 +12,7 @@ from .items_pb2 import (
     JobMount,
     JobNetwork,
     JobSpec,
-    Layer,
+    LayerSpec,
     PathsLayer,
     PrefixOptions,
     ProcMount,

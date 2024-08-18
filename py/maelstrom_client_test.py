@@ -6,7 +6,7 @@ from maelstrom_client import (
     ContainerRef,
     ContainerSpec,
     JobSpec,
-    Layer,
+    LayerSpec,
     PathsLayer,
     PrefixOptions,
     TarLayer,
@@ -28,7 +28,7 @@ def test_simple_job(fixture: Fixture, tmp_path: Path) -> None:
     layers = []
 
     tar_layer = TarLayer(path="crates/maelstrom-worker/src/executor-test-deps.tar")
-    layers.append(Layer(tar=tar_layer))
+    layers.append(LayerSpec(tar=tar_layer))
 
     test_script = os.path.join(tmp_path, "test.py")
     with open(test_script, "w") as f:
@@ -36,7 +36,7 @@ def test_simple_job(fixture: Fixture, tmp_path: Path) -> None:
 
     options = PrefixOptions(strip_prefix=str(tmp_path))
     layers.append(
-        Layer(paths=PathsLayer(paths=[test_script], prefix_options=options))
+        LayerSpec(paths=PathsLayer(paths=[test_script], prefix_options=options))
     )
 
     container = ContainerSpec(working_directory="/", layers=layers)

@@ -9,7 +9,7 @@ use anyhow::Result;
 use maelstrom_base::{
     stats::JobState, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobStatus, Utf8PathBuf,
 };
-use maelstrom_client::spec::{JobSpec, Layer};
+use maelstrom_client::spec::{JobSpec, LayerSpec};
 use maelstrom_util::{fs::Fs, root::RootBuf};
 use pretty_assertions::assert_eq;
 use std::{
@@ -362,7 +362,7 @@ impl CollectTests for TestCollector {
         _artifact: &FakeTestArtifact,
         _metadata: &TestMetadata,
         _ind: &ui::UiSender,
-    ) -> Result<Vec<Layer>> {
+    ) -> Result<Vec<LayerSpec>> {
         Ok(vec![])
     }
 

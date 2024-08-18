@@ -6,7 +6,7 @@ use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
-use maelstrom_client_base::spec::{JobSpec, Layer, PrefixOptions, SymlinkSpec};
+use maelstrom_client_base::spec::{JobSpec, LayerSpec, PrefixOptions, SymlinkSpec};
 use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
 use regex::Regex;
 use std::panic::Location;
@@ -28,7 +28,7 @@ fn spawn_bg_proc() -> ClientBgProcess {
 
 struct ClientFixture {
     client: Client,
-    layers: Vec<Layer>,
+    layers: Vec<LayerSpec>,
     self_path: Utf8PathBuf,
     test_line: u32,
     temp_dir: tempfile::TempDir,
@@ -70,7 +70,7 @@ impl ClientFixture {
         let mut layers = vec![];
         let self_path = fs.read_link("/proc/self/exe").unwrap();
         let sos = read_shared_libraries(&self_path).unwrap();
-        layers.push(Layer::Paths {
+        layers.push(LayerSpec::Paths {
             paths: sos
                 .into_iter()
                 .map(|p| Utf8PathBuf::from_path_buf(p).unwrap())
@@ -83,7 +83,7 @@ impl ClientFixture {
         });
 
         let self_path = Utf8PathBuf::from_path_buf(self_path).unwrap();
-        layers.push(Layer::Paths {
+        layers.push(LayerSpec::Paths {
             paths: vec![self_path.clone()],
             prefix_options: PrefixOptions::default(),
         });
@@ -97,7 +97,7 @@ impl ClientFixture {
         }
     }
 
-    fn run_job(&self, added_layers: Vec<Layer>) -> String {
+    fn run_job(&self, added_layers: Vec<LayerSpec>) -> String {
         let mut layers = self.layers.clone();
         layers.extend(added_layers);
         let spec = JobSpec::new(self.self_path.clone(), layers)
@@ -166,7 +166,7 @@ fn tar_test(fix: &ClientFixture) {
         .unwrap();
     tar.finish().unwrap();
 
-    let layer = Layer::Tar {
+    let layer = LayerSpec::Tar {
         path: Utf8PathBuf::from_path_buf(tar_path.clone()).unwrap(),
     };
     let output = fix.run_job(vec![layer]);
@@ -180,7 +180,7 @@ fn tar_test_job() {
     println!("{contents}");
 }
 
-fn paths_test(fix: &ClientFixture, create: &[&str], layer: Layer, expected: &[&str]) {
+fn paths_test(fix: &ClientFixture, create: &[&str], layer: LayerSpec, expected: &[&str]) {
     let root = Utf8PathBuf::from_path_buf(fix.temp_dir.path().into()).unwrap();
 
     for path in create {
@@ -228,7 +228,7 @@ fn paths_test_strip_prefix(fix: &ClientFixture) {
     paths_test(
         fix,
         &["project/a/foo.bin", "project/a/bar.bin"],
-        Layer::Paths {
+        LayerSpec::Paths {
             paths: vec!["a/foo.bin".into(), "a/bar.bin".into()],
             prefix_options: PrefixOptions {
                 strip_prefix: Some("a".into()),
@@ -243,7 +243,7 @@ fn paths_test_prepend_prefix(fix: &ClientFixture) {
     paths_test(
         fix,
         &["project/foo2.bin", "project/bar2.bin"],
-        Layer::Paths {
+        LayerSpec::Paths {
             paths: vec!["foo2.bin".into(), "bar2.bin".into()],
             prefix_options: PrefixOptions {
                 prepend_prefix: Some("/baz".into()),
@@ -259,7 +259,7 @@ fn paths_test_absolute(fix: &ClientFixture) {
     paths_test(
         fix,
         &["foo3.bin", "bar3.bin"],
-        Layer::Paths {
+        LayerSpec::Paths {
             paths: vec![root.join("foo3.bin"), root.join("bar3.bin")],
             prefix_options: PrefixOptions {
                 strip_prefix: Some(root),
@@ -274,7 +274,7 @@ fn glob_test(fix: &ClientFixture) {
     paths_test(
         fix,
         &["project/foo.txt", "project/bar.bin"],
-        Layer::Glob {
+        LayerSpec::Glob {
             glob: "*.txt".into(),
             prefix_options: Default::default(),
         },
@@ -286,7 +286,7 @@ fn stubs_test(fix: &ClientFixture) {
     paths_test(
         fix,
         &[],
-        Layer::Stubs {
+        LayerSpec::Stubs {
             stubs: vec!["/foo/{bar,baz}".into(), "/foo/qux/".into()],
         },
         &["/foo/", "/foo/bar", "/foo/baz", "/foo/qux/"],
@@ -297,7 +297,7 @@ fn symlinks_test(fix: &ClientFixture) {
     paths_test(
         fix,
         &[],
-        Layer::Symlinks {
+        LayerSpec::Symlinks {
             symlinks: vec![SymlinkSpec {
                 link: "/foo".into(),
                 target: "/bar".into(),

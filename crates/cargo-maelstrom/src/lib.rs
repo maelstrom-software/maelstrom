@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 use cargo_metadata::Target as CargoTarget;
 use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{
-    spec::{Layer, PrefixOptions},
+    spec::{LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
@@ -308,8 +308,8 @@ impl Iterator for CargoTestArtifactStream {
     }
 }
 
-fn path_layer_for_binary(binary_path: &Path) -> Result<Layer> {
-    Ok(Layer::Paths {
+fn path_layer_for_binary(binary_path: &Path) -> Result<LayerSpec> {
+    Ok(LayerSpec::Paths {
         paths: vec![binary_path.to_path_buf().try_into()?],
         prefix_options: PrefixOptions {
             strip_prefix: Some(binary_path.parent().unwrap().to_path_buf().try_into()?),
@@ -318,8 +318,8 @@ fn path_layer_for_binary(binary_path: &Path) -> Result<Layer> {
     })
 }
 
-fn so_layer_for_binary(binary_path: &Path) -> Result<Layer> {
-    Ok(Layer::SharedLibraryDependencies {
+fn so_layer_for_binary(binary_path: &Path) -> Result<LayerSpec> {
+    Ok(LayerSpec::SharedLibraryDependencies {
         binary_paths: vec![binary_path.to_owned().try_into()?],
         prefix_options: PrefixOptions {
             follow_symlinks: true,
@@ -392,7 +392,7 @@ impl CollectTests for CargoTestCollector {
         artifact: &CargoTestArtifact,
         metadata: &TestMetadata,
         _ind: &UiSender,
-    ) -> Result<Vec<Layer>> {
+    ) -> Result<Vec<LayerSpec>> {
         let mut layers = vec![path_layer_for_binary(artifact.path())?];
 
         if metadata.include_shared_libraries() {

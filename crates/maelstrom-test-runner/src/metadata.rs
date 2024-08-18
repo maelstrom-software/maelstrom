@@ -9,7 +9,7 @@ use maelstrom_base::{
     UserId, Utf8PathBuf,
 };
 use maelstrom_client::{
-    spec::{EnvironmentSpec, ImageSpec, Layer, PossiblyImage},
+    spec::{EnvironmentSpec, ImageSpec, LayerSpec, PossiblyImage},
     ProjectDir,
 };
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
@@ -44,7 +44,7 @@ impl<TestFilterT> Default for AllMetadata<TestFilterT> {
             group: None,
             timeout: None,
             // Create directories and files for mounting special file-systems and device files
-            layers: Some(PossiblyImage::Explicit(vec![Layer::Stubs {
+            layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Stubs {
                 stubs: vec![
                     "/{proc,sys,tmp}/".into(),
                     "/dev/{full,null,random,urandom,zero}".into(),
@@ -109,7 +109,7 @@ pub struct TestMetadata {
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
     pub timeout: Option<Timeout>,
-    pub layers: Vec<Layer>,
+    pub layers: Vec<LayerSpec>,
     pub environment: Vec<EnvironmentSpec>,
     pub mounts: Vec<JobMount>,
     pub ignore: bool,

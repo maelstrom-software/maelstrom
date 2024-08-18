@@ -172,7 +172,7 @@ pub fn environment_eval(
 #[proto(proto_buf_type = "proto::ContainerSpec")]
 pub struct ContainerSpec {
     pub image: Option<ImageSpec>,
-    pub layers: Vec<Layer>,
+    pub layers: Vec<LayerSpec>,
     #[proto(default)]
     pub root_overlay: JobRootOverlay,
     pub environment: Vec<EnvironmentSpec>,
@@ -224,7 +224,7 @@ pub struct JobSpec {
 }
 
 impl JobSpec {
-    pub fn new(program: impl Into<String>, layers: impl Into<Vec<Layer>>) -> Self {
+    pub fn new(program: impl Into<String>, layers: impl Into<Vec<LayerSpec>>) -> Self {
         JobSpec {
             container: ContainerSpec {
                 layers: layers.into(),
@@ -345,9 +345,12 @@ pub struct SymlinkSpec {
 #[derive(
     Clone, Debug, Deserialize, Eq, Hash, IntoProtoBuf, PartialEq, Serialize, TryFromProtoBuf,
 )]
-#[proto(proto_buf_type = "proto::Layer", enum_type = "proto::layer::Layer")]
+#[proto(
+    proto_buf_type = "proto::LayerSpec",
+    enum_type = "proto::layer_spec::Spec"
+)]
 #[serde(untagged, deny_unknown_fields)]
-pub enum Layer {
+pub enum LayerSpec {
     #[proto(proto_buf_type = proto::TarLayer)]
     Tar {
         #[serde(rename = "tar")]
@@ -381,7 +384,7 @@ pub enum Layer {
     },
 }
 
-impl Layer {
+impl LayerSpec {
     pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
         match self {
             Self::Tar { path } => *path = replace_template_vars(path.as_str(), vars)?.into(),
@@ -516,11 +519,11 @@ impl ConvertedImage {
 
     /// Return an iterator of layers for the image. If there is no image, the iterator will be
     /// empty.
-    pub fn layers(&self) -> Result<Vec<Layer>> {
+    pub fn layers(&self) -> Result<Vec<LayerSpec>> {
         self.layers
             .iter()
             .map(|p| {
-                Ok(Layer::Tar {
+                Ok(LayerSpec::Tar {
                     path: Utf8PathBuf::from_path_buf(p.to_owned()).map_err(|_| {
                         anyhow!("image {} has a non-UTF-8 layer path {p:?}", self.name())
                     })?,

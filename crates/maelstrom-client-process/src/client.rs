@@ -21,7 +21,7 @@ use maelstrom_base::{
 use maelstrom_client_base::{
     spec::{
         environment_eval, std_env_lookup, ContainerRef, ContainerSpec, ConvertedImage, ImageConfig,
-        JobSpec, Layer,
+        JobSpec, LayerSpec,
     },
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, StateDir,
     MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
@@ -138,7 +138,7 @@ impl<'a> maelstrom_util::manifest::DataUpload for &'a Uploader {
 }
 
 impl ClientState {
-    fn build_layer(&self, layer: Layer) {
+    fn build_layer(&self, layer: LayerSpec) {
         let uploader = Uploader {
             log: self.log.clone(),
             local_broker_sender: self.local_broker_sender.clone(),
@@ -158,7 +158,10 @@ impl ClientState {
         });
     }
 
-    async fn get_layers(&self, layers: Vec<Layer>) -> Result<Vec<(Sha256Digest, ArtifactType)>> {
+    async fn get_layers(
+        &self,
+        layers: Vec<LayerSpec>,
+    ) -> Result<Vec<(Sha256Digest, ArtifactType)>> {
         debug!(self.log, "get_layers"; "layers" => ?layers);
 
         let mut locked = self.locked.lock().await;

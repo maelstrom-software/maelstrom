@@ -36,7 +36,7 @@ pub enum ContainerRef {
 pub struct ContainerSpec {
     pub image: Option<ImageSpec>,
     pub environment: Vec<EnvironmentSpec>,
-    pub layers: Vec<Layer>,
+    pub layers: Vec<LayerSpec>,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
@@ -282,7 +282,7 @@ execvpe](https://man7.org/linux/man-pages/man3/exec.3.html).
 ```rust
 pub struct JobSpec {
     // ...
-    pub layers: Vec<Layer>,
+    pub layers: Vec<LayerSpec>,
     // ...
 }
 ```

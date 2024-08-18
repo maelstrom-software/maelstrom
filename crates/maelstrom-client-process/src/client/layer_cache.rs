@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use maelstrom_base::{ArtifactType, Sha256Digest};
-use maelstrom_client_base::spec::Layer;
+use maelstrom_client_base::spec::LayerSpec;
 use std::collections::HashMap;
 use tokio::sync::watch;
 
@@ -55,7 +55,7 @@ pub enum CacheResult {
 
 #[derive(Default)]
 pub struct LayerCache {
-    cache: HashMap<Layer, CacheEntry>,
+    cache: HashMap<LayerSpec, CacheEntry>,
 }
 
 impl LayerCache {
@@ -63,7 +63,7 @@ impl LayerCache {
         Default::default()
     }
 
-    pub fn get(&mut self, layer: &Layer) -> CacheResult {
+    pub fn get(&mut self, layer: &LayerSpec) -> CacheResult {
         match self.cache.get(layer) {
             Some(CacheEntry::Pending(r)) => CacheResult::Wait(r.subscribe()),
             Some(CacheEntry::Cached(l)) => CacheResult::Success(l.clone()),
@@ -76,7 +76,7 @@ impl LayerCache {
         }
     }
 
-    pub fn fill(&mut self, layer: &Layer, res: Result<BuiltLayer>) {
+    pub fn fill(&mut self, layer: &LayerSpec, res: Result<BuiltLayer>) {
         if let Some(CacheEntry::Pending(r)) = self.cache.remove(layer) {
             r.send(&res);
             if let Ok(cached) = res {

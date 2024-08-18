@@ -9,7 +9,7 @@ use maelstrom_base::{
     Utf8PathBuf,
 };
 use maelstrom_client::{
-    spec::{Layer, PrefixOptions},
+    spec::{LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ImageSpec, JobSpec, ProjectDir, StateDir,
 };
@@ -216,14 +216,14 @@ impl<'client> PytestTestCollector<'client> {
 
         // Run a local job to install the packages
         let layers = vec![
-            Layer::Paths {
+            LayerSpec::Paths {
                 paths: vec![source_req_path.clone().try_into()?],
                 prefix_options: Default::default(),
             },
-            Layer::Stubs {
+            LayerSpec::Stubs {
                 stubs: vec!["/dev/null".into()],
             },
-            Layer::Paths {
+            LayerSpec::Paths {
                 paths: vec![resolv_conf.clone().try_into()?],
                 prefix_options: PrefixOptions {
                     strip_prefix: Some(resolv_conf.parent().unwrap().to_owned().try_into()?),
@@ -422,7 +422,7 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         _artifact: &PytestTestArtifact,
         metadata: &TestMetadata,
         ind: &UiSender,
-    ) -> Result<Vec<Layer>> {
+    ) -> Result<Vec<LayerSpec>> {
         match &metadata.image {
             Some(image) => {
                 let image_name: ImageName = image.name.parse()?;
@@ -435,7 +435,7 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
 
                 let packages_path = self.get_pip_packages(image.clone(), &ref_, ind)?;
                 let packages_path = packages_path.strip_prefix(&self.project_dir).unwrap();
-                Ok(vec![Layer::Glob {
+                Ok(vec![LayerSpec::Glob {
                     glob: format!("{packages_path}/**"),
                     prefix_options: PrefixOptions {
                         strip_prefix: Some(packages_path.into()),

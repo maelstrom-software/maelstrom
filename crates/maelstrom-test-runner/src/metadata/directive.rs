@@ -1,6 +1,6 @@
 use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
-use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
+use maelstrom_client::spec::{incompatible, Image, ImageUse, LayerSpec, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{
     collections::BTreeMap,
@@ -20,8 +20,8 @@ pub struct TestDirective<TestFilterT> {
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
     pub timeout: Option<Option<Timeout>>,
-    pub layers: Option<PossiblyImage<Vec<Layer>>>,
-    pub added_layers: Vec<Layer>,
+    pub layers: Option<PossiblyImage<Vec<LayerSpec>>>,
+    pub added_layers: Vec<LayerSpec>,
     pub mounts: Option<Vec<JobMountForTomlAndJson>>,
     pub added_mounts: Vec<JobMountForTomlAndJson>,
     pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
@@ -823,7 +823,7 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![Layer::Stubs {
+                layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Stubs {
                     stubs: vec!["/foo/bar".into(), "/bin/{baz,qux}/".into()]
                 }])),
                 ..Default::default()
@@ -841,7 +841,7 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![Layer::Symlinks {
+                layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Symlinks {
                     symlinks: vec![SymlinkSpec {
                         link: "/hi".into(),
                         target: "/there".into()

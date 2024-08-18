@@ -53,8 +53,8 @@ message SharedLibraryDependenciesLayer {
     PrefixOptions prefix_options = 2;
 }
 
-message Layer {
-    oneof layer {
+message LayerSpec {
+    oneof spec {
         TarLayer tar = 1;
         GlobLayer glob = 2;
         PathsLayer paths = 3;
@@ -160,7 +160,7 @@ message JobTty {
 
 message ContainerSpec {
     optional ImageSpec image = 1;
-    repeated Layer layers = 2;
+    repeated LayerSpec layers = 2;
     optional JobRootOverlay root_overlay = 3;
     repeated EnvironmentSpec environment = 4;
     optional string working_directory = 5;

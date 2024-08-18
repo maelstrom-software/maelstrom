@@ -11,7 +11,7 @@ use maelstrom_base::{
     ArtifactType, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client_base::{
-    spec::{Layer, PrefixOptions, SymlinkSpec},
+    spec::{LayerSpec, PrefixOptions, SymlinkSpec},
     CacheDir, ProjectDir, MANIFEST_DIR, SO_LISTINGS_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_util::{
@@ -245,12 +245,12 @@ impl LayerBuilder {
 
     pub async fn build_layer(
         &self,
-        layer: Layer,
+        layer: LayerSpec,
         mut data_upload: impl DataUpload,
     ) -> Result<(PathBuf, ArtifactType)> {
         Ok(match layer {
-            Layer::Tar { path } => (path.into_std_path_buf(), ArtifactType::Tar),
-            Layer::Paths {
+            LayerSpec::Tar { path } => (path.into_std_path_buf(), ArtifactType::Tar),
+            LayerSpec::Paths {
                 paths,
                 prefix_options,
             } => {
@@ -263,7 +263,7 @@ impl LayerBuilder {
                     .await?;
                 (manifest_path, ArtifactType::Manifest)
             }
-            Layer::Glob {
+            LayerSpec::Glob {
                 glob,
                 prefix_options,
             } => {
@@ -282,15 +282,15 @@ impl LayerBuilder {
                     .await?;
                 (manifest_path, ArtifactType::Manifest)
             }
-            Layer::Stubs { stubs } => {
+            LayerSpec::Stubs { stubs } => {
                 let manifest_path = self.build_stub_manifest(stubs).await?;
                 (manifest_path, ArtifactType::Manifest)
             }
-            Layer::Symlinks { symlinks } => {
+            LayerSpec::Symlinks { symlinks } => {
                 let manifest_path = self.build_symlink_manifest(symlinks).await?;
                 (manifest_path, ArtifactType::Manifest)
             }
-            Layer::SharedLibraryDependencies {
+            LayerSpec::SharedLibraryDependencies {
                 binary_paths,
                 prefix_options,
             } => {
@@ -463,8 +463,8 @@ mod tests {
             }
         }
 
-        async fn build_layer(&self, layer: Layer) -> PathBuf {
-            let is_tar = matches!(layer, Layer::Tar { .. });
+        async fn build_layer(&self, layer: LayerSpec) -> PathBuf {
+            let is_tar = matches!(layer, LayerSpec::Tar { .. });
 
             let (artifact_path, artifact_type) = self
                 .builder
@@ -493,7 +493,7 @@ mod tests {
         fix.fs.write(&test_artifact, b"hello world").await.unwrap();
 
         let manifest = fix
-            .build_layer(Layer::Paths {
+            .build_layer(LayerSpec::Paths {
                 paths: vec![test_artifact.try_into().unwrap()],
                 prefix_options: Default::default(),
             })
@@ -513,7 +513,7 @@ mod tests {
         fix.fs.write(&test_artifact, b"hi").await.unwrap();
 
         let manifest = fix
-            .build_layer(Layer::Paths {
+            .build_layer(LayerSpec::Paths {
                 paths: vec![test_artifact.try_into().unwrap()],
                 prefix_options: Default::default(),
             })
@@ -544,7 +544,7 @@ mod tests {
         fix.fs.write(&artifact_path, b"hello world").await.unwrap();
 
         let manifest = fix
-            .build_layer(Layer::Paths {
+            .build_layer(LayerSpec::Paths {
                 paths: vec![input_path.try_into().unwrap()],
                 prefix_options: prefix_options_factory(&fix.artifact_dir),
             })
@@ -684,7 +684,7 @@ mod tests {
         }
 
         let manifest = fix
-            .build_layer(Layer::Glob {
+            .build_layer(LayerSpec::Glob {
                 glob: glob_factory(&fix.artifact_dir),
                 prefix_options: prefix_options_factory(&fix.artifact_dir),
             })
@@ -781,7 +781,7 @@ mod tests {
     async fn glob_no_files_relative() {
         let fix = Fixture::new().await;
         let manifest = fix
-            .build_layer(Layer::Glob {
+            .build_layer(LayerSpec::Glob {
                 glob: "*.txt".into(),
                 prefix_options: Default::default(),
             })
@@ -792,7 +792,7 @@ mod tests {
     async fn stubs_test(path: &str, expected: Vec<ExpectedManifestEntry>) {
         let fix = Fixture::new().await;
         let manifest = fix
-            .build_layer(Layer::Stubs {
+            .build_layer(LayerSpec::Stubs {
                 stubs: vec![path.to_owned()],
             })
             .await;
@@ -894,7 +894,7 @@ mod tests {
     async fn symlink_test() {
         let fix = Fixture::new().await;
         let manifest = fix
-            .build_layer(Layer::Symlinks {
+            .build_layer(LayerSpec::Symlinks {
                 symlinks: vec![SymlinkSpec {
                     link: utf8_path_buf!("/foo"),
                     target: utf8_path_buf!("/bar"),
@@ -929,7 +929,7 @@ mod tests {
         let ld_linux_hash = fix.hash_file(ld_linux_path.as_std_path()).await;
 
         let manifest = fix
-            .build_layer(Layer::SharedLibraryDependencies {
+            .build_layer(LayerSpec::SharedLibraryDependencies {
                 binary_paths: vec![test_binary.into()],
                 prefix_options: PrefixOptions {
                     follow_symlinks: true,

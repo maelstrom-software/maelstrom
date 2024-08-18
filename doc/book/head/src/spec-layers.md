@@ -10,7 +10,7 @@ For this reason, Maelstrom provides some conveniences for creating layers based
 on specifications. A layer specification looks like this:
 
 ```rust
-pub enum Layer {
+pub enum LayerSpec {
     Tar {
         path: Utf8PathBuf,
     },
@@ -35,7 +35,7 @@ We will cover each layer type below.
 
 ## `Tar`
 ```rust
-pub enum Layer {
+pub enum LayerSpec {
     Tar {
         path: Utf8PathBuf,
     },
@@ -97,7 +97,7 @@ Maelstrom will put the file in the container at `/test/layers/a/a.bin`.
 
 ## `Glob`
 ```rust
-pub enum Layer {
+pub enum LayerSpec {
     // ...
     Glob {
         glob: String,
@@ -117,7 +117,7 @@ The `prefix_options` are applied to every matching path, as [described above](#p
 
 ## `Paths`
 ```rust
-pub enum Layer {
+pub enum LayerSpec {
     // ...
     Paths {
         paths: Vec<Utf8PathBuf>,
@@ -143,7 +143,7 @@ type.
 
 ## `Stubs`
 ```rust
-pub enum Layer {
+pub enum LayerSpec {
     // ...
     Stubs { stubs: Vec<String> },
     // ...
@@ -174,7 +174,7 @@ result in a layer with the following files and directories:
 
 ## `Symlinks`
 ```rust
-pub enum Layer {
+pub enum LayerSpec {
     // ...
     Symlinks { symlinks: Vec<SymlinkSpec> },
 }
@@ -191,7 +191,7 @@ be created, as necessary.
 
 ## `SharedLibraryDependencies`
 ```rust
-pub enum Layer {
+pub enum LayerSpec {
     // ...
     SharedLibraryDependencies {
         binary_paths: Vec<Utf8PathBuf>,

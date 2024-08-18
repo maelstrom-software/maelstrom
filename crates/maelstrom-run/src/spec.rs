@@ -5,7 +5,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::spec::{
     incompatible, ContainerSpec, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment,
-    JobSpec, Layer, PossiblyImage,
+    JobSpec, LayerSpec, PossiblyImage,
 };
 use serde::de::Error as _;
 use serde::{de, Deserialize, Deserializer};
@@ -41,8 +41,8 @@ struct Job {
     arguments: Option<Vec<String>>,
     environment: Option<Vec<EnvironmentSpec>>,
     use_image_environment: bool,
-    layers: PossiblyImage<NonEmpty<Layer>>,
-    added_layers: Vec<Layer>,
+    layers: PossiblyImage<NonEmpty<LayerSpec>>,
+    added_layers: Vec<LayerSpec>,
     mounts: Option<Vec<JobMountForTomlAndJson>>,
     network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
@@ -55,7 +55,7 @@ struct Job {
 
 impl Job {
     #[cfg(test)]
-    fn new(program: Utf8PathBuf, layers: NonEmpty<Layer>) -> Self {
+    fn new(program: Utf8PathBuf, layers: NonEmpty<LayerSpec>) -> Self {
         Job {
             program,
             layers: PossiblyImage::Explicit(layers),

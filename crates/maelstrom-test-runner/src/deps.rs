@@ -2,7 +2,7 @@ use crate::{metadata::TestMetadata, ui};
 use anyhow::Result;
 use maelstrom_base::{ClientJobId, JobOutcomeResult, Utf8PathBuf};
 use maelstrom_client::{
-    spec::{JobSpec, Layer},
+    spec::{JobSpec, LayerSpec},
     IntrospectResponse,
 };
 use maelstrom_util::template::TemplateVars;
@@ -171,7 +171,7 @@ pub trait CollectTests {
         artifact: &Self::Artifact,
         metadata: &TestMetadata,
         ind: &ui::UiSender,
-    ) -> Result<Vec<Layer>>;
+    ) -> Result<Vec<LayerSpec>>;
 
     fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
         lines
