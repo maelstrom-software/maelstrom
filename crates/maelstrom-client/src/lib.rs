@@ -11,7 +11,7 @@ use futures::stream::StreamExt as _;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
-    IntoProtoBuf, IntoResult, TryFromProtoBuf,
+    AddContainerRequest, IntoProtoBuf, RunJobResponse, StartRequest, TryFromProtoBuf,
 };
 use maelstrom_linux::{self as linux, Pid};
 use maelstrom_util::{
@@ -174,11 +174,10 @@ fn map_tonic_error(error: tonic::Status) -> anyhow::Error {
     }
 }
 
-fn flatten_rpc_result<ProtRetT>(res: TonicResponse<ProtRetT>) -> Result<ProtRetT::Output>
-where
-    ProtRetT: IntoResult,
-{
-    res.map_err(map_tonic_error)?.into_inner().into_result()
+fn transform_rpc_response<RetT: TryFromProtoBuf>(
+    res: TonicResponse<<RetT as TryFromProtoBuf>::ProtoBufType>,
+) -> Result<RetT> {
+    TryFromProtoBuf::try_from_proto_buf(res.map_err(map_tonic_error)?.into_inner())
 }
 
 async fn handle_log_messages(
@@ -243,34 +242,38 @@ impl Client {
             "inline_limit" => ?inline_limit,
             "slots" => ?slots,
         );
-        let msg = proto::StartRequest {
-            broker_addr: broker_addr.into_proto_buf(),
-            project_dir: project_dir.as_ref().into_proto_buf(),
-            state_dir: state_dir.as_ref().into_proto_buf(),
-            cache_dir: cache_dir.as_ref().into_proto_buf(),
-            container_image_depot_dir: container_image_depot_dir.as_ref().into_proto_buf(),
-            cache_size: cache_size.into_proto_buf(),
-            inline_limit: inline_limit.into_proto_buf(),
-            slots: slots.into_proto_buf(),
-            accept_invalid_remote_container_tls_certs: accept_invalid_remote_container_tls_certs
-                .into_proto_buf(),
-        };
+        let msg = StartRequest {
+            broker_addr,
+            project_dir: project_dir.as_ref().to_owned(),
+            state_dir: state_dir.as_ref().to_owned(),
+            cache_dir: cache_dir.as_ref().to_owned(),
+            container_image_depot_dir: container_image_depot_dir.as_ref().to_owned(),
+            cache_size,
+            inline_limit,
+            slots,
+            accept_invalid_remote_container_tls_certs,
+        }
+        .into_proto_buf();
         s.send_sync(|mut client| async move { client.start(msg).await })?;
         slog::debug!(s.log, "client completed start");
 
         Ok(s)
     }
 
-    fn send_async<BuilderT, FutureT, ProtRetT>(
+    fn send_async<BuilderT, FutureT, RetT>(
         &self,
         builder: BuilderT,
-    ) -> Result<Receiver<Result<ProtRetT::Output>>>
+    ) -> Result<Receiver<Result<RetT>>>
     where
         BuilderT: FnOnce(ClientProcessClient<tonic::transport::Channel>) -> FutureT,
         BuilderT: Send + Sync + 'static,
-        FutureT: Future<Output = result::Result<tonic::Response<ProtRetT>, tonic::Status>> + Send,
-        ProtRetT: IntoResult,
-        ProtRetT::Output: Send + 'static,
+        FutureT: Future<
+                Output = result::Result<
+                    tonic::Response<<RetT as TryFromProtoBuf>::ProtoBufType>,
+                    tonic::Status,
+                >,
+            > + Send,
+        RetT: TryFromProtoBuf + Send + 'static,
     {
         let (send, recv) = std_mpsc::channel();
         self.requester
@@ -278,20 +281,24 @@ impl Client {
             .unwrap()
             .send(Box::new(move |client| {
                 Box::pin(async move {
-                    let _ = send.send(flatten_rpc_result(builder(client).await));
+                    let _ = send.send(transform_rpc_response(builder(client).await));
                 })
             }))
             .with_context(|| "sending RPC request to client process")?;
         Ok(recv)
     }
 
-    fn send_sync<BuilderT, FutureT, ProtRetT>(&self, builder: BuilderT) -> Result<ProtRetT::Output>
+    fn send_sync<BuilderT, FutureT, RetT>(&self, builder: BuilderT) -> Result<RetT>
     where
         BuilderT: FnOnce(ClientProcessClient<tonic::transport::Channel>) -> FutureT,
         BuilderT: Send + Sync + 'static,
-        FutureT: Future<Output = result::Result<tonic::Response<ProtRetT>, tonic::Status>> + Send,
-        ProtRetT: IntoResult,
-        ProtRetT::Output: Send + 'static,
+        FutureT: Future<
+                Output = result::Result<
+                    tonic::Response<<RetT as TryFromProtoBuf>::ProtoBufType>,
+                    tonic::Status,
+                >,
+            > + Send,
+        RetT: TryFromProtoBuf + Send + 'static,
     {
         self.send_async(builder)?
             .recv()
@@ -312,12 +319,11 @@ impl Client {
             .send(Box::new(move |mut client| {
                 Box::pin(async move {
                     let res = async move {
-                        let (client_job_id, result) =
-                            flatten_rpc_result(client.run_job(msg).await)?;
-                        Result::<_, anyhow::Error>::Ok((
-                            TryFromProtoBuf::try_from_proto_buf(client_job_id)?,
-                            TryFromProtoBuf::try_from_proto_buf(result)?,
-                        ))
+                        let RunJobResponse {
+                            client_job_id,
+                            result,
+                        } = transform_rpc_response(client.run_job(msg).await)?;
+                        Result::<_, anyhow::Error>::Ok((client_job_id, result))
                     }
                     .await;
                     task::spawn_blocking(move || handler(res));
@@ -337,19 +343,13 @@ impl Client {
     pub fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {
         self.send_sync(|mut client| async move {
             client
-                .add_container(proto::AddContainerRequest {
-                    name: name.into_proto_buf(),
-                    container: Some(container.into_proto_buf()),
-                })
+                .add_container(AddContainerRequest { name, container }.into_proto_buf())
                 .await
         })
     }
 
     pub fn introspect(&self) -> Result<IntrospectResponse> {
-        self.send_sync(move |mut client| async move {
-            let res = client.introspect(proto::Void {}).await?;
-            Ok(res.map(TryFromProtoBuf::try_from_proto_buf))
-        })
+        self.send_sync(move |mut client| async move { client.introspect(proto::Void {}).await })
     }
 }
 

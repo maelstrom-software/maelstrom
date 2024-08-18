@@ -75,6 +75,14 @@ impl IntoProtoBuf for () {
     }
 }
 
+impl TryFromProtoBuf for () {
+    type ProtoBufType = proto::Void;
+
+    fn try_from_proto_buf(_: proto::Void) -> Result<()> {
+        Ok(())
+    }
+}
+
 impl IntoProtoBuf for bool {
     type ProtoBufType = bool;
 
@@ -120,6 +128,22 @@ impl TryFromProtoBuf for u16 {
 
     fn try_from_proto_buf(v: u32) -> Result<Self> {
         Ok(v.try_into()?)
+    }
+}
+
+impl IntoProtoBuf for u32 {
+    type ProtoBufType = u32;
+
+    fn into_proto_buf(self) -> u32 {
+        self
+    }
+}
+
+impl TryFromProtoBuf for u32 {
+    type ProtoBufType = u32;
+
+    fn try_from_proto_buf(v: u32) -> Result<Self> {
+        Ok(v)
     }
 }
 

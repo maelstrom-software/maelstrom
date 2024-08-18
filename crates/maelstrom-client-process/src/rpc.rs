@@ -4,14 +4,8 @@ use anyhow::Result;
 use futures::{Stream, StreamExt as _};
 use maelstrom_client_base::{
     proto::{self, client_process_server::ClientProcess},
-    spec::ContainerSpec,
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntoProtoBuf, IntoResult, ProjectDir, StateDir,
+    AddContainerRequest, IntoProtoBuf, RunJobRequest, RunJobResponse, StartRequest,
     TryFromProtoBuf,
-};
-use maelstrom_container::ContainerImageDepotDir;
-use maelstrom_util::{
-    config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
-    root::RootBuf,
 };
 use std::pin::Pin;
 use std::{
@@ -68,24 +62,20 @@ impl ClientProcess for Handler {
 
     async fn start(&self, request: Request<proto::StartRequest>) -> TonicResponse<proto::Void> {
         async {
-            let request = request.into_inner();
+            let request: StartRequest = TryFromProtoBuf::try_from_proto_buf(request.into_inner())?;
             let log_sink = { self.log_sink.lock().unwrap().clone() };
             self.client
                 .start(
                     log_sink,
-                    Option::<BrokerAddr>::try_from_proto_buf(request.broker_addr)?,
-                    RootBuf::<ProjectDir>::try_from_proto_buf(request.project_dir)?,
-                    RootBuf::<StateDir>::try_from_proto_buf(request.state_dir)?,
-                    RootBuf::<CacheDir>::try_from_proto_buf(request.cache_dir)?,
-                    RootBuf::<ContainerImageDepotDir>::try_from_proto_buf(
-                        request.container_image_depot_dir,
-                    )?,
-                    CacheSize::try_from_proto_buf(request.cache_size)?,
-                    InlineLimit::try_from_proto_buf(request.inline_limit)?,
-                    Slots::try_from_proto_buf(request.slots)?,
-                    AcceptInvalidRemoteContainerTlsCerts::try_from_proto_buf(
-                        request.accept_invalid_remote_container_tls_certs,
-                    )?,
+                    request.broker_addr,
+                    request.project_dir,
+                    request.state_dir,
+                    request.cache_dir,
+                    request.container_image_depot_dir,
+                    request.cache_size,
+                    request.inline_limit,
+                    request.slots,
+                    request.accept_invalid_remote_container_tls_certs,
                 )
                 .await
                 .map(IntoProtoBuf::into_proto_buf)
@@ -99,14 +89,16 @@ impl ClientProcess for Handler {
         request: Request<proto::RunJobRequest>,
     ) -> TonicResponse<proto::RunJobResponse> {
         async {
-            let spec = request.into_inner().into_result()?;
-            let spec = TryFromProtoBuf::try_from_proto_buf(spec)?;
+            let RunJobRequest { spec } = TryFromProtoBuf::try_from_proto_buf(request.into_inner())?;
             self.client
                 .run_job(spec)
                 .await
-                .map(|(cjid, res)| proto::RunJobResponse {
-                    client_job_id: cjid.into_proto_buf(),
-                    result: Some(res.into_proto_buf()),
+                .map(|(client_job_id, result)| {
+                    RunJobResponse {
+                        client_job_id,
+                        result,
+                    }
+                    .into_proto_buf()
                 })
         }
         .await
@@ -118,12 +110,10 @@ impl ClientProcess for Handler {
         request: Request<proto::AddContainerRequest>,
     ) -> TonicResponse<proto::Void> {
         async {
-            let (name, container) = request.into_inner().into_result()?;
+            let AddContainerRequest { name, container } =
+                TryFromProtoBuf::try_from_proto_buf(request.into_inner())?;
             self.client
-                .add_container(
-                    String::try_from_proto_buf(name)?,
-                    ContainerSpec::try_from_proto_buf(container)?,
-                )
+                .add_container(name, container)
                 .await
                 .map(IntoProtoBuf::into_proto_buf)
         }

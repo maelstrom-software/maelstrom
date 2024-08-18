@@ -2,7 +2,6 @@
 
 mod config;
 mod into_proto_buf;
-mod into_result;
 mod pocket_definition;
 mod remote_derive;
 mod try_from_proto_buf;
@@ -10,16 +9,6 @@ mod try_from_proto_buf;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput, Item};
-
-/// Derives an implementation of `maelstrom_client_base::IntoResult`
-#[proc_macro_derive(IntoResult)]
-pub fn into_result(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    match into_result::main(input) {
-        Err(e) => e.into_compile_error().into(),
-        Ok(v) => quote!(#v).into(),
-    }
-}
 
 /// Derives an implementation of `maelstrom_client_base::proto_buf_conv::IntoProtoBuf`
 ///

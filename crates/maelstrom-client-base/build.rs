@@ -2,8 +2,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::str::from_utf8;
 
-const INTO_RESULT: [&str; 3] = ["AddContainerRequest", "RunJobRequest", "RunJobResponse"];
-
 fn test_for_protoc() -> Option<PathBuf> {
     if let Ok(o) = Command::new("protoc").arg("--version").output() {
         if let Ok(s) = from_utf8(&o.stdout[..]).map(str::trim) {
@@ -31,11 +29,6 @@ fn main() {
     }
 
     let mut b = tonic_build::configure();
-    for resp in INTO_RESULT {
-        b = b.message_attribute(resp, "#[derive(maelstrom_macro::IntoResult)]");
-    }
-
     b = b.btree_map(["EnvironmentSpec.vars"]);
-
     b.compile(&["src/items.proto"], &["src/"]).unwrap();
 }

@@ -12,10 +12,15 @@ extern crate self as maelstrom_client;
 
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
-use anyhow::{anyhow, Result};
-use derive_more::From;
+use derive_more::{From, Into};
 use enum_map::EnumMap;
+use maelstrom_base::{ClientJobId, JobOutcomeResult};
+use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
+use maelstrom_util::{
+    config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
+    root::RootBuf,
+};
 use serde::Deserialize;
 use std::fmt;
 
@@ -52,82 +57,6 @@ impl From<proto::Error> for anyhow::Error {
     }
 }
 
-pub trait IntoResult {
-    type Output;
-    fn into_result(self) -> Result<Self::Output>;
-}
-
-impl IntoResult for proto::Void {
-    type Output = ();
-
-    fn into_result(self) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl IntoResult for u32 {
-    type Output = u32;
-
-    fn into_result(self) -> Result<u32> {
-        Ok(self)
-    }
-}
-
-impl<V> IntoResult for anyhow::Result<V> {
-    type Output = V;
-
-    fn into_result(self) -> Result<Self::Output> {
-        self
-    }
-}
-
-impl<V> IntoResult for Option<V> {
-    type Output = V;
-
-    fn into_result(self) -> Result<Self::Output> {
-        match self {
-            Some(res) => Ok(res),
-            None => Err(anyhow!("malformed response")),
-        }
-    }
-}
-
-impl<A, B> IntoResult for (A, B)
-where
-    A: IntoResult,
-    B: IntoResult,
-{
-    type Output = (A::Output, B::Output);
-
-    fn into_result(self) -> Result<Self::Output> {
-        Ok((self.0.into_result()?, self.1.into_result()?))
-    }
-}
-
-impl<V> IntoResult for Vec<V> {
-    type Output = Vec<V>;
-
-    fn into_result(self) -> Result<Self::Output> {
-        Ok(self)
-    }
-}
-
-impl<T> IntoResult for tonic::Streaming<T> {
-    type Output = Self;
-
-    fn into_result(self) -> Result<Self::Output> {
-        Ok(self)
-    }
-}
-
-impl IntoResult for String {
-    type Output = String;
-
-    fn into_result(self) -> Result<Self::Output> {
-        Ok(self)
-    }
-}
-
 #[derive(IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::RemoteProgress")]
 pub struct RemoteProgress {
@@ -145,7 +74,8 @@ pub struct IntrospectResponse {
     pub image_downloads: Vec<RemoteProgress>,
 }
 
-#[derive(Clone, Deserialize, From)]
+#[derive(Clone, Deserialize, From, Into, TryFromProtoBuf, IntoProtoBuf)]
+#[proto(proto_buf_type = bool, try_from_into)]
 #[serde(transparent)]
 pub struct AcceptInvalidRemoteContainerTlsCerts(bool);
 
@@ -158,22 +88,6 @@ impl AcceptInvalidRemoteContainerTlsCerts {
 impl fmt::Debug for AcceptInvalidRemoteContainerTlsCerts {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
-    }
-}
-
-impl TryFromProtoBuf for AcceptInvalidRemoteContainerTlsCerts {
-    type ProtoBufType = bool;
-
-    fn try_from_proto_buf(v: bool) -> Result<Self> {
-        Ok(Self::from(v))
-    }
-}
-
-impl IntoProtoBuf for AcceptInvalidRemoteContainerTlsCerts {
-    type ProtoBufType = bool;
-
-    fn into_proto_buf(self) -> bool {
-        self.into_inner()
     }
 }
 
@@ -234,4 +148,48 @@ impl slog::KV for SimpleKV {
         }
         Ok(())
     }
+}
+
+//                                 _      __
+//  _ __ ___  __ _ _   _  ___  ___| |_   / / __ ___  ___ _ __   ___  _ __  ___  ___
+// | '__/ _ \/ _` | | | |/ _ \/ __| __| / / '__/ _ \/ __| '_ \ / _ \| '_ \/ __|/ _ \
+// | | |  __/ (_| | |_| |  __/\__ \ |_ / /| | |  __/\__ \ |_) | (_) | | | \__ \  __/
+// |_|  \___|\__, |\__,_|\___||___/\__/_/ |_|  \___||___/ .__/ \___/|_| |_|___/\___|
+//              |_|                                     |_|
+
+#[derive(IntoProtoBuf, TryFromProtoBuf)]
+#[proto(proto_buf_type = "proto::StartRequest")]
+pub struct StartRequest {
+    pub broker_addr: Option<BrokerAddr>,
+    pub project_dir: RootBuf<ProjectDir>,
+    pub state_dir: RootBuf<StateDir>,
+    pub container_image_depot_dir: RootBuf<ContainerImageDepotDir>,
+    pub cache_dir: RootBuf<CacheDir>,
+    pub cache_size: CacheSize,
+    pub inline_limit: InlineLimit,
+    pub slots: Slots,
+    pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf)]
+#[proto(proto_buf_type = "proto::RunJobRequest")]
+pub struct RunJobRequest {
+    #[proto(option)]
+    pub spec: spec::JobSpec,
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf)]
+#[proto(proto_buf_type = "proto::RunJobResponse")]
+pub struct RunJobResponse {
+    pub client_job_id: ClientJobId,
+    #[proto(option)]
+    pub result: JobOutcomeResult,
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf)]
+#[proto(proto_buf_type = "proto::AddContainerRequest")]
+pub struct AddContainerRequest {
+    pub name: String,
+    #[proto(option)]
+    pub container: spec::ContainerSpec,
 }
