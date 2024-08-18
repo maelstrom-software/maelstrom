@@ -38,30 +38,6 @@ pub trait TryFromProtoBuf: Sized {
     fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self>;
 }
 
-macro_rules! proto_struct_enum_conversion {
-    ($struct_name:ty, $enum_name:ty, $field:ident) => {
-        impl From<$enum_name> for $struct_name {
-            fn from($field: $enum_name) -> Self {
-                Self {
-                    $field: Some($field),
-                }
-            }
-        }
-
-        impl TryFrom<$struct_name> for $enum_name {
-            type Error = anyhow::Error;
-
-            fn try_from($field: $struct_name) -> Result<Self> {
-                $field
-                    .$field
-                    .ok_or_else(|| anyhow!(concat!("malformed ", stringify!($struct_name))))
-            }
-        }
-    };
-}
-
-proto_struct_enum_conversion!(proto::Layer, proto::layer::Layer, layer);
-
 //  _           _ _ _        _
 // | |__  _   _(_) | |_     (_)_ __
 // | '_ \| | | | | | __|____| | '_ \
@@ -536,8 +512,6 @@ remote_derive!(
     @Tmp: proto(proto_buf_type = "proto::TmpMount"),
 );
 
-proto_struct_enum_conversion!(proto::JobMount, proto::job_mount::Mount, mount);
-
 remote_derive!(
     JobRootOverlay,
     (IntoProtoBuf, TryFromProtoBuf),
@@ -546,12 +520,6 @@ remote_derive!(
         enum_type = "proto::job_root_overlay::Overlay"
     ),
     @Local: proto(proto_buf_type = "proto::LocalJobRootOverlay"),
-);
-
-proto_struct_enum_conversion!(
-    proto::JobRootOverlay,
-    proto::job_root_overlay::Overlay,
-    overlay
 );
 
 remote_derive!(
@@ -564,12 +532,6 @@ remote_derive!(
     @Truncated: proto(proto_buf_type = "proto::JobOutputResultTruncated"),
 );
 
-proto_struct_enum_conversion!(
-    proto::JobOutputResult,
-    proto::job_output_result::Result,
-    result
-);
-
 remote_derive!(
     JobOutcome,
     (IntoProtoBuf, TryFromProtoBuf),
@@ -578,8 +540,6 @@ remote_derive!(
         enum_type = "proto::job_outcome::Outcome"
     ),
 );
-
-proto_struct_enum_conversion!(proto::JobOutcome, proto::job_outcome::Outcome, outcome);
 
 remote_derive!(
     JobCompleted,

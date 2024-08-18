@@ -3,6 +3,7 @@
 mod config;
 mod into_proto_buf;
 mod pocket_definition;
+mod proto_buf_ext;
 mod remote_derive;
 mod try_from_proto_buf;
 
@@ -141,6 +142,17 @@ pub fn remote_derive_inner(input: TokenStream) -> TokenStream {
 pub fn remote_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as remote_derive::Arguments);
     match remote_derive::main(input) {
+        Err(e) => e.into_compile_error().into(),
+        Ok(v) => quote!(#(#v)*).into(),
+    }
+}
+
+/// Derives useful things on the generated protobuf types. This macro is applied to all the
+/// generated protobuf types in the `build.rs` file.
+#[proc_macro_derive(ProtoBufExt, attributes(prost))]
+pub fn proto_buf_ext(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match proto_buf_ext::main(input) {
         Err(e) => e.into_compile_error().into(),
         Ok(v) => quote!(#(#v)*).into(),
     }

@@ -211,20 +211,6 @@ impl ContainerRef {
     }
 }
 
-impl From<proto::container_ref::Ref> for proto::ContainerRef {
-    fn from(r: proto::container_ref::Ref) -> Self {
-        Self { r#ref: Some(r) }
-    }
-}
-
-impl TryFrom<proto::ContainerRef> for proto::container_ref::Ref {
-    type Error = anyhow::Error;
-
-    fn try_from(p: proto::ContainerRef) -> Result<Self> {
-        p.r#ref.ok_or_else(|| anyhow!("malformed ContainerRef"))
-    }
-}
-
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq)]
 #[proto(proto_buf_type = "proto::JobSpec")]
 pub struct JobSpec {
