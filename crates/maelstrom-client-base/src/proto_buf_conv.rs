@@ -60,6 +60,8 @@ macro_rules! proto_struct_enum_conversion {
     };
 }
 
+proto_struct_enum_conversion!(proto::Layer, proto::layer::Layer, layer);
+
 //  _           _ _ _        _
 // | |__  _   _(_) | |_     (_)_ __
 // | '_ \| | | | | | __|____| | '_ \
@@ -452,8 +454,6 @@ impl<V: TryFromProtoBuf> TryFromProtoBuf for maelstrom_base::NonEmpty<V> {
         .ok_or_else(|| anyhow!("malformed NonEmpty"))
     }
 }
-
-proto_struct_enum_conversion!(proto::Layer, proto::layer::Layer, layer);
 
 remote_derive!(
     UserId,
