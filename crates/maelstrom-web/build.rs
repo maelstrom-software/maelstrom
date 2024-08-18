@@ -96,31 +96,39 @@ fn create_tar(web_dir: &Path, pkg_dir: &Path, output_file: &Path) {
 
 fn with_profiles(workspace_root: &Path, body: impl FnOnce() + std::panic::UnwindSafe) {
     let cargo_toml = workspace_root.join("Cargo.toml");
-    let cargo_toml_old = workspace_root.join("Cargo.toml.old");
-    fs::copy(&cargo_toml, &cargo_toml_old).unwrap();
 
-    let mut f = fs::OpenOptions::new()
-        .read(true)
-        .append(true)
-        .open(&cargo_toml)
+    if !fs::read_to_string(&cargo_toml)
+        .unwrap()
+        .contains("profile.wasm_")
+    {
+        let cargo_toml_old = workspace_root.join("Cargo.toml.old");
+        fs::copy(&cargo_toml, &cargo_toml_old).unwrap();
+
+        let mut f = fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(&cargo_toml)
+            .unwrap();
+        f.write_all(
+            b"\
+            [profile.wasm_dev]\n\
+            inherits = \"dev\"\n\
+            [profile.wasm_release]\n\
+            inherits = \"release\"\n\
+            ",
+        )
         .unwrap();
-    f.write_all(
-        b"\
-        [profile.wasm_dev]\n\
-        inherits = \"dev\"\n\
-        [profile.wasm_release]\n\
-        inherits = \"release\"\n\
-    ",
-    )
-    .unwrap();
 
-    let result = std::panic::catch_unwind(|| {
+        let result = std::panic::catch_unwind(|| {
+            body();
+        });
+
+        fs::rename(cargo_toml_old, cargo_toml).unwrap();
+
+        result.unwrap();
+    } else {
         body();
-    });
-
-    fs::rename(cargo_toml_old, cargo_toml).unwrap();
-
-    result.unwrap();
+    }
 }
 
 fn build_wasm(target: &str, profile: &str, workspace_root: &Path) {
