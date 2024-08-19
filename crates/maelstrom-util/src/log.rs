@@ -4,11 +4,6 @@ use slog_async::Async;
 use slog_term::{FullFormat, PlainDecorator, PlainSyncDecorator, TermDecorator, TestStdoutWriter};
 use std::io::Write;
 
-pub enum LoggerFactory {
-    FromLevel(LogLevel),
-    FromLogger(Logger),
-}
-
 pub fn run_with_logger<T>(log_level: LogLevel, f: impl FnOnce(Logger) -> T) -> T {
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();

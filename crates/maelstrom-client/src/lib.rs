@@ -16,7 +16,6 @@ use maelstrom_client_base::{
 use maelstrom_linux::{self as linux, Pid};
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
-    log::LoggerFactory,
     root::Root,
 };
 use std::{
@@ -105,7 +104,7 @@ impl ClientBgProcess {
             })
         } else {
             drop(sock1);
-            maelstrom_client_process::main(sock2, LoggerFactory::FromLevel(log_level))
+            maelstrom_client_process::main(sock2, None, log_level)
                 .context("client background process")?;
             process::exit(0);
         }
@@ -360,7 +359,8 @@ pub fn bg_proc_main() -> Result<()> {
 
         let res = maelstrom_client_process::main_after_clone(
             sock,
-            LoggerFactory::FromLogger(log.clone()),
+            Some(log.clone()),
+            maelstrom_util::config::common::LogLevel::Debug,
         );
         slog::info!(log, "shutting down"; "res" => ?res);
         res

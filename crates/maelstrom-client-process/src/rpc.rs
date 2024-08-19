@@ -1,12 +1,14 @@
 use crate::client::Client;
 use crate::log::RpcLogSink;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use futures::{Stream, StreamExt as _};
 use maelstrom_client_base::{
     proto::{self, client_process_server::ClientProcess},
     AddContainerRequest, IntoProtoBuf, RunJobRequest, RunJobResponse, StartRequest,
     TryFromProtoBuf,
 };
+use maelstrom_util::config::common::LogLevel;
+use slog::Drain as _;
 use std::pin::Pin;
 use std::{
     result,
@@ -19,14 +21,16 @@ type TonicResponse<T> = TonicResult<Response<T>>;
 
 pub struct Handler {
     client: Arc<Client>,
-    log_sink: Mutex<Option<RpcLogSink>>,
+    rpc_log_level: LogLevel,
+    log: Mutex<Option<slog::Logger>>,
 }
 
 impl Handler {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: Client, log: Option<slog::Logger>, rpc_log_level: LogLevel) -> Self {
         Self {
             client: Arc::new(client),
-            log_sink: Default::default(),
+            rpc_log_level,
+            log: Mutex::new(log),
         }
     }
 }
@@ -55,7 +59,9 @@ impl ClientProcess for Handler {
         _request: Request<proto::Void>,
     ) -> TonicResponse<Self::StreamLogMessagesStream> {
         let (sink, outgoing) = RpcLogSink::new();
-        *self.log_sink.lock().unwrap() = Some(sink);
+        let drain = slog_async::Async::new(sink).build().fuse();
+        let drain = slog::LevelFilter::new(drain, self.rpc_log_level.as_slog_level()).fuse();
+        *self.log.lock().unwrap() = Some(slog::Logger::root(drain, slog::o!()));
         Ok(Box::pin(outgoing.map(|m| Ok(m.into_proto_buf()))) as Self::StreamLogMessagesStream)
             .map_to_tonic()
     }
@@ -63,10 +69,12 @@ impl ClientProcess for Handler {
     async fn start(&self, request: Request<proto::StartRequest>) -> TonicResponse<proto::Void> {
         async {
             let request: StartRequest = TryFromProtoBuf::try_from_proto_buf(request.into_inner())?;
-            let log_sink = { self.log_sink.lock().unwrap().clone() };
+            let Some(log) = ({ self.log.lock().unwrap().clone() }) else {
+                bail!("no logging set up");
+            };
             self.client
                 .start(
-                    log_sink,
+                    log,
                     request.broker_addr,
                     request.project_dir,
                     request.state_dir,

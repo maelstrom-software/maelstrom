@@ -5,7 +5,6 @@ mod state_machine;
 use crate::{
     artifact_pusher,
     digest_repo::DigestRepository,
-    log::RpcLogSink,
     progress::{LazyProgress, ProgressTracker},
     router,
 };
@@ -31,13 +30,11 @@ use maelstrom_container::{
 };
 use maelstrom_util::{
     async_fs,
-    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
-    log::LoggerFactory,
+    config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
     net,
-    root::{Root, RootBuf},
+    root::RootBuf,
 };
 use maelstrom_worker::local_worker;
-use slog::Drain as _;
 use slog::{debug, info, warn, Logger};
 use state_machine::StateMachine;
 use std::future::Future;
@@ -56,7 +53,7 @@ use tokio::{
 
 #[derive(Clone)]
 pub struct Client {
-    state_machine: Arc<StateMachine<LoggerFactory, ClientState>>,
+    state_machine: Arc<StateMachine<(), ClientState>>,
     clean_up: Arc<CleanUpWork>,
 }
 
@@ -214,9 +211,9 @@ impl ClientState {
 const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 
 impl Client {
-    pub fn new(log: LoggerFactory) -> Self {
+    pub fn new() -> Self {
         Self {
-            state_machine: Arc::new(StateMachine::new(log)),
+            state_machine: Arc::new(StateMachine::new(())),
             clean_up: Default::default(),
         }
     }
@@ -224,7 +221,7 @@ impl Client {
     #[allow(clippy::too_many_arguments)]
     pub async fn start(
         &self,
-        rpc_log_sink: Option<RpcLogSink>,
+        log: Logger,
         broker_addr: Option<BrokerAddr>,
         project_dir: RootBuf<ProjectDir>,
         state_dir: RootBuf<StateDir>,
@@ -235,23 +232,8 @@ impl Client {
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
     ) -> Result<()> {
-        async fn file_logger(
-            log_level: LogLevel,
-            fs: &async_fs::Fs,
-            state_dir: &Root<StateDir>,
-        ) -> Result<Logger> {
-            struct LogFile;
-            let log_file = fs
-                .open_or_create_file_append(state_dir.join::<LogFile>("client-process.log"))
-                .await?;
-            Ok(maelstrom_util::log::file_logger(
-                log_level,
-                log_file.into_inner().into_std().await,
-            ))
-        }
-
         async fn try_to_start(
-            log: LoggerFactory,
+            log: Logger,
             broker_addr: Option<BrokerAddr>,
             project_dir: RootBuf<ProjectDir>,
             state_dir: RootBuf<StateDir>,
@@ -271,13 +253,6 @@ impl Client {
             // Make sure the state dir exists before we try to put a log file in.
             fs.create_dir_all(&state_dir).await?;
 
-            // Ensure we have a logger. If this program was started by a user on the shell, then a
-            // logger will have been provided. Otherwise, open a log file in the cache directory
-            // and log there.
-            let log = match log {
-                LoggerFactory::FromLogger(log) => log,
-                LoggerFactory::FromLevel(level) => file_logger(level, &fs, &state_dir).await?,
-            };
             debug!(log, "client starting";
                 "broker_addr" => ?broker_addr,
                 "project_dir" => ?project_dir,
@@ -533,13 +508,7 @@ impl Client {
             ))
         }
 
-        let (mut log, activation_handle) = self.state_machine.try_to_begin_activation()?;
-
-        // RPC initiated logging takes precedence
-        if let Some(rpc_log_sink) = rpc_log_sink {
-            let drain = slog_async::Async::new(rpc_log_sink).build().fuse();
-            log = LoggerFactory::FromLogger(slog::Logger::root(drain, slog::o!()));
-        }
+        let (_, activation_handle) = self.state_machine.try_to_begin_activation()?;
 
         let result = try_to_start(
             log,
