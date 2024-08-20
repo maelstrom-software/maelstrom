@@ -8,7 +8,7 @@ use bumpalo::{
 use maelstrom_base::{
     tty::{self, DecodeInputChunk, DecodeInputRemainder},
     GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork, JobOutputResult,
-    JobResult, JobRootOverlay, JobStatus, JobTty, UserId, Utf8PathBuf, WindowSize,
+    JobResult, JobRootOverlay, JobTerminationStatus, JobTty, UserId, Utf8PathBuf, WindowSize,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -220,7 +220,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 async fn wait_for_child(
     child_pidfd: OwnedFd,
     mut kill_event_receiver: EventReceiver,
-) -> Result<JobStatus> {
+) -> Result<JobTerminationStatus> {
     let async_fd = AsyncFd::with_interest(child_pidfd, Interest::READABLE)?;
     let mut kill_event_received = false;
     loop {
@@ -236,8 +236,8 @@ async fn wait_for_child(
         }
     }
     Ok(match linux::waitid(&async_fd.into_inner())? {
-        WaitStatus::Exited(code) => JobStatus::Exited(code.as_u8()),
-        WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.as_u8()),
+        WaitStatus::Exited(code) => JobTerminationStatus::Exited(code.as_u8()),
+        WaitStatus::Signaled(signo) => JobTerminationStatus::Signaled(signo.as_u8()),
     })
 }
 
@@ -1466,7 +1466,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         runtime.spawn(async move {
             // It's not clear what to do if we get an error waiting, which, in theory, should never
             // happen. What we do is return the error so that the client can get back a system
-            // error. An alternative would be to panic and send a plain JobStatus back.
+            // error. An alternative would be to panic and send a plain JobTerminationStatus back.
             let _ = status_sender.send(wait_for_child(child_pidfd, kill_event_receiver).await);
         });
 
@@ -1616,7 +1616,7 @@ mod tests {
     use bytesize::ByteSize;
     use indoc::indoc;
     use maelstrom_base::{
-        enum_set, nonempty, ArtifactType, EnumSet, JobStatus, Utf8Path, WindowSize,
+        enum_set, nonempty, ArtifactType, EnumSet, JobTerminationStatus, Utf8Path, WindowSize,
     };
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
@@ -1710,7 +1710,7 @@ mod tests {
     struct Test {
         spec: maelstrom_base::JobSpec,
         inline_limit: InlineLimit,
-        expected_status: JobStatus,
+        expected_status: JobTerminationStatus,
         expected_stdout: JobOutputResult,
         expected_stderr: JobOutputResult,
         expected_duration: Duration,
@@ -1721,7 +1721,7 @@ mod tests {
             Test {
                 spec,
                 inline_limit: InlineLimit::from(ByteSize::b(1000)),
-                expected_status: JobStatus::Exited(0),
+                expected_status: JobTerminationStatus::Exited(0),
                 expected_stdout: JobOutputResult::None,
                 expected_stderr: JobOutputResult::None,
                 expected_duration: Duration::from_secs(1),
@@ -1733,7 +1733,7 @@ mod tests {
             self
         }
 
-        fn expected_status(mut self, expected_status: JobStatus) -> Self {
+        fn expected_status(mut self, expected_status: JobTerminationStatus) -> Self {
             self.expected_status = expected_status;
             self
         }
@@ -1786,7 +1786,7 @@ mod tests {
     #[tokio::test]
     async fn exited_1() {
         Test::new(bash_spec("exit 1"))
-            .expected_status(JobStatus::Exited(1))
+            .expected_status(JobTerminationStatus::Exited(1))
             .run()
             .await;
     }
@@ -1805,7 +1805,7 @@ mod tests {
             sys.stderr.flush()
             os.abort()
         "#}))
-        .expected_status(JobStatus::Signaled(11))
+        .expected_status(JobTerminationStatus::Signaled(11))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
         .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"b\n")))
         .run()
@@ -1941,7 +1941,7 @@ mod tests {
                     mount_point: utf8_path_buf!("/sys"),
                 }]),
         )
-        .expected_status(JobStatus::Exited(1))
+        .expected_status(JobTerminationStatus::Exited(1))
         .expected_stderr(JobOutputResult::Inline(boxed_u8!(
             b"cat: read error: Invalid argument\n"
         )))
@@ -1993,7 +1993,7 @@ mod tests {
             ))
             .network(JobNetwork::Local),
         )
-        .expected_status(JobStatus::Exited(0))
+        .expected_status(JobTerminationStatus::Exited(0))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"goodbye")))
         .run()
         .await;
@@ -2059,7 +2059,7 @@ mod tests {
             effects: JobEffects { stdout, stderr, .. },
         } = run(spec, "100".parse().unwrap()).await.unwrap();
         assert_eq!(stderr, JobOutputResult::None);
-        assert_eq!(status, JobStatus::Exited(0));
+        assert_eq!(status, JobTerminationStatus::Exited(0));
         let JobOutputResult::Inline(contents) = stdout else {
             panic!("expected JobOutputResult::Inline, got {stdout:?}");
         };
@@ -2079,7 +2079,7 @@ mod tests {
     #[tokio::test]
     async fn one_layer_is_read_only() {
         Test::new(test_spec("/bin/touch").arguments(["/foo"]))
-            .expected_status(JobStatus::Exited(1))
+            .expected_status(JobTerminationStatus::Exited(1))
             .expected_stderr(JobOutputResult::Inline(boxed_u8!(
                 b"touch: /foo: Read-only file system\n"
             )))
@@ -2090,14 +2090,14 @@ mod tests {
     #[tokio::test]
     async fn one_layer_with_tmp_root_overlay_is_writable() {
         Test::new(bash_spec("echo bar > /foo && cat /foo").root_overlay(JobRootOverlay::Tmp))
-            .expected_status(JobStatus::Exited(0))
+            .expected_status(JobTerminationStatus::Exited(0))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
             .run()
             .await;
 
         // Run another job to ensure that the file doesn't persist.
         Test::new(bash_spec("test -e /foo"))
-            .expected_status(JobStatus::Exited(1))
+            .expected_status(JobTerminationStatus::Exited(1))
             .run()
             .await;
     }
@@ -2106,7 +2106,7 @@ mod tests {
     async fn multiple_layers_with_tmp_root_overlay_is_writable() {
         let spec = bash_spec("echo bar > /foo && cat /foo").root_overlay(JobRootOverlay::Tmp);
         Test::new(spec)
-            .expected_status(JobStatus::Exited(0))
+            .expected_status(JobTerminationStatus::Exited(0))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
             .run()
             .await;
@@ -2114,7 +2114,7 @@ mod tests {
         // Run another job to ensure that the file doesn't persist.
         let spec = bash_spec("test -e /foo").root_overlay(JobRootOverlay::Tmp);
         Test::new(spec)
-            .expected_status(JobStatus::Exited(1))
+            .expected_status(JobTerminationStatus::Exited(1))
             .run()
             .await;
     }
@@ -2135,7 +2135,7 @@ mod tests {
                 work: work_path.clone().try_into().unwrap(),
             }),
         )
-        .expected_status(JobStatus::Exited(0))
+        .expected_status(JobTerminationStatus::Exited(0))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
         .run()
         .await;
@@ -2147,7 +2147,7 @@ mod tests {
                 work: work_path.clone().try_into().unwrap(),
             }),
         )
-        .expected_status(JobStatus::Exited(0))
+        .expected_status(JobTerminationStatus::Exited(0))
         .run()
         .await;
 
@@ -2457,7 +2457,7 @@ mod tests {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
-        .expected_status(JobStatus::Exited(1))
+        .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
     }
@@ -2490,7 +2490,7 @@ mod tests {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
-        .expected_status(JobStatus::Exited(1))
+        .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
     }
@@ -2546,7 +2546,7 @@ mod tests {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
-        .expected_status(JobStatus::Exited(1))
+        .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
     }
@@ -2598,7 +2598,7 @@ mod tests {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
-        .expected_status(JobStatus::Exited(1))
+        .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
     }
@@ -2672,7 +2672,7 @@ mod tests {
                 },
             ]),
         )
-        .expected_status(JobStatus::Exited(1))
+        .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
         let contents = fs::read_to_string(temp_file).unwrap();
@@ -2700,7 +2700,7 @@ mod tests {
                     read_only: true,
                 }]),
         )
-        .expected_status(JobStatus::Exited(0))
+        .expected_status(JobTerminationStatus::Exited(0))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"hello\n")))
         .run()
         .await;
@@ -2834,7 +2834,7 @@ mod tests {
         } = job_completed;
         assert_eq!(stderr, JobOutputResult::None);
         assert_eq!(stdout, JobOutputResult::None);
-        assert_eq!(status, JobStatus::Exited(code));
+        assert_eq!(status, JobTerminationStatus::Exited(code));
     }
 
     #[tokio::test]

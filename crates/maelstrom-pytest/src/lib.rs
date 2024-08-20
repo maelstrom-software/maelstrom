@@ -5,8 +5,8 @@ mod pytest;
 
 use anyhow::{anyhow, bail, Result};
 use maelstrom_base::{
-    enum_set, JobDevice, JobMount, JobNetwork, JobOutcome, JobRootOverlay, JobStatus, Timeout,
-    Utf8PathBuf,
+    enum_set, JobDevice, JobMount, JobNetwork, JobOutcome, JobRootOverlay, JobTerminationStatus,
+    Timeout, Utf8PathBuf,
 };
 use maelstrom_client::{
     spec::{LayerSpec, PrefixOptions},
@@ -264,7 +264,7 @@ impl<'client> PytestTestCollector<'client> {
         let outcome = outcome.map_err(|err| anyhow!("error installing pip packages: {err:?}"))?;
         match outcome {
             JobOutcome::Completed(completed) => {
-                if completed.status != JobStatus::Exited(0) {
+                if completed.status != JobTerminationStatus::Exited(0) {
                     bail!(
                         "pip install failed:\nstderr: {}\nstdout{}",
                         completed.effects.stderr,

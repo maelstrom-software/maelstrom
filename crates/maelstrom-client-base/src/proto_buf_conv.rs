@@ -7,10 +7,10 @@ use maelstrom_base::{
     job_device_pocket_definition, job_effects_pocket_definition, job_mount_pocket_definition,
     job_network_pocket_definition, job_outcome_pocket_definition,
     job_output_result_pocket_definition, job_root_overlay_pocket_definition,
-    job_status_pocket_definition, job_tty_pocket_definition, timeout_pocket_definition,
+    job_termination_status_pocket_definition, job_tty_pocket_definition, timeout_pocket_definition,
     user_id_pocket_definition, window_size_pocket_definition, ClientJobId, GroupId, JobCompleted,
     JobDevice, JobEffects, JobMount, JobNetwork, JobOutcome, JobOutputResult, JobRootOverlay,
-    JobStatus, JobTty, Timeout, UserId, Utf8PathBuf, WindowSize,
+    JobTerminationStatus, JobTty, Timeout, UserId, Utf8PathBuf, WindowSize,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -462,7 +462,7 @@ remote_derive!(
 );
 
 remote_derive!(
-    JobStatus,
+    JobTerminationStatus,
     (IntoProtoBuf, TryFromProtoBuf),
     proto(proto_buf_type = "proto::job_completed::Status")
 );

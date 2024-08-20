@@ -77,7 +77,7 @@ macro_rules! spec {
 macro_rules! completed {
     [1] => {
         maelstrom_base::JobCompleted {
-            status: maelstrom_base::JobStatus::Exited(0),
+            status: maelstrom_base::JobTerminationStatus::Exited(0),
             effects: maelstrom_base::JobEffects {
                 stdout: maelstrom_base::JobOutputResult::None,
                 stderr: maelstrom_base::JobOutputResult::None,
@@ -87,7 +87,7 @@ macro_rules! completed {
     };
     [2] => {
         maelstrom_base::JobCompleted {
-            status: maelstrom_base::JobStatus::Exited(1),
+            status: maelstrom_base::JobTerminationStatus::Exited(1),
             effects: maelstrom_base::JobEffects {
                 stdout: maelstrom_base::JobOutputResult::None,
                 stderr: maelstrom_base::JobOutputResult::None,
@@ -97,7 +97,7 @@ macro_rules! completed {
     };
     [3] => {
         maelstrom_base::JobCompleted {
-            status: maelstrom_base::JobStatus::Signaled(15),
+            status: maelstrom_base::JobTerminationStatus::Signaled(15),
             effects: maelstrom_base::JobEffects {
                 stdout: maelstrom_base::JobOutputResult::None,
                 stderr: maelstrom_base::JobOutputResult::None,
@@ -107,7 +107,7 @@ macro_rules! completed {
     };
     [$n:expr] => {
         maelstrom_base::JobCompleted {
-            status: maelstrom_base::JobStatus::Exited($n),
+            status: maelstrom_base::JobTerminationStatus::Exited($n),
             effects: maelstrom_base::JobEffects {
                 stdout: maelstrom_base::JobOutputResult::None,
                 stderr: maelstrom_base::JobOutputResult::None,

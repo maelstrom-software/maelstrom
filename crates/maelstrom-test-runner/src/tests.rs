@@ -17,7 +17,7 @@ use indoc::indoc;
 use maelstrom_base::{
     stats::{JobState, JobStateCounts},
     ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutcomeResult, JobOutputResult,
-    JobStatus,
+    JobTerminationStatus,
 };
 use maelstrom_client::{spec::JobSpec, IntrospectResponse, ProjectDir, StateDir};
 use maelstrom_util::{
@@ -888,7 +888,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
 #[test]
 fn failed_tests() {
     let failed_outcome = JobOutcome::Completed(JobCompleted {
-        status: JobStatus::Exited(1),
+        status: JobTerminationStatus::Exited(1),
         effects: JobEffects {
             stdout: JobOutputResult::Inline(Box::new(
                 *b"\

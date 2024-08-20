@@ -755,7 +755,7 @@ mod tests {
     use super::{Message::*, *};
     use crate::cache::EntryKind::*;
     use anyhow::anyhow;
-    use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobStatus};
+    use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc, time::Duration};
     use BrokerToWorker::*;
@@ -1545,7 +1545,7 @@ mod tests {
             TimerHandleDropped(jid!(1)),
         };
         Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
+            status: JobTerminationStatus::Exited(0),
             effects: JobEffects {
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Inline(boxed_u8!(b"stderr")),

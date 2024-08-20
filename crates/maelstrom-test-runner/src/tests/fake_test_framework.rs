@@ -7,7 +7,8 @@ use crate::{
 };
 use anyhow::Result;
 use maelstrom_base::{
-    stats::JobState, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobStatus, Utf8PathBuf,
+    stats::JobState, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobTerminationStatus,
+    Utf8PathBuf,
 };
 use maelstrom_client::spec::{JobSpec, LayerSpec};
 use maelstrom_util::{fs::Fs, root::RootBuf};
@@ -48,7 +49,7 @@ impl Default for FakeTestCase {
             desired_state: JobState::Complete,
             expected_estimated_duration: None,
             outcome: JobOutcome::Completed(JobCompleted {
-                status: JobStatus::Exited(0),
+                status: JobTerminationStatus::Exited(0),
                 effects: JobEffects {
                     stdout: JobOutputResult::None,
                     stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),

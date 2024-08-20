@@ -1,6 +1,7 @@
 use assert_matches::assert_matches;
 use maelstrom_base::{
-    JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobStatus, Utf8Path, Utf8PathBuf,
+    JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobTerminationStatus, Utf8Path,
+    Utf8PathBuf,
 };
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
@@ -114,7 +115,7 @@ impl ClientFixture {
         let output = assert_matches!(
             outcome,
             Ok(JobOutcome::Completed(JobCompleted {
-                status: JobStatus::Exited(0),
+                status: JobTerminationStatus::Exited(0),
                 effects: JobEffects { stdout: JobOutputResult::Inline(stdout), .. },
                 ..
             })) => stdout

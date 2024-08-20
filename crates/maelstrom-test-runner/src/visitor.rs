@@ -4,7 +4,7 @@ use crate::{TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
-    JobStatus,
+    JobTerminationStatus,
 };
 use maelstrom_util::process::{ExitCode, ExitCodeAccumulator};
 use std::sync::{Arc, Condvar, Mutex};
@@ -221,7 +221,7 @@ where
                 test_duration = Some(duration);
                 let mut job_failed = true;
                 let exit_code = match status {
-                    JobStatus::Exited(code) => {
+                    JobTerminationStatus::Exited(code) => {
                         test_status = if code == 0 {
                             job_failed = false;
                             UiJobStatus::Ok
@@ -230,7 +230,7 @@ where
                         };
                         ExitCode::from(code)
                     }
-                    JobStatus::Signaled(signo) => {
+                    JobTerminationStatus::Signaled(signo) => {
                         test_status =
                             UiJobStatus::Failure(Some(format!("killed by signal {signo}")));
                         ExitCode::FAILURE

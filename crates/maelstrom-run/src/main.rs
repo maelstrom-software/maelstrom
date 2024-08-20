@@ -2,7 +2,7 @@ use anyhow::{anyhow, Error, Result};
 use clap::Args;
 use maelstrom_base::{
     tty, ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult,
-    JobOutputResult, JobStatus, JobTty, WindowSize,
+    JobOutputResult, JobTerminationStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
@@ -223,13 +223,13 @@ fn visitor(res: Result<(ClientJobId, JobOutcomeResult)>, tracker: Arc<JobTracker
         Ok((cjid, Ok(JobOutcome::Completed(JobCompleted { status, effects })))) => {
             print_effects(Some(cjid), effects).ok();
             match status {
-                JobStatus::Exited(0) => ExitCode::SUCCESS,
-                JobStatus::Exited(code) => {
+                JobTerminationStatus::Exited(0) => ExitCode::SUCCESS,
+                JobTerminationStatus::Exited(code) => {
                     io::stdout().lock().flush().ok();
                     eprintln!("job {cjid}: exited with code {code}");
                     ExitCode::from(code)
                 }
-                JobStatus::Signaled(signum) => {
+                JobTerminationStatus::Signaled(signum) => {
                     io::stdout().lock().flush().ok();
                     eprintln!("job {cjid}: killed by signal {signum}");
                     ExitCode::FAILURE
@@ -291,8 +291,8 @@ fn mimic_child_death(res: JobOutcomeResult) -> Result<ExitCode> {
         Ok(JobOutcome::Completed(JobCompleted { status, effects })) => {
             print_effects(None, effects)?;
             match status {
-                JobStatus::Exited(code) => code.into(),
-                JobStatus::Signaled(signo) => {
+                JobTerminationStatus::Exited(code) => code.into(),
+                JobTerminationStatus::Signaled(signo) => {
                     let _ = linux::raise(signo.into());
                     let _ = linux::raise(Signal::KILL);
                     unreachable!()

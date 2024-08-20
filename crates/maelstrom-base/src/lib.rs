@@ -459,7 +459,7 @@ impl JobSpec {
 /// signal.
 #[pocket_definition(export)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub enum JobStatus {
+pub enum JobTerminationStatus {
     Exited(u8),
     Signaled(u8),
 }
@@ -533,7 +533,7 @@ pub struct JobEffects {
 #[pocket_definition(export)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct JobCompleted {
-    pub status: JobStatus,
+    pub status: JobTerminationStatus,
     pub effects: JobEffects,
 }
 
