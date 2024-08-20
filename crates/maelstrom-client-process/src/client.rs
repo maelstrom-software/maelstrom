@@ -210,6 +210,20 @@ impl ClientState {
 /// For files under this size, the data is stashed in the manifest rather than uploaded separately
 const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 
+async fn wait_for_job_completed(
+    mut receiver: tokio::sync::mpsc::UnboundedReceiver<router::JobStatus>,
+) -> Result<(ClientJobId, JobOutcomeResult)> {
+    loop {
+        if let router::JobStatus::Completed { cjid, result } = receiver
+            .recv()
+            .await
+            .ok_or_else(|| anyhow!("job canceled"))?
+        {
+            break Ok((cjid, result));
+        }
+    }
+}
+
 impl Client {
     pub fn new() -> Self {
         Self {
@@ -586,7 +600,7 @@ impl Client {
 
     pub async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         debug!(state.log, "run_job"; "spec" => ?spec);
 
         let container = match spec.container {
@@ -650,7 +664,7 @@ impl Client {
         state
             .local_broker_sender
             .send(router::Message::RunJob(spec, sender))?;
-        watcher.wait(receiver).await
+        watcher.wait(wait_for_job_completed(receiver)).await
     }
 
     pub async fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {

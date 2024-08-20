@@ -3135,6 +3135,7 @@ dependencies = [
  "bracoxide",
  "chrono",
  "colored-diff",
+ "derive_more",
  "enum-map",
  "futures",
  "globset",
