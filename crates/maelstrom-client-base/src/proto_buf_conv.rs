@@ -3,14 +3,17 @@ use anyhow::{anyhow, Result};
 use enum_map::{enum_map, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    client_job_id_pocket_definition, group_id_pocket_definition, job_completed_pocket_definition,
+    client_job_id_pocket_definition, group_id_pocket_definition,
+    job_broker_status_pocket_definition, job_completed_pocket_definition,
     job_device_pocket_definition, job_effects_pocket_definition, job_mount_pocket_definition,
     job_network_pocket_definition, job_outcome_pocket_definition,
     job_output_result_pocket_definition, job_root_overlay_pocket_definition,
-    job_termination_status_pocket_definition, job_tty_pocket_definition, timeout_pocket_definition,
-    user_id_pocket_definition, window_size_pocket_definition, ClientJobId, GroupId, JobCompleted,
-    JobDevice, JobEffects, JobMount, JobNetwork, JobOutcome, JobOutputResult, JobRootOverlay,
-    JobTerminationStatus, JobTty, Timeout, UserId, Utf8PathBuf, WindowSize,
+    job_termination_status_pocket_definition, job_tty_pocket_definition,
+    job_worker_status_pocket_definition, timeout_pocket_definition, user_id_pocket_definition,
+    window_size_pocket_definition, worker_id_pocket_definition, ClientJobId, GroupId,
+    JobBrokerStatus, JobCompleted, JobDevice, JobEffects, JobMount, JobNetwork, JobOutcome,
+    JobOutputResult, JobRootOverlay, JobTerminationStatus, JobTty, JobWorkerStatus, Timeout,
+    UserId, Utf8PathBuf, WindowSize, WorkerId,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -456,6 +459,24 @@ remote_derive!(
 );
 
 remote_derive!(
+    WindowSize,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(proto_buf_type = "proto::WindowSize")
+);
+
+remote_derive!(
+    WorkerId,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(proto_buf_type = u32, try_from_into)
+);
+
+//      _       _
+//     | | ___ | |__ __/\__
+//  _  | |/ _ \| '_ \\    /
+// | |_| | (_) | |_) /_  _\
+//  \___/ \___/|_.__/  \/
+
+remote_derive!(
     JobDevice,
     (IntoProtoBuf, TryFromProtoBuf),
     proto(proto_buf_type = "proto::JobDevice")
@@ -480,24 +501,11 @@ remote_derive!(
 );
 
 remote_derive!(
-    WindowSize,
-    (IntoProtoBuf, TryFromProtoBuf),
-    proto(proto_buf_type = "proto::WindowSize")
-);
-
-remote_derive!(
     JobTty,
     (IntoProtoBuf, TryFromProtoBuf),
     proto(proto_buf_type = "proto::JobTty"),
     @window_size: proto(option)
 );
-
-//      _       _
-//     | | ___ | |__ __/\__
-//  _  | |/ _ \| '_ \\    /
-// | |_| | (_) | |_) /_  _\
-//  \___/ \___/|_.__/  \/
-//
 
 remote_derive!(
     JobMount,
@@ -546,6 +554,31 @@ remote_derive!(
     (IntoProtoBuf, TryFromProtoBuf),
     proto(proto_buf_type = "proto::JobCompleted", option_all),
 );
+
+remote_derive!(
+    JobWorkerStatus,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(proto_buf_type = "proto::JobWorkerStatus"),
+);
+
+remote_derive!(
+    JobBrokerStatus,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(proto_buf_type = "proto::JobBrokerStatus", enum_type = "proto::job_broker_status::Status"),
+    @AtWorker: proto(proto_buf_type = "proto::JobBrokerAtWorkerStatus")
+);
+
+impl From<(u32, i32)> for proto::JobBrokerAtWorkerStatus {
+    fn from((worker_id, status): (u32, i32)) -> Self {
+        Self { worker_id, status }
+    }
+}
+
+impl From<proto::JobBrokerAtWorkerStatus> for (u32, i32) {
+    fn from(p: proto::JobBrokerAtWorkerStatus) -> Self {
+        (p.worker_id, p.status)
+    }
+}
 
 impl IntoProtoBuf for maelstrom_base::JobError<String> {
     type ProtoBufType = proto::JobError;

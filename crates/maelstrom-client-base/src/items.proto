@@ -247,6 +247,44 @@ message JobOutcomeResult {
     }
 }
 
+enum JobWorkerStatus {
+    JOB_WORKER_STATUS_WAITING_FOR_LAYERS = 0;
+    JOB_WORKER_STATUS_WAITING_TO_EXECUTE = 1;
+    JOB_WORKER_STATUS_EXECUTING = 2;
+}
+
+message JobBrokerAtWorkerStatus {
+    uint32 worker_id = 1;
+    JobWorkerStatus status = 2;
+}
+
+message JobBrokerStatus {
+    oneof status {
+        Void waiting_for_layers = 1;
+        Void waiting_for_worker  = 2;
+        JobBrokerAtWorkerStatus at_worker = 3;
+    }
+}
+
+message JobRunningStatus {
+    oneof status {
+        JobBrokerStatus at_broker = 1;
+        JobWorkerStatus at_local_worker = 2;
+    }
+}
+
+message JobCompletedStatus {
+    uint32 cjid = 1;
+    JobOutcomeResult result = 2;
+}
+
+message JobStatus {
+    oneof status {
+        JobRunningStatus running = 1;
+        JobCompletedStatus completed = 2;
+    }
+}
+
 message RunJobResponse {
     uint32 client_job_id = 1;
     JobOutcomeResult result = 2;

@@ -17,7 +17,6 @@ assert_matches.workspace = true
 async-trait.workspace = true
 bracoxide.workspace = true
 chrono.workspace = true
-derive_more.workspace = true
 futures.workspace = true
 globset.workspace = true
 itertools.workspace = true

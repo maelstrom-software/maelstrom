@@ -22,8 +22,8 @@ use maelstrom_client_base::{
         environment_eval, std_env_lookup, ContainerRef, ContainerSpec, ConvertedImage, ImageConfig,
         JobSpec, LayerSpec,
     },
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, StateDir,
-    MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
+    StateDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{
     self as container, ContainerImage, ContainerImageDepot, ContainerImageDepotDir,
@@ -211,10 +211,10 @@ impl ClientState {
 const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 
 async fn wait_for_job_completed(
-    mut receiver: tokio::sync::mpsc::UnboundedReceiver<router::JobStatus>,
+    mut receiver: tokio::sync::mpsc::UnboundedReceiver<JobStatus>,
 ) -> Result<(ClientJobId, JobOutcomeResult)> {
     loop {
-        if let router::JobStatus::Completed { cjid, result } = receiver
+        if let JobStatus::Completed { cjid, result } = receiver
             .recv()
             .await
             .ok_or_else(|| anyhow!("job canceled"))?

@@ -98,14 +98,27 @@ fn into_proto_buf_enum(
                         Self::#variant_ident => #enum_type::#variant_ident(proto::Void {})
                     }
                 }
+                darling::ast::Style::Tuple if v.fields.len() == 1 => {
+                    parse_quote! {
+                        Self::#variant_ident(f) => #enum_type::#variant_ident(
+                            crate::IntoProtoBuf::into_proto_buf(f)
+                        )
+                    }
+                }
                 darling::ast::Style::Tuple => {
+                    let variant_type = v
+                        .proto_buf_type
+                        .as_ref()
+                        .ok_or(Error::new(variant_ident.span(), "missing proto_buf_type"))?;
                     let num_fields = v.fields.len();
                     let field_idents1 =
                         (0..num_fields).map(|n| Ident::new(&format!("f{n}"), Span::call_site()));
                     let field_idents2 = field_idents1.clone();
                     parse_quote! {
                         Self::#variant_ident(#(#field_idents1),*) => #enum_type::#variant_ident(
-                            #(crate::IntoProtoBuf::into_proto_buf(#field_idents2)),*
+                            <#variant_type as ::std::convert::From<_>>::from(
+                                (#(crate::IntoProtoBuf::into_proto_buf(#field_idents2)),*)
+                            )
                         )
                     }
                 }

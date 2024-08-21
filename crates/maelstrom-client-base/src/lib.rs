@@ -14,7 +14,7 @@ pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
 use derive_more::{From, Into};
 use enum_map::EnumMap;
-use maelstrom_base::{ClientJobId, JobOutcomeResult};
+use maelstrom_base::{ClientJobId, JobBrokerStatus, JobOutcomeResult, JobWorkerStatus};
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 use maelstrom_util::{
@@ -148,6 +148,31 @@ impl slog::KV for SimpleKV {
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, IntoProtoBuf, TryFromProtoBuf)]
+#[proto(
+    proto_buf_type = "proto::JobRunningStatus",
+    enum_type = "proto::job_running_status::Status"
+)]
+pub enum JobRunningStatus {
+    AtBroker(JobBrokerStatus),
+    AtLocalWorker(JobWorkerStatus),
+}
+
+#[derive(Clone, Debug, From, PartialEq, Eq, PartialOrd, Ord, IntoProtoBuf, TryFromProtoBuf)]
+#[proto(
+    proto_buf_type = "proto::JobStatus",
+    enum_type = "proto::job_status::Status"
+)]
+pub enum JobStatus {
+    Running(JobRunningStatus),
+    #[proto(proto_buf_type = "proto::JobCompletedStatus")]
+    Completed {
+        cjid: ClientJobId,
+        #[proto(option)]
+        result: JobOutcomeResult,
+    },
 }
 
 //                                 _      __

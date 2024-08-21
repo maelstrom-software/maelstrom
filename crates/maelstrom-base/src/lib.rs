@@ -577,6 +577,7 @@ pub type JobResult<T, E> = Result<T, JobError<E>>;
 /// Worker, Broker, and Client.
 pub type JobOutcomeResult = JobResult<JobOutcome, String>;
 
+#[pocket_definition(export)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobWorkerStatus {
     WaitingForLayers,
@@ -584,6 +585,7 @@ pub enum JobWorkerStatus {
     Executing,
 }
 
+#[pocket_definition(export)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobBrokerStatus {
     WaitingForLayers,
@@ -592,6 +594,7 @@ pub enum JobBrokerStatus {
 }
 
 /// ID of a worker connection. These share the same ID space as [`ClientId`] and [`MonitorId`].
+#[pocket_definition(export)]
 #[derive(
     Copy,
     Clone,
@@ -606,6 +609,7 @@ pub enum JobBrokerStatus {
     PartialEq,
     PartialOrd,
     Serialize,
+    Into,
 )]
 pub struct WorkerId(u32);
 

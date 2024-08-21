@@ -1,12 +1,12 @@
 use crate::artifact_pusher;
 use anyhow::{anyhow, Error, Result};
-use derive_more::From;
 use maelstrom_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{JobState, JobStateCounts},
     ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec, JobWorkerStatus,
     Sha256Digest,
 };
+use maelstrom_client_base::{JobRunningStatus, JobStatus};
 use maelstrom_util::{ext::OptionExt as _, fs::Fs, sync};
 use maelstrom_worker::local_worker;
 use std::{
@@ -56,22 +56,6 @@ pub enum Message<DepsT: Deps> {
     LocalWorker(WorkerToBroker),
     LocalWorkerStartArtifactFetch(Sha256Digest, PathBuf),
     Shutdown(Error),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum JobRunningStatus {
-    AtBroker(JobBrokerStatus),
-    AtLocalWorker(JobWorkerStatus),
-}
-
-#[derive(Clone, Debug, From, PartialEq, Eq, PartialOrd, Ord)]
-pub enum JobStatus {
-    #[allow(dead_code)]
-    Running(JobRunningStatus),
-    Completed {
-        cjid: ClientJobId,
-        result: JobOutcomeResult,
-    },
 }
 
 struct JobEntry<HandleT> {

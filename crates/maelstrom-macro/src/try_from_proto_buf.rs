@@ -120,15 +120,30 @@ fn try_from_proto_buf_enum(
                         #enum_type::#variant_ident(_) => Ok(Self::#variant_ident)
                     }
                 }
+                darling::ast::Style::Tuple if v.fields.len() == 1 => {
+                    parse_quote! {
+                        #enum_type::#variant_ident(f) => Ok(Self::#variant_ident(
+                            crate::TryFromProtoBuf::try_from_proto_buf(f)?
+                        ))
+                    }
+                }
                 darling::ast::Style::Tuple => {
+                    let variant_type = v
+                        .proto_buf_type
+                        .as_ref()
+                        .ok_or(Error::new(variant_ident.span(), "missing path_type"))?;
                     let num_fields = v.fields.len();
                     let field_idents1 =
                         (0..num_fields).map(|n| Ident::new(&format!("f{n}"), Span::call_site()));
                     let field_idents2 = field_idents1.clone();
                     parse_quote! {
-                        #enum_type::#variant_ident(#(#field_idents1),*) => Ok(Self::#variant_ident(
-                            #(crate::TryFromProtoBuf::try_from_proto_buf(#field_idents2)?),*
-                        ))
+                        #enum_type::#variant_ident(v) => {
+                            let (#(#field_idents1),*) =
+                                <_ as ::std::convert::From<#variant_type>>::from(v);
+                            Ok(Self::#variant_ident(
+                                #(crate::TryFromProtoBuf::try_from_proto_buf(#field_idents2)?),*
+                            ))
+                        }
                     }
                 }
                 darling::ast::Style::Struct => {
