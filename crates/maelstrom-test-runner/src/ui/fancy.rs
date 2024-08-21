@@ -21,10 +21,9 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Rect},
     style::{palette::tailwind, Color, Modifier, Style, Stylize as _},
-    terminal::{Terminal, Viewport},
     text::{Line, Span, Text},
     widgets::{Block, Cell, Gauge, Paragraph, Row, Table, Widget, Wrap},
-    TerminalOptions,
+    Terminal, TerminalOptions, Viewport,
 };
 use slog::Drain as _;
 use std::cell::RefCell;
@@ -368,7 +367,7 @@ impl Ui for FancyUi {
         let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
 
         let mut last_tick = Instant::now();
-        terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
+        terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
         loop {
             if last_tick.elapsed() > Duration::from_millis(33) {
                 while crossterm::event::poll(Duration::from_secs(0))? {
@@ -387,7 +386,7 @@ impl Ui for FancyUi {
                     }
                 }
                 self.throbber_state.calc_next();
-                terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
+                terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
                 last_tick = Instant::now();
             }
 
@@ -477,7 +476,7 @@ impl Ui for FancyUi {
         self.remote_progress.clear();
         self.running_tests.clear();
 
-        terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
+        terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
 
         Ok(())
     }

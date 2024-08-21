@@ -124,7 +124,7 @@ impl Widget for MultiGauge<'_> {
                     buf.set_style(*area, style);
                     for y in area.top()..area.bottom() {
                         for x in area.left()..area.right() {
-                            let cell = buf.get_mut(x, y);
+                            let cell = &mut buf[(x, y)];
                             if x < label_col
                                 || x >= label_col + clamped_label_width
                                 || y != label_row
@@ -153,7 +153,7 @@ impl Widget for MultiGauge<'_> {
                     };
                     for y in area.top()..area.bottom() {
                         let x = area.left();
-                        let cell = buf.get_mut(x, y);
+                        let cell = &mut buf[(x, y)];
                         if x < label_col || x >= label_col + clamped_label_width || y != label_row {
                             cell.set_symbol(get_unicode_block(frac))
                                 .set_fg(fg)
