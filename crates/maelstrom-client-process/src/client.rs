@@ -214,12 +214,15 @@ async fn wait_for_job_completed(
     mut receiver: tokio::sync::mpsc::UnboundedReceiver<JobStatus>,
 ) -> Result<(ClientJobId, JobOutcomeResult)> {
     loop {
-        if let JobStatus::Completed { cjid, result } = receiver
+        if let JobStatus::Completed {
+            client_job_id,
+            result,
+        } = receiver
             .recv()
             .await
             .ok_or_else(|| anyhow!("job canceled"))?
         {
-            break Ok((cjid, result));
+            break Ok((client_job_id, result));
         }
     }
 }

@@ -93,14 +93,19 @@ impl<DepsT: Deps> Router<DepsT> {
         }
     }
 
-    fn receive_job_response(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
+    fn receive_job_response(&mut self, client_job_id: ClientJobId, result: JobOutcomeResult) {
         let handle = self
             .jobs
-            .remove(&cjid)
-            .unwrap_or_else(|| panic!("received response for unknown job {cjid}"))
+            .remove(&client_job_id)
+            .unwrap_or_else(|| panic!("received response for unknown job {client_job_id}"))
             .handle;
-        self.deps
-            .job_update(&handle, JobStatus::Completed { cjid, result });
+        self.deps.job_update(
+            &handle,
+            JobStatus::Completed {
+                client_job_id,
+                result,
+            },
+        );
         self.completed_jobs += 1;
     }
 
@@ -662,7 +667,7 @@ mod tests {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
         LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
-            JobUpdate(cjid!(0), JobStatus::Completed { cjid: cjid!(0), result: Ok(outcome!(0)) }),
+            JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
         };
     }
 
@@ -689,7 +694,7 @@ mod tests {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar).network(JobNetwork::Local)),
         };
         LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
-            JobUpdate(cjid!(0), JobStatus::Completed { cjid: cjid!(0), result: Ok(outcome!(0)) }),
+            JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
         };
     }
 
@@ -739,7 +744,7 @@ mod tests {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
         Broker(BrokerToClient::JobResponse(cjid!(0), Ok(outcome!(0)))) => {
-            JobUpdate(cjid!(0), JobStatus::Completed { cjid: cjid!(0), result: Ok(outcome!(0)) }),
+            JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
         };
     }
 
@@ -825,7 +830,7 @@ mod tests {
         };
 
         LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
-            JobUpdate(cjid!(0), JobStatus::Completed { cjid: cjid!(0), result: Ok(outcome!(0)) }),
+            JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
         };
         GetJobStateCounts(0) => {
             TestMessage::JobStateCountsResponse(0, enum_map! {
@@ -967,7 +972,7 @@ mod tests {
         };
 
         Broker(BrokerToClient::JobResponse(cjid!(0), Ok(outcome!(0)))) => {
-            JobUpdate(cjid!(0), JobStatus::Completed { cjid: cjid!(0), result: Ok(outcome!(0)) }),
+            JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
         };
         GetJobStateCounts(0) => {
             TestMessage::JobStateCountsResponse(0, enum_map! {

@@ -274,7 +274,7 @@ message JobRunningStatus {
 }
 
 message JobCompletedStatus {
-    uint32 cjid = 1;
+    uint32 client_job_id = 1;
     JobOutcomeResult result = 2;
 }
 

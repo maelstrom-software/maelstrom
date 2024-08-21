@@ -169,7 +169,7 @@ pub enum JobStatus {
     Running(JobRunningStatus),
     #[proto(proto_buf_type = "proto::JobCompletedStatus")]
     Completed {
-        cjid: ClientJobId,
+        client_job_id: ClientJobId,
         #[proto(option)]
         result: JobOutcomeResult,
     },
