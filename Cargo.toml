@@ -123,7 +123,7 @@ proc-macro2 = "1"
 prost = "0.12"
 protoc-bin-vendored = "3.0.0"
 quote = "1"
-ratatui = { version = "0.28", features = ["unstable-rendered-line-info"] }
+ratatui = { version = "0.28", features = ["unstable-rendered-line-info", "scrolling-regions"] }
 rand = "0.8.5"
 regex = "1.8.3"
 regex-macro = "0.2"
@@ -168,3 +168,6 @@ wasm-logger = "0.2"
 web-sys = "0.3"
 xdg = "2.5.2"
 zerocopy = { version = "0.7", features = ["derive"] }
+
+[patch.crates-io]
+ratatui = { path = "../maelstrom-software/ratatui" }
