@@ -4,8 +4,7 @@ use anyhow::{bail, Result};
 use futures::{Stream, StreamExt as _};
 use maelstrom_client_base::{
     proto::{self, client_process_server::ClientProcess},
-    AddContainerRequest, IntoProtoBuf, RunJobRequest, RunJobResponse, StartRequest,
-    TryFromProtoBuf,
+    AddContainerRequest, IntoProtoBuf, RunJobRequest, StartRequest, TryFromProtoBuf,
 };
 use maelstrom_util::config::common::LogLevel;
 use slog::Drain as _;
@@ -92,22 +91,16 @@ impl ClientProcess for Handler {
         .map_to_tonic()
     }
 
+    type RunJobStream = Pin<Box<dyn Stream<Item = TonicResult<proto::JobStatus>> + Send>>;
+
     async fn run_job(
         &self,
         request: Request<proto::RunJobRequest>,
-    ) -> TonicResponse<proto::RunJobResponse> {
+    ) -> TonicResponse<Self::RunJobStream> {
         async {
             let RunJobRequest { spec } = TryFromProtoBuf::try_from_proto_buf(request.into_inner())?;
-            self.client
-                .run_job(spec)
-                .await
-                .map(|(client_job_id, result)| {
-                    RunJobResponse {
-                        client_job_id,
-                        result,
-                    }
-                    .into_proto_buf()
-                })
+            let stream = self.client.run_job(spec).await?;
+            Ok(Box::pin(stream.map(|e| Ok(IntoProtoBuf::into_proto_buf(e)))) as Self::RunJobStream)
         }
         .await
         .map_to_tonic()

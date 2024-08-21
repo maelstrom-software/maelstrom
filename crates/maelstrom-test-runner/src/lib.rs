@@ -642,7 +642,7 @@ impl<MainAppDepsT: MainAppDeps> TestToEnqueue<MainAppDepsT> {
         state.queuing_state.track_outstanding(&case_str, ui);
         ui.update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&state.log, "submitting job"; "case" => &case_str);
-        let cb = move |res| self.visitor.job_finished(res);
+        let cb = move |res| self.visitor.job_update(res);
         state.deps.client().add_job(self.spec, cb)?;
         Ok(EnqueueResult::Enqueued {
             package_name: self.package_name,

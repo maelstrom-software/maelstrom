@@ -1,4 +1,4 @@
-from .client import Client, RunJobFuture, LayerType
+from .client import Client, RunJobStream, LayerType
 
 from .items_pb2 import (
     BindMount,

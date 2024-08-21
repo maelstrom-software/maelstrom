@@ -107,11 +107,7 @@ impl ClientFixture {
                 ("INSIDE_JOB", "yes"),
                 ("TEST_LINE", &self.test_line.to_string()),
             ]);
-        let (send, recv) = std::sync::mpsc::channel();
-        self.client
-            .add_job(spec, move |res| send.send(res).unwrap())
-            .unwrap();
-        let (_, outcome) = recv.recv().unwrap().unwrap();
+        let (_, outcome) = self.client.run_job(spec).unwrap();
         let output = assert_matches!(
             outcome,
             Ok(JobOutcome::Completed(JobCompleted {

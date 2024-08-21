@@ -45,8 +45,10 @@ def test_simple_job(fixture: Fixture, tmp_path: Path) -> None:
         program="/usr/bin/python3",
         arguments=["/test.py"],
     )
-    job_future = fixture.client.run_job(spec)
-    result = job_future.result()
+    stream = fixture.client.run_job(spec)
+    for status in stream:
+        result = status.completed
+
     assert result.result.outcome.completed.exited == 0
     assert result.result.outcome.completed.effects.stderr.inline == b""
     assert result.result.outcome.completed.effects.stdout.inline == b"hello\n"

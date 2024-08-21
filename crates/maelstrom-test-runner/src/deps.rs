@@ -1,9 +1,9 @@
 use crate::{metadata::TestMetadata, ui};
 use anyhow::Result;
-use maelstrom_base::{ClientJobId, JobOutcomeResult, Utf8PathBuf};
+use maelstrom_base::Utf8PathBuf;
 use maelstrom_client::{
     spec::{JobSpec, LayerSpec},
-    IntrospectResponse,
+    IntrospectResponse, JobStatus,
 };
 use maelstrom_util::template::TemplateVars;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -23,7 +23,7 @@ pub trait ClientTrait: Sync {
     fn add_job(
         &self,
         spec: JobSpec,
-        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
+        handler: impl FnMut(Result<JobStatus>) + Send + Sync + Clone + 'static,
     ) -> Result<()>;
 }
 
@@ -35,7 +35,7 @@ impl ClientTrait for maelstrom_client::Client {
     fn add_job(
         &self,
         spec: JobSpec,
-        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
+        handler: impl FnMut(Result<JobStatus>) + Send + Sync + Clone + 'static,
     ) -> Result<()> {
         maelstrom_client::Client::add_job(self, spec, handler)
     }

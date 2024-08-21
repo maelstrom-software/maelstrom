@@ -238,10 +238,10 @@ impl Adapter {
 }
 
 impl Deps for Adapter {
-    type JobHandle = UnboundedSender<JobStatus>;
+    type JobHandle = futures::channel::mpsc::UnboundedSender<JobStatus>;
 
     fn job_update(&self, handle: &Self::JobHandle, status: JobStatus) {
-        handle.send(status).ok();
+        handle.unbounded_send(status).ok();
     }
 
     type JobStateCountsHandle = oneshot::Sender<JobStateCounts>;

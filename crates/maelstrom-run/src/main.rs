@@ -6,7 +6,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, JobSpec, ProjectDir, StateDir,
+    ContainerImageDepotDir, JobSpec, JobStatus, ProjectDir, StateDir,
 };
 use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow};
 use maelstrom_macro::Config;
@@ -218,7 +218,16 @@ fn print_effects(
     Ok(())
 }
 
-fn visitor(res: Result<(ClientJobId, JobOutcomeResult)>, tracker: Arc<JobTracker>) {
+fn visitor(res: Result<JobStatus>, tracker: &JobTracker) {
+    let res = match res {
+        Ok(JobStatus::Completed {
+            client_job_id,
+            result,
+        }) => Ok((client_job_id, result)),
+        Ok(_) => return,
+        Err(err) => Err(err),
+    };
+
     let exit_code = match res {
         Ok((cjid, Ok(JobOutcome::Completed(JobCompleted { status, effects })))) => {
             print_effects(Some(cjid), effects).ok();
@@ -783,7 +792,7 @@ fn main_with_logger(
         for job_spec in job_specs {
             let tracker = tracker.clone();
             tracker.add_outstanding();
-            client.add_job(job_spec?, move |res| visitor(res, tracker))?;
+            client.add_job(job_spec?, move |res| visitor(res, &tracker))?;
         }
         tracker.wait_for_outstanding();
         Ok(tracker.accum.get())

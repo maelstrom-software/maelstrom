@@ -15,7 +15,7 @@ use layer_builder::LayerBuilder;
 use layer_cache::{CacheResult, LayerCache};
 use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
-    ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest,
+    ArtifactType, Sha256Digest,
 };
 use maelstrom_client_base::{
     spec::{
@@ -209,23 +209,6 @@ impl ClientState {
 
 /// For files under this size, the data is stashed in the manifest rather than uploaded separately
 const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
-
-async fn wait_for_job_completed(
-    mut receiver: tokio::sync::mpsc::UnboundedReceiver<JobStatus>,
-) -> Result<(ClientJobId, JobOutcomeResult)> {
-    loop {
-        if let JobStatus::Completed {
-            client_job_id,
-            result,
-        } = receiver
-            .recv()
-            .await
-            .ok_or_else(|| anyhow!("job canceled"))?
-        {
-            break Ok((client_job_id, result));
-        }
-    }
-}
 
 impl Client {
     pub fn new() -> Self {
@@ -601,9 +584,12 @@ impl Client {
         }
     }
 
-    pub async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
-        let (state, watcher) = self.state_machine.active_with_watcher()?;
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    pub async fn run_job(
+        &self,
+        spec: JobSpec,
+    ) -> Result<futures::channel::mpsc::UnboundedReceiver<JobStatus>> {
+        let state = self.state_machine.active()?;
+        let (sender, receiver) = futures::channel::mpsc::unbounded();
         debug!(state.log, "run_job"; "spec" => ?spec);
 
         let container = match spec.container {
@@ -667,7 +653,7 @@ impl Client {
         state
             .local_broker_sender
             .send(router::Message::RunJob(spec, sender))?;
-        watcher.wait(wait_for_job_completed(receiver)).await
+        Ok(receiver)
     }
 
     pub async fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {

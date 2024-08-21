@@ -1,8 +1,8 @@
 pub use maelstrom_client_base::{
     spec,
     spec::{ContainerSpec, ImageSpec, JobSpec},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, RemoteProgress,
-    RpcLogMessage, StateDir, MANIFEST_DIR,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
+    RemoteProgress, RpcLogMessage, StateDir, MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
@@ -11,7 +11,7 @@ use futures::stream::StreamExt as _;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
-    AddContainerRequest, IntoProtoBuf, RunJobResponse, StartRequest, TryFromProtoBuf,
+    AddContainerRequest, IntoProtoBuf, StartRequest, TryFromProtoBuf,
 };
 use maelstrom_linux::{self as linux, Pid};
 use maelstrom_util::{
@@ -34,10 +34,7 @@ use std::{
 };
 use tokio::{
     net::UnixStream as TokioUnixStream,
-    sync::{
-        mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
-        oneshot,
-    },
+    sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
     task,
 };
 
@@ -190,6 +187,20 @@ async fn handle_log_messages(
     Ok(())
 }
 
+fn wait_for_job_completed_blocking(
+    receiver: std_mpsc::Receiver<Result<JobStatus>>,
+) -> Result<(ClientJobId, JobOutcomeResult)> {
+    loop {
+        if let JobStatus::Completed {
+            client_job_id,
+            result,
+        } = receiver.recv().map_err(|_| anyhow!("job canceled"))??
+        {
+            break Ok((client_job_id, result));
+        }
+    }
+}
+
 impl Client {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -299,7 +310,7 @@ impl Client {
     pub fn add_job(
         &self,
         spec: JobSpec,
-        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
+        mut handler: impl FnMut(Result<JobStatus>) + Send + Sync + Clone + 'static,
     ) -> Result<()> {
         let msg = proto::RunJobRequest {
             spec: Some(spec.clone().into_proto_buf()),
@@ -309,26 +320,36 @@ impl Client {
             .unwrap()
             .send(Box::new(move |mut client| {
                 Box::pin(async move {
-                    let res = async move {
-                        let RunJobResponse {
-                            client_job_id,
-                            result,
-                        } = transform_rpc_response(client.run_job(msg).await)?;
-                        Result::<_, anyhow::Error>::Ok((client_job_id, result))
+                    let mut stream = match client.run_job(msg).await.map_err(map_tonic_error) {
+                        Ok(v) => v.into_inner(),
+                        Err(e) => {
+                            task::spawn_blocking(move || handler(Err(e))).await.unwrap();
+                            return;
+                        }
+                    };
+                    while let Some(status) = stream.next().await {
+                        let status = async {
+                            JobStatus::try_from_proto_buf(status.map_err(map_tonic_error)?)
+                        }
+                        .await;
+                        let was_error = status.is_err();
+                        let mut handler = handler.clone();
+                        task::spawn_blocking(move || handler(status)).await.unwrap();
+                        if was_error {
+                            break;
+                        }
                     }
-                    .await;
-                    task::spawn_blocking(move || handler(res));
                 })
             }))?;
         Ok(())
     }
 
     pub fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
-        let (sender, receiver) = oneshot::channel();
+        let (sender, receiver) = std_mpsc::channel();
         self.add_job(spec, move |result| {
             let _ = sender.send(result);
         })?;
-        receiver.blocking_recv()?
+        wait_for_job_completed_blocking(receiver)
     }
 
     pub fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {

@@ -16,10 +16,9 @@ use indicatif::InMemoryTerm;
 use indoc::indoc;
 use maelstrom_base::{
     stats::{JobState, JobStateCounts},
-    ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutcomeResult, JobOutputResult,
-    JobTerminationStatus,
+    ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobTerminationStatus,
 };
-use maelstrom_client::{spec::JobSpec, IntrospectResponse, ProjectDir, StateDir};
+use maelstrom_client::{spec::JobSpec, IntrospectResponse, JobStatus, ProjectDir, StateDir};
 use maelstrom_util::{
     fs::Fs,
     log::test_logger,
@@ -71,11 +70,14 @@ impl ClientTrait for TestClient {
     fn add_job(
         &self,
         spec: JobSpec,
-        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
+        mut handler: impl FnMut(Result<JobStatus>) + Send + Sync + 'static,
     ) -> Result<()> {
-        let cjid = ClientJobId::from_u32(self.next_job_id.fetch_add(1, Ordering::AcqRel));
+        let client_job_id = ClientJobId::from_u32(self.next_job_id.fetch_add(1, Ordering::AcqRel));
         if let Some(outcome) = self.tests.find_outcome(spec) {
-            handler(Ok((cjid, Ok(outcome))));
+            handler(Ok(JobStatus::Completed {
+                client_job_id,
+                result: Ok(outcome),
+            }));
         }
         Ok(())
     }

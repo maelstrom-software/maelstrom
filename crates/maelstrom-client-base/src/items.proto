@@ -285,11 +285,6 @@ message JobStatus {
     }
 }
 
-message RunJobResponse {
-    uint32 client_job_id = 1;
-    JobOutcomeResult result = 2;
-}
-
 message Void {}
 
 message JobStateCounts {
@@ -341,6 +336,6 @@ service ClientProcess {
     rpc StreamLogMessages(Void) returns (stream LogMessage);
     rpc Start(StartRequest) returns (Void);
     rpc AddContainer(AddContainerRequest) returns (Void);
-    rpc RunJob(RunJobRequest) returns (RunJobResponse);
+    rpc RunJob(RunJobRequest) returns (stream JobStatus);
     rpc Introspect(Void) returns (IntrospectResponse);
 }

@@ -11,7 +11,7 @@ from .items_pb2 import (
     JobSpec,
     PathsLayer,
     RunJobRequest,
-    RunJobResponse,
+    JobStatus,
     StartRequest,
     StubsLayer,
     SymlinkSpec,
@@ -25,8 +25,8 @@ from xdg_base_dirs import (
 )
 
 
-class RunJobFuture(Protocol):
-    def result(self) -> RunJobResponse: ...
+class RunJobStream(Protocol):
+    def __next__(self) -> JobStatus: ...
 
 
 LayerType = Union[TarLayer, GlobLayer, PathsLayer, StubsLayer, SymlinksLayer]
@@ -63,5 +63,5 @@ class Client:
     def run_job(
         self,
         spec: JobSpec,
-    ) -> RunJobFuture:
-        return self.stub.RunJob.future(RunJobRequest(spec=spec))
+    ) -> RunJobStream:
+        return self.stub.RunJob(RunJobRequest(spec=spec))

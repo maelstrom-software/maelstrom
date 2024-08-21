@@ -204,14 +204,6 @@ pub struct RunJobRequest {
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf)]
-#[proto(proto_buf_type = "proto::RunJobResponse")]
-pub struct RunJobResponse {
-    pub client_job_id: ClientJobId,
-    #[proto(option)]
-    pub result: JobOutcomeResult,
-}
-
-#[derive(IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::AddContainerRequest")]
 pub struct AddContainerRequest {
     pub name: String,

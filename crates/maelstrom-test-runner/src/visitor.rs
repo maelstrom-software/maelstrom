@@ -3,9 +3,10 @@ use crate::ui::{UiJobResult, UiJobStatus, UiJobSummary, UiSender};
 use crate::{TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
 use maelstrom_base::{
-    ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
+    ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutputResult,
     JobTerminationStatus,
 };
+use maelstrom_client::JobStatus;
 use maelstrom_util::process::{ExitCode, ExitCodeAccumulator};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -200,7 +201,16 @@ where
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
 {
-    pub fn job_finished(&self, res: Result<(ClientJobId, JobOutcomeResult)>) {
+    pub fn job_update(&self, res: Result<JobStatus>) {
+        let res = match res {
+            Ok(JobStatus::Completed {
+                client_job_id,
+                result,
+            }) => Ok((client_job_id, result)),
+            Ok(_) => return,
+            Err(err) => Err(err),
+        };
+
         let test_status: UiJobStatus;
         let mut test_output_stderr: Vec<String> = vec![];
         let mut test_output_stdout: Vec<String> = vec![];

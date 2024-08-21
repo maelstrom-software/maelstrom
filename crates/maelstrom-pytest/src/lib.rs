@@ -233,8 +233,7 @@ impl<'client> PytestTestCollector<'client> {
                 },
             },
         ];
-        let (sender, receiver) = std::sync::mpsc::channel();
-        self.client.add_job(
+        let (_, outcome) = self.client.run_job(
             JobSpec::new("/bin/sh", layers)
                 .arguments([
                     "-c".to_owned(),
@@ -258,9 +257,7 @@ impl<'client> PytestTestCollector<'client> {
                 .mounts([JobMount::Devices {
                     devices: enum_set![JobDevice::Null],
                 }]),
-            move |res| drop(sender.send(res)),
         )?;
-        let (_, outcome) = receiver.recv()??;
         let outcome = outcome.map_err(|err| anyhow!("error installing pip packages: {err:?}"))?;
         match outcome {
             JobOutcome::Completed(completed) => {
