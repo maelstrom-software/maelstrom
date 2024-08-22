@@ -97,6 +97,7 @@ impl<LatentT, ActiveT> StateMachine<LatentT, ActiveT> {
     /// some sorts of out-of-band failures of the client may result in the client just "stopping"
     /// and not resolving requests one way or the other. A watcher can be used to detect this
     /// situation and abort an outstanding request.
+    #[allow(dead_code)]
     pub fn active_with_watcher(&self) -> Result<(&ActiveT, ActiveWatcher<'_, LatentT, ActiveT>)> {
         // We need to be careful to use the copy of our state from the receiver when we call
         // `active_value` so that we don't miss a message when we then go and wait on that
@@ -170,6 +171,7 @@ impl<'a, LatentT, ActiveT> ActivationHandle<'a, LatentT, ActiveT> {
     }
 }
 
+#[allow(dead_code)]
 pub struct ActiveWatcher<'a, LatentT, ActiveT> {
     state_machine: &'a StateMachine<LatentT, ActiveT>,
     receiver: Receiver<State>,
@@ -185,6 +187,7 @@ impl<'a, LatentT, ActiveT> ActiveWatcher<'a, LatentT, ActiveT> {
     ///
     /// If the future never yields a value, but the state machine transitions to failed, then the
     /// state machine error will be yielded.
+    #[allow(dead_code)]
     pub async fn wait<F, T, E>(mut self, future: F) -> Result<T>
     where
         F: Future<Output = std::result::Result<T, E>>,

@@ -15,9 +15,8 @@ use fake_test_framework::{
 use indicatif::InMemoryTerm;
 use indoc::indoc;
 use maelstrom_base::{
-    stats::{JobState, JobStateCounts},
-    ClientJobId, JobBrokerStatus, JobCompleted, JobEffects, JobOutcome, JobOutputResult,
-    JobTerminationStatus, JobWorkerStatus,
+    stats::JobState, ClientJobId, JobBrokerStatus, JobCompleted, JobEffects, JobOutcome,
+    JobOutputResult, JobTerminationStatus, JobWorkerStatus,
 };
 use maelstrom_client::{
     spec::JobSpec, IntrospectResponse, JobRunningStatus, JobStatus, ProjectDir, StateDir,
@@ -126,14 +125,6 @@ impl MainAppDeps for TestMainAppDeps {
     const MAELSTROM_TEST_TOML: &'static str = "maelstrom-test.toml";
 }
 
-fn counts_from_states(states: &[JobState]) -> JobStateCounts {
-    let mut counts = JobStateCounts::default();
-    for state in states {
-        counts[*state] += 1;
-    }
-    counts
-}
-
 #[derive(Default, Clone)]
 struct TestIntrospectDriver<'scope> {
     #[allow(clippy::type_complexity)]
@@ -155,12 +146,7 @@ impl<'scope> IntrospectDriver<'scope> for TestIntrospectDriver<'scope> {
 }
 
 impl<'scope> TestIntrospectDriver<'scope> {
-    fn update(&self, job_state_counts: JobStateCounts) {
-        let resp = IntrospectResponse {
-            job_state_counts,
-            artifact_uploads: vec![],
-            image_downloads: vec![],
-        };
+    fn update(&self, resp: IntrospectResponse) {
         (self.update_func.borrow_mut().as_mut().unwrap())(resp)
     }
 }
@@ -218,7 +204,6 @@ fn run_app(
     let introspect_driver = TestIntrospectDriver::default();
     let mut app = MainApp::new(&state, ui_sender, introspect_driver.clone(), None).unwrap();
 
-    let mut running = vec![];
     loop {
         let res = app.enqueue_one().unwrap();
         let (package_name, case) = match res {
@@ -226,10 +211,9 @@ fn run_app(
             EnqueueResult::NotEnqueued(NotCollected::Ignored | NotCollected::Listed) => continue,
             EnqueueResult::Enqueued { package_name, case } => (package_name, case),
         };
-        let test = fake_tests.find_case(&package_name, &case);
-        running.push(test.desired_state);
+        let _test = fake_tests.find_case(&package_name, &case);
 
-        introspect_driver.update(counts_from_states(&running));
+        introspect_driver.update(IntrospectResponse::default());
     }
 
     app.drain().unwrap();

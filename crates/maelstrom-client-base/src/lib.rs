@@ -13,7 +13,6 @@ extern crate self as maelstrom_client;
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
 use derive_more::{From, Into};
-use enum_map::EnumMap;
 use maelstrom_base::{
     stats::JobState, ClientJobId, JobBrokerStatus, JobOutcomeResult, JobWorkerStatus,
 };
@@ -67,11 +66,9 @@ pub struct RemoteProgress {
     pub progress: u64,
 }
 
-#[derive(IntoProtoBuf, TryFromProtoBuf)]
+#[derive(Default, IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::IntrospectResponse")]
 pub struct IntrospectResponse {
-    #[proto(option)]
-    pub job_state_counts: EnumMap<maelstrom_base::stats::JobState, u64>,
     pub artifact_uploads: Vec<RemoteProgress>,
     pub image_downloads: Vec<RemoteProgress>,
 }

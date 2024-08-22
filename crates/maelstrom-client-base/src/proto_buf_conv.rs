@@ -1,6 +1,5 @@
 use crate::proto;
 use anyhow::{anyhow, Result};
-use enum_map::{enum_map, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
     client_job_id_pocket_definition, group_id_pocket_definition,
@@ -632,34 +631,6 @@ impl TryFromProtoBuf for maelstrom_base::JobOutcomeResult {
             JobOutcomeResult::Error(e) => Ok(Self::Err(TryFromProtoBuf::try_from_proto_buf(e)?)),
             JobOutcomeResult::Outcome(v) => Ok(Self::Ok(TryFromProtoBuf::try_from_proto_buf(v)?)),
         }
-    }
-}
-
-impl IntoProtoBuf for EnumMap<maelstrom_base::stats::JobState, u64> {
-    type ProtoBufType = proto::JobStateCounts;
-
-    fn into_proto_buf(self) -> Self::ProtoBufType {
-        use maelstrom_base::stats::JobState;
-        proto::JobStateCounts {
-            waiting_for_artifacts: self[JobState::WaitingForArtifacts],
-            pending: self[JobState::Pending],
-            running: self[JobState::Running],
-            complete: self[JobState::Complete],
-        }
-    }
-}
-
-impl TryFromProtoBuf for EnumMap<maelstrom_base::stats::JobState, u64> {
-    type ProtoBufType = proto::JobStateCounts;
-
-    fn try_from_proto_buf(b: proto::JobStateCounts) -> Result<Self> {
-        use maelstrom_base::stats::JobState;
-        Ok(enum_map! {
-            JobState::WaitingForArtifacts => b.waiting_for_artifacts,
-            JobState::Pending => b.pending,
-            JobState::Running => b.running,
-            JobState::Complete => b.complete,
-        })
     }
 }
 

@@ -668,16 +668,10 @@ impl Client {
     }
 
     pub async fn introspect(&self) -> Result<IntrospectResponse> {
-        let (state, watcher) = self.state_machine.active_with_watcher()?;
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        state
-            .local_broker_sender
-            .send(router::Message::GetJobStateCounts(sender))?;
-        let job_state_counts = watcher.wait(receiver).await?;
+        let state = self.state_machine.active()?;
         let artifact_uploads = state.artifact_upload_tracker.get_remote_progresses();
         let image_downloads = state.image_download_tracker.get_remote_progresses();
         Ok(IntrospectResponse {
-            job_state_counts,
             artifact_uploads,
             image_downloads,
         })

@@ -2,7 +2,6 @@ use crate::artifact_pusher;
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
-    stats::{JobState, JobStateCounts},
     ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::{JobRunningStatus, JobStatus};
@@ -13,19 +12,13 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::{
-    sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        oneshot,
-    },
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task::JoinSet,
 };
 
 pub trait Deps {
     type JobHandle;
     fn job_update(&self, handle: &Self::JobHandle, status: JobStatus);
-
-    type JobStateCountsHandle;
-    fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts);
 
     // Only in remote broker mode.
     fn send_job_request_to_broker(&self, cjid: ClientJobId, spec: JobSpec);
@@ -46,7 +39,6 @@ pub enum Message<DepsT: Deps> {
     // These are requests from the client.
     AddArtifact(PathBuf, Sha256Digest),
     RunJob(JobSpec, DepsT::JobHandle),
-    GetJobStateCounts(DepsT::JobStateCountsHandle),
 
     // Only in non-standalone mode.
     Broker(BrokerToClient),
@@ -133,18 +125,6 @@ impl<DepsT: Deps> Router<DepsT> {
                     self.deps.send_job_request_to_broker(cjid, spec);
                 }
             }
-            Message::GetJobStateCounts(handle) => {
-                let mut counts = JobStateCounts::default();
-                counts[JobState::Complete] = self.completed_jobs;
-                for entry in self.jobs.values() {
-                    let state = match entry.status {
-                        None => JobState::WaitingForArtifacts,
-                        Some(ref running_status) => running_status.to_state(),
-                    };
-                    counts[state] += 1;
-                }
-                self.deps.job_state_counts(handle, counts);
-            }
             Message::Broker(BrokerToClient::JobResponse(cjid, result)) => {
                 assert!(!self.standalone);
                 self.receive_job_response(cjid, result);
@@ -217,12 +197,6 @@ impl Deps for Adapter {
         handle.unbounded_send(status).ok();
     }
 
-    type JobStateCountsHandle = oneshot::Sender<JobStateCounts>;
-
-    fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts) {
-        handle.send(counts).ok();
-    }
-
     fn send_job_request_to_broker(&self, cjid: ClientJobId, spec: JobSpec) {
         let _ = self
             .broker_sender
@@ -290,8 +264,7 @@ pub fn start_task(
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use enum_map::enum_map;
-    use maelstrom_base::{JobBrokerStatus, JobNetwork, JobWorkerStatus};
+    use maelstrom_base::JobNetwork;
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc, result};
     use BrokerToClient::*;
@@ -300,7 +273,6 @@ mod tests {
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
     enum TestMessage {
         JobUpdate(ClientJobId, JobStatus),
-        JobStateCountsResponse(i32, JobStateCounts),
         JobRequestToBroker(ClientJobId, JobSpec),
         StartArtifactTransferToBroker(Sha256Digest, PathBuf),
         EnqueueJobToLocalWorker(JobId, JobSpec),
@@ -321,13 +293,6 @@ mod tests {
             self.borrow_mut()
                 .messages
                 .push(TestMessage::JobUpdate(*handle, status));
-        }
-
-        type JobStateCountsHandle = i32;
-        fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts) {
-            self.borrow_mut()
-                .messages
-                .push(TestMessage::JobStateCountsResponse(handle, counts));
         }
 
         fn send_job_request_to_broker(&self, cjid: ClientJobId, spec: JobSpec) {
@@ -718,242 +683,6 @@ mod tests {
         };
         Broker(BrokerToClient::JobResponse(cjid!(0), Ok(outcome!(0)))) => {
             JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
-        };
-    }
-
-    script_test! {
-        get_job_state_counts_standalone,
-        Fixture::new(true, []),
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 0,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        RunJob(spec!(1, Tar), cjid!(1)) => {
-            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar)),
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 2,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        LocalWorker(WorkerToBroker::JobStatusUpdate(jid!(0, 0), JobWorkerStatus::WaitingForLayers)) => {
-            JobUpdate(
-                cjid!(0),
-                JobStatus::Running(JobRunningStatus::AtLocalWorker(JobWorkerStatus::WaitingForLayers))
-            )
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 2,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        LocalWorker(WorkerToBroker::JobStatusUpdate(jid!(0, 0), JobWorkerStatus::WaitingToExecute)) => {
-            JobUpdate(
-                cjid!(0),
-                JobStatus::Running(JobRunningStatus::AtLocalWorker(JobWorkerStatus::WaitingToExecute))
-            )
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 1,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        LocalWorker(WorkerToBroker::JobStatusUpdate(jid!(0, 0), JobWorkerStatus::Executing)) => {
-            JobUpdate(
-                cjid!(0),
-                JobStatus::Running(JobRunningStatus::AtLocalWorker(JobWorkerStatus::Executing))
-            )
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 0,
-                JobState::Running => 1,
-                JobState::Complete => 0,
-            }),
-        };
-
-        LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
-            JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 1,
-            }),
-        };
-    }
-
-    script_test! {
-        get_job_state_counts_clustered,
-        Fixture::new(false, []),
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 0,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            JobRequestToBroker(cjid!(0), spec!(0, Tar)),
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        RunJob(spec!(1, Tar), cjid!(1)) => {
-            JobRequestToBroker(cjid!(1), spec!(1, Tar)),
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 2,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        Broker(BrokerToClient::JobStatusUpdate(cjid!(0), JobBrokerStatus::WaitingForLayers)) => {
-            JobUpdate(
-                cjid!(0),
-                JobStatus::Running(JobRunningStatus::AtBroker(JobBrokerStatus::WaitingForLayers))
-            )
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 2,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        Broker(BrokerToClient::JobStatusUpdate(cjid!(0), JobBrokerStatus::WaitingForWorker)) => {
-            JobUpdate(
-                cjid!(0),
-                JobStatus::Running(JobRunningStatus::AtBroker(JobBrokerStatus::WaitingForWorker))
-            )
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 1,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        Broker(BrokerToClient::JobStatusUpdate(
-            cjid!(0), JobBrokerStatus::AtWorker(wid!(0), JobWorkerStatus::WaitingForLayers)
-        )) => {
-            JobUpdate(
-                cjid!(0),
-                JobStatus::Running(
-                    JobRunningStatus::AtBroker(
-                        JobBrokerStatus::AtWorker(wid!(0), JobWorkerStatus::WaitingForLayers)
-                    )
-                )
-            )
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 2,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        Broker(BrokerToClient::JobStatusUpdate(
-            cjid!(0), JobBrokerStatus::AtWorker(wid!(0), JobWorkerStatus::WaitingToExecute)
-        )) => {
-            JobUpdate(
-                cjid!(0),
-                JobStatus::Running(
-                    JobRunningStatus::AtBroker(
-                        JobBrokerStatus::AtWorker(wid!(0), JobWorkerStatus::WaitingToExecute)
-                    )
-                )
-            )
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 1,
-                JobState::Running => 0,
-                JobState::Complete => 0,
-            }),
-        };
-
-        Broker(BrokerToClient::JobStatusUpdate(
-            cjid!(0), JobBrokerStatus::AtWorker(wid!(0), JobWorkerStatus::Executing)
-        )) => {
-            JobUpdate(
-                cjid!(0),
-                JobStatus::Running(
-                    JobRunningStatus::AtBroker(
-                        JobBrokerStatus::AtWorker(wid!(0), JobWorkerStatus::Executing)
-                    )
-                )
-            )
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 0,
-                JobState::Running => 1,
-                JobState::Complete => 0,
-            }),
-        };
-
-        Broker(BrokerToClient::JobResponse(cjid!(0), Ok(outcome!(0)))) => {
-            JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
-        };
-        GetJobStateCounts(0) => {
-            TestMessage::JobStateCountsResponse(0, enum_map! {
-                JobState::WaitingForArtifacts => 1,
-                JobState::Pending => 0,
-                JobState::Running => 0,
-                JobState::Complete => 1,
-            }),
         };
     }
 }

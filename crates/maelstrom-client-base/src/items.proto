@@ -287,13 +287,6 @@ message JobStatus {
 
 message Void {}
 
-message JobStateCounts {
-    uint64 waiting_for_artifacts = 1;
-    uint64 pending = 2;
-    uint64 running = 3;
-    uint64 complete = 4;
-}
-
 message RemoteProgress {
     string name = 1;
     uint64 size = 2;
@@ -303,7 +296,6 @@ message RemoteProgress {
 message IntrospectResponse {
     repeated RemoteProgress artifact_uploads = 1;
     repeated RemoteProgress image_downloads = 2;
-    JobStateCounts job_state_counts = 3;
 }
 
 enum LogLevel {
