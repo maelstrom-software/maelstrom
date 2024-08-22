@@ -97,18 +97,6 @@ where
             term,
         }
     }
-
-    fn update_job_states(&self, counts: JobStateCounts) {
-        for job_state in JobState::iter().filter(|s| s != &JobState::Complete) {
-            let jobs = JobState::iter()
-                .filter(|s| s >= &job_state)
-                .map(|s| counts[s])
-                .sum();
-            let bar = self.bars.get(&job_state).unwrap();
-            let pos = max(jobs, self.state.finished);
-            bar.set_position(pos);
-        }
-    }
 }
 
 impl<TermT> ProgressIndicator for MultipleProgressBars<TermT>
@@ -161,7 +149,18 @@ where
                 .insert(1, super::make_side_progress_bar("white", msg, 21))
         };
         self.remote_bar_tracker.update(new_side_progress, states);
-        self.update_job_states(resp.job_state_counts)
+    }
+
+    fn update_job_states(&self, counts: JobStateCounts) {
+        for job_state in JobState::iter().filter(|s| s != &JobState::Complete) {
+            let jobs = JobState::iter()
+                .filter(|s| s >= &job_state)
+                .map(|s| counts[s])
+                .sum();
+            let bar = self.bars.get(&job_state).unwrap();
+            let pos = max(jobs, self.state.finished);
+            bar.set_position(pos);
+        }
     }
 
     fn done_queuing_jobs(&mut self) {

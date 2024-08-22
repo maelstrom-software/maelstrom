@@ -16,9 +16,12 @@ use indicatif::InMemoryTerm;
 use indoc::indoc;
 use maelstrom_base::{
     stats::{JobState, JobStateCounts},
-    ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobTerminationStatus,
+    ClientJobId, JobBrokerStatus, JobCompleted, JobEffects, JobOutcome, JobOutputResult,
+    JobTerminationStatus, JobWorkerStatus,
 };
-use maelstrom_client::{spec::JobSpec, IntrospectResponse, JobStatus, ProjectDir, StateDir};
+use maelstrom_client::{
+    spec::JobSpec, IntrospectResponse, JobRunningStatus, JobStatus, ProjectDir, StateDir,
+};
 use maelstrom_util::{
     fs::Fs,
     log::test_logger,
@@ -73,12 +76,33 @@ impl ClientTrait for TestClient {
         mut handler: impl FnMut(Result<JobStatus>) + Send + Sync + 'static,
     ) -> Result<()> {
         let client_job_id = ClientJobId::from_u32(self.next_job_id.fetch_add(1, Ordering::AcqRel));
-        if let Some(outcome) = self.tests.find_outcome(spec) {
-            handler(Ok(JobStatus::Completed {
-                client_job_id,
-                result: Ok(outcome),
-            }));
+
+        let case = self.tests.find_case_for_spec(spec);
+
+        match case.desired_state {
+            JobState::WaitingForArtifacts => {
+                handler(Ok(JobStatus::Running(JobRunningStatus::AtBroker(
+                    JobBrokerStatus::WaitingForLayers,
+                ))));
+            }
+            JobState::Pending => {
+                handler(Ok(JobStatus::Running(JobRunningStatus::AtBroker(
+                    JobBrokerStatus::WaitingForWorker,
+                ))));
+            }
+            JobState::Running => {
+                handler(Ok(JobStatus::Running(JobRunningStatus::AtBroker(
+                    JobBrokerStatus::AtWorker(1.into(), JobWorkerStatus::Executing),
+                ))));
+            }
+            JobState::Complete => {
+                handler(Ok(JobStatus::Completed {
+                    client_job_id,
+                    result: Ok(case.outcome.clone()),
+                }));
+            }
         }
+
         Ok(())
     }
 }

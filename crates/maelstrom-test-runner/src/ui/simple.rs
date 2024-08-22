@@ -1,6 +1,6 @@
 mod progress;
 
-use super::{Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
+use super::{JobStatuses, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use crate::config::Quiet;
 use anyhow::Result;
 use colored::Colorize as _;
@@ -323,6 +323,7 @@ fn run_simple_ui<ProgressIndicatorT>(
 where
     ProgressIndicatorT: ProgressIndicator,
 {
+    let mut jobs = JobStatuses::default();
     let mut last_tick = Instant::now();
     loop {
         if last_tick.elapsed() > Duration::from_millis(500) {
@@ -340,9 +341,20 @@ where
                     let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
                     let _ = r.log_to(&slog_drain);
                 }
-                UiMessage::JobFinished(res) => job_finished(prog, res),
+                UiMessage::JobUpdated(msg) => {
+                    jobs.job_updated(msg.job_id, msg.status);
+                    prog.update_job_states(jobs.counts());
+                }
+                UiMessage::JobFinished(res) => {
+                    jobs.job_finished(res.job_id);
+                    prog.update_job_states(jobs.counts());
+                    job_finished(prog, res);
+                }
                 UiMessage::UpdatePendingJobsCount(count) => prog.update_length(count),
-                UiMessage::JobEnqueued(_) => {}
+                UiMessage::JobEnqueued(msg) => {
+                    jobs.job_enqueued(msg.job_id, msg.name);
+                    prog.update_job_states(jobs.counts());
+                }
                 UiMessage::UpdateIntrospectState(resp) => {
                     prog.update_introspect_state(resp);
                 }

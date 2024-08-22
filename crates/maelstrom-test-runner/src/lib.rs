@@ -34,12 +34,12 @@ use std::{
     io::{self, IsTerminal as _},
     mem, str,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
 use test_listing::TestListingStore;
-use ui::{Ui, UiSender, UiSlogDrain};
+use ui::{Ui, UiJobEnqueued, UiJobId, UiSender, UiSlogDrain};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -97,6 +97,7 @@ struct JobQueuingState<TestCollectorT: CollectTests> {
     list_action: Option<ListAction>,
     repeat: Repeat,
     collector_options: TestCollectorT::Options,
+    next_ui_job_id: AtomicU32,
 }
 
 impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
@@ -121,17 +122,27 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
             list_action,
             repeat,
             collector_options,
+            next_ui_job_id: AtomicU32::new(1),
         })
     }
 
-    fn track_outstanding(&self, case_str: &str, ui: &UiSender) {
+    fn next_ui_job_id(&self) -> UiJobId {
+        self.next_ui_job_id.fetch_add(1, Ordering::AcqRel).into()
+    }
+
+    fn track_outstanding(&self, case_str: &str, ui: &UiSender) -> UiJobId {
         let count = self.jobs_queued.fetch_add(1, Ordering::AcqRel);
         ui.update_length(std::cmp::max(
             self.expected_job_count.load(Ordering::Acquire),
             count + 1,
         ));
-        ui.job_enqueued(case_str.into());
+        let ui_job_id = self.next_ui_job_id();
+        ui.job_enqueued(UiJobEnqueued {
+            job_id: ui_job_id,
+            name: case_str.into(),
+        });
         self.tracker.add_outstanding();
+        ui_job_id
     }
 }
 
@@ -271,8 +282,8 @@ where
         );
 
         if self.ignored_cases.contains(case_name) || test_metadata.ignore {
-            self.queuing_state.track_outstanding(&case_str, &self.ui);
-            visitor.job_ignored();
+            let ui_job_id = self.queuing_state.track_outstanding(&case_str, &self.ui);
+            visitor.job_ignored(ui_job_id);
             return Ok(NotCollected::Ignored.into());
         }
 
@@ -639,10 +650,10 @@ impl<MainAppDepsT: MainAppDeps> Clone for TestToEnqueue<MainAppDepsT> {
 impl<MainAppDepsT: MainAppDeps> TestToEnqueue<MainAppDepsT> {
     fn enqueue(self, state: &MainAppState<MainAppDepsT>, ui: &UiSender) -> Result<EnqueueResult> {
         let case_str = self.case_str;
-        state.queuing_state.track_outstanding(&case_str, ui);
+        let ui_job_id = state.queuing_state.track_outstanding(&case_str, ui);
         ui.update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&state.log, "submitting job"; "case" => &case_str);
-        let cb = move |res| self.visitor.job_update(res);
+        let cb = move |res| self.visitor.job_update(ui_job_id, res);
         state.deps.client().add_job(self.spec, cb)?;
         Ok(EnqueueResult::Enqueued {
             package_name: self.package_name,

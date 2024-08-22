@@ -1,14 +1,12 @@
 mod multi_gauge;
 
-use super::{Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
+use super::{JobStatuses, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use crate::config::Quiet;
 use anyhow::{bail, Result};
 use derive_more::From;
 use indicatif::HumanBytes;
-use maelstrom_base::stats::JobState;
 use maelstrom_client::RemoteProgress;
 use maelstrom_linux as linux;
-use maelstrom_util::ext::OptionExt as _;
 use multi_gauge::{InnerGauge, MultiGauge};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
@@ -27,7 +25,6 @@ use ratatui::{
 };
 use slog::Drain as _;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::io::{self, stdout};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
@@ -303,16 +300,11 @@ impl Widget for PrintAbove {
 }
 
 pub struct FancyUi {
-    jobs_waiting_for_artifacts: u64,
-    jobs_pending: u64,
-    jobs_running: u64,
-    jobs_completed: u64,
-    jobs_outstanding: u64,
-
+    jobs: JobStatuses,
+    expected_total_jobs: u64,
     all_done: Option<UiJobSummary>,
     producing_build_output: bool,
 
-    running_tests: BTreeMap<String, Vec<Instant>>,
     build_output: vt100::Parser,
     print_above: Vec<PrintAbove>,
     enqueue_status: Option<String>,
@@ -333,16 +325,11 @@ impl FancyUi {
         }
 
         Ok(Self {
-            jobs_waiting_for_artifacts: 0,
-            jobs_pending: 0,
-            jobs_running: 0,
-            jobs_completed: 0,
-            jobs_outstanding: 0,
-
+            jobs: JobStatuses::default(),
+            expected_total_jobs: 0,
             all_done: None,
             producing_build_output: false,
 
-            running_tests: BTreeMap::new(),
             build_output: vt100::Parser::new(3, u16::MAX, 0),
             print_above: vec![],
             enqueue_status: Some("starting...".into()),
@@ -412,31 +399,21 @@ impl Ui for FancyUi {
                         self.producing_build_output = true;
                     }
                     UiMessage::List(_) => {}
+                    UiMessage::JobUpdated(msg) => self.jobs.job_updated(msg.job_id, msg.status),
                     UiMessage::JobFinished(res) => {
-                        self.jobs_completed += 1;
-                        let runs = self.running_tests.get_mut(&res.name).unwrap();
-                        runs.remove(0);
-                        if runs.is_empty() {
-                            self.running_tests.remove(&res.name).assert_is_some();
-                        }
+                        self.jobs.job_finished(res.job_id);
                         self.print_above.extend(format_finished(res));
                     }
-                    UiMessage::UpdatePendingJobsCount(count) => self.jobs_outstanding = count,
-                    UiMessage::JobEnqueued(name) => {
-                        self.running_tests
-                            .entry(name)
-                            .and_modify(|runs| runs.push(Instant::now()))
-                            .or_insert_with(|| vec![Instant::now()]);
+                    UiMessage::UpdatePendingJobsCount(count) => {
+                        self.expected_total_jobs = count;
+                    }
+                    UiMessage::JobEnqueued(msg) => {
+                        self.jobs.job_enqueued(msg.job_id, msg.name);
                     }
                     UiMessage::UpdateIntrospectState(resp) => {
                         let mut states = resp.artifact_uploads;
                         states.extend(resp.image_downloads);
                         self.remote_progress = states;
-
-                        self.jobs_waiting_for_artifacts =
-                            resp.job_state_counts[JobState::WaitingForArtifacts];
-                        self.jobs_pending = resp.job_state_counts[JobState::Pending];
-                        self.jobs_running = resp.job_state_counts[JobState::Running];
                     }
                     UiMessage::UpdateEnqueueStatus(msg) => {
                         self.enqueue_status = Some(msg);
@@ -474,7 +451,6 @@ impl Ui for FancyUi {
         self.producing_build_output = false;
         self.enqueue_status = None;
         self.remote_progress.clear();
-        self.running_tests.clear();
 
         terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
 
@@ -489,10 +465,6 @@ impl Drop for FancyUi {
 }
 
 impl FancyUi {
-    fn num_running_tests(&self) -> usize {
-        self.running_tests.values().map(|r| r.len()).sum::<usize>()
-    }
-
     fn handle_key(&mut self, key: KeyEvent) {
         if key.kind != KeyEventKind::Press {
             return;
@@ -509,23 +481,20 @@ impl FancyUi {
         let create_block = |title: String| Block::bordered().gray().title(title.bold());
 
         let omitted_tests = self
-            .num_running_tests()
-            .saturating_sub((area.height as usize).saturating_sub(2));
+            .jobs
+            .running()
+            .saturating_sub((area.height as u64).saturating_sub(2));
         let omitted_trailer = (omitted_tests > 0)
             .then(|| format!(" ({omitted_tests} tests not shown)"))
             .unwrap_or_default();
-        let mut running_tests: Vec<(&String, &Instant)> = self
-            .running_tests
-            .iter()
-            .flat_map(|(n, r)| r.iter().map(move |t| (n, t)))
-            .collect();
+        let mut running_tests: Vec<_> = self.jobs.running_tests().collect();
         running_tests.sort_by_key(|a| a.1);
         Table::new(
             running_tests
                 .into_iter()
                 .rev()
-                .skip(omitted_tests)
-                .map(|(name, t)| format_running_test(name.as_str(), t)),
+                .skip(omitted_tests as usize)
+                .map(|(name, t)| format_running_test(name, t)),
             [Constraint::Fill(1), Constraint::Length(4)],
         )
         .block(create_block(format!("Running Tests{}", omitted_trailer)))
@@ -550,23 +519,23 @@ impl FancyUi {
             InnerGauge::default().gauge_style(color).ratio(prcnt)
         };
 
-        let d = self.jobs_outstanding;
+        let d = self.expected_total_jobs;
 
         MultiGauge::default()
-            .gauge(build_gauge(tailwind::GREEN.c800, self.jobs_completed, d))
-            .gauge(build_gauge(tailwind::BLUE.c800, self.jobs_running, d))
-            .gauge(build_gauge(tailwind::YELLOW.c800, self.jobs_pending, d))
+            .gauge(build_gauge(tailwind::GREEN.c800, self.jobs.completed(), d))
+            .gauge(build_gauge(tailwind::BLUE.c800, self.jobs.running(), d))
+            .gauge(build_gauge(tailwind::YELLOW.c800, self.jobs.pending(), d))
             .gauge(build_gauge(
                 tailwind::PURPLE.c800,
-                self.jobs_waiting_for_artifacts,
+                self.jobs.waiting_for_artifacts(),
                 d,
             ))
             .label(format!(
                 "{}w {}p {}r {}c / {d}e",
-                self.jobs_waiting_for_artifacts,
-                self.jobs_pending,
-                self.jobs_running,
-                self.jobs_completed,
+                self.jobs.waiting_for_artifacts(),
+                self.jobs.pending(),
+                self.jobs.running(),
+                self.jobs.completed(),
             ))
             .render(area, buf);
     }
@@ -671,10 +640,8 @@ impl Widget for &mut FancyUi {
         let mut sections = vec![];
 
         if self.all_done.is_none() {
-            if !self.running_tests.is_empty() {
-                let max_height = (self.num_running_tests() + 2)
-                    .try_into()
-                    .unwrap_or(u16::MAX);
+            if self.jobs.running() > 0 {
+                let max_height = (self.jobs.running() + 2).try_into().unwrap_or(u16::MAX);
                 sections.push((
                     Constraint::Max(max_height),
                     FancyUi::render_running_tests as SectionFnPtr,

@@ -15,6 +15,7 @@ use crate::ui::PrintWidthCb;
 use anyhow::Result;
 use colored::Colorize as _;
 use indicatif::{ProgressBar, ProgressStyle};
+use maelstrom_base::stats::JobStateCounts;
 use maelstrom_client::IntrospectResponse;
 
 pub trait ProgressIndicator {
@@ -40,6 +41,9 @@ pub trait ProgressIndicator {
 
     /// Update progress with new introspect data.
     fn update_introspect_state(&mut self, _resp: IntrospectResponse) {}
+
+    /// Update progress with job states.
+    fn update_job_states(&self, _counts: JobStateCounts) {}
 
     /// Tick any spinners.
     fn tick(&mut self) {}

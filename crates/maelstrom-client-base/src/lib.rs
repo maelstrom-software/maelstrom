@@ -14,7 +14,9 @@ pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
 use derive_more::{From, Into};
 use enum_map::EnumMap;
-use maelstrom_base::{ClientJobId, JobBrokerStatus, JobOutcomeResult, JobWorkerStatus};
+use maelstrom_base::{
+    stats::JobState, ClientJobId, JobBrokerStatus, JobOutcomeResult, JobWorkerStatus,
+};
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 use maelstrom_util::{
@@ -158,6 +160,36 @@ impl slog::KV for SimpleKV {
 pub enum JobRunningStatus {
     AtBroker(JobBrokerStatus),
     AtLocalWorker(JobWorkerStatus),
+}
+
+impl JobRunningStatus {
+    pub fn to_state(&self) -> JobState {
+        match self {
+            JobRunningStatus::AtBroker(JobBrokerStatus::WaitingForLayers) => {
+                JobState::WaitingForArtifacts
+            }
+            JobRunningStatus::AtBroker(JobBrokerStatus::WaitingForWorker) => JobState::Pending,
+            JobRunningStatus::AtBroker(JobBrokerStatus::AtWorker(
+                _,
+                JobWorkerStatus::WaitingForLayers,
+            ))
+            | JobRunningStatus::AtLocalWorker(JobWorkerStatus::WaitingForLayers) => {
+                JobState::WaitingForArtifacts
+            }
+            JobRunningStatus::AtBroker(JobBrokerStatus::AtWorker(
+                _,
+                JobWorkerStatus::WaitingToExecute,
+            ))
+            | JobRunningStatus::AtLocalWorker(JobWorkerStatus::WaitingToExecute) => {
+                JobState::Pending
+            }
+            JobRunningStatus::AtBroker(JobBrokerStatus::AtWorker(
+                _,
+                JobWorkerStatus::Executing,
+            ))
+            | JobRunningStatus::AtLocalWorker(JobWorkerStatus::Executing) => JobState::Running,
+        }
+    }
 }
 
 #[derive(Clone, Debug, From, PartialEq, Eq, PartialOrd, Ord, IntoProtoBuf, TryFromProtoBuf)]

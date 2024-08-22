@@ -172,7 +172,7 @@ impl FakeTests {
             .collect()
     }
 
-    pub fn find_outcome(&self, spec: JobSpec) -> Option<JobOutcome> {
+    pub fn find_case_for_spec(&self, spec: JobSpec) -> &FakeTestCase {
         let binary_name = spec.program.file_name().unwrap();
         let binary = self.find_binary(binary_name);
         let case_name = spec
@@ -182,7 +182,7 @@ impl FakeTests {
             .unwrap();
         let case = binary.tests.iter().find(|c| &c.name == case_name).unwrap();
         assert_eq!(&spec.estimated_duration, &case.expected_estimated_duration);
-        (case.desired_state == JobState::Complete).then(|| case.outcome.clone())
+        case
     }
 
     fn find_binary(&self, binary_name: &str) -> &FakeTestBinary {

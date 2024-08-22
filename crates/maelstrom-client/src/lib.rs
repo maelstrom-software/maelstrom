@@ -1,8 +1,8 @@
 pub use maelstrom_client_base::{
     spec,
     spec::{ContainerSpec, ImageSpec, JobSpec},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
-    RemoteProgress, RpcLogMessage, StateDir, MANIFEST_DIR,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobRunningStatus,
+    JobStatus, ProjectDir, RemoteProgress, RpcLogMessage, StateDir, MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 

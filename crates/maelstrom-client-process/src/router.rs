@@ -3,8 +3,7 @@ use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{JobState, JobStateCounts},
-    ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec, JobWorkerStatus,
-    Sha256Digest,
+    ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::{JobRunningStatus, JobStatus};
 use maelstrom_util::{ext::OptionExt as _, fs::Fs, sync};
@@ -140,33 +139,7 @@ impl<DepsT: Deps> Router<DepsT> {
                 for entry in self.jobs.values() {
                     let state = match entry.status {
                         None => JobState::WaitingForArtifacts,
-                        Some(JobRunningStatus::AtBroker(JobBrokerStatus::WaitingForLayers)) => {
-                            JobState::WaitingForArtifacts
-                        }
-                        Some(JobRunningStatus::AtBroker(JobBrokerStatus::WaitingForWorker)) => {
-                            JobState::Pending
-                        }
-                        Some(JobRunningStatus::AtBroker(JobBrokerStatus::AtWorker(
-                            _,
-                            JobWorkerStatus::WaitingForLayers,
-                        )))
-                        | Some(JobRunningStatus::AtLocalWorker(
-                            JobWorkerStatus::WaitingForLayers,
-                        )) => JobState::WaitingForArtifacts,
-                        Some(JobRunningStatus::AtBroker(JobBrokerStatus::AtWorker(
-                            _,
-                            JobWorkerStatus::WaitingToExecute,
-                        )))
-                        | Some(JobRunningStatus::AtLocalWorker(
-                            JobWorkerStatus::WaitingToExecute,
-                        )) => JobState::Pending,
-                        Some(JobRunningStatus::AtBroker(JobBrokerStatus::AtWorker(
-                            _,
-                            JobWorkerStatus::Executing,
-                        )))
-                        | Some(JobRunningStatus::AtLocalWorker(JobWorkerStatus::Executing)) => {
-                            JobState::Running
-                        }
+                        Some(ref running_status) => running_status.to_state(),
                     };
                     counts[state] += 1;
                 }
@@ -318,7 +291,7 @@ pub fn start_task(
 mod tests {
     use super::{Message::*, *};
     use enum_map::enum_map;
-    use maelstrom_base::JobNetwork;
+    use maelstrom_base::{JobBrokerStatus, JobNetwork, JobWorkerStatus};
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc, result};
     use BrokerToClient::*;

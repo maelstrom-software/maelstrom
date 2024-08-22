@@ -1,9 +1,9 @@
 use crate::test_listing::TestListing;
-use crate::ui::{UiJobResult, UiJobStatus, UiJobSummary, UiSender};
+use crate::ui::{UiJobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiSender};
 use crate::{TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
 use maelstrom_base::{
-    ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutputResult,
+    ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
     JobTerminationStatus,
 };
 use maelstrom_client::JobStatus;
@@ -201,16 +201,7 @@ where
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
 {
-    pub fn job_update(&self, res: Result<JobStatus>) {
-        let res = match res {
-            Ok(JobStatus::Completed {
-                client_job_id,
-                result,
-            }) => Ok((client_job_id, result)),
-            Ok(_) => return,
-            Err(err) => Err(err),
-        };
-
+    fn job_finished(&self, ui_job_id: UiJobId, res: Result<(ClientJobId, JobOutcomeResult)>) {
         let test_status: UiJobStatus;
         let mut test_output_stderr: Vec<String> = vec![];
         let mut test_output_stdout: Vec<String> = vec![];
@@ -264,7 +255,7 @@ where
                 }
 
                 if !job_failed && was_ignored(&stdout, &self.case_str, self.was_ignored) {
-                    self.job_ignored();
+                    self.job_ignored(ui_job_id);
                     return;
                 }
 
@@ -333,6 +324,7 @@ where
         };
 
         self.ui.job_finished(UiJobResult {
+            job_id: ui_job_id,
             name: self.case_str.clone(),
             status: test_status,
             duration: test_duration,
@@ -344,9 +336,24 @@ where
         self.tracker.job_exited(self.case_str.clone(), exit_code);
     }
 
-    pub fn job_ignored(&self) {
+    pub fn job_update(&self, ui_job_id: UiJobId, res: Result<JobStatus>) {
+        match res {
+            Ok(JobStatus::Completed {
+                client_job_id,
+                result,
+            }) => self.job_finished(ui_job_id, Ok((client_job_id, result))),
+            Ok(JobStatus::Running(status)) => self.ui.job_updated(UiJobUpdate {
+                job_id: ui_job_id,
+                status,
+            }),
+            Err(err) => self.job_finished(ui_job_id, Err(err)),
+        }
+    }
+
+    pub fn job_ignored(&self, ui_job_id: UiJobId) {
         self.ui.job_finished(UiJobResult {
             name: self.case_str.clone(),
+            job_id: ui_job_id,
             status: UiJobStatus::Ignored,
             duration: None,
             stdout: vec![],

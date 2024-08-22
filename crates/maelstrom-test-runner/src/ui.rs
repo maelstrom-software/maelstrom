@@ -3,10 +3,14 @@ mod simple;
 
 use crate::{config::Quiet, LoggingOutput};
 use anyhow::Result;
-use maelstrom_client::IntrospectResponse;
+use derive_more::{From, Into};
+use maelstrom_base::stats::{JobState, JobStateCounts};
+use maelstrom_client::{IntrospectResponse, JobRunningStatus};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
+use std::time::Instant;
 use std::{fmt, str};
 use strum::EnumIter;
 
@@ -95,10 +99,24 @@ pub struct UiJobSummary {
 
 pub struct UiJobResult {
     pub name: String,
+    pub job_id: UiJobId,
     pub duration: Option<Duration>,
     pub status: UiJobStatus,
     pub stdout: Vec<String>,
     pub stderr: Vec<String>,
+}
+
+#[derive(Debug, Copy, Clone, From, Into, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UiJobId(u32);
+
+pub struct UiJobUpdate {
+    pub job_id: UiJobId,
+    pub status: JobRunningStatus,
+}
+
+pub struct UiJobEnqueued {
+    pub job_id: UiJobId,
+    pub name: String,
 }
 
 pub enum UiMessage {
@@ -106,9 +124,10 @@ pub enum UiMessage {
     BuildOutputChunk(Vec<u8>),
     SlogRecord(slog_async::AsyncRecord),
     List(String),
+    JobUpdated(UiJobUpdate),
     JobFinished(UiJobResult),
     UpdatePendingJobsCount(u64),
-    JobEnqueued(String),
+    JobEnqueued(UiJobEnqueued),
     UpdateIntrospectState(IntrospectResponse),
     UpdateEnqueueStatus(String),
     DoneBuilding,
@@ -155,6 +174,11 @@ impl UiSender {
         let _ = self.send.send(UiMessage::List(line));
     }
 
+    /// Should be sent when a test job has changed status.
+    pub fn job_updated(&self, status: UiJobUpdate) {
+        let _ = self.send.send(UiMessage::JobUpdated(status));
+    }
+
     /// Should be sent when a test job has finished.
     pub fn job_finished(&self, res: UiJobResult) {
         let _ = self.send.send(UiMessage::JobFinished(res));
@@ -168,8 +192,8 @@ impl UiSender {
     }
 
     /// Sent when we've enqueued a new test job.
-    pub fn job_enqueued(&self, name: String) {
-        let _ = self.send.send(UiMessage::JobEnqueued(name));
+    pub fn job_enqueued(&self, msg: UiJobEnqueued) {
+        let _ = self.send.send(UiMessage::JobEnqueued(msg));
     }
 
     /// Update the status message. This messages is displayed until [`Self::done_queuing_jobs`] is
@@ -306,4 +330,97 @@ pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet) -> R
             }
         }
     })
+}
+
+#[derive(Default)]
+struct JobStatusEntry {
+    name: String,
+    status: Option<JobRunningStatus>,
+    start_time: Option<Instant>,
+}
+
+impl JobStatusEntry {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            status: None,
+            start_time: None,
+        }
+    }
+
+    fn is_state(&self, state: JobState) -> bool {
+        match &self.status {
+            Some(s) => s.to_state() == state,
+            None => state == JobState::WaitingForArtifacts,
+        }
+    }
+
+    fn update(&mut self, status: JobRunningStatus) {
+        self.status = Some(status);
+        if self.start_time.is_none() && self.is_state(JobState::Running) {
+            self.start_time = Some(Instant::now());
+        }
+    }
+}
+
+#[derive(Default)]
+struct JobStatuses {
+    map: HashMap<UiJobId, JobStatusEntry>,
+    completed: u64,
+}
+
+impl JobStatuses {
+    fn job_updated(&mut self, job_id: UiJobId, status: JobRunningStatus) {
+        self.map.get_mut(&job_id).unwrap().update(status)
+    }
+
+    fn job_finished(&mut self, job_id: UiJobId) {
+        self.map.remove(&job_id);
+        self.completed += 1;
+    }
+
+    fn job_enqueued(&mut self, job_id: UiJobId, name: String) {
+        self.map.insert(job_id, JobStatusEntry::new(name));
+    }
+
+    fn waiting_for_artifacts(&self) -> u64 {
+        self.map
+            .values()
+            .filter(|e| e.is_state(JobState::WaitingForArtifacts))
+            .count() as u64
+    }
+
+    fn pending(&self) -> u64 {
+        self.map
+            .values()
+            .filter(|e| e.is_state(JobState::Pending))
+            .count() as u64
+    }
+
+    fn running(&self) -> u64 {
+        self.map
+            .values()
+            .filter(|e| e.is_state(JobState::Running))
+            .count() as u64
+    }
+
+    fn completed(&self) -> u64 {
+        self.completed
+    }
+
+    fn running_tests(&self) -> impl Iterator<Item = (&str, &Instant)> {
+        self.map
+            .values()
+            .filter(|t| t.is_state(JobState::Running))
+            .map(|t| (t.name.as_str(), t.start_time.as_ref().unwrap()))
+    }
+
+    fn counts(&self) -> JobStateCounts {
+        let mut counts = JobStateCounts::default();
+        counts[JobState::WaitingForArtifacts] = self.waiting_for_artifacts();
+        counts[JobState::Pending] = self.pending();
+        counts[JobState::Running] = self.running();
+        counts[JobState::Complete] = self.completed();
+        counts
+    }
 }
