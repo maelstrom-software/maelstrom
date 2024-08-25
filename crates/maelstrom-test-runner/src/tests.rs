@@ -151,47 +151,60 @@ impl<'scope> TestIntrospectDriver<'scope> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Debug)]
+struct TestArgs {
+    fake_tests: FakeTests,
+    quiet: bool,
+    include: Vec<String>,
+    exclude: Vec<String>,
+    repeat: Repeat,
+    list: Option<ListAction>,
+    stdout_tty: bool,
+    finish: bool,
+}
+
+impl Default for TestArgs {
+    fn default() -> Self {
+        Self {
+            fake_tests: FakeTests::default(),
+            quiet: false,
+            include: vec!["all".into()],
+            exclude: vec![],
+            repeat: Repeat::default(),
+            list: None,
+            stdout_tty: false,
+            finish: true,
+        }
+    }
+}
+
 fn run_app(
     bin_dir: &Root<BinDir>,
     term: InMemoryTerm,
-    fake_tests: FakeTests,
     project_dir: &Root<ProjectDir>,
-    stdout_tty: bool,
-    quiet: bool,
-    include_filter: Vec<String>,
-    exclude_filter: Vec<String>,
-    repeat: Repeat,
-    list: Option<ListAction>,
-    finish: bool,
+    test_args: TestArgs,
 ) -> String {
     let fs = Fs::new();
     let log = test_logger();
-    slog::info!(
-        log, "doing test";
-        "quiet" => ?quiet,
-        "include_filter" => ?include_filter,
-        "exclude_filter" => ?exclude_filter,
-        "list" => ?list,
-    );
+    slog::info!(log, "doing test"; "test_args" => ?test_args);
 
     fs.create_dir_all(bin_dir).unwrap();
-    fake_tests.create_binaries(&fs, bin_dir);
+    test_args.fake_tests.create_binaries(&fs, bin_dir);
 
     let target_directory = project_dir.join::<BuildDir>("target");
     let deps = TestMainAppDeps::new(
-        fake_tests.clone(),
+        test_args.fake_tests.clone(),
         bin_dir.to_owned(),
         target_directory.clone(),
     );
 
-    let is_list = list.is_some();
+    let is_list = test_args.list.is_some();
     let state = MainAppState::new(
         deps,
-        include_filter,
-        exclude_filter,
-        list,
-        repeat,
+        test_args.include,
+        test_args.exclude,
+        test_args.list,
+        test_args.repeat,
         false, // stderr_color
         project_dir,
         target_directory.join::<StateDir>("maelstrom/state"),
@@ -211,14 +224,14 @@ fn run_app(
             EnqueueResult::NotEnqueued(NotCollected::Ignored | NotCollected::Listed) => continue,
             EnqueueResult::Enqueued { package_name, case } => (package_name, case),
         };
-        let _test = fake_tests.find_case(&package_name, &case);
+        let _test = test_args.fake_tests.find_case(&package_name, &case);
 
         introspect_driver.update(IntrospectResponse::default());
     }
 
     app.drain().unwrap();
 
-    if finish {
+    if test_args.finish {
         app.finish().unwrap();
     }
 
@@ -226,14 +239,14 @@ fn run_app(
     drop(introspect_driver);
     drop(state);
 
-    if quiet {
-        let mut ui = ui::QuietUi::new(is_list, stdout_tty, term.clone()).unwrap();
+    if test_args.quiet {
+        let mut ui = ui::QuietUi::new(is_list, test_args.stdout_tty, term.clone()).unwrap();
         ui.run(ui_recv).unwrap();
 
         slog::info!(log, "test complete");
         term.contents()
     } else {
-        let mut ui = ui::SimpleUi::new(is_list, stdout_tty, term.clone());
+        let mut ui = ui::SimpleUi::new(is_list, test_args.stdout_tty, term.clone());
         ui.run(ui_recv).unwrap();
 
         slog::info!(log, "test complete");
@@ -241,71 +254,21 @@ fn run_app(
     }
 }
 
-fn run_or_list_all_tests_sync(
-    tmp_dir: &Root<TmpDir>,
-    fake_tests: FakeTests,
-    quiet: bool,
-    include_filter: Vec<String>,
-    exclude_filter: Vec<String>,
-    list: Option<ListAction>,
-    repeat: Repeat,
-) -> String {
+fn run_all_tests_sync(tmp_dir: &Root<TmpDir>, test_args: TestArgs) -> String {
     let bin_dir = tmp_dir.join::<BinDir>("bin");
     let project_dir = tmp_dir.join::<ProjectDir>("project");
 
     let term = InMemoryTerm::new(50, 50);
-    run_app(
-        &bin_dir,
-        term.clone(),
-        fake_tests,
-        &project_dir,
-        false, // stdout_tty
-        quiet,
-        include_filter,
-        exclude_filter,
-        repeat,
-        list,
-        true, // finish
-    )
+    run_app(&bin_dir, term.clone(), &project_dir, test_args)
 }
 
-fn run_all_tests_sync(
-    tmp_dir: &Root<TmpDir>,
-    fake_tests: FakeTests,
-    quiet: bool,
-    include_filter: Vec<String>,
-    exclude_filter: Vec<String>,
-    repeat: Repeat,
-) -> String {
-    run_or_list_all_tests_sync(
+fn list_all_tests_sync(tmp_dir: &Root<TmpDir>, test_args: TestArgs, expected_tests: &str) {
+    let listing = run_all_tests_sync(
         tmp_dir,
-        fake_tests,
-        quiet,
-        include_filter,
-        exclude_filter,
-        None,
-        repeat,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn list_all_tests_sync(
-    tmp_dir: &Root<TmpDir>,
-    fake_tests: FakeTests,
-    quiet: bool,
-    include_filter: Vec<String>,
-    exclude_filter: Vec<String>,
-    repeat: Repeat,
-    expected_tests: &str,
-) {
-    let listing = run_or_list_all_tests_sync(
-        tmp_dir,
-        fake_tests.clone(),
-        quiet.clone(),
-        include_filter.clone(),
-        exclude_filter.clone(),
-        Some(ListAction::ListTests),
-        repeat,
+        TestArgs {
+            list: Some(ListAction::ListTests),
+            ..test_args
+        },
     );
     assert_eq!(listing, expected_tests);
 }
@@ -322,11 +285,10 @@ fn no_tests_all_tests_sync() {
     assert_eq!(
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
-            fake_tests,
-            false, /* quiet */
-            vec!["all".into()],
-            vec![],
-            Repeat::default(),
+            TestArgs {
+                fake_tests,
+                ..Default::default()
+            }
         ),
         "\
         \n\
@@ -348,11 +310,10 @@ fn no_tests_all_tests_sync_listing() {
     };
     list_all_tests_sync(
         Root::new(tmp_dir.path()),
-        fake_tests,
-        false, /* quiet */
-        vec!["all".into()],
-        vec![],
-        Repeat::default(),
+        TestArgs {
+            fake_tests,
+            ..Default::default()
+        },
         "",
     );
 }
@@ -381,11 +342,10 @@ fn two_tests_all_tests_sync() {
     assert_eq!(
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
-            fake_tests,
-            false, /* quiet */
-            vec!["all".into()],
-            vec![],
-            Repeat::default(),
+            TestArgs {
+                fake_tests,
+                ..Default::default()
+            }
         ),
         "\
         bar test_it............................OK   1.000s\n\
@@ -421,11 +381,10 @@ fn two_tests_all_tests_sync_listing() {
     };
     list_all_tests_sync(
         Root::new(tmp_dir.path()),
-        fake_tests,
-        false, /* quiet */
-        vec!["all".into()],
-        vec![],
-        Repeat::default(),
+        TestArgs {
+            fake_tests,
+            ..Default::default()
+        },
         indoc! {"
             bar test_it
             foo test_it\
@@ -456,11 +415,11 @@ fn two_tests_all_tests_sync_listing_with_repeat() {
     };
     list_all_tests_sync(
         Root::new(tmp_dir.path()),
-        fake_tests,
-        false, /* quiet */
-        vec!["all".into()],
-        vec![],
-        Repeat::try_from(2).unwrap(),
+        TestArgs {
+            fake_tests,
+            repeat: Repeat::try_from(2).unwrap(),
+            ..Default::default()
+        },
         indoc! {"
             bar test_it
             foo test_it\
@@ -506,11 +465,12 @@ fn four_tests_filtered_sync() {
     assert_eq!(
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
-            fake_tests,
-            false, /* quiet */
-            vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
-            vec!["package = \"bin\"".into()],
-            Repeat::default(),
+            TestArgs {
+                fake_tests,
+                include: vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
+                exclude: vec!["package = \"bin\"".into()],
+                ..Default::default()
+            }
         ),
         "\
         bar test_it2...........................OK   1.000s\n\
@@ -560,11 +520,12 @@ fn four_tests_filtered_sync_listing() {
     };
     list_all_tests_sync(
         Root::new(tmp_dir.path()),
-        fake_tests,
-        false, /* quiet */
-        vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
-        vec!["package = \"bin\"".into()],
-        Repeat::default(),
+        TestArgs {
+            fake_tests,
+            include: vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
+            exclude: vec!["package = \"bin\"".into()],
+            ..Default::default()
+        },
         indoc! {"
             bar test_it2
             foo test_it\
@@ -603,11 +564,11 @@ fn three_tests_single_package_sync() {
     assert_eq!(
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
-            fake_tests,
-            false, /* quiet */
-            vec!["package = \"foo\"".into()],
-            vec![],
-            Repeat::default(),
+            TestArgs {
+                fake_tests,
+                include: vec!["package = \"foo\"".into()],
+                ..Default::default()
+            }
         ),
         "\
         foo test_it............................OK   1.000s\n\
@@ -656,11 +617,11 @@ fn three_tests_single_package_filtered_sync() {
     assert_eq!(
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
-            fake_tests,
-            false, /* quiet */
-            vec!["and = [{ package = \"foo\" }, { name = \"test_it\" }]".into()],
-            vec![],
-            Repeat::default(),
+            TestArgs {
+                fake_tests,
+                include: vec!["and = [{ package = \"foo\" }, { name = \"test_it\" }]".into()],
+                ..Default::default()
+            }
         ),
         "\
         foo test_it............................OK   1.000s\n\
@@ -704,11 +665,10 @@ fn ignored_test_sync() {
     assert_eq!(
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
-            fake_tests,
-            false, /* quiet */
-            vec!["all".into()],
-            vec![],
-            Repeat::default(),
+            TestArgs {
+                fake_tests,
+                ..Default::default()
+            }
         ),
         "\
         bar test_it............................OK   1.000s\n\
@@ -756,11 +716,11 @@ fn ignored_test_sync_with_repeat() {
     assert_eq!(
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
-            fake_tests,
-            false, /* quiet */
-            vec!["all".into()],
-            vec![],
-            Repeat::try_from(2).unwrap()
+            TestArgs {
+                fake_tests,
+                repeat: Repeat::try_from(2).unwrap(),
+                ..Default::default()
+            }
         ),
         "\
         bar test_it............................OK   1.000s\n\
@@ -821,11 +781,10 @@ fn ignored_test_via_config_sync() {
     assert_eq!(
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
-            fake_tests,
-            false, /* quiet */
-            vec!["all".into()],
-            vec![],
-            Repeat::default(),
+            TestArgs {
+                fake_tests,
+                ..Default::default()
+            }
         ),
         "\
         bar test_it............................OK   1.000s\n\
@@ -865,11 +824,11 @@ fn two_tests_all_tests_sync_quiet() {
     assert_eq!(
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
-            fake_tests,
-            true, /* quiet */
-            vec!["all".into()],
-            vec![],
-            Repeat::default(),
+            TestArgs {
+                fake_tests,
+                quiet: true,
+                ..Default::default()
+            }
         ),
         "\
         \n\
@@ -888,15 +847,11 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     run_app(
         Root::new(tmp_dir.path()),
         term.clone(),
-        fake_tests,
         &project_dir,
-        false, // stdout_tty
-        false, /* quiet */
-        vec!["all".into()],
-        vec![],
-        Repeat::default(),
-        None,
-        true, // finish
+        TestArgs {
+            fake_tests,
+            ..Default::default()
+        },
     );
 
     term.contents()
@@ -960,7 +915,7 @@ fn failed_tests() {
     );
 }
 
-fn run_in_progress_test(fake_tests: FakeTests, quiet: bool, expected_output: &str) {
+fn run_in_progress_test(test_args: TestArgs, expected_output: &str) {
     let tmp_dir = tempdir().unwrap();
     let project_dir = RootBuf::<ProjectDir>::new(tmp_dir.path().join("project"));
 
@@ -969,15 +924,12 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: bool, expected_output: &st
     let contents = run_app(
         Root::new(tmp_dir.path()),
         term_clone,
-        fake_tests,
         &project_dir,
-        true, // stdout_tty
-        quiet,
-        vec!["all".into()],
-        vec![],
-        Repeat::default(),
-        None,
-        false, // finish
+        TestArgs {
+            stdout_tty: true,
+            finish: false,
+            ..test_args
+        },
     );
     assert_eq!(contents, expected_output);
 }
@@ -1005,8 +957,10 @@ fn waiting_for_artifacts() {
         ],
     };
     run_in_progress_test(
-        fake_tests,
-        false, /* quiet */
+        TestArgs {
+            fake_tests,
+            ..Default::default()
+        },
         "\
         ######################## 2/2 waiting for artifacts\n\
         ------------------------ 0/2 pending\n\
@@ -1039,8 +993,10 @@ fn pending() {
         ],
     };
     run_in_progress_test(
-        fake_tests,
-        false, /* quiet */
+        TestArgs {
+            fake_tests,
+            ..Default::default()
+        },
         "\
         ######################## 2/2 waiting for artifacts\n\
         ######################## 2/2 pending\n\
@@ -1073,8 +1029,10 @@ fn running() {
         ],
     };
     run_in_progress_test(
-        fake_tests,
-        false, /* quiet */
+        TestArgs {
+            fake_tests,
+            ..Default::default()
+        },
         "\
         ######################## 2/2 waiting for artifacts\n\
         ######################## 2/2 pending\n\
@@ -1107,8 +1065,10 @@ fn complete() {
         ],
     };
     run_in_progress_test(
-        fake_tests,
-        false, /* quiet */
+        TestArgs {
+            fake_tests,
+            ..Default::default()
+        },
         "\
         foo test_it............................OK   1.000s\n\
         ######################## 2/2 waiting for artifacts\n\
@@ -1142,13 +1102,16 @@ fn complete_quiet() {
         ],
     };
     run_in_progress_test(
-        fake_tests,
-        true, /* quiet */
+        TestArgs {
+            fake_tests,
+            quiet: true,
+            ..Default::default()
+        },
         "#####################------------------- 1/2 tests",
     );
 }
 
-fn run_loop_test(fake_tests: FakeTests, loop_times: usize, expected_output: &str) {
+fn run_loop_test(test_args: TestArgs, expected_output: &str) {
     let tmp_dir = tempdir().unwrap();
     let project_dir = RootBuf::<ProjectDir>::new(tmp_dir.path().join("project"));
 
@@ -1157,15 +1120,12 @@ fn run_loop_test(fake_tests: FakeTests, loop_times: usize, expected_output: &str
     let contents = run_app(
         Root::new(tmp_dir.path()),
         term_clone,
-        fake_tests,
         &project_dir,
-        true,  // stdout_tty
-        false, /* quiet */
-        vec!["all".into()],
-        vec![],
-        Repeat::try_from(loop_times).unwrap(),
-        None,  // list
-        false, // finish
+        TestArgs {
+            stdout_tty: true,
+            finish: false,
+            ..test_args
+        },
     );
     assert_eq!(contents, expected_output);
 }
@@ -1193,8 +1153,11 @@ fn loop_two_times() {
         ],
     };
     run_loop_test(
-        fake_tests,
-        2, // loop times
+        TestArgs {
+            fake_tests,
+            repeat: 2.try_into().unwrap(),
+            ..Default::default()
+        },
         "\
         foo test_it............................OK   1.000s\n\
         foo test_it............................OK   1.000s\n\
@@ -1231,8 +1194,11 @@ fn loop_three_times() {
         ],
     };
     run_loop_test(
-        fake_tests,
-        3, // loop times
+        TestArgs {
+            fake_tests,
+            repeat: 3.try_into().unwrap(),
+            ..Default::default()
+        },
         "\
         foo test_it............................OK   1.000s\n\
         foo test_it............................OK   1.000s\n\
@@ -1277,11 +1243,10 @@ fn expected_count_updates_packages() {
     };
     run_all_tests_sync(
         tmp_dir,
-        fake_tests.clone(),
-        false, /* quiet */
-        vec!["all".into()],
-        vec![],
-        Repeat::default(),
+        TestArgs {
+            fake_tests: fake_tests.clone(),
+            ..Default::default()
+        },
     );
 
     let test_listing_store = TestListingStore::new(
@@ -1306,11 +1271,10 @@ fn expected_count_updates_packages() {
 
     run_all_tests_sync(
         tmp_dir,
-        fake_tests.clone(),
-        false, /* quiet */
-        vec!["all".into()],
-        vec![],
-        Repeat::default(),
+        TestArgs {
+            fake_tests: fake_tests.clone(),
+            ..Default::default()
+        },
     );
 
     // new listing should match
@@ -1334,11 +1298,10 @@ fn expected_count_updates_cases() {
     };
     run_all_tests_sync(
         tmp_dir,
-        fake_tests.clone(),
-        false, /* quiet */
-        vec!["all".into()],
-        vec![],
-        Repeat::default(),
+        TestArgs {
+            fake_tests: fake_tests.clone(),
+            ..Default::default()
+        },
     );
 
     let test_listing_store = TestListingStore::new(
@@ -1359,11 +1322,10 @@ fn expected_count_updates_cases() {
 
     run_all_tests_sync(
         tmp_dir,
-        fake_tests.clone(),
-        false, /* quiet */
-        vec!["all".into()],
-        vec![],
-        Repeat::default(),
+        TestArgs {
+            fake_tests: fake_tests.clone(),
+            ..Default::default()
+        },
     );
 
     // new listing should match
@@ -1387,11 +1349,11 @@ fn filtering_none_does_not_build() {
     };
     run_all_tests_sync(
         tmp_dir,
-        fake_tests.clone(),
-        false, /* quiet */
-        vec!["none".into()],
-        vec![],
-        Repeat::default(),
+        TestArgs {
+            fake_tests,
+            include: vec!["none".into()],
+            ..Default::default()
+        },
     );
 
     let entries: Vec<_> = Fs::new()

@@ -21,7 +21,7 @@ use std::{
 
 pub struct BinDir;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FakeTestCase {
     pub name: String,
     pub ignored: bool,
@@ -60,7 +60,7 @@ impl Default for FakeTestCase {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FakeTestBinary {
     pub name: String,
     pub tests: Vec<FakeTestCase>,
@@ -72,7 +72,7 @@ impl FakeTestBinary {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct FakeTests {
     pub test_binaries: Vec<FakeTestBinary>,
 }
