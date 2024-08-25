@@ -1,7 +1,7 @@
 mod fake_test_framework;
 
 use crate::{
-    config::{Quiet, Repeat},
+    config::Repeat,
     introspect_driver::IntrospectDriver,
     test_listing::TestListingStore,
     ui::{self, Ui as _},
@@ -158,7 +158,7 @@ fn run_app(
     fake_tests: FakeTests,
     project_dir: &Root<ProjectDir>,
     stdout_tty: bool,
-    quiet: Quiet,
+    quiet: bool,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
     repeat: Repeat,
@@ -226,18 +226,25 @@ fn run_app(
     drop(introspect_driver);
     drop(state);
 
-    let mut ui = ui::SimpleUi::new(is_list, stdout_tty, quiet, term.clone());
-    ui.run(ui_recv).unwrap();
+    if quiet {
+        let mut ui = ui::QuietUi::new(is_list, stdout_tty, term.clone()).unwrap();
+        ui.run(ui_recv).unwrap();
 
-    slog::info!(log, "test complete");
+        slog::info!(log, "test complete");
+        term.contents()
+    } else {
+        let mut ui = ui::SimpleUi::new(is_list, stdout_tty, term.clone());
+        ui.run(ui_recv).unwrap();
 
-    term.contents()
+        slog::info!(log, "test complete");
+        term.contents()
+    }
 }
 
 fn run_or_list_all_tests_sync(
     tmp_dir: &Root<TmpDir>,
     fake_tests: FakeTests,
-    quiet: Quiet,
+    quiet: bool,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
     list: Option<ListAction>,
@@ -265,7 +272,7 @@ fn run_or_list_all_tests_sync(
 fn run_all_tests_sync(
     tmp_dir: &Root<TmpDir>,
     fake_tests: FakeTests,
-    quiet: Quiet,
+    quiet: bool,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
     repeat: Repeat,
@@ -285,7 +292,7 @@ fn run_all_tests_sync(
 fn list_all_tests_sync(
     tmp_dir: &Root<TmpDir>,
     fake_tests: FakeTests,
-    quiet: Quiet,
+    quiet: bool,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
     repeat: Repeat,
@@ -316,7 +323,7 @@ fn no_tests_all_tests_sync() {
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
             fake_tests,
-            false.into(),
+            false, /* quiet */
             vec!["all".into()],
             vec![],
             Repeat::default(),
@@ -342,7 +349,7 @@ fn no_tests_all_tests_sync_listing() {
     list_all_tests_sync(
         Root::new(tmp_dir.path()),
         fake_tests,
-        false.into(),
+        false, /* quiet */
         vec!["all".into()],
         vec![],
         Repeat::default(),
@@ -375,7 +382,7 @@ fn two_tests_all_tests_sync() {
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
             fake_tests,
-            false.into(),
+            false, /* quiet */
             vec!["all".into()],
             vec![],
             Repeat::default(),
@@ -415,7 +422,7 @@ fn two_tests_all_tests_sync_listing() {
     list_all_tests_sync(
         Root::new(tmp_dir.path()),
         fake_tests,
-        false.into(),
+        false, /* quiet */
         vec!["all".into()],
         vec![],
         Repeat::default(),
@@ -450,7 +457,7 @@ fn two_tests_all_tests_sync_listing_with_repeat() {
     list_all_tests_sync(
         Root::new(tmp_dir.path()),
         fake_tests,
-        false.into(),
+        false, /* quiet */
         vec!["all".into()],
         vec![],
         Repeat::try_from(2).unwrap(),
@@ -500,7 +507,7 @@ fn four_tests_filtered_sync() {
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
             fake_tests,
-            false.into(),
+            false, /* quiet */
             vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
             vec!["package = \"bin\"".into()],
             Repeat::default(),
@@ -554,7 +561,7 @@ fn four_tests_filtered_sync_listing() {
     list_all_tests_sync(
         Root::new(tmp_dir.path()),
         fake_tests,
-        false.into(),
+        false, /* quiet */
         vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
         vec!["package = \"bin\"".into()],
         Repeat::default(),
@@ -597,7 +604,7 @@ fn three_tests_single_package_sync() {
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
             fake_tests,
-            false.into(),
+            false, /* quiet */
             vec!["package = \"foo\"".into()],
             vec![],
             Repeat::default(),
@@ -650,7 +657,7 @@ fn three_tests_single_package_filtered_sync() {
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
             fake_tests,
-            false.into(),
+            false, /* quiet */
             vec!["and = [{ package = \"foo\" }, { name = \"test_it\" }]".into()],
             vec![],
             Repeat::default(),
@@ -698,7 +705,7 @@ fn ignored_test_sync() {
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
             fake_tests,
-            false.into(),
+            false, /* quiet */
             vec!["all".into()],
             vec![],
             Repeat::default(),
@@ -750,7 +757,7 @@ fn ignored_test_sync_with_repeat() {
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
             fake_tests,
-            false.into(),
+            false, /* quiet */
             vec!["all".into()],
             vec![],
             Repeat::try_from(2).unwrap()
@@ -815,7 +822,7 @@ fn ignored_test_via_config_sync() {
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
             fake_tests,
-            false.into(),
+            false, /* quiet */
             vec!["all".into()],
             vec![],
             Repeat::default(),
@@ -859,7 +866,7 @@ fn two_tests_all_tests_sync_quiet() {
         run_all_tests_sync(
             Root::new(tmp_dir.path()),
             fake_tests,
-            true.into(),
+            true, /* quiet */
             vec!["all".into()],
             vec![],
             Repeat::default(),
@@ -884,7 +891,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
         fake_tests,
         &project_dir,
         false, // stdout_tty
-        Quiet::from(false),
+        false, /* quiet */
         vec!["all".into()],
         vec![],
         Repeat::default(),
@@ -953,7 +960,7 @@ fn failed_tests() {
     );
 }
 
-fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &str) {
+fn run_in_progress_test(fake_tests: FakeTests, quiet: bool, expected_output: &str) {
     let tmp_dir = tempdir().unwrap();
     let project_dir = RootBuf::<ProjectDir>::new(tmp_dir.path().join("project"));
 
@@ -999,7 +1006,7 @@ fn waiting_for_artifacts() {
     };
     run_in_progress_test(
         fake_tests,
-        false.into(),
+        false, /* quiet */
         "\
         ######################## 2/2 waiting for artifacts\n\
         ------------------------ 0/2 pending\n\
@@ -1033,7 +1040,7 @@ fn pending() {
     };
     run_in_progress_test(
         fake_tests,
-        false.into(),
+        false, /* quiet */
         "\
         ######################## 2/2 waiting for artifacts\n\
         ######################## 2/2 pending\n\
@@ -1067,7 +1074,7 @@ fn running() {
     };
     run_in_progress_test(
         fake_tests,
-        false.into(),
+        false, /* quiet */
         "\
         ######################## 2/2 waiting for artifacts\n\
         ######################## 2/2 pending\n\
@@ -1101,7 +1108,7 @@ fn complete() {
     };
     run_in_progress_test(
         fake_tests,
-        false.into(),
+        false, /* quiet */
         "\
         foo test_it............................OK   1.000s\n\
         ######################## 2/2 waiting for artifacts\n\
@@ -1136,8 +1143,8 @@ fn complete_quiet() {
     };
     run_in_progress_test(
         fake_tests,
-        true.into(),
-        "#####################-------------------- 1/2 jobs",
+        true, /* quiet */
+        "#####################------------------- 1/2 tests",
     );
 }
 
@@ -1152,8 +1159,8 @@ fn run_loop_test(fake_tests: FakeTests, loop_times: usize, expected_output: &str
         term_clone,
         fake_tests,
         &project_dir,
-        true,         // stdout_tty
-        false.into(), // quiet
+        true,  // stdout_tty
+        false, /* quiet */
         vec!["all".into()],
         vec![],
         Repeat::try_from(loop_times).unwrap(),
@@ -1271,7 +1278,7 @@ fn expected_count_updates_packages() {
     run_all_tests_sync(
         tmp_dir,
         fake_tests.clone(),
-        false.into(),
+        false, /* quiet */
         vec!["all".into()],
         vec![],
         Repeat::default(),
@@ -1300,7 +1307,7 @@ fn expected_count_updates_packages() {
     run_all_tests_sync(
         tmp_dir,
         fake_tests.clone(),
-        false.into(),
+        false, /* quiet */
         vec!["all".into()],
         vec![],
         Repeat::default(),
@@ -1328,7 +1335,7 @@ fn expected_count_updates_cases() {
     run_all_tests_sync(
         tmp_dir,
         fake_tests.clone(),
-        false.into(),
+        false, /* quiet */
         vec!["all".into()],
         vec![],
         Repeat::default(),
@@ -1353,7 +1360,7 @@ fn expected_count_updates_cases() {
     run_all_tests_sync(
         tmp_dir,
         fake_tests.clone(),
-        false.into(),
+        false, /* quiet */
         vec!["all".into()],
         vec![],
         Repeat::default(),
@@ -1381,7 +1388,7 @@ fn filtering_none_does_not_build() {
     run_all_tests_sync(
         tmp_dir,
         fake_tests.clone(),
-        false.into(),
+        false, /* quiet */
         vec!["none".into()],
         vec![],
         Repeat::default(),

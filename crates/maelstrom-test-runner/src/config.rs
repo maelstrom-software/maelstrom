@@ -15,22 +15,6 @@ use std::{
 };
 use xdg::BaseDirectories;
 
-#[derive(Copy, Clone, Deserialize, From)]
-#[serde(transparent)]
-pub struct Quiet(bool);
-
-impl Quiet {
-    pub fn into_inner(self) -> bool {
-        self.0
-    }
-}
-
-impl Debug for Quiet {
-    fn fmt(&self, f: &mut Formatter<'_>) -> result::Result<(), fmt::Error> {
-        self.0.fmt(f)
-    }
-}
-
 #[derive(Copy, Clone, Debug, Deserialize, From)]
 #[serde(transparent)]
 pub struct Repeat(NonZeroUsize);
@@ -122,11 +106,7 @@ pub struct Config {
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
 
-    /// Don't output information about the tests being run.
-    #[config(flag, short = 'q')]
-    pub quiet: Quiet,
-
-    /// The UI style to use. Options are "auto", "simple", and "fancy".
+    /// The UI style to use. Options are "auto", "simple", "quiet", and "fancy".
     #[config(value_name = "UI-STYLE", default = "UiKind::Auto")]
     pub ui: UiKind,
 

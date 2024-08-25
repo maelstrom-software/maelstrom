@@ -1,38 +1,26 @@
 mod progress;
 
-use super::{JobStatuses, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
-use crate::config::Quiet;
+use super::{JobStatuses, Terminal, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use anyhow::Result;
 use colored::Colorize as _;
 use derive_more::From;
-use indicatif::TermLike;
 use progress::{
-    MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar,
-    TestListingProgress, TestListingProgressNoSpinner,
+    MultipleProgressBars, NoBar, ProgressIndicator, TestListingProgress,
+    TestListingProgressNoSpinner,
 };
 use slog::Drain as _;
 use std::cell::RefCell;
 use std::io::{self, Write as _};
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 use unicode_truncate::UnicodeTruncateStr as _;
 use unicode_width::UnicodeWidthStr as _;
 
-pub trait Terminal: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {}
-
-impl<TermT> Terminal for TermT where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static
-{
-}
-
 #[derive(From)]
 enum ProgressImpl<TermT> {
     TestListingProgress(TestListingProgress<TermT>),
     TestListingProgressNoSpinner(TestListingProgressNoSpinner<TermT>),
-    QuietProgressBar(QuietProgressBar<TermT>),
     MultipleProgressBars(MultipleProgressBars<TermT>),
-    QuietNoBar(QuietNoBar<TermT>),
     NoBar(NoBar<TermT>),
 }
 
@@ -45,7 +33,7 @@ impl<TermT> SimpleUi<TermT>
 where
     TermT: Terminal,
 {
-    pub fn new(list: bool, stdout_is_tty: bool, quiet: Quiet, term: TermT) -> Self
+    pub fn new(list: bool, stdout_is_tty: bool, term: TermT) -> Self
     where
         TermT: Terminal,
     {
@@ -55,13 +43,10 @@ where
             } else {
                 TestListingProgressNoSpinner::new(term).into()
             }
+        } else if stdout_is_tty {
+            MultipleProgressBars::new(term, "starting...").into()
         } else {
-            match (stdout_is_tty, quiet.into_inner()) {
-                (true, true) => QuietProgressBar::new(term).into(),
-                (true, false) => MultipleProgressBars::new(term, "starting...").into(),
-                (false, true) => QuietNoBar::new(term).into(),
-                (false, false) => NoBar::new(term).into(),
-            }
+            NoBar::new(term).into()
         };
         Self {
             prog_impl,
@@ -80,9 +65,7 @@ where
             ProgressImpl::TestListingProgressNoSpinner(p) => {
                 run_simple_ui(p, recv, self.stdout_is_tty)
             }
-            ProgressImpl::QuietProgressBar(p) => run_simple_ui(p, recv, self.stdout_is_tty),
             ProgressImpl::MultipleProgressBars(p) => run_simple_ui(p, recv, self.stdout_is_tty),
-            ProgressImpl::QuietNoBar(p) => run_simple_ui(p, recv, self.stdout_is_tty),
             ProgressImpl::NoBar(p) => run_simple_ui(p, recv, self.stdout_is_tty),
         }
     }
@@ -144,54 +127,7 @@ fn all_jobs_finished<ProgressIndicatorT>(
 where
     ProgressIndicatorT: ProgressIndicator,
 {
-    prog.finished(move |width| {
-        let mut summary_lines = vec![];
-        summary_lines.push("".into());
-
-        let heading = " Test Summary ";
-        let equal_width = (width - heading.width()) / 2;
-        summary_lines.push(format!(
-            "{empty:=<equal_width$}{heading}{empty:=<equal_width$}",
-            empty = ""
-        ));
-        let success = "Successful Tests";
-        let failure = "Failed Tests";
-        let ignore = "Ignored Tests";
-        let mut column1_width = std::cmp::max(success.width(), failure.width());
-        let max_digits = 9;
-        let num_failed = summary.failed.len();
-        let num_ignored = summary.ignored.len();
-        let num_succeeded = summary.succeeded;
-        if num_ignored > 0 {
-            column1_width = std::cmp::max(column1_width, ignore.width());
-        }
-        summary_lines.push(format!(
-            "{:<column1_width$}: {num_succeeded:>max_digits$}",
-            success.green(),
-        ));
-        summary_lines.push(format!(
-            "{:<column1_width$}: {num_failed:>max_digits$}",
-            failure.red(),
-        ));
-        let failed_width = summary.failed.iter().map(|n| n.width()).max().unwrap_or(0);
-        for failed in &summary.failed {
-            summary_lines.push(format!("    {failed:<failed_width$}: {}", "failure".red()));
-        }
-        if num_ignored > 0 {
-            summary_lines.push(format!(
-                "{:<column1_width$}: {num_ignored:>max_digits$}",
-                ignore.yellow(),
-            ));
-            let failed_width = summary.ignored.iter().map(|n| n.width()).max().unwrap_or(0);
-            for ignored in &summary.ignored {
-                summary_lines.push(format!(
-                    "    {ignored:<failed_width$}: {}",
-                    "ignored".yellow()
-                ));
-            }
-        }
-        summary_lines
-    })
+    prog.finished(move |width| summary.to_lines(width))
 }
 
 pub struct ProgressSlogRecordDecorator<'a, ProgressIndicatorT> {

@@ -29,7 +29,6 @@ fn do_maelstrom_go_test_test(
         parent: maelstrom_test_runner::config::Config {
             broker: None,
             log_level: LogLevel::Debug,
-            quiet: false.into(),
             container_image_depot_root,
             timeout: None,
             cache_size: CacheSize::default(),
@@ -46,7 +45,7 @@ fn do_maelstrom_go_test_test(
     let log = maelstrom_util::log::test_logger();
     let logger = Logger::GivenLogger(log.clone());
 
-    let ui = ui::SimpleUi::new(false, false, false.into(), term.clone());
+    let ui = ui::SimpleUi::new(false, false, term.clone());
     let mut stderr = vec![];
     let bg_proc = spawn_bg_proc();
     let exit_code = maelstrom_go_test::main_with_stderr_and_project_dir(

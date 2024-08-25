@@ -975,12 +975,7 @@ where
     let stderr_is_tty = io::stderr().is_terminal();
     let stdout_is_tty = io::stdout().is_terminal();
 
-    let ui = ui::factory(
-        config_parent.ui,
-        is_list(&extra_options),
-        stdout_is_tty,
-        config_parent.quiet,
-    )?;
+    let ui = ui::factory(config_parent.ui, is_list(&extra_options), stdout_is_tty)?;
 
     if extra_options.as_ref().client_bg_proc {
         alternative_mains::client_bg_proc()

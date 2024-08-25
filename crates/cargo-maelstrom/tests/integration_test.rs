@@ -43,7 +43,6 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         parent: maelstrom_test_runner::config::Config {
             broker: None,
             log_level: LogLevel::Debug,
-            quiet: false.into(),
             container_image_depot_root: RootBuf::new(PathBuf::from(".cache/maelstrom/container")),
             timeout: None,
             cache_size: CacheSize::default(),
@@ -79,7 +78,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
 
     let bg_proc = spawn_bg_proc();
 
-    let ui = ui::SimpleUi::new(false, false, false.into(), term.clone());
+    let ui = ui::SimpleUi::new(false, false, term.clone());
     cargo_maelstrom::main(config, extra_options, bg_proc, logger, false, ui).unwrap();
 
     term.contents()

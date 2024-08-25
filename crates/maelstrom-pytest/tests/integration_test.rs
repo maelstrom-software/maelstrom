@@ -99,7 +99,6 @@ fn do_maelstrom_pytest_test(
         parent: maelstrom_test_runner::config::Config {
             broker: None,
             log_level: LogLevel::Debug,
-            quiet: false.into(),
             container_image_depot_root,
             timeout: None,
             cache_size: CacheSize::default(),
@@ -115,7 +114,7 @@ fn do_maelstrom_pytest_test(
 
     let logger = Logger::GivenLogger(log.clone());
 
-    let ui = ui::SimpleUi::new(extra_options.list, false, false.into(), term.clone());
+    let ui = ui::SimpleUi::new(extra_options.list, false, term.clone());
     let mut stderr = vec![];
     let bg_proc = spawn_bg_proc();
     let exit_code = maelstrom_pytest::main_with_stderr_and_project_dir(

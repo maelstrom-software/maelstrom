@@ -1,7 +1,6 @@
 mod multi_gauge;
 
 use super::{JobStatuses, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
-use crate::config::Quiet;
 use anyhow::{bail, Result};
 use derive_more::From;
 use indicatif::HumanBytes;
@@ -313,15 +312,12 @@ pub struct FancyUi {
 }
 
 impl FancyUi {
-    pub fn new(list: bool, stdout_is_tty: bool, quiet: Quiet) -> Result<Self> {
+    pub fn new(list: bool, stdout_is_tty: bool) -> Result<Self> {
         if list {
             bail!("`--ui fancy` doesn't support listing");
         }
         if !stdout_is_tty {
             bail!("stdout must be a TTY to use `--ui fancy`")
-        }
-        if quiet.into_inner() {
-            bail!("`--ui fancy` doesn't support quiet mode")
         }
 
         Ok(Self {

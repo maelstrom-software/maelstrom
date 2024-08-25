@@ -1,20 +1,33 @@
 mod fancy;
+mod quiet;
 mod simple;
 
-use crate::{config::Quiet, LoggingOutput};
+use crate::LoggingOutput;
 use anyhow::Result;
 use derive_more::{From, Into};
 use maelstrom_base::stats::{JobState, JobStateCounts};
 use maelstrom_client::{IntrospectResponse, JobRunningStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 use std::time::Instant;
 use std::{fmt, str};
 use strum::EnumIter;
 
+pub use quiet::QuietUi;
 pub use simple::SimpleUi;
+
+pub trait Terminal:
+    indicatif::TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static
+{
+}
+
+impl<TermT> Terminal for TermT where
+    TermT: indicatif::TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static
+{
+}
 
 pub struct UiHandle {
     handle: std::thread::JoinHandle<Result<()>>,
@@ -95,6 +108,61 @@ pub struct UiJobSummary {
     pub failed: Vec<String>,
     pub ignored: Vec<String>,
     pub succeeded: usize,
+}
+
+impl UiJobSummary {
+    /// Formatting code used by simple and quiet UI
+    fn to_lines(&self, width: usize) -> Vec<String> {
+        use colored::Colorize as _;
+        use unicode_width::UnicodeWidthStr as _;
+
+        let mut summary_lines = vec![];
+        summary_lines.push("".into());
+
+        let heading = " Test Summary ";
+        let equal_width = (width - heading.width()) / 2;
+        summary_lines.push(format!(
+            "{empty:=<equal_width$}{heading}{empty:=<equal_width$}",
+            empty = ""
+        ));
+        let success = "Successful Tests";
+        let failure = "Failed Tests";
+        let ignore = "Ignored Tests";
+        let mut column1_width = std::cmp::max(success.width(), failure.width());
+        let max_digits = 9;
+        let num_failed = self.failed.len();
+        let num_ignored = self.ignored.len();
+        let num_succeeded = self.succeeded;
+        if num_ignored > 0 {
+            column1_width = std::cmp::max(column1_width, ignore.width());
+        }
+        summary_lines.push(format!(
+            "{:<column1_width$}: {num_succeeded:>max_digits$}",
+            success.green(),
+        ));
+        summary_lines.push(format!(
+            "{:<column1_width$}: {num_failed:>max_digits$}",
+            failure.red(),
+        ));
+        let failed_width = self.failed.iter().map(|n| n.width()).max().unwrap_or(0);
+        for failed in &self.failed {
+            summary_lines.push(format!("    {failed:<failed_width$}: {}", "failure".red()));
+        }
+        if num_ignored > 0 {
+            summary_lines.push(format!(
+                "{:<column1_width$}: {num_ignored:>max_digits$}",
+                ignore.yellow(),
+            ));
+            let failed_width = self.ignored.iter().map(|n| n.width()).max().unwrap_or(0);
+            for ignored in &self.ignored {
+                summary_lines.push(format!(
+                    "    {ignored:<failed_width$}: {}",
+                    "ignored".yellow()
+                ));
+            }
+        }
+        summary_lines
+    }
 }
 
 pub struct UiJobResult {
@@ -250,6 +318,7 @@ pub enum UiKind {
     Auto,
     Simple,
     Fancy,
+    Quiet,
 }
 
 impl fmt::Display for UiKind {
@@ -258,6 +327,7 @@ impl fmt::Display for UiKind {
             Self::Simple => write!(f, "simple"),
             Self::Fancy => write!(f, "fancy"),
             Self::Auto => write!(f, "auto"),
+            Self::Quiet => write!(f, "quiet"),
         }
     }
 }
@@ -283,6 +353,7 @@ impl str::FromStr for UiKind {
             "simple" => Ok(Self::Simple),
             "fancy" => Ok(Self::Fancy),
             "auto" => Ok(Self::Auto),
+            "quiet" => Ok(Self::Quiet),
             ui_name => Err(UnknownUiError {
                 ui_name: ui_name.into(),
             }),
@@ -313,20 +384,24 @@ fn ui_kind_parsing_and_fmt() {
     }
 }
 
-pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet) -> Result<Box<dyn Ui>> {
+pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool) -> Result<Box<dyn Ui>> {
     Ok(match kind {
         UiKind::Simple => Box::new(SimpleUi::new(
             list,
             stdout_is_tty,
-            quiet,
             console::Term::buffered_stdout(),
         )),
-        UiKind::Fancy => Box::new(fancy::FancyUi::new(list, stdout_is_tty, quiet)?),
+        UiKind::Fancy => Box::new(fancy::FancyUi::new(list, stdout_is_tty)?),
+        UiKind::Quiet => Box::new(quiet::QuietUi::new(
+            list,
+            stdout_is_tty,
+            console::Term::buffered_stdout(),
+        )?),
         UiKind::Auto => {
-            if list || !stdout_is_tty || quiet.into_inner() {
-                factory(UiKind::Simple, list, stdout_is_tty, quiet)?
+            if list || !stdout_is_tty {
+                factory(UiKind::Simple, list, stdout_is_tty)?
             } else {
-                factory(UiKind::Fancy, list, stdout_is_tty, quiet)?
+                factory(UiKind::Fancy, list, stdout_is_tty)?
             }
         }
     })
