@@ -787,7 +787,7 @@ where
     }
 
     /// Waits for all outstanding jobs to finish, displays a summary, and obtains an `ExitCode`
-    fn finish(&mut self) -> Result<ExitCode> {
+    fn finish(mut self) -> Result<ExitCode> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
         self.state.queuing_state.tracker.wait_for_outstanding();
         self.introspect_driver.stop()?;

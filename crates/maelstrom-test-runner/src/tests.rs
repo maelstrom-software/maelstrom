@@ -236,9 +236,10 @@ fn run_app(
 
     if test_args.finish {
         app.finish().unwrap();
+    } else {
+        drop(app);
     }
 
-    drop(app);
     drop(introspect_driver);
     drop(state);
 
