@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 - `ui` test-runner configuration option value now matches the same casing as the CLI option
   (kebab-case)
+- UI now has improved tracking of the state of tests. The fancy UI in particular will now only show
+  a test as running once it has actually started executing.
 
 ### Fixed
 - Fixed issue with test-runner fancy UI where it would crash if the summary was too large.
