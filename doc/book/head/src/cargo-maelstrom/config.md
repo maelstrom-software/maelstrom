@@ -26,6 +26,7 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`locked`</span>                     | boolean | [require `Cargo.lock` is up to date](#cargo)                                                | Cargo's default
 <span style="white-space: nowrap;">`offline`</span>                    | boolean | [run without Cargo accessing the network](#cargo)                                           | Cargo's default
 <span style="white-space: nowrap;">`extra-test-binary-args`</span>     | list    | [pass arbitrary arguments to test binary](#extra-test-binary-args)                          | no args
+<span style="white-space: nowrap;">`stop-after`</span>                 | number  | [stop after given number of failures](#stop-after)                                          | never stop
 
 ## `cache-size`
 
@@ -150,3 +151,8 @@ beginning these arguments like follows:
 ```bash
 cargo maelstrom -- --force-run-in-process
 ```
+
+## `stop-after`
+
+This optional configuration value if provided gives a limit on the number of failure to tolerate. If
+the limit is reached, `cargo-maelstrom` exits prematurely.

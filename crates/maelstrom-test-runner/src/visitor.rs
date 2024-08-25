@@ -1,6 +1,7 @@
+use crate::config::StopAfter;
 use crate::test_listing::TestListing;
 use crate::ui::{UiJobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiSender};
-use crate::{TestArtifactKey, TestCaseMetadata};
+use crate::{NotRunEstimate, TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
@@ -20,16 +21,30 @@ enum CaseResult {
 struct Statuses {
     outstanding: u64,
     completed: Vec<(String, CaseResult)>,
+    num_failed: u64,
 }
 
-#[derive(Default)]
 pub struct JobStatusTracker {
     statuses: Mutex<Statuses>,
+    stop_after: Option<StopAfter>,
     condvar: Condvar,
     exit_code: ExitCodeAccumulator,
 }
 
+fn failure_limit_reached(stop_after: &Option<StopAfter>, statuses: &Statuses) -> bool {
+    stop_after.is_some_and(|limit| statuses.num_failed as usize >= usize::from(limit))
+}
+
 impl JobStatusTracker {
+    pub fn new(stop_after: Option<StopAfter>) -> Self {
+        Self {
+            statuses: Mutex::new(Statuses::default()),
+            stop_after,
+            condvar: Condvar::new(),
+            exit_code: ExitCodeAccumulator::default(),
+        }
+    }
+
     pub fn add_outstanding(&self) {
         let mut statuses = self.statuses.lock().unwrap();
         statuses.outstanding += 1;
@@ -39,6 +54,9 @@ impl JobStatusTracker {
         let mut statuses = self.statuses.lock().unwrap();
         statuses.outstanding -= 1;
         statuses.completed.push((case, CaseResult::Ran(exit_code)));
+        if exit_code != ExitCode::SUCCESS {
+            statuses.num_failed += 1;
+        }
         self.exit_code.add(exit_code);
         self.condvar.notify_one();
     }
@@ -50,16 +68,26 @@ impl JobStatusTracker {
         self.condvar.notify_one();
     }
 
-    pub fn wait_for_outstanding(&self) {
+    pub fn wait_for_outstanding_or_failure_limit_reached(&self) {
         let mut statuses = self.statuses.lock().unwrap();
-        while statuses.outstanding > 0 {
+        while !(statuses.outstanding == 0 || failure_limit_reached(&self.stop_after, &statuses)) {
             statuses = self.condvar.wait(statuses).unwrap();
         }
     }
 
-    pub fn ui_summary(&self) -> UiJobSummary {
+    pub fn completed(&self) -> u64 {
         let statuses = self.statuses.lock().unwrap();
-        assert_eq!(statuses.outstanding, 0);
+        statuses.completed.len() as u64
+    }
+
+    pub fn is_failure_limit_reached(&self) -> bool {
+        let statuses = self.statuses.lock().unwrap();
+        failure_limit_reached(&self.stop_after, &statuses)
+    }
+
+    pub fn ui_summary(&self, not_run_estimate: NotRunEstimate) -> UiJobSummary {
+        let statuses = self.statuses.lock().unwrap();
+
         let failed: Vec<_> = statuses
             .completed
             .iter()
@@ -73,11 +101,18 @@ impl JobStatusTracker {
             .map(|(n, _)| n.clone())
             .collect();
 
+        let mut not_run =
+            failure_limit_reached(&self.stop_after, &statuses).then_some(not_run_estimate);
+        if not_run == Some(NotRunEstimate::Exactly(0)) {
+            not_run = None;
+        }
+
         let succeeded = statuses.completed.len() - failed.len() - ignored.len();
         UiJobSummary {
             succeeded,
             failed,
             ignored,
+            not_run,
         }
     }
 
@@ -202,6 +237,10 @@ where
     CaseMetadataT: TestCaseMetadata,
 {
     fn job_finished(&self, ui_job_id: UiJobId, res: Result<(ClientJobId, JobOutcomeResult)>) {
+        if self.tracker.is_failure_limit_reached() {
+            return;
+        }
+
         let test_status: UiJobStatus;
         let mut test_output_stderr: Vec<String> = vec![];
         let mut test_output_stdout: Vec<String> = vec![];
@@ -337,6 +376,10 @@ where
     }
 
     pub fn job_update(&self, ui_job_id: UiJobId, res: Result<JobStatus>) {
+        if self.tracker.is_failure_limit_reached() {
+            return;
+        }
+
         match res {
             Ok(JobStatus::Completed {
                 client_job_id,
@@ -351,6 +394,10 @@ where
     }
 
     pub fn job_ignored(&self, ui_job_id: UiJobId) {
+        if self.tracker.is_failure_limit_reached() {
+            return;
+        }
+
         self.ui.job_finished(UiJobResult {
             name: self.case_str.clone(),
             job_id: ui_job_id,

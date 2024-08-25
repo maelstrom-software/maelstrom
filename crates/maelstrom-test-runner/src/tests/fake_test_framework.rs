@@ -15,11 +15,38 @@ use maelstrom_util::{fs::Fs, root::RootBuf};
 use pretty_assertions::assert_eq;
 use std::{
     collections::HashSet,
+    fmt,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
 pub struct BinDir;
+
+#[derive(Clone, Default)]
+pub struct FakeTestCompleteCallback(
+    pub Arc<Mutex<Option<Box<dyn FnOnce() + Send + Sync + 'static>>>>,
+);
+
+impl FakeTestCompleteCallback {
+    pub fn set(&self, handler: impl FnOnce() + Send + Sync + 'static) {
+        *self.0.lock().unwrap() = Some(Box::new(handler));
+    }
+
+    fn call(&self) {
+        (self.0.lock().unwrap().take().unwrap())();
+    }
+
+    fn discard(&self) {
+        let _ = self.0.lock().unwrap().take();
+    }
+}
+
+impl fmt::Debug for FakeTestCompleteCallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt("<callback>", f)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct FakeTestCase {
@@ -28,6 +55,8 @@ pub struct FakeTestCase {
     pub desired_state: JobState,
     pub expected_estimated_duration: Option<Duration>,
     pub outcome: JobOutcome,
+    pub complete_at_end: bool,
+    pub cb: FakeTestCompleteCallback,
 }
 
 impl FakeTestCase {
@@ -38,6 +67,18 @@ impl FakeTestCase {
             ..
         })) = self.outcome;
         duration
+    }
+
+    pub fn maybe_complete(&self) {
+        if self.complete_at_end {
+            self.cb.call();
+        } else {
+            self.cb.discard();
+        }
+    }
+
+    pub fn discard_cb(&self) {
+        self.cb.discard();
     }
 }
 
@@ -56,6 +97,8 @@ impl Default for FakeTestCase {
                     duration: Duration::from_secs(1),
                 },
             }),
+            complete_at_end: false,
+            cb: Default::default(),
         }
     }
 }

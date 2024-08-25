@@ -2,7 +2,7 @@ mod fancy;
 mod quiet;
 mod simple;
 
-use crate::LoggingOutput;
+use crate::{LoggingOutput, NotRunEstimate};
 use anyhow::Result;
 use derive_more::{From, Into};
 use maelstrom_base::stats::{JobState, JobStateCounts};
@@ -108,6 +108,7 @@ pub struct UiJobSummary {
     pub failed: Vec<String>,
     pub ignored: Vec<String>,
     pub succeeded: usize,
+    pub not_run: Option<NotRunEstimate>,
 }
 
 impl UiJobSummary {
@@ -128,13 +129,18 @@ impl UiJobSummary {
         let success = "Successful Tests";
         let failure = "Failed Tests";
         let ignore = "Ignored Tests";
+        let not_run = "Tests Not Run";
         let mut column1_width = std::cmp::max(success.width(), failure.width());
         let max_digits = 9;
         let num_failed = self.failed.len();
         let num_ignored = self.ignored.len();
+        let num_not_run = self.not_run;
         let num_succeeded = self.succeeded;
         if num_ignored > 0 {
             column1_width = std::cmp::max(column1_width, ignore.width());
+        }
+        if num_not_run.is_some() {
+            column1_width = std::cmp::max(column1_width, not_run.width());
         }
         summary_lines.push(format!(
             "{:<column1_width$}: {num_succeeded:>max_digits$}",
@@ -153,13 +159,19 @@ impl UiJobSummary {
                 "{:<column1_width$}: {num_ignored:>max_digits$}",
                 ignore.yellow(),
             ));
-            let failed_width = self.ignored.iter().map(|n| n.width()).max().unwrap_or(0);
+            let ignored_width = self.ignored.iter().map(|n| n.width()).max().unwrap_or(0);
             for ignored in &self.ignored {
                 summary_lines.push(format!(
-                    "    {ignored:<failed_width$}: {}",
+                    "    {ignored:<ignored_width$}: {}",
                     "ignored".yellow()
                 ));
             }
+        }
+        if let Some(num_not_run) = num_not_run {
+            summary_lines.push(format!(
+                "{:<column1_width$}: {num_not_run:>max_digits$}",
+                not_run.red(),
+            ));
         }
         summary_lines
     }

@@ -19,6 +19,7 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`short`</span>                      | boolean | [tells long running tests to shorten their times](#short)                                   | `false`
 <span style="white-space: nowrap;">`fullpath`</span>                   | boolean | [shows the full file name in error messages](#fullpath)                                     | `false`
 <span style="white-space: nowrap;">`extra-test-binary-args`</span>     | list    | [pass arbitrary arguments to test binary](#extra-test-binary-args)                          | no args
+<span style="white-space: nowrap;">`stop-after`</span>                 | number  | [stop after given number of failures](#stop-after)                                          | never stop
 
 ## `cache-size`
 
@@ -127,3 +128,8 @@ beginning these arguments like follows:
 ```bash
 maelstrom-go-test -- -test.parallel 12
 ```
+
+## `stop-after`
+
+This optional configuration value if provided gives a limit on the number of failure to tolerate. If
+the limit is reached, `cargo-maelstrom` exits prematurely.

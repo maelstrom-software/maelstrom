@@ -20,13 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `extra-pytest-collect-args` config value added to `maelstrom-pytest`
 - `extra-pytest-test-args` config value added to `maelstrom-pytest`
 - `shared-library-dependencies` layer type added
+- `stop-after` config value added
 
 #### Changed
-- `ui` test-runner configuration option value now matches the same casing as the CLI option
+- `ui` test-runner config option value now matches the same casing as the CLI option
   (kebab-case)
 - UI now has improved tracking of the state of tests. The fancy UI in particular will now only show
   a test as running once it has actually started executing.
-- `quiet` configuration option removed from test runners, replaced with new "quiet" UI.
+- `quiet` config option removed from test runners, replaced with new "quiet" UI.
 
 ### Fixed
 - Fixed issue with test-runner fancy UI where it would crash if the summary was too large.

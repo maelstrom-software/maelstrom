@@ -544,10 +544,11 @@ impl FancyUi {
         let num_failed = summary.failed.len();
         let num_ignored = summary.ignored.len();
         let num_succeeded = summary.succeeded;
+        let num_not_run = summary.not_run;
 
         let summary_line = |msg, cnt| {
             (
-                Row::new([Cell::from(msg), Cell::from(format!("{cnt}"))]),
+                Row::new([Cell::from(msg), Cell::from(cnt)]),
                 vec![Constraint::Fill(1), Constraint::Length(9)],
             )
                 .into()
@@ -575,18 +576,26 @@ impl FancyUi {
                 .collect()
         };
 
+        self.print_above.push(summary_line(
+            "Successful Tests".green(),
+            num_succeeded.to_string(),
+        ));
         self.print_above
-            .push(summary_line("Successful Tests".green(), num_succeeded));
-        self.print_above
-            .push(summary_line("Failed Tests".red(), num_failed));
+            .push(summary_line("Failed Tests".red(), num_failed.to_string()));
         self.print_above
             .extend(list_tests(&summary.failed, "failure".red()));
 
         if num_ignored > 0 {
-            self.print_above
-                .push(summary_line("Ignored Tests".yellow(), num_ignored));
+            self.print_above.push(summary_line(
+                "Ignored Tests".yellow(),
+                num_ignored.to_string(),
+            ));
             self.print_above
                 .extend(list_tests(&summary.ignored, "ignored".yellow()));
+        }
+        if let Some(num_not_run) = num_not_run {
+            self.print_above
+                .push(summary_line("Tests Not Run".red(), num_not_run.to_string()));
         }
     }
 

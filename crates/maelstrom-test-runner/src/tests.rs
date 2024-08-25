@@ -102,6 +102,16 @@ impl ClientTrait for TestClient {
             }
         }
 
+        if case.desired_state != JobState::Complete {
+            let outcome = case.outcome.clone();
+            case.cb.set(move || {
+                handler(Ok(JobStatus::Completed {
+                    client_job_id,
+                    result: Ok(outcome),
+                }));
+            });
+        }
+
         Ok(())
     }
 }
@@ -220,6 +230,7 @@ fn run_app(
     let introspect_driver = TestIntrospectDriver::default();
     let mut app = MainApp::new(&state, ui_sender, introspect_driver.clone(), None).unwrap();
 
+    let mut pending = vec![];
     loop {
         let res = app.enqueue_one().unwrap();
         let (package_name, case) = match res {
@@ -227,7 +238,10 @@ fn run_app(
             EnqueueResult::NotEnqueued(NotCollected::Ignored | NotCollected::Listed) => continue,
             EnqueueResult::Enqueued { package_name, case } => (package_name, case),
         };
-        let _test = test_args.fake_tests.find_case(&package_name, &case);
+        let test = test_args.fake_tests.find_case(&package_name, &case);
+        if test.desired_state != JobState::Complete {
+            pending.push(test.clone());
+        }
 
         introspect_driver.update(IntrospectResponse::default());
     }
@@ -235,9 +249,17 @@ fn run_app(
     app.done_queuing().unwrap();
 
     if test_args.finish {
+        for p in pending {
+            p.maybe_complete();
+        }
+
         app.wait_for_tests().unwrap();
         app.finish().unwrap();
     } else {
+        for p in pending {
+            p.discard_cb();
+        }
+
         drop(app);
     }
 
@@ -862,9 +884,8 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     term.contents()
 }
 
-#[test]
-fn failed_tests() {
-    let failed_outcome = JobOutcome::Completed(JobCompleted {
+fn failed_outcome() -> JobOutcome {
+    JobOutcome::Completed(JobCompleted {
         status: JobTerminationStatus::Exited(1),
         effects: JobEffects {
             stdout: JobOutputResult::Inline(Box::new(
@@ -878,14 +899,29 @@ fn failed_tests() {
             stderr: JobOutputResult::Inline(Box::new(*b"error output")),
             duration: Duration::from_secs(1),
         },
-    });
+    })
+}
+
+fn failed_outcome_no_output() -> JobOutcome {
+    JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(1),
+        effects: JobEffects {
+            stdout: JobOutputResult::Inline(Box::new(*b"")),
+            stderr: JobOutputResult::Inline(Box::new(*b"")),
+            duration: Duration::from_secs(1),
+        },
+    })
+}
+
+#[test]
+fn failed_tests() {
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
-                    outcome: failed_outcome.clone(),
+                    outcome: failed_outcome(),
                     ..Default::default()
                 }],
             },
@@ -893,7 +929,7 @@ fn failed_tests() {
                 name: "foo".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
-                    outcome: failed_outcome.clone(),
+                    outcome: failed_outcome(),
                     ..Default::default()
                 }],
             },
@@ -1367,4 +1403,270 @@ fn filtering_none_does_not_build() {
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
     assert_eq!(entries, vec!["maelstrom"]);
+}
+
+fn stop_after_fake_tests() -> FakeTests {
+    FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "bin".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it2".into(),
+                    outcome: failed_outcome_no_output(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec![FakeTestCase {
+                    name: "testy".into(),
+                    outcome: failed_outcome_no_output(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+        ],
+    }
+}
+
+#[test]
+fn stop_after_not_reached() {
+    let tmp_dir = tempdir().unwrap();
+    assert_eq!(
+        run_all_tests_sync(
+            Root::new(tmp_dir.path()),
+            TestArgs {
+                fake_tests: stop_after_fake_tests(),
+                stop_after: Some(3.try_into().unwrap()),
+                ..Default::default()
+            }
+        ),
+        indoc! {"
+        bin test_it............................OK   1.000s
+        bar test_it2.........................FAIL   1.000s
+        baz testy............................FAIL   1.000s
+        foo test_it............................OK   1.000s
+
+        ================== Test Summary ==================
+        Successful Tests:         2
+        Failed Tests    :         2
+            bar test_it2: failure
+            baz testy   : failure\
+        "}
+    );
+}
+
+#[test]
+fn stop_after_1_unknown_not_run() {
+    let tmp_dir = tempdir().unwrap();
+    assert_eq!(
+        run_all_tests_sync(
+            Root::new(tmp_dir.path()),
+            TestArgs {
+                fake_tests: stop_after_fake_tests(),
+                stop_after: Some(1.try_into().unwrap()),
+                ..Default::default()
+            }
+        ),
+        indoc! {"
+        bin test_it............................OK   1.000s
+        bar test_it2.........................FAIL   1.000s
+
+        ================== Test Summary ==================
+        Successful Tests:         1
+        Failed Tests    :         1
+            bar test_it2: failure
+        Tests Not Run   :   unknown\
+        "}
+    );
+}
+
+#[test]
+fn stop_after_1_at_least_one_not_run() {
+    let tmp_dir = tempdir().unwrap();
+
+    let mut fake_tests = stop_after_fake_tests();
+    fake_tests.test_binaries[0].tests[0].desired_state = JobState::Running;
+    assert_eq!(
+        run_all_tests_sync(
+            Root::new(tmp_dir.path()),
+            TestArgs {
+                fake_tests,
+                stop_after: Some(1.try_into().unwrap()),
+                ..Default::default()
+            }
+        ),
+        indoc! {"
+        bar test_it2.........................FAIL   1.000s
+
+        ================== Test Summary ==================
+        Successful Tests:         0
+        Failed Tests    :         1
+            bar test_it2: failure
+        Tests Not Run   :        >1\
+        "}
+    );
+}
+
+#[test]
+fn stop_after_1_no_tests_not_run() {
+    let tmp_dir = tempdir().unwrap();
+
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "bin".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it2".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec![FakeTestCase {
+                    name: "testy".into(),
+                    desired_state: JobState::Running,
+                    complete_at_end: true,
+                    outcome: failed_outcome_no_output(),
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+
+    assert_eq!(
+        run_all_tests_sync(
+            Root::new(tmp_dir.path()),
+            TestArgs {
+                fake_tests,
+                stop_after: Some(1.try_into().unwrap()),
+                ..Default::default()
+            }
+        ),
+        indoc! {"
+        bin test_it............................OK   1.000s
+        bar test_it2...........................OK   1.000s
+        baz testy............................FAIL   1.000s
+
+        ================== Test Summary ==================
+        Successful Tests:         2
+        Failed Tests    :         1
+            baz testy: failure\
+        "}
+    );
+}
+
+#[test]
+fn stop_after_1_exact_test_not_run_known() {
+    let tmp_dir = tempdir().unwrap();
+
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "bin".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    desired_state: JobState::Running,
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it2".into(),
+                    desired_state: JobState::Running,
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec![FakeTestCase {
+                    name: "testy".into(),
+                    desired_state: JobState::Running,
+                    complete_at_end: true,
+                    outcome: failed_outcome_no_output(),
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+
+    assert_eq!(
+        run_all_tests_sync(
+            Root::new(tmp_dir.path()),
+            TestArgs {
+                fake_tests,
+                stop_after: Some(1.try_into().unwrap()),
+                ..Default::default()
+            }
+        ),
+        indoc! {"
+        baz testy............................FAIL   1.000s
+
+        ================== Test Summary ==================
+        Successful Tests:         0
+        Failed Tests    :         1
+            baz testy: failure
+        Tests Not Run   :         2\
+        "}
+    );
+}
+
+#[test]
+fn stop_after_1_with_estimate() {
+    let tmp_dir = tempdir().unwrap();
+    let tmp_dir = Root::new(tmp_dir.path());
+    let mut fake_tests = stop_after_fake_tests();
+    for test in &mut fake_tests.test_binaries {
+        test.tests[0].expected_estimated_duration = Some(Duration::from_secs(1));
+    }
+
+    let test_listing_store = TestListingStore::new(
+        Fs::new(),
+        tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
+    );
+    let mut listing = test_listing_store.load().unwrap();
+    fake_tests.update_listing(&mut listing);
+    test_listing_store.save(listing).unwrap();
+
+    assert_eq!(
+        run_all_tests_sync(
+            tmp_dir,
+            TestArgs {
+                fake_tests,
+                stop_after: Some(1.try_into().unwrap()),
+                ..Default::default()
+            }
+        ),
+        indoc! {"
+        bin test_it............................OK   1.000s
+        bar test_it2.........................FAIL   1.000s
+
+        ================== Test Summary ==================
+        Successful Tests:         1
+        Failed Tests    :         1
+            bar test_it2: failure
+        Tests Not Run   :        ~2\
+        "}
+    );
 }

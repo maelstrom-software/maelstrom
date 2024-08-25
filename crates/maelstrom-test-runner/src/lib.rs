@@ -30,17 +30,36 @@ use slog::Drain as _;
 use std::{
     collections::{BTreeMap, HashSet},
     ffi::OsString,
-    fmt::Debug,
+    fmt::{self, Debug},
     io::{self, IsTerminal as _},
     mem, str,
     sync::{
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
 use test_listing::TestListingStore;
 use ui::{Ui, UiJobEnqueued, UiJobId, UiSender, UiSlogDrain};
 use visitor::{JobStatusTracker, JobStatusVisitor};
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum NotRunEstimate {
+    About(u64),
+    Exactly(u64),
+    GreaterThan(u64),
+    Unknown,
+}
+
+impl fmt::Display for NotRunEstimate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::About(n) => fmt::Display::fmt(&format!("~{n}"), f),
+            Self::Exactly(n) => fmt::Display::fmt(&n, f),
+            Self::GreaterThan(n) => fmt::Display::fmt(&format!(">{n}"), f),
+            Self::Unknown => fmt::Display::fmt("unknown", f),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum ListAction {
@@ -93,10 +112,10 @@ struct JobQueuingState<TestCollectorT: CollectTests> {
     jobs_queued: AtomicU64,
     test_metadata: AllMetadata<TestCollectorT::TestFilter>,
     expected_job_count: AtomicU64,
+    all_jobs_queued: AtomicBool,
     test_listing: Arc<Mutex<Option<TestListing<TestCollectorT>>>>,
     list_action: Option<ListAction>,
     repeat: Repeat,
-    _stop_after: Option<StopAfter>,
     collector_options: TestCollectorT::Options,
     next_ui_job_id: AtomicU32,
 }
@@ -116,14 +135,14 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
         Ok(Self {
             filter,
             stderr_color,
-            tracker: Arc::new(JobStatusTracker::default()),
+            tracker: Arc::new(JobStatusTracker::new(stop_after)),
             jobs_queued: AtomicU64::new(0),
             test_metadata,
             expected_job_count: AtomicU64::new(0),
+            all_jobs_queued: AtomicBool::new(false),
             test_listing: Arc::new(Mutex::new(Some(test_listing))),
             list_action,
             repeat,
-            _stop_after: stop_after,
             collector_options,
             next_ui_job_id: AtomicU32::new(1),
         })
@@ -146,6 +165,27 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
         });
         self.tracker.add_outstanding();
         ui_job_id
+    }
+
+    fn not_run_estimate(&self) -> NotRunEstimate {
+        let all_jobs_queued = self.all_jobs_queued.load(Ordering::Acquire);
+        let jobs_queued = self.jobs_queued.load(Ordering::Acquire);
+        let jobs_expected = self.expected_job_count.load(Ordering::Acquire);
+        let completed = self.tracker.completed();
+
+        if all_jobs_queued {
+            // If we queued everything, we know exactly how many tests didn't run
+            NotRunEstimate::Exactly(jobs_queued - completed)
+        } else if jobs_expected >= jobs_queued {
+            // If our expectation looks okay, then lets trust it
+            NotRunEstimate::About(jobs_expected - completed)
+        } else if jobs_queued > 0 && jobs_queued > completed {
+            // Otherwise, if we have any jobs we queued but didn't complete, we can say it is at
+            // least that much
+            NotRunEstimate::GreaterThan(jobs_queued - completed)
+        } else {
+            NotRunEstimate::Unknown
+        }
     }
 }
 
@@ -744,6 +784,10 @@ where
     /// Enqueue one test as a job on the `Client`. This is meant to be called repeatedly until
     /// `EnqueueResult::Done` is returned, or an error is encountered.
     pub fn enqueue_one(&mut self) -> Result<EnqueueResult> {
+        if self.state.queuing_state.tracker.is_failure_limit_reached() {
+            return Ok(NotCollected::Done.into());
+        }
+
         let repeat_times = usize::from(self.state.queuing_state.repeat);
         match mem::take(&mut self.stage) {
             EnqueueStage::NeedTest => match self.queuing.collect_one()? {
@@ -758,6 +802,10 @@ where
                 }
                 CollectionResult::NotCollected(NotCollected::Done) => {
                     self.stage = EnqueueStage::Done;
+                    self.state
+                        .queuing_state
+                        .all_jobs_queued
+                        .store(true, Ordering::Release);
                     Ok(NotCollected::Done.into())
                 }
                 CollectionResult::NotCollected(res) => Ok(res.into()),
@@ -789,14 +837,18 @@ where
     /// Waits for all outstanding jobs to finish.
     fn wait_for_tests(&mut self) -> Result<()> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
-        self.state.queuing_state.tracker.wait_for_outstanding();
+        self.state
+            .queuing_state
+            .tracker
+            .wait_for_outstanding_or_failure_limit_reached();
         self.introspect_driver.stop()?;
         Ok(())
     }
 
     /// Displays a summary, and obtains an `ExitCode`
     fn finish(self) -> Result<ExitCode> {
-        let summary = self.state.queuing_state.tracker.ui_summary();
+        let nre = self.state.queuing_state.not_run_estimate();
+        let summary = self.state.queuing_state.tracker.ui_summary(nre);
         self.ui.finished(summary)?;
 
         self.state.test_listing_store.save(

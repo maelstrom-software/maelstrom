@@ -19,6 +19,7 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`extra-pytest-args`</span>          | list    | [pass arbitrary arguments to pytest](#extra-pytest-args)                                    | no args
 <span style="white-space: nowrap;">`extra-pytest-collect-args`</span>  | list    | [pass arbitrary arguments to pytest when collecting](#extra-pytest-collect-args)            | no args
 <span style="white-space: nowrap;">`extra-pytest-test-args`</span>     | list    | [pass arbitrary arguments to pytest when running a test](#extra-pytest-test-args)           | no args
+<span style="white-space: nowrap;">`stop-after`</span>                 | number  | [stop after given number of failures](#stop-after)                                          | never stop
 
 ## `cache-size`
 
@@ -131,3 +132,8 @@ They must always be preceded by `--` like as follows:
 ```bash
 maelstrom-pytest -- -n1
 ```
+
+## `stop-after`
+
+This optional configuration value if provided gives a limit on the number of failure to tolerate. If
+the limit is reached, `cargo-maelstrom` exits prematurely.
