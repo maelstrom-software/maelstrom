@@ -1,7 +1,7 @@
 mod fake_test_framework;
 
 use crate::{
-    config::Repeat,
+    config::{Repeat, StopAfter},
     introspect_driver::IntrospectDriver,
     test_listing::TestListingStore,
     ui::{self, Ui as _},
@@ -158,6 +158,7 @@ struct TestArgs {
     include: Vec<String>,
     exclude: Vec<String>,
     repeat: Repeat,
+    stop_after: Option<StopAfter>,
     list: Option<ListAction>,
     stdout_tty: bool,
     finish: bool,
@@ -171,6 +172,7 @@ impl Default for TestArgs {
             include: vec!["all".into()],
             exclude: vec![],
             repeat: Repeat::default(),
+            stop_after: None,
             list: None,
             stdout_tty: false,
             finish: true,
@@ -205,6 +207,7 @@ fn run_app(
         test_args.exclude,
         test_args.list,
         test_args.repeat,
+        test_args.stop_after,
         false, // stderr_color
         project_dir,
         target_directory.join::<StateDir>("maelstrom/state"),

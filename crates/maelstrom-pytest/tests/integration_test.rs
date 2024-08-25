@@ -107,6 +107,7 @@ fn do_maelstrom_pytest_test(
             accept_invalid_remote_container_tls_certs: true.into(),
             ui: ui::UiKind::Simple,
             repeat: Default::default(),
+            stop_after: None,
         },
         pytest_options: Default::default(),
     };

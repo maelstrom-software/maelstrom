@@ -622,6 +622,7 @@ pub fn main(
             extra_options.parent.exclude,
             list_action,
             config.parent.repeat,
+            config.parent.stop_after,
             stderr_is_tty,
             workspace_dir,
             &state_dir,

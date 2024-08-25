@@ -14,7 +14,7 @@ pub use deps::*;
 
 use anyhow::Result;
 use clap::{Args, Command};
-use config::Repeat;
+use config::{Repeat, StopAfter};
 use derive_more::From;
 use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use maelstrom_base::{JobRootOverlay, Timeout, Utf8PathBuf};
@@ -96,6 +96,7 @@ struct JobQueuingState<TestCollectorT: CollectTests> {
     test_listing: Arc<Mutex<Option<TestListing<TestCollectorT>>>>,
     list_action: Option<ListAction>,
     repeat: Repeat,
+    _stop_after: Option<StopAfter>,
     collector_options: TestCollectorT::Options,
     next_ui_job_id: AtomicU32,
 }
@@ -109,6 +110,7 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
         test_listing: TestListing<TestCollectorT>,
         list_action: Option<ListAction>,
         repeat: Repeat,
+        stop_after: Option<StopAfter>,
         collector_options: TestCollectorT::Options,
     ) -> Result<Self> {
         Ok(Self {
@@ -121,6 +123,7 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
             test_listing: Arc::new(Mutex::new(Some(test_listing))),
             list_action,
             repeat,
+            _stop_after: stop_after,
             collector_options,
             next_ui_job_id: AtomicU32::new(1),
         })
@@ -548,6 +551,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         exclude_filter: Vec<String>,
         list_action: Option<ListAction>,
         repeat: Repeat,
+        stop_after: Option<StopAfter>,
         stderr_color: bool,
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
@@ -559,7 +563,8 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
             "include_filter" => ?include_filter,
             "exclude_filter" => ?exclude_filter,
             "list_action" => ?list_action,
-            "repeat" => ?repeat
+            "repeat" => ?repeat,
+            "stop_after" => ?stop_after
         );
 
         let mut test_metadata =
@@ -580,6 +585,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
                 test_listing,
                 list_action,
                 repeat,
+                stop_after,
                 collector_options,
             )?,
             test_listing_store,

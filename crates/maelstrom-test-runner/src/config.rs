@@ -15,23 +15,43 @@ use std::{
 };
 use xdg::BaseDirectories;
 
-#[derive(Copy, Clone, Debug, Deserialize, From)]
-#[serde(transparent)]
-pub struct Repeat(NonZeroUsize);
+macro_rules! non_zero_usize_wrapper {
+    ($name:ident) => {
+        #[derive(Copy, Clone, Debug, Deserialize, From)]
+        #[serde(transparent)]
+        pub struct $name(NonZeroUsize);
 
-impl From<Repeat> for usize {
-    fn from(s: Repeat) -> usize {
-        s.0.into()
-    }
+        impl From<$name> for usize {
+            fn from(s: $name) -> usize {
+                s.0.into()
+            }
+        }
+
+        impl TryFrom<usize> for $name {
+            type Error = <NonZeroUsize as TryFrom<usize>>::Error;
+
+            fn try_from(t: usize) -> result::Result<Self, Self::Error> {
+                Ok(Self(t.try_into()?))
+            }
+        }
+
+        impl str::FromStr for $name {
+            type Err = <NonZeroUsize as str::FromStr>::Err;
+
+            fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+                Ok(Self::from(NonZeroUsize::from_str(s)?))
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut Formatter<'_>) -> result::Result<(), fmt::Error> {
+                fmt::Display::fmt(&self.0, f)
+            }
+        }
+    };
 }
 
-impl TryFrom<usize> for Repeat {
-    type Error = <NonZeroUsize as TryFrom<usize>>::Error;
-
-    fn try_from(t: usize) -> result::Result<Self, Self::Error> {
-        Ok(Self(t.try_into()?))
-    }
-}
+non_zero_usize_wrapper!(Repeat);
 
 impl Default for Repeat {
     fn default() -> Self {
@@ -39,19 +59,7 @@ impl Default for Repeat {
     }
 }
 
-impl str::FromStr for Repeat {
-    type Err = <NonZeroUsize as str::FromStr>::Err;
-
-    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        Ok(Self::from(NonZeroUsize::from_str(s)?))
-    }
-}
-
-impl fmt::Display for Repeat {
-    fn fmt(&self, f: &mut Formatter<'_>) -> result::Result<(), fmt::Error> {
-        fmt::Display::fmt(&self.0, f)
-    }
-}
+non_zero_usize_wrapper!(StopAfter);
 
 #[derive(Config, Debug)]
 pub struct Config {
@@ -113,6 +121,10 @@ pub struct Config {
     /// The number of times to run each selected test. Must be non-zero.
     #[config(alias = "loop", value_name = "COUNT", default = "Repeat::default()")]
     pub repeat: Repeat,
+
+    /// Stop running tests after the given number of failures are encountered.
+    #[config(option, value_name = "NUM-FAILURES", default = r#""never stop""#)]
+    pub stop_after: Option<StopAfter>,
 
     /// Override timeout value for all tests specified (O indicates no timeout).
     #[config(

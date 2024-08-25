@@ -37,6 +37,7 @@ fn do_maelstrom_go_test_test(
             accept_invalid_remote_container_tls_certs: true.into(),
             ui: ui::UiKind::Simple,
             repeat: Default::default(),
+            stop_after: None,
         },
         go_test_options: Default::default(),
     };

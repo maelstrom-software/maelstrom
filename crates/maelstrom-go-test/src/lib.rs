@@ -794,6 +794,7 @@ pub fn main_with_stderr_and_project_dir(
             extra_options.parent.exclude,
             list_action,
             config.parent.repeat,
+            config.parent.stop_after,
             stderr_is_tty,
             project_dir,
             &state_dir,
