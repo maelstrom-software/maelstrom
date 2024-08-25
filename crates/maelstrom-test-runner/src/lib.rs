@@ -777,8 +777,8 @@ where
         }
     }
 
-    /// Indicates that we have finished enqueuing jobs and starts tearing things down
-    fn drain(&mut self) -> Result<()> {
+    /// Indicates that we have finished enqueuing jobs.
+    fn done_queuing(&mut self) -> Result<()> {
         slog::debug!(self.queuing.log, "draining");
         self.ui
             .update_length(self.state.queuing_state.jobs_queued.load(Ordering::Acquire));
@@ -786,12 +786,16 @@ where
         Ok(())
     }
 
-    /// Waits for all outstanding jobs to finish, displays a summary, and obtains an `ExitCode`
-    fn finish(mut self) -> Result<ExitCode> {
+    /// Waits for all outstanding jobs to finish.
+    fn wait_for_tests(&mut self) -> Result<()> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
         self.state.queuing_state.tracker.wait_for_outstanding();
         self.introspect_driver.stop()?;
+        Ok(())
+    }
 
+    /// Displays a summary, and obtains an `ExitCode`
+    fn finish(self) -> Result<ExitCode> {
         let summary = self.state.queuing_state.tracker.ui_summary();
         self.ui.finished(summary)?;
 
@@ -911,7 +915,8 @@ where
             timeout_override,
         )?;
         while !app.enqueue_one()?.is_done() {}
-        app.drain()?;
+        app.done_queuing()?;
+        app.wait_for_tests()?;
         app.finish()
     });
     let log = state.log.clone();

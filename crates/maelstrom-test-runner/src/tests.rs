@@ -232,9 +232,10 @@ fn run_app(
         introspect_driver.update(IntrospectResponse::default());
     }
 
-    app.drain().unwrap();
+    app.done_queuing().unwrap();
 
     if test_args.finish {
+        app.wait_for_tests().unwrap();
         app.finish().unwrap();
     } else {
         drop(app);
