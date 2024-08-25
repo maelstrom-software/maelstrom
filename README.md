@@ -161,6 +161,11 @@ maelstrom-pytest
 This runs in "standalone" mode, meaning all tests are run locally. Each test is run in its own
 container.
 
+## Running Tests
+Once you have finished the configuration, you only need invoke `maelstrom-pytest` to run all the
+tests in your project. It must be run from an environment where `pytest` is in the Python path. If
+you are using virtualenv for your project make sure to source that first.
+
 ## Setting Up a Cluster
 
 To get even more out of Maelstrom, you can set up a cluster to run your tests on.

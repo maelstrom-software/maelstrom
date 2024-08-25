@@ -32,3 +32,8 @@ in your project directory. This needs to at a minimum include the `pytest` packa
 ```
 pytest==8.1.1
 ```
+
+## Running Tests
+Once you have finished the configuration, you only need invoke `maelstrom-pytest` to run all the
+tests in your project. It must be run from an environment where `pytest` is in the Python path. If
+you are using virtualenv for your project make sure to source that first.

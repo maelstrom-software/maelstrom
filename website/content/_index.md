@@ -166,6 +166,11 @@ packages for you as part of the container. It expects to read these packages fro
 test-requirements.txt file in your project directory. This needs to at a minimum include the pytest
 package
 
+<p><h4><b>Running Tests</b></h4></p>
+Once you have finished the configuration, you only need invoke <tt>maelstrom-pytest</tt> to run all
+the tests in your project. It must be run from an environment where <tt>pytest</tt> is in the Python
+path. If you are using virtualenv for your project make sure to source that first.
+
 <tt>test-requirements.txt</tt>.
 
 ```
