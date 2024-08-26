@@ -33,10 +33,7 @@ use std::{
     fmt::{self, Debug},
     io::{self, IsTerminal as _},
     mem, str,
-    sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 use test_listing::TestListingStore;
 use ui::{Ui, UiJobEnqueued, UiJobId, UiSender, UiSlogDrain};
@@ -141,10 +138,10 @@ impl<TestCollectorT: CollectTests> JobQueuingDeps<TestCollectorT> {
 struct JobQueuingState<'a, TestCollectorT: CollectTests> {
     deps: &'a JobQueuingDeps<TestCollectorT>,
     tracker: Arc<JobStatusTracker>,
-    jobs_queued: AtomicU64,
-    expected_job_count: AtomicU64,
-    all_jobs_queued: AtomicBool,
-    next_ui_job_id: AtomicU32,
+    jobs_queued: u64,
+    expected_job_count: u64,
+    all_jobs_queued: bool,
+    next_ui_job_id: u32,
 }
 
 impl<'a, TestCollectorT: CollectTests> JobQueuingState<'a, TestCollectorT> {
@@ -152,23 +149,22 @@ impl<'a, TestCollectorT: CollectTests> JobQueuingState<'a, TestCollectorT> {
         Self {
             deps,
             tracker: Arc::new(JobStatusTracker::new(deps.stop_after)),
-            jobs_queued: AtomicU64::new(0),
-            expected_job_count: AtomicU64::new(expected_job_count),
-            all_jobs_queued: AtomicBool::new(false),
-            next_ui_job_id: AtomicU32::new(1),
+            jobs_queued: 0,
+            expected_job_count,
+            all_jobs_queued: false,
+            next_ui_job_id: 1,
         }
     }
 
-    fn next_ui_job_id(&self) -> UiJobId {
-        self.next_ui_job_id.fetch_add(1, Ordering::AcqRel).into()
+    fn next_ui_job_id(&mut self) -> UiJobId {
+        let next_id = self.next_ui_job_id;
+        self.next_ui_job_id += 1;
+        next_id.into()
     }
 
-    fn track_outstanding(&self, case_str: &str, ui: &UiSender) -> UiJobId {
-        let count = self.jobs_queued.fetch_add(1, Ordering::AcqRel);
-        ui.update_length(std::cmp::max(
-            self.expected_job_count.load(Ordering::Acquire),
-            count + 1,
-        ));
+    fn track_outstanding(&mut self, case_str: &str, ui: &UiSender) -> UiJobId {
+        self.jobs_queued += 1;
+        ui.update_length(std::cmp::max(self.expected_job_count, self.jobs_queued));
         let ui_job_id = self.next_ui_job_id();
         ui.job_enqueued(UiJobEnqueued {
             job_id: ui_job_id,
@@ -179,21 +175,18 @@ impl<'a, TestCollectorT: CollectTests> JobQueuingState<'a, TestCollectorT> {
     }
 
     fn not_run_estimate(&self) -> NotRunEstimate {
-        let all_jobs_queued = self.all_jobs_queued.load(Ordering::Acquire);
-        let jobs_queued = self.jobs_queued.load(Ordering::Acquire);
-        let jobs_expected = self.expected_job_count.load(Ordering::Acquire);
         let completed = self.tracker.completed();
 
-        if all_jobs_queued {
+        if self.all_jobs_queued {
             // If we queued everything, we know exactly how many tests didn't run
-            NotRunEstimate::Exactly(jobs_queued - completed)
-        } else if jobs_expected >= jobs_queued {
+            NotRunEstimate::Exactly(self.jobs_queued - completed)
+        } else if self.expected_job_count >= self.jobs_queued {
             // If our expectation looks okay, then lets trust it
-            NotRunEstimate::About(jobs_expected - completed)
-        } else if jobs_queued > 0 && jobs_queued > completed {
+            NotRunEstimate::About(self.expected_job_count - completed)
+        } else if self.jobs_queued > 0 && self.jobs_queued > completed {
             // Otherwise, if we have any jobs we queued but didn't complete, we can say it is at
             // least that much
-            NotRunEstimate::GreaterThan(jobs_queued - completed)
+            NotRunEstimate::GreaterThan(self.jobs_queued - completed)
         } else {
             NotRunEstimate::Unknown
         }
@@ -298,7 +291,7 @@ where
 
     fn build_job_from_case(
         &mut self,
-        queuing_state: &JobQueuingState<'a, MainAppDepsT::TestCollector>,
+        queuing_state: &mut JobQueuingState<'a, MainAppDepsT::TestCollector>,
         case_name: &str,
         case_metadata: &CaseMetadataM<MainAppDepsT>,
     ) -> Result<CollectionResult<MainAppDepsT>> {
@@ -404,7 +397,7 @@ where
     /// Meant to be called until it returns `CollectionResult::NotCollected(NotCollected::Done)`
     fn collect_one(
         &mut self,
-        queuing_state: &JobQueuingState<'a, MainAppDepsT::TestCollector>,
+        queuing_state: &mut JobQueuingState<'a, MainAppDepsT::TestCollector>,
     ) -> Result<CollectionResult<MainAppDepsT>> {
         let Some((case_name, case_metadata)) = self.cases.next() else {
             return Ok(NotCollected::Done.into());
@@ -564,7 +557,7 @@ where
             .artifact_queuing
             .as_mut()
             .unwrap()
-            .collect_one(&self.state)?;
+            .collect_one(&mut self.state)?;
         if res.is_done() {
             self.artifact_queuing = None;
             return self.collect_one();
@@ -710,7 +703,7 @@ impl<MainAppDepsT: MainAppDeps> TestToEnqueue<MainAppDepsT> {
     fn enqueue(
         self,
         state: &MainAppState<MainAppDepsT>,
-        queuing_state: &JobQueuingState<'_, MainAppDepsT::TestCollector>,
+        queuing_state: &mut JobQueuingState<'_, MainAppDepsT::TestCollector>,
         ui: &UiSender,
     ) -> Result<EnqueueResult> {
         let case_str = self.case_str;
@@ -816,14 +809,11 @@ where
                             test: test.clone(),
                         };
                     }
-                    test.enqueue(self.state, &self.queuing.state, &self.ui)
+                    test.enqueue(self.state, &mut self.queuing.state, &self.ui)
                 }
                 CollectionResult::NotCollected(NotCollected::Done) => {
                     self.stage = EnqueueStage::Done;
-                    self.queuing
-                        .state
-                        .all_jobs_queued
-                        .store(true, Ordering::Release);
+                    self.queuing.state.all_jobs_queued = true;
                     Ok(NotCollected::Done.into())
                 }
                 CollectionResult::NotCollected(res) => Ok(res.into()),
@@ -837,7 +827,7 @@ where
                         times: times - 1,
                     };
                 }
-                test.enqueue(self.state, &self.queuing.state, &self.ui)
+                test.enqueue(self.state, &mut self.queuing.state, &self.ui)
             }
             EnqueueStage::Done => Ok(NotCollected::Done.into()),
         }
@@ -846,8 +836,7 @@ where
     /// Indicates that we have finished enqueuing jobs.
     fn done_queuing(&mut self) -> Result<()> {
         slog::debug!(self.queuing.log, "draining");
-        self.ui
-            .update_length(self.queuing.state.jobs_queued.load(Ordering::Acquire));
+        self.ui.update_length(self.queuing.state.jobs_queued);
         self.ui.done_queuing_jobs();
         Ok(())
     }
