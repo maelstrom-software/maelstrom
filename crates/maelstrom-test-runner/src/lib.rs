@@ -855,7 +855,7 @@ where
     fn finish(self) -> Result<ExitCode> {
         let nre = self.queuing.state.not_run_estimate();
         let summary = self.queuing.state.tracker.ui_summary(nre);
-        self.ui.finished(summary)?;
+        self.ui.finished(summary);
 
         self.deps.test_listing_store.save(
             self.deps

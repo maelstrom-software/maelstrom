@@ -295,9 +295,8 @@ impl UiSender {
 
     /// Should be called when all the test jobs are completed. This may cause the UI to display
     /// some kind of "results" or "summary" to the user.
-    pub fn finished(&self, summary: UiJobSummary) -> Result<()> {
+    pub fn finished(&self, summary: UiJobSummary) {
         let _ = self.send.send(UiMessage::AllJobsFinished(summary));
-        Ok(())
     }
 }
 
