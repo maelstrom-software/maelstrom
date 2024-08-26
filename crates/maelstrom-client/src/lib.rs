@@ -329,7 +329,7 @@ impl Client {
                     let mut stream = match client.run_job(msg).await.map_err(map_tonic_error) {
                         Ok(v) => v.into_inner(),
                         Err(e) => {
-                            task::spawn_blocking(move || handler(Err(e))).await.unwrap();
+                            let _ = task::spawn_blocking(move || handler(Err(e))).await.ok();
                             return;
                         }
                     };
@@ -340,7 +340,9 @@ impl Client {
                         .await;
                         let was_error = status.is_err();
                         let mut handler = handler.clone();
-                        task::spawn_blocking(move || handler(status)).await.unwrap();
+                        if task::spawn_blocking(move || handler(status)).await.is_err() {
+                            break;
+                        }
                         if was_error {
                             break;
                         }
