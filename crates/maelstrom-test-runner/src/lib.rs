@@ -580,7 +580,7 @@ pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
 }
 
 impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
-    /// Creates a new `MainAppState`
+    /// Creates a new `MainAppCombinedDeps`
     ///
     /// `bg_proc`: handle to background client process
     /// `include_filter`: tests which match any of the patterns in this filter are run
@@ -979,7 +979,7 @@ where
     });
     let log = deps.log.clone();
     drop(deps);
-    slog::debug!(log, "MainAppState destroyed");
+    slog::debug!(log, "MainAppCombinedDeps destroyed");
 
     let ui_res = ui_handle.join();
     let exit_code = exit_code_res?;
