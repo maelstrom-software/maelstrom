@@ -77,6 +77,7 @@ fn print_error(label: &str, res: Result<()>) {
     }
 }
 
+#[derive(Debug)]
 struct ClientBgHandle(Pid);
 
 impl ClientBgHandle {
@@ -86,6 +87,7 @@ impl ClientBgHandle {
     }
 }
 
+#[derive(Debug)]
 pub struct ClientBgProcess {
     handle: ClientBgHandle,
     sock: Option<StdUnixStream>,
@@ -149,7 +151,11 @@ impl Drop for Client {
             "dispatcher",
             self.dispatcher_handle.take().unwrap().join().unwrap(),
         );
-        slog::debug!(self.log, "Client::drop: waiting for child process");
+        slog::debug!(
+            self.log,
+            "Client::drop: waiting for child process";
+            "process_handle" => ?self.process_handle
+        );
         self.process_handle.wait().unwrap();
     }
 }
