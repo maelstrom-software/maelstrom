@@ -14,7 +14,7 @@ use maelstrom_client::{
 };
 use maelstrom_test_runner::{
     metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
-    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata,
+    CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps, NoCaseMetadata,
     TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
@@ -616,7 +616,7 @@ pub fn main(
             manifest_options: config.cargo_manifest_options,
             extra_test_binary_args: config.extra_test_binary_args,
         };
-        let state = MainAppState::new(
+        let deps = MainAppCombinedDeps::new(
             deps,
             extra_options.parent.include,
             extra_options.parent.exclude,
@@ -631,7 +631,7 @@ pub fn main(
         )?;
 
         let res = run_app_with_ui_multithreaded(
-            state,
+            deps,
             logging_output,
             config.parent.timeout.map(Timeout::new),
             ui,

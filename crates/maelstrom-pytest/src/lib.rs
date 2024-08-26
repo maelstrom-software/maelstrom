@@ -16,7 +16,7 @@ use maelstrom_client::{
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
     metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
-    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, TestArtifact,
+    CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps, TestArtifact,
     TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
@@ -627,7 +627,7 @@ pub fn main_with_stderr_and_project_dir(
     )?;
     let deps = DefaultMainAppDeps::new(project_dir, build_dir, &cache_dir, &client)?;
 
-    let state = MainAppState::new(
+    let deps = MainAppCombinedDeps::new(
         deps,
         extra_options.parent.include,
         extra_options.parent.exclude,
@@ -642,7 +642,7 @@ pub fn main_with_stderr_and_project_dir(
     )?;
 
     let res = run_app_with_ui_multithreaded(
-        state,
+        deps,
         logging_output,
         config.parent.timeout.map(Timeout::new),
         ui,

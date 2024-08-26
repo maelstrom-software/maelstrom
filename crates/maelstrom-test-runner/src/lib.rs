@@ -572,14 +572,14 @@ pub struct BuildDir;
 
 /// A collection of objects that are used to run the MainApp. This is useful as a separate object
 /// since it can contain things which live longer than scoped threads and thus shared among them.
-pub struct MainAppState<MainAppDepsT: MainAppDeps> {
-    deps: MainAppDepsT,
+pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
+    abstract_deps: MainAppDepsT,
     queuing_deps: JobQueuingDeps<MainAppDepsT::TestCollector>,
     test_listing_store: TestListingStore<ArtifactKeyM<MainAppDepsT>, CaseMetadataM<MainAppDepsT>>,
     log: slog::Logger,
 }
 
-impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
+impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
     /// Creates a new `MainAppState`
     ///
     /// `bg_proc`: handle to background client process
@@ -592,7 +592,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
     /// `client_driver`: an object which drives the background work of the `Client`
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        deps: MainAppDepsT,
+        abstract_deps: MainAppDepsT,
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
         list_action: Option<ListAction>,
@@ -619,11 +619,11 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         let test_listing = test_listing_store.load()?;
         let filter = TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
 
-        let vars = deps.get_template_vars(&collector_options)?;
+        let vars = abstract_deps.get_template_vars(&collector_options)?;
         test_metadata.replace_template_vars(&vars)?;
 
         Ok(Self {
-            deps,
+            abstract_deps,
             queuing_deps: JobQueuingDeps::new(
                 filter,
                 stderr_color,
@@ -702,7 +702,7 @@ impl<MainAppDepsT: MainAppDeps> Clone for TestToEnqueue<MainAppDepsT> {
 impl<MainAppDepsT: MainAppDeps> TestToEnqueue<MainAppDepsT> {
     fn enqueue(
         self,
-        state: &MainAppState<MainAppDepsT>,
+        state: &MainAppCombinedDeps<MainAppDepsT>,
         queuing_state: &mut JobQueuingState<'_, MainAppDepsT::TestCollector>,
         ui: &UiSender,
     ) -> Result<EnqueueResult> {
@@ -711,7 +711,7 @@ impl<MainAppDepsT: MainAppDeps> TestToEnqueue<MainAppDepsT> {
         ui.update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&state.log, "submitting job"; "case" => &case_str);
         let cb = move |res| self.visitor.job_update(ui_job_id, res);
-        state.deps.client().add_job(self.spec, cb)?;
+        state.abstract_deps.client().add_job(self.spec, cb)?;
         Ok(EnqueueResult::Enqueued {
             package_name: self.package_name,
             case: self.case,
@@ -749,42 +749,41 @@ enum EnqueueStage<MainAppDepsT: MainAppDeps> {
     Done,
 }
 
-struct MainApp<'state, IntrospectDriverT, MainAppDepsT: MainAppDeps> {
-    state: &'state MainAppState<MainAppDepsT>,
-    queuing: JobQueuing<'state, MainAppDepsT>,
+struct MainApp<'deps, IntrospectDriverT, MainAppDepsT: MainAppDeps> {
+    deps: &'deps MainAppCombinedDeps<MainAppDepsT>,
+    queuing: JobQueuing<'deps, MainAppDepsT>,
     introspect_driver: IntrospectDriverT,
     ui: UiSender,
     stage: EnqueueStage<MainAppDepsT>,
 }
 
-impl<'state, 'scope, IntrospectDriverT, MainAppDepsT>
-    MainApp<'state, IntrospectDriverT, MainAppDepsT>
+impl<'deps, 'scope, IntrospectDriverT, MainAppDepsT> MainApp<'deps, IntrospectDriverT, MainAppDepsT>
 where
     IntrospectDriverT: IntrospectDriver<'scope>,
     MainAppDepsT: MainAppDeps,
 {
     pub fn new(
-        state: &'state MainAppState<MainAppDepsT>,
+        deps: &'deps MainAppCombinedDeps<MainAppDepsT>,
         ui: UiSender,
         mut introspect_driver: IntrospectDriverT,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self>
     where
-        'state: 'scope,
+        'deps: 'scope,
     {
-        introspect_driver.drive(state.deps.client(), ui.clone());
+        introspect_driver.drive(deps.abstract_deps.client(), ui.clone());
 
-        slog::debug!(state.log, "main app created");
+        slog::debug!(deps.log, "main app created");
 
         let queuing = JobQueuing::new(
-            state.log.clone(),
-            &state.queuing_deps,
-            &state.deps,
+            deps.log.clone(),
+            &deps.queuing_deps,
+            &deps.abstract_deps,
             ui.clone(),
             timeout_override,
         )?;
         Ok(Self {
-            state,
+            deps,
             queuing,
             introspect_driver,
             ui,
@@ -799,7 +798,7 @@ where
             return Ok(NotCollected::Done.into());
         }
 
-        let repeat_times = usize::from(self.state.queuing_deps.repeat);
+        let repeat_times = usize::from(self.deps.queuing_deps.repeat);
         match mem::take(&mut self.stage) {
             EnqueueStage::NeedTest => match self.queuing.collect_one()? {
                 CollectionResult::Collected(test) => {
@@ -809,7 +808,7 @@ where
                             test: test.clone(),
                         };
                     }
-                    test.enqueue(self.state, &mut self.queuing.state, &self.ui)
+                    test.enqueue(self.deps, &mut self.queuing.state, &self.ui)
                 }
                 CollectionResult::NotCollected(NotCollected::Done) => {
                     self.stage = EnqueueStage::Done;
@@ -827,7 +826,7 @@ where
                         times: times - 1,
                     };
                 }
-                test.enqueue(self.state, &mut self.queuing.state, &self.ui)
+                test.enqueue(self.deps, &mut self.queuing.state, &self.ui)
             }
             EnqueueStage::Done => Ok(NotCollected::Done.into()),
         }
@@ -858,8 +857,8 @@ where
         let summary = self.queuing.state.tracker.ui_summary(nre);
         self.ui.finished(summary)?;
 
-        self.state.test_listing_store.save(
-            self.state
+        self.deps.test_listing_store.save(
+            self.deps
                 .queuing_deps
                 .test_listing
                 .lock()
@@ -956,7 +955,7 @@ impl Logger {
 /// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
 /// application on this thread using the UI until it is completed.
 pub fn run_app_with_ui_multithreaded<MainAppDepsT>(
-    state: MainAppState<MainAppDepsT>,
+    deps: MainAppCombinedDeps<MainAppDepsT>,
     logging_output: LoggingOutput,
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,
@@ -964,11 +963,11 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT>(
 where
     MainAppDepsT: MainAppDeps,
 {
-    let (ui_handle, ui_sender) = ui.start_ui_thread(logging_output, state.log.clone());
+    let (ui_handle, ui_sender) = ui.start_ui_thread(logging_output, deps.log.clone());
 
     let exit_code_res = std::thread::scope(|scope| {
         let mut app = MainApp::new(
-            &state,
+            &deps,
             ui_sender,
             DefaultIntrospectDriver::new(scope),
             timeout_override,
@@ -978,8 +977,8 @@ where
         app.wait_for_tests()?;
         app.finish()
     });
-    let log = state.log.clone();
-    drop(state);
+    let log = deps.log.clone();
+    drop(deps);
     slog::debug!(log, "MainAppState destroyed");
 
     let ui_res = ui_handle.join();

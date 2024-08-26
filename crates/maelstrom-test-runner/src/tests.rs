@@ -5,7 +5,7 @@ use crate::{
     introspect_driver::IntrospectDriver,
     test_listing::TestListingStore,
     ui::{self, Ui as _},
-    BuildDir, ClientTrait, EnqueueResult, ListAction, MainApp, MainAppDeps, MainAppState,
+    BuildDir, ClientTrait, EnqueueResult, ListAction, MainApp, MainAppCombinedDeps, MainAppDeps,
     NotCollected,
 };
 use anyhow::Result;
@@ -211,7 +211,7 @@ fn run_app(
     );
 
     let is_list = test_args.list.is_some();
-    let state = MainAppState::new(
+    let state = MainAppCombinedDeps::new(
         deps,
         test_args.include,
         test_args.exclude,
