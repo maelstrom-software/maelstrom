@@ -6,7 +6,7 @@ use cargo_metadata::{
 use maelstrom_base::WindowSize;
 use maelstrom_linux as linux;
 use maelstrom_macro::Config;
-use maelstrom_test_runner::ui::UiSender;
+use maelstrom_test_runner::ui::UiWeakSender;
 use maelstrom_util::{process::ExitCode, tty::open_pseudoterminal};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -289,7 +289,7 @@ fn spawn_cargo(args: Vec<OsString>) -> Result<Child> {
     }
 }
 
-fn handle_cargo_tty_inner(tty: linux::OwnedFd, ui: UiSender) -> Result<String> {
+fn handle_cargo_tty_inner(tty: linux::OwnedFd, ui: UiWeakSender) -> Result<String> {
     let mut stderr_string = String::new();
     let mut input = TtyReader { fd: tty };
 
@@ -301,15 +301,21 @@ fn handle_cargo_tty_inner(tty: linux::OwnedFd, ui: UiSender) -> Result<String> {
         }
         let read_data = &buf[0..num_read];
         stderr_string += &String::from_utf8_lossy(read_data);
-        ui.build_output_chunk(read_data);
+        if let Some(ui) = ui.upgrade() {
+            ui.build_output_chunk(read_data);
+        } else {
+            break;
+        }
     }
 
     Ok(stderr_string)
 }
 
-fn handle_cargo_tty(tty: linux::OwnedFd, ui: UiSender) -> Result<String> {
+fn handle_cargo_tty(tty: linux::OwnedFd, ui: UiWeakSender) -> Result<String> {
     let res = handle_cargo_tty_inner(tty, ui.clone());
-    ui.done_building();
+    if let Some(ui) = ui.upgrade() {
+        ui.done_building();
+    }
     res
 }
 
@@ -319,7 +325,7 @@ pub fn run_cargo_test(
     compilation_options: &CompilationOptions,
     manifest_options: &ManifestOptions,
     packages: Vec<&CargoPackage>,
-    ui: UiSender,
+    ui: UiWeakSender,
     log: slog::Logger,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     let mut args = vec![

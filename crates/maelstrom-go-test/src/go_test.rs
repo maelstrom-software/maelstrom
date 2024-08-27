@@ -1,6 +1,6 @@
 use crate::{GoImportPath, GoTestOptions};
 use anyhow::{anyhow, Context as _, Result};
-use maelstrom_test_runner::{ui::UiSender, BuildDir};
+use maelstrom_test_runner::{ui::UiWeakSender, BuildDir};
 use maelstrom_util::{
     fs::Fs,
     process::ExitCode,
@@ -59,14 +59,18 @@ impl Iterator for TestArtifactStream {
     }
 }
 
-fn handle_build_output(ui: UiSender, send_to_ui: bool, r: impl BufRead) -> Result<String> {
+fn handle_build_output(ui: UiWeakSender, send_to_ui: bool, r: impl BufRead) -> Result<String> {
     let mut output_s = String::new();
     for line in r.lines() {
         let line = line?;
         output_s += &line;
         output_s += "\n";
         if send_to_ui {
-            ui.build_output_line(line);
+            if let Some(ui) = ui.upgrade() {
+                ui.build_output_line(line);
+            } else {
+                break;
+            }
         }
     }
     Ok(output_s)
@@ -92,7 +96,7 @@ fn handle_build_cmd_status(
     }
 }
 
-fn run_build_cmd(cmd: &mut Command, stdout_to_ui: bool, ui: UiSender) -> Result<String> {
+fn run_build_cmd(cmd: &mut Command, stdout_to_ui: bool, ui: UiWeakSender) -> Result<String> {
     let mut child = cmd.stderr(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
 
     let stdout = BufReader::new(child.stdout.take().unwrap());
@@ -110,7 +114,12 @@ fn run_build_cmd(cmd: &mut Command, stdout_to_ui: bool, ui: UiSender) -> Result<
     handle_build_cmd_status(exit_status, stdout, stderr)
 }
 
-fn go_build(dir: &Path, output: &Path, options: &GoTestOptions, ui: UiSender) -> Result<String> {
+fn go_build(
+    dir: &Path,
+    output: &Path,
+    options: &GoTestOptions,
+    ui: UiWeakSender,
+) -> Result<String> {
     let mut cmd = Command::new("go");
     cmd.current_dir(dir)
         .arg("test")
@@ -143,7 +152,7 @@ fn multi_go_build(
     build_dir: RootBuf<BuildDir>,
     options: GoTestOptions,
     send: mpsc::Sender<GoTestArtifact>,
-    ui: UiSender,
+    ui: UiWeakSender,
 ) -> Result<()> {
     let build_dir = build_dir.into_path_buf();
 
@@ -180,7 +189,9 @@ fn multi_go_build(
     }
 
     let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-    ui.done_building();
+    if let Some(ui) = ui.upgrade() {
+        ui.done_building();
+    }
 
     for res in results {
         res?
@@ -193,7 +204,7 @@ pub(crate) fn build_and_collect(
     options: &GoTestOptions,
     packages: Vec<&GoPackage>,
     build_dir: &Root<BuildDir>,
-    ui: UiSender,
+    ui: UiWeakSender,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     let options = options.clone();
     let build_dir = build_dir.to_owned();
@@ -235,7 +246,7 @@ impl GoPackage {
     }
 }
 
-pub(crate) fn go_list(dir: &Path, ui: &UiSender) -> Result<Vec<GoPackage>> {
+pub(crate) fn go_list(dir: &Path, ui: UiWeakSender) -> Result<Vec<GoPackage>> {
     let stdout = run_build_cmd(
         Command::new("go")
             .current_dir(dir)

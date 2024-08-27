@@ -375,7 +375,7 @@ impl CollectTests for CargoTestCollector {
             &options.compilation_options,
             &options.manifest_options,
             packages,
-            ui.clone(),
+            ui.downgrade(),
             self.log.clone(),
         )?;
         Ok((

@@ -384,7 +384,8 @@ impl CollectTests for GoTestCollector {
         let packages = packages.into_iter().map(|m| &m.0).collect();
 
         let build_dir = self.cache_dir.join::<BuildDir>("test-binaries");
-        let (wait, stream) = go_test::build_and_collect(options, packages, &build_dir, ui.clone())?;
+        let (wait, stream) =
+            go_test::build_and_collect(options, packages, &build_dir, ui.downgrade())?;
         Ok((wait, TestArtifactStream(stream)))
     }
 
@@ -406,7 +407,7 @@ impl CollectTests for GoTestCollector {
     }
 
     fn get_packages(&self, ui: &UiSender) -> Result<Vec<GoPackage>> {
-        Ok(go_test::go_list(self.project_dir.as_ref(), ui)
+        Ok(go_test::go_list(self.project_dir.as_ref(), ui.downgrade())
             .with_context(|| "running go list")?
             .into_iter()
             .map(GoPackage)
