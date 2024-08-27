@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use std::time::Instant;
 use std::{fmt, str};
@@ -217,12 +218,20 @@ pub enum UiMessage {
 
 #[derive(Clone)]
 pub struct UiSender {
-    send: Sender<UiMessage>,
+    send: Arc<Sender<UiMessage>>,
 }
 
 impl UiSender {
     pub fn new(send: Sender<UiMessage>) -> Self {
-        Self { send }
+        Self {
+            send: Arc::new(send),
+        }
+    }
+
+    pub fn downgrade(&self) -> UiWeakSender {
+        UiWeakSender {
+            send: Arc::downgrade(&self.send),
+        }
     }
 }
 
@@ -297,6 +306,17 @@ impl UiSender {
     /// some kind of "results" or "summary" to the user.
     pub fn finished(&self, summary: UiJobSummary) {
         let _ = self.send.send(UiMessage::AllJobsFinished(summary));
+    }
+}
+
+#[derive(Clone)]
+pub struct UiWeakSender {
+    send: Weak<Sender<UiMessage>>,
+}
+
+impl UiWeakSender {
+    pub fn upgrade(&self) -> Option<UiSender> {
+        self.send.upgrade().map(|send| UiSender { send })
     }
 }
 

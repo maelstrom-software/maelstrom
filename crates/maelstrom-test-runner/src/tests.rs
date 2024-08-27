@@ -256,10 +256,6 @@ fn run_app(
         app.wait_for_tests().unwrap();
         app.finish().unwrap();
     } else {
-        for p in pending {
-            p.discard_cb();
-        }
-
         drop(app);
     }
 

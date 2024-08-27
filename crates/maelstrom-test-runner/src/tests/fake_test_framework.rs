@@ -36,10 +36,6 @@ impl FakeTestCompleteCallback {
     fn call(&self) {
         (self.0.lock().unwrap().take().unwrap())();
     }
-
-    fn discard(&self) {
-        let _ = self.0.lock().unwrap().take();
-    }
 }
 
 impl fmt::Debug for FakeTestCompleteCallback {
@@ -72,13 +68,7 @@ impl FakeTestCase {
     pub fn maybe_complete(&self) {
         if self.complete_at_end {
             self.cb.call();
-        } else {
-            self.cb.discard();
         }
-    }
-
-    pub fn discard_cb(&self) {
-        self.cb.discard();
     }
 }
 

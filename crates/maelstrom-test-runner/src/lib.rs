@@ -323,7 +323,7 @@ where
             self.artifact.to_key(),
             case_name.to_owned(),
             case_str.clone(),
-            self.ui.clone(),
+            self.ui.downgrade(),
             MainAppDepsT::TestCollector::remove_fixture_output
                 as fn(&str, Vec<String>) -> Vec<String>,
             MainAppDepsT::TestCollector::was_test_ignored as fn(&str, &[String]) -> bool,

@@ -1,6 +1,6 @@
 use crate::config::StopAfter;
 use crate::test_listing::TestListing;
-use crate::ui::{UiJobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiSender};
+use crate::ui::{UiJobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiWeakSender};
 use crate::{NotRunEstimate, TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
 use maelstrom_base::{
@@ -132,7 +132,7 @@ pub struct JobStatusVisitor<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCa
     artifact: ArtifactKeyT,
     case: String,
     case_str: String,
-    ui: UiSender,
+    ui: UiWeakSender,
     remove_fixture_output: fn(&str, Vec<String>) -> Vec<String>,
     was_ignored: fn(&str, &[String]) -> bool,
 }
@@ -150,7 +150,7 @@ where
         artifact: ArtifactKeyT,
         case: String,
         case_str: String,
-        ui: UiSender,
+        ui: UiWeakSender,
         remove_fixture_output: fn(&str, Vec<String>) -> Vec<String>,
         was_ignored: fn(&str, &[String]) -> bool,
     ) -> Self {
@@ -367,7 +367,7 @@ where
             }
         };
 
-        self.ui.job_finished(UiJobResult {
+        self.ui_job_finished(UiJobResult {
             job_id: ui_job_id,
             name: self.case_str.clone(),
             status: test_status,
@@ -393,7 +393,7 @@ where
                 client_job_id,
                 result,
             }) => self.job_finished(locked_tracker, ui_job_id, Ok((client_job_id, result))),
-            Ok(JobStatus::Running(status)) => self.ui.job_updated(UiJobUpdate {
+            Ok(JobStatus::Running(status)) => self.ui_job_updated(UiJobUpdate {
                 job_id: ui_job_id,
                 status,
             }),
@@ -407,7 +407,7 @@ where
             return;
         }
 
-        self.ui.job_finished(UiJobResult {
+        self.ui_job_finished(UiJobResult {
             name: self.case_str.clone(),
             job_id: ui_job_id,
             status: UiJobStatus::Ignored,
@@ -420,5 +420,17 @@ where
 
         // This call unblocks main thread, so it must go last
         self.tracker.condvar.notify_all();
+    }
+
+    fn ui_job_finished(&self, res: UiJobResult) {
+        if let Some(ui) = self.ui.upgrade() {
+            ui.job_finished(res);
+        }
+    }
+
+    fn ui_job_updated(&self, res: UiJobUpdate) {
+        if let Some(ui) = self.ui.upgrade() {
+            ui.job_updated(res);
+        }
     }
 }
