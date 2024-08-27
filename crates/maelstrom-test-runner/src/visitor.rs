@@ -9,7 +9,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::JobStatus;
 use maelstrom_util::process::{ExitCode, ExitCodeAccumulator};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 #[derive(Clone)]
 enum CaseResult {
@@ -17,97 +17,50 @@ enum CaseResult {
     Ran(ExitCode),
 }
 
-#[derive(Clone, Default)]
-struct Statuses {
+#[derive(Default)]
+struct LockedJobStatusTracker {
     outstanding: u64,
     completed: Vec<(String, CaseResult)>,
     num_failed: u64,
-}
-
-pub struct JobStatusTracker {
-    statuses: Mutex<Statuses>,
     stop_after: Option<StopAfter>,
-    condvar: Condvar,
     exit_code: ExitCodeAccumulator,
 }
 
-fn failure_limit_reached(stop_after: &Option<StopAfter>, statuses: &Statuses) -> bool {
-    stop_after.is_some_and(|limit| statuses.num_failed as usize >= usize::from(limit))
-}
-
-impl JobStatusTracker {
-    pub fn new(stop_after: Option<StopAfter>) -> Self {
-        Self {
-            statuses: Mutex::new(Statuses::default()),
-            stop_after,
-            condvar: Condvar::new(),
-            exit_code: ExitCodeAccumulator::default(),
-        }
-    }
-
-    pub fn add_outstanding(&self) {
-        let mut statuses = self.statuses.lock().unwrap();
-        statuses.outstanding += 1;
-    }
-
-    pub fn job_exited(&self, case: String, exit_code: ExitCode) {
-        let mut statuses = self.statuses.lock().unwrap();
-        statuses.outstanding -= 1;
-        statuses.completed.push((case, CaseResult::Ran(exit_code)));
+impl LockedJobStatusTracker {
+    fn job_exited(&mut self, case: String, exit_code: ExitCode) {
+        self.outstanding -= 1;
+        self.completed.push((case, CaseResult::Ran(exit_code)));
         if exit_code != ExitCode::SUCCESS {
-            statuses.num_failed += 1;
+            self.num_failed += 1;
         }
         self.exit_code.add(exit_code);
-        self.condvar.notify_one();
     }
 
-    pub fn job_ignored(&self, case: String) {
-        let mut statuses = self.statuses.lock().unwrap();
-        statuses.outstanding -= 1;
-        statuses.completed.push((case, CaseResult::Ignored));
-        self.condvar.notify_one();
+    fn job_ignored(&mut self, case: String) {
+        self.outstanding -= 1;
+        self.completed.push((case, CaseResult::Ignored));
     }
 
-    pub fn wait_for_outstanding_or_failure_limit_reached(&self) {
-        let mut statuses = self.statuses.lock().unwrap();
-        while !(statuses.outstanding == 0 || failure_limit_reached(&self.stop_after, &statuses)) {
-            statuses = self.condvar.wait(statuses).unwrap();
-        }
-    }
-
-    pub fn completed(&self) -> u64 {
-        let statuses = self.statuses.lock().unwrap();
-        statuses.completed.len() as u64
-    }
-
-    pub fn is_failure_limit_reached(&self) -> bool {
-        let statuses = self.statuses.lock().unwrap();
-        failure_limit_reached(&self.stop_after, &statuses)
-    }
-
-    pub fn ui_summary(&self, not_run_estimate: NotRunEstimate) -> UiJobSummary {
-        let statuses = self.statuses.lock().unwrap();
-
-        let failed: Vec<_> = statuses
+    fn ui_summary(&self, not_run_estimate: NotRunEstimate) -> UiJobSummary {
+        let failed: Vec<_> = self
             .completed
             .iter()
             .filter(|(_, res)| matches!(res, CaseResult::Ran(e) if e != &ExitCode::SUCCESS))
             .map(|(n, _)| n.clone())
             .collect();
-        let ignored: Vec<_> = statuses
+        let ignored: Vec<_> = self
             .completed
             .iter()
             .filter(|(_, res)| matches!(res, CaseResult::Ignored))
             .map(|(n, _)| n.clone())
             .collect();
 
-        let mut not_run =
-            failure_limit_reached(&self.stop_after, &statuses).then_some(not_run_estimate);
+        let mut not_run = self.is_failure_limit_reached().then_some(not_run_estimate);
         if not_run == Some(NotRunEstimate::Exactly(0)) {
             not_run = None;
         }
 
-        let succeeded = statuses.completed.len() - failed.len() - ignored.len();
+        let succeeded = self.completed.len() - failed.len() - ignored.len();
         UiJobSummary {
             succeeded,
             failed,
@@ -116,8 +69,58 @@ impl JobStatusTracker {
         }
     }
 
+    fn is_failure_limit_reached(&self) -> bool {
+        self.stop_after
+            .is_some_and(|limit| self.num_failed as usize >= usize::from(limit))
+    }
+}
+
+pub struct JobStatusTracker {
+    inner: Mutex<LockedJobStatusTracker>,
+    condvar: Condvar,
+}
+
+impl JobStatusTracker {
+    pub fn new(stop_after: Option<StopAfter>) -> Self {
+        Self {
+            inner: Mutex::new(LockedJobStatusTracker {
+                stop_after,
+                ..Default::default()
+            }),
+            condvar: Condvar::new(),
+        }
+    }
+
+    pub fn add_outstanding(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.outstanding += 1;
+    }
+
+    pub fn wait_for_outstanding_or_failure_limit_reached(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        while !(inner.outstanding == 0 || inner.is_failure_limit_reached()) {
+            inner = self.condvar.wait(inner).unwrap();
+        }
+    }
+
+    pub fn completed(&self) -> u64 {
+        let inner = self.inner.lock().unwrap();
+        inner.completed.len() as u64
+    }
+
+    pub fn is_failure_limit_reached(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.is_failure_limit_reached()
+    }
+
+    pub fn ui_summary(&self, not_run_estimate: NotRunEstimate) -> UiJobSummary {
+        let inner = self.inner.lock().unwrap();
+        inner.ui_summary(not_run_estimate)
+    }
+
     pub fn exit_code(&self) -> ExitCode {
-        self.exit_code.get()
+        let inner = self.inner.lock().unwrap();
+        inner.exit_code.get()
     }
 }
 
@@ -236,11 +239,12 @@ where
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
 {
-    fn job_finished(&self, ui_job_id: UiJobId, res: Result<(ClientJobId, JobOutcomeResult)>) {
-        if self.tracker.is_failure_limit_reached() {
-            return;
-        }
-
+    fn job_finished(
+        &self,
+        mut locked_tracker: MutexGuard<'_, LockedJobStatusTracker>,
+        ui_job_id: UiJobId,
+        res: Result<(ClientJobId, JobOutcomeResult)>,
+    ) {
         let test_status: UiJobStatus;
         let mut test_output_stderr: Vec<String> = vec![];
         let mut test_output_stdout: Vec<String> = vec![];
@@ -294,6 +298,7 @@ where
                 }
 
                 if !job_failed && was_ignored(&stdout, &self.case_str, self.was_ignored) {
+                    drop(locked_tracker);
                     self.job_ignored(ui_job_id);
                     return;
                 }
@@ -371,12 +376,15 @@ where
             stderr: test_output_stderr,
         });
 
+        locked_tracker.job_exited(self.case_str.clone(), exit_code);
+
         // This call unblocks main thread, so it must go last
-        self.tracker.job_exited(self.case_str.clone(), exit_code);
+        self.tracker.condvar.notify_all();
     }
 
     pub fn job_update(&self, ui_job_id: UiJobId, res: Result<JobStatus>) {
-        if self.tracker.is_failure_limit_reached() {
+        let locked_tracker = self.tracker.inner.lock().unwrap();
+        if locked_tracker.is_failure_limit_reached() {
             return;
         }
 
@@ -384,17 +392,18 @@ where
             Ok(JobStatus::Completed {
                 client_job_id,
                 result,
-            }) => self.job_finished(ui_job_id, Ok((client_job_id, result))),
+            }) => self.job_finished(locked_tracker, ui_job_id, Ok((client_job_id, result))),
             Ok(JobStatus::Running(status)) => self.ui.job_updated(UiJobUpdate {
                 job_id: ui_job_id,
                 status,
             }),
-            Err(err) => self.job_finished(ui_job_id, Err(err)),
+            Err(err) => self.job_finished(locked_tracker, ui_job_id, Err(err)),
         }
     }
 
     pub fn job_ignored(&self, ui_job_id: UiJobId) {
-        if self.tracker.is_failure_limit_reached() {
+        let mut locked_tracker = self.tracker.inner.lock().unwrap();
+        if locked_tracker.is_failure_limit_reached() {
             return;
         }
 
@@ -407,7 +416,9 @@ where
             stderr: vec![],
         });
 
+        locked_tracker.job_ignored(self.case_str.clone());
+
         // This call unblocks main thread, so it must go last
-        self.tracker.job_ignored(self.case_str.clone());
+        self.tracker.condvar.notify_all();
     }
 }
