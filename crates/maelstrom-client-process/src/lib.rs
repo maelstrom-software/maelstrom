@@ -47,7 +47,7 @@ pub async fn main_after_clone(
 
     sock.set_nonblocking(true)?;
     let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
-    Server::builder()
+    let res = Server::builder()
         .add_service(ClientProcessServer::new(Handler::new(
             client.clone(),
             log,
@@ -57,9 +57,10 @@ pub async fn main_after_clone(
             stream::once(async move { TokioError::<_>::Ok(sock) }).chain(stream::pending()),
             receiver,
         )
-        .await?;
+        .await;
     client.shutdown().await;
 
+    res?;
     Ok(())
 }
 
