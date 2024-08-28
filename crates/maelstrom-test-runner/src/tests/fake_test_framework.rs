@@ -163,6 +163,13 @@ impl FakeTests {
                     &binary.name,
                     binary.artifact_key(),
                     &case.name,
+                    !matches!(
+                        &case.outcome,
+                        JobOutcome::Completed(JobCompleted {
+                            status: JobTerminationStatus::Exited(0),
+                            ..
+                        })
+                    ),
                     case.timing(),
                 );
             }

@@ -345,7 +345,7 @@ where
             &self.ui,
         )?);
 
-        let estimated_duration = self
+        let (failed_previously, estimated_duration) = self
             .queuing_deps
             .test_listing
             .lock()
@@ -382,7 +382,7 @@ where
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
                 estimated_duration,
                 allocate_tty: None,
-                priority: 0, // TODO: Prioritize tests that failed last time higher.
+                priority: if failed_previously { 1 } else { 0 },
             },
             visitor,
         }

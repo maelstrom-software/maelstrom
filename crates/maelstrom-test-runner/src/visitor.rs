@@ -312,6 +312,7 @@ where
                         self.package.as_str(),
                         self.artifact.clone(),
                         self.case.as_str(),
+                        job_failed,
                         duration,
                     );
                 exit_code
@@ -349,6 +350,7 @@ where
                         self.package.as_str(),
                         self.artifact.clone(),
                         self.case.as_str(),
+                        true,
                         duration,
                     );
                 ExitCode::FAILURE

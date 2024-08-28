@@ -30,6 +30,8 @@ use std::{
 pub struct CaseData<CaseMetadataT> {
     timings: Vec<Duration>,
     metadata: CaseMetadataT,
+    failed_previous: bool,
+    failed_next: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -141,6 +143,10 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                     CaseData {
                         timings: vec![],
                         metadata,
+                        // We treat new test cases as if they failed the previous time: we want to
+                        // run them immediately.
+                        failed_previous: true,
+                        failed_next: None,
                     },
                 )
             }));
@@ -199,6 +205,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         package_name: &str,
         artifact_key: ArtifactKeyT,
         case_name: &str,
+        failed: bool,
         timing: Duration,
     ) {
         const MAX_TIMINGS_PER_CASE: usize = 3;
@@ -208,6 +215,11 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
             .cases
             .get_mut(case_name)
             .expect("case should have been added");
+        case.failed_next = match case.failed_next {
+            None => Some(failed),
+            Some(true) => Some(true),
+            Some(false) => Some(failed),
+        };
         case.timings.push(timing);
         while case.timings.len() > MAX_TIMINGS_PER_CASE {
             case.timings.remove(0);
@@ -219,19 +231,28 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         package_name: &str,
         artifact_key: &ArtifactKeyT,
         case_name: &str,
-    ) -> Option<Duration> {
-        let package = self.packages.get(package_name)?;
-        let artifact = package.artifacts.get(artifact_key)?;
-        let case = artifact.cases.get(case_name)?;
+    ) -> (bool, Option<Duration>) {
+        let Some(package) = self.packages.get(package_name) else {
+            return (true, None);
+        };
+        let Some(artifact) = package.artifacts.get(artifact_key) else {
+            return (true, None);
+        };
+        let Some(case) = artifact.cases.get(case_name) else {
+            return (true, None);
+        };
         if case.timings.is_empty() {
-            return None;
+            return (case.failed_previous, None);
         }
-        let mut avg = Duration::ZERO;
         let len: u32 = case.timings.len().try_into().unwrap();
-        for timing in &case.timings {
-            avg += *timing / len;
-        }
-        Some(avg)
+        (
+            case.failed_previous,
+            Some(
+                case.timings
+                    .iter()
+                    .fold(Duration::ZERO, |avg, timing| avg + *timing / len),
+            ),
+        )
     }
 }
 
@@ -258,6 +279,8 @@ struct OnDiskCaseData<CaseMetadataT: TestCaseMetadata> {
     #[serde(bound(deserialize = ""))]
     #[serde(flatten)]
     metadata: CaseMetadataT,
+    #[serde(default)]
+    failed: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -326,6 +349,11 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                                                                 OnDiskCaseData {
                                                                     timings: data.timings,
                                                                     metadata: data.metadata,
+                                                                    failed: data
+                                                                        .failed_next
+                                                                        .unwrap_or(
+                                                                            data.failed_previous,
+                                                                        ),
                                                                 },
                                                             )
                                                         },
@@ -364,6 +392,8 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                                 CaseData {
                                     timings: data.timings,
                                     metadata: data.metadata,
+                                    failed_previous: data.failed,
+                                    failed_next: None,
                                 },
                             )
                         })),
@@ -486,17 +516,21 @@ mod tests {
     }
 
     fn artifact_from_timings(
-        iter: impl IntoIterator<Item = (&'static str, Vec<Duration>)>,
+        iter: impl IntoIterator<Item = (&'static str, bool, Option<bool>, Vec<Duration>)>,
     ) -> Artifact<NoCaseMetadata> {
-        Artifact::from_iter(iter.into_iter().map(|(name, timings)| {
-            (
-                name,
-                CaseData {
-                    timings: timings,
-                    metadata: NoCaseMetadata,
-                },
-            )
-        }))
+        Artifact::from_iter(iter.into_iter().map(
+            |(name, failed_previous, failed_next, timings)| {
+                (
+                    name,
+                    CaseData {
+                        timings: timings,
+                        metadata: NoCaseMetadata,
+                        failed_previous,
+                        failed_next,
+                    },
+                )
+            },
+        ))
     }
 
     #[test]
@@ -506,9 +540,14 @@ mod tests {
             Package::from_iter([(
                 StringArtifactKey::from("artifact-1.library"),
                 artifact_from_timings([
-                    ("case-1-1L-1", vec![millis!(10), millis!(11), millis!(12)]),
-                    ("case-1-1L-2", vec![millis!(20), millis!(21)]),
-                    ("case-1-1L-3", vec![millis!(30)]),
+                    (
+                        "case-1-1L-1",
+                        false,
+                        None,
+                        vec![millis!(10), millis!(11), millis!(12)],
+                    ),
+                    ("case-1-1L-2", true, None, vec![millis!(20), millis!(21)]),
+                    ("case-1-1L-3", false, Some(true), vec![millis!(30)]),
                 ]),
             )]),
         )]);
@@ -532,17 +571,22 @@ mod tests {
                     (
                         StringArtifactKey::from("artifact-1.library"),
                         artifact_from_timings([
-                            ("case-1-1L-1", vec![millis!(10), millis!(11), millis!(12)]),
-                            ("case-1-1L-2", vec![millis!(20), millis!(21)]),
-                            ("case-1-1L-3", vec![millis!(30)]),
+                            (
+                                "case-1-1L-1",
+                                false,
+                                None,
+                                vec![millis!(10), millis!(11), millis!(12)]
+                            ),
+                            ("case-1-1L-2", true, None, vec![millis!(20), millis!(21)]),
+                            ("case-1-1L-3", false, Some(true), vec![millis!(30)]),
                         ]),
                     ),
                     (
                         StringArtifactKey::from("artifact-1.binary"),
                         artifact_from_timings([
-                            ("case-1-1B-1", vec![]),
-                            ("case-1-1B-2", vec![]),
-                            ("case-1-1B-3", vec![]),
+                            ("case-1-1B-1", true, None, vec![]),
+                            ("case-1-1B-2", true, None, vec![]),
+                            ("case-1-1B-3", true, None, vec![]),
                         ]),
                     ),
                 ]),
@@ -577,17 +621,17 @@ mod tests {
                     (
                         StringArtifactKey::from("artifact-1.library"),
                         artifact_from_timings([
-                            ("case-1-1L-2", vec![millis!(20), millis!(21)]),
-                            ("case-1-1L-3", vec![millis!(30)]),
-                            ("case-1-1L-4", vec![]),
+                            ("case-1-1L-2", true, None, vec![millis!(20), millis!(21)]),
+                            ("case-1-1L-3", false, Some(true), vec![millis!(30)]),
+                            ("case-1-1L-4", true, None, vec![]),
                         ]),
                     ),
                     (
                         StringArtifactKey::from("artifact-1.binary"),
                         artifact_from_timings([
-                            ("case-1-1B-2", vec![]),
-                            ("case-1-1B-3", vec![]),
-                            ("case-1-1B-4", vec![]),
+                            ("case-1-1B-2", true, None, vec![]),
+                            ("case-1-1B-3", true, None, vec![]),
+                            ("case-1-1B-4", true, None, vec![]),
                         ]),
                     ),
                 ]),
@@ -613,17 +657,17 @@ mod tests {
                         (
                             StringArtifactKey::from("artifact-1.library"),
                             artifact_from_timings([
-                                ("case-1-1L-2", vec![millis!(20), millis!(21)]),
-                                ("case-1-1L-3", vec![millis!(30)]),
-                                ("case-1-1L-4", vec![]),
+                                ("case-1-1L-2", true, None, vec![millis!(20), millis!(21)]),
+                                ("case-1-1L-3", false, Some(true), vec![millis!(30)]),
+                                ("case-1-1L-4", true, None, vec![]),
                             ]),
                         ),
                         (
                             StringArtifactKey::from("artifact-1.binary"),
                             artifact_from_timings([
-                                ("case-1-1B-2", vec![]),
-                                ("case-1-1B-3", vec![]),
-                                ("case-1-1B-4", vec![]),
+                                ("case-1-1B-2", true, None, vec![]),
+                                ("case-1-1B-3", true, None, vec![]),
+                                ("case-1-1B-4", true, None, vec![]),
                             ]),
                         ),
                     ])
@@ -633,9 +677,9 @@ mod tests {
                     Package::from_iter([(
                         StringArtifactKey::from("artifact-1.library"),
                         artifact_from_timings([
-                            ("case-2-1L-1", vec![]),
-                            ("case-2-1L-2", vec![]),
-                            ("case-2-1L-3", vec![]),
+                            ("case-2-1L-1", true, None, vec![]),
+                            ("case-2-1L-2", true, None, vec![]),
+                            ("case-2-1L-3", true, None, vec![]),
                         ]),
                     )]),
                 ),
@@ -652,15 +696,25 @@ mod tests {
                     (
                         StringArtifactKey::from("artifact-1.library"),
                         artifact_from_timings([
-                            ("case-1-1L-1", vec![millis!(10), millis!(11)]),
-                            ("case-1-1L-2", vec![millis!(20), millis!(21)]),
+                            ("case-1-1L-1", true, None, vec![millis!(10), millis!(11)]),
+                            (
+                                "case-1-1L-2",
+                                false,
+                                Some(true),
+                                vec![millis!(20), millis!(21)],
+                            ),
                         ]),
                     ),
                     (
                         StringArtifactKey::from("artifact-1.binary"),
                         artifact_from_timings([
-                            ("case-1-1B-1", vec![millis!(15), millis!(16)]),
-                            ("case-1-1B-2", vec![millis!(25), millis!(26)]),
+                            ("case-1-1B-1", true, None, vec![millis!(15), millis!(16)]),
+                            (
+                                "case-1-1B-2",
+                                false,
+                                Some(false),
+                                vec![millis!(25), millis!(26)],
+                            ),
                         ]),
                     ),
                 ]),
@@ -670,8 +724,8 @@ mod tests {
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
                     artifact_from_timings([
-                        ("case-2-1L-1", vec![millis!(10), millis!(12)]),
-                        ("case-2-1L-2", vec![millis!(20), millis!(22)]),
+                        ("case-2-1L-1", true, None, vec![millis!(10), millis!(12)]),
+                        ("case-2-1L-2", false, None, vec![millis!(20), millis!(22)]),
                     ]),
                 )]),
             ),
@@ -698,8 +752,13 @@ mod tests {
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
                     artifact_from_timings([
-                        ("case-1-1L-1", vec![millis!(10), millis!(11)]),
-                        ("case-1-1L-2", vec![millis!(20), millis!(21)]),
+                        ("case-1-1L-1", true, None, vec![millis!(10), millis!(11)]),
+                        (
+                            "case-1-1L-2",
+                            false,
+                            Some(true),
+                            vec![millis!(20), millis!(21)]
+                        ),
                     ]),
                 )]),
             )]),
@@ -715,16 +774,16 @@ mod tests {
                     (
                         StringArtifactKey::from("artifact-1.library"),
                         artifact_from_timings([
-                            ("case-1-1L-1", vec![millis!(10), millis!(11)]),
-                            ("case-1-1L-2", vec![millis!(20)]),
-                            ("case-1-1L-3", vec![]),
+                            ("case-1-1L-1", false, None, vec![millis!(10), millis!(11)]),
+                            ("case-1-1L-2", false, None, vec![millis!(20)]),
+                            ("case-1-1L-3", false, None, vec![]),
                         ]),
                     ),
                     (
                         StringArtifactKey::from("artifact-1.binary"),
                         artifact_from_timings([
-                            ("case-1-1B-1", vec![millis!(15), millis!(16)]),
-                            ("case-1-1B-2", vec![]),
+                            ("case-1-1B-1", false, None, vec![millis!(15), millis!(16)]),
+                            ("case-1-1B-2", false, None, vec![]),
                         ]),
                     ),
                 ]),
@@ -733,7 +792,12 @@ mod tests {
                 "package-2",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
-                    artifact_from_timings([("case-2-1L-1", vec![millis!(10), millis!(12)])]),
+                    artifact_from_timings([(
+                        "case-2-1L-1",
+                        false,
+                        None,
+                        vec![millis!(10), millis!(12)],
+                    )]),
                 )]),
             ),
         ]);
@@ -775,6 +839,7 @@ mod tests {
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
+            false,
             millis!(10),
         );
         assert_eq!(
@@ -783,7 +848,7 @@ mod tests {
                 "package-1",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
-                    artifact_from_timings([("case-1-1L-1", vec![millis!(10)])]),
+                    artifact_from_timings([("case-1-1L-1", true, Some(false), vec![millis!(10)])]),
                 )]),
             )]),
         );
@@ -792,6 +857,7 @@ mod tests {
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
+            true,
             millis!(11),
         );
         assert_eq!(
@@ -800,7 +866,12 @@ mod tests {
                 "package-1",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
-                    artifact_from_timings([("case-1-1L-1", vec![millis!(10), millis!(11)])]),
+                    artifact_from_timings([(
+                        "case-1-1L-1",
+                        true,
+                        Some(true),
+                        vec![millis!(10), millis!(11)]
+                    )]),
                 )]),
             )]),
         );
@@ -809,6 +880,7 @@ mod tests {
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
+            false,
             millis!(12),
         );
         assert_eq!(
@@ -819,6 +891,8 @@ mod tests {
                     StringArtifactKey::from("artifact-1.library"),
                     artifact_from_timings([(
                         "case-1-1L-1",
+                        true,
+                        Some(true),
                         vec![millis!(10), millis!(11), millis!(12)]
                     )]),
                 )]),
@@ -829,6 +903,7 @@ mod tests {
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
+            false,
             millis!(13),
         );
         assert_eq!(
@@ -839,6 +914,8 @@ mod tests {
                     StringArtifactKey::from("artifact-1.library"),
                     artifact_from_timings([(
                         "case-1-1L-1",
+                        true,
+                        Some(true),
                         vec![millis!(11), millis!(12), millis!(13)]
                     )]),
                 )]),
@@ -854,6 +931,8 @@ mod tests {
                 StringArtifactKey::from("artifact-1.library"),
                 artifact_from_timings([(
                     "case-1-1L-1",
+                    false,
+                    None,
                     vec![
                         millis!(10),
                         millis!(11),
@@ -869,6 +948,7 @@ mod tests {
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
+            false,
             millis!(15),
         );
         assert_eq!(
@@ -879,6 +959,8 @@ mod tests {
                     StringArtifactKey::from("artifact-1.library"),
                     artifact_from_timings([(
                         "case-1-1L-1",
+                        false,
+                        Some(false),
                         vec![millis!(13), millis!(14), millis!(15)]
                     )]),
                 )]),
@@ -894,37 +976,48 @@ mod tests {
             Package::from_iter([(
                 artifact_1.clone(),
                 artifact_from_timings([
-                    ("case-1", vec![]),
-                    ("case-2", vec![millis!(10)]),
-                    ("case-3", vec![millis!(10), millis!(12)]),
+                    ("case-1", false, None, vec![]),
+                    ("case-2", true, None, vec![millis!(10)]),
+                    ("case-3", false, None, vec![millis!(10), millis!(12)]),
                     (
                         "case-4",
+                        false,
+                        None,
                         vec![millis!(10), millis!(12), millis!(14), millis!(16)],
                     ),
                 ]),
             )]),
         )]);
 
-        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-1"), None);
+        assert_eq!(
+            listing.get_timing("package-1", &artifact_1, "case-1"),
+            (false, None),
+        );
         assert_eq!(
             listing.get_timing("package-1", &artifact_1, "case-2"),
-            Some(millis!(10))
+            (true, Some(millis!(10))),
         );
         assert_eq!(
             listing.get_timing("package-1", &artifact_1, "case-3"),
-            Some(millis!(11))
+            (false, Some(millis!(11))),
         );
         assert_eq!(
             listing.get_timing("package-1", &artifact_1, "case-4"),
-            Some(millis!(13))
+            (false, Some(millis!(13))),
         );
-        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-5"), None);
+        assert_eq!(
+            listing.get_timing("package-1", &artifact_1, "case-5"),
+            (true, None),
+        );
         let artifact_1_bin = StringArtifactKey::from("artifact-1.binary");
         assert_eq!(
             listing.get_timing("package-1", &artifact_1_bin, "case-1"),
-            None
+            (true, None),
         );
-        assert_eq!(listing.get_timing("package-2", &artifact_1, "case-1"), None);
+        assert_eq!(
+            listing.get_timing("package-2", &artifact_1, "case-1"),
+            (true, None),
+        );
     }
 
     #[test]
@@ -1079,9 +1172,11 @@ mod tests {
                         version = 3
 
                         [package-1."artifact-1.library".case-1-1L-1]
+                        failed = false
                         timings = [0.01, 0.011]
 
                         [package-1."artifact-1.library".case-1-1L-2]
+                        failed = true
                         timings = [0.02]
 
                         [package-1."artifact-1.library".case-1-1L-3]
@@ -1100,9 +1195,9 @@ mod tests {
             Package::from_iter([(
                 StringArtifactKey::from("artifact-1.library"),
                 artifact_from_timings([
-                    ("case-1-1L-1", vec![millis!(10), millis!(11)]),
-                    ("case-1-1L-2", vec![millis!(20)]),
-                    ("case-1-1L-3", vec![]),
+                    ("case-1-1L-1", false, None, vec![millis!(10), millis!(11)]),
+                    ("case-1-1L-2", true, None, vec![millis!(20)]),
+                    ("case-1-1L-3", false, None, vec![]),
                 ]),
             )]),
         )]);
@@ -1243,7 +1338,12 @@ mod tests {
                 "package-2",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
-                    artifact_from_timings([("case-2-1L-1", vec![millis!(10), millis!(12)])]),
+                    artifact_from_timings([(
+                        "case-2-1L-1",
+                        false,
+                        None,
+                        vec![millis!(10), millis!(12)],
+                    )]),
                 )]),
             ),
             (
@@ -1252,16 +1352,21 @@ mod tests {
                     (
                         StringArtifactKey::from("artifact-1.binary"),
                         artifact_from_timings([
-                            ("case-1-1B-1", vec![millis!(15), millis!(16)]),
-                            ("case-1-1B-2", vec![]),
+                            ("case-1-1B-1", true, None, vec![millis!(15), millis!(16)]),
+                            ("case-1-1B-2", false, None, vec![]),
                         ]),
                     ),
                     (
                         StringArtifactKey::from("artifact-1.library"),
                         artifact_from_timings([
-                            ("case-1-1L-1", vec![millis!(10), millis!(11)]),
-                            ("case-1-1L-2", vec![millis!(20)]),
-                            ("case-1-1L-3", vec![]),
+                            (
+                                "case-1-1L-1",
+                                false,
+                                Some(true),
+                                vec![millis!(10), millis!(11)],
+                            ),
+                            ("case-1-1L-2", true, Some(false), vec![millis!(20)]),
+                            ("case-1-1L-3", false, None, vec![]),
                         ]),
                     ),
                 ]),
@@ -1277,21 +1382,27 @@ mod tests {
 
                 [package-1."artifact-1.binary".case-1-1B-1]
                 timings = [0.015, 0.016]
+                failed = true
 
                 [package-1."artifact-1.binary".case-1-1B-2]
                 timings = []
+                failed = false
 
                 [package-1."artifact-1.library".case-1-1L-1]
                 timings = [0.01, 0.011]
+                failed = true
 
                 [package-1."artifact-1.library".case-1-1L-2]
                 timings = [0.02]
+                failed = false
 
                 [package-1."artifact-1.library".case-1-1L-3]
                 timings = []
+                failed = false
 
                 [package-2."artifact-1.library".case-2-1L-1]
                 timings = [0.01, 0.012]
+                failed = false
             "#},
         );
     }
