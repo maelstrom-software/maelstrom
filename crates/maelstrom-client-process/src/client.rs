@@ -649,6 +649,7 @@ impl Client {
             timeout: spec.timeout,
             estimated_duration: spec.estimated_duration,
             allocate_tty: spec.allocate_tty,
+            priority: spec.priority,
         };
         state
             .local_broker_sender

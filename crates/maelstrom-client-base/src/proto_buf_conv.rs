@@ -79,6 +79,22 @@ impl TryFromProtoBuf for bool {
     }
 }
 
+impl IntoProtoBuf for i8 {
+    type ProtoBufType = i32;
+
+    fn into_proto_buf(self) -> i32 {
+        self as i32
+    }
+}
+
+impl TryFromProtoBuf for i8 {
+    type ProtoBufType = i32;
+
+    fn try_from_proto_buf(v: i32) -> Result<Self> {
+        Ok(v.try_into()?)
+    }
+}
+
 impl IntoProtoBuf for u8 {
     type ProtoBufType = u32;
 

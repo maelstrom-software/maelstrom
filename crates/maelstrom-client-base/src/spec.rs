@@ -221,6 +221,7 @@ pub struct JobSpec {
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
     pub allocate_tty: Option<JobTty>,
+    pub priority: i8,
 }
 
 impl JobSpec {
@@ -228,21 +229,22 @@ impl JobSpec {
         JobSpec {
             container: ContainerSpec {
                 layers: layers.into(),
-                image: None,
+                image: Default::default(),
                 environment: Default::default(),
                 mounts: Default::default(),
                 network: Default::default(),
                 root_overlay: Default::default(),
-                working_directory: None,
-                user: None,
-                group: None,
+                working_directory: Default::default(),
+                user: Default::default(),
+                group: Default::default(),
             }
             .into(),
             program: program.into().into(),
             arguments: Default::default(),
-            timeout: None,
-            estimated_duration: None,
-            allocate_tty: None,
+            timeout: Default::default(),
+            estimated_duration: Default::default(),
+            allocate_tty: Default::default(),
+            priority: Default::default(),
         }
     }
 
@@ -298,6 +300,11 @@ impl JobSpec {
 
     pub fn timeout(mut self, timeout: Option<impl Into<Timeout>>) -> Self {
         self.timeout = timeout.map(Into::into);
+        self
+    }
+
+    pub fn priority(mut self, priority: i8) -> Self {
+        self.priority = priority;
         self
     }
 }

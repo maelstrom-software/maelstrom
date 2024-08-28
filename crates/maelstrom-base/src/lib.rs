@@ -357,6 +357,7 @@ pub struct JobSpec {
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
     pub allocate_tty: Option<JobTty>,
+    pub priority: i8,
 }
 
 impl JobSpec {
@@ -372,12 +373,13 @@ impl JobSpec {
             mounts: Default::default(),
             network: Default::default(),
             root_overlay: Default::default(),
-            working_directory: None,
-            user: None,
-            group: None,
-            timeout: None,
-            estimated_duration: None,
-            allocate_tty: None,
+            working_directory: Default::default(),
+            user: Default::default(),
+            group: Default::default(),
+            timeout: Default::default(),
+            estimated_duration: Default::default(),
+            allocate_tty: Default::default(),
+            priority: Default::default(),
         }
     }
 
@@ -441,6 +443,11 @@ impl JobSpec {
 
     pub fn allocate_tty(mut self, allocate_tty: Option<impl Into<JobTty>>) -> Self {
         self.allocate_tty = allocate_tty.map(Into::into);
+        self
+    }
+
+    pub fn priority(mut self, priority: i8) -> Self {
+        self.priority = priority;
         self
     }
 

@@ -51,6 +51,7 @@ struct Job {
     group: Option<GroupId>,
     image: Option<String>,
     timeout: Option<u32>,
+    priority: Option<i8>,
 }
 
 impl Job {
@@ -71,6 +72,7 @@ impl Job {
             group: None,
             image: None,
             timeout: None,
+            priority: None,
         }
     }
 
@@ -132,6 +134,7 @@ impl Job {
             timeout: self.timeout.and_then(Timeout::new),
             estimated_duration: None,
             allocate_tty: None,
+            priority: self.priority.unwrap_or_default(),
         })
     }
 }
@@ -152,6 +155,7 @@ enum JobField {
     Group,
     Image,
     Timeout,
+    Priority,
 }
 
 struct JobVisitor;
@@ -212,6 +216,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
         let mut group = None;
         let mut image = None;
         let mut timeout = None;
+        let mut priority = None;
         while let Some(key) = map.next_key()? {
             match key {
                 JobField::Program => {
@@ -281,6 +286,9 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                 JobField::Timeout => {
                     timeout = Some(map.next_value()?);
                 }
+                JobField::Priority => {
+                    priority = Some(map.next_value()?);
+                }
                 JobField::Image => {
                     let i = map.next_value::<Image>()?;
                     image = Some(i.name);
@@ -335,6 +343,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
             group,
             image,
             timeout,
+            priority,
         })
     }
 }
@@ -1119,6 +1128,23 @@ mod tests {
             .into_job_spec()
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![tar_layer!("1")]).timeout(Timeout::new(0)),
+        )
+    }
+
+    #[test]
+    fn priority() {
+        assert_eq!(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ { "tar": "1" } ],
+                    "priority": -42
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec()
+            .unwrap(),
+            JobSpec::new(string!("/bin/sh"), vec![tar_layer!("1")]).priority(-42),
         )
     }
 }

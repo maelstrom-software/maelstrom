@@ -184,6 +184,7 @@ message JobSpec {
     optional uint32 timeout = 4;
     optional Duration estimated_duration = 5;
     optional JobTty allocate_tty = 6;
+    int32 priority = 7;
 }
 
 message RunJobRequest {

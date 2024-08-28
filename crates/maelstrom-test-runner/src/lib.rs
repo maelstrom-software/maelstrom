@@ -382,6 +382,7 @@ where
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
                 estimated_duration,
                 allocate_tty: None,
+                priority: 0, // TODO: Prioritize tests that failed last time higher.
             },
             visitor,
         }
