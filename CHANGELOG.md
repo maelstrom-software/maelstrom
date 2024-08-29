@@ -8,35 +8,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### Added
-- `maelstrom-go-test` now edits out some lines from test failures that come from the `go test` test
-  fixture code.
-- `maelstrom-go-test` now shows tests which call `t.Skip` as status `IGNORED`
-- `vet` config value added to `maelstrom-go-test`
-- `short` config value added to `maelstrom-go-test`
-- `fullpath` config value added to `maelstrom-go-test`
-- `extra-test-binary-args` config value added to `maelstrom-go-test`
-- `extra-test-binary-args` config value added to `cargo-maelstrom`
-- `extra-pytest-args` config value added to `maelstrom-pytest`
-- `extra-pytest-collect-args` config value added to `maelstrom-pytest`
-- `extra-pytest-test-args` config value added to `maelstrom-pytest`
-- `shared-library-dependencies` layer type added
-- `stop-after` config value added
+- `maelstrom-go-test` now edits out some lines from test failures that come
+  from the `go test` test fixture code.
+  \[[369](https://github.com/maelstrom-software/maelstrom/issues/369)\]
+- `maelstrom-go-test` now shows tests which call `t.Skip` as status `IGNORED`.
+  \[[367](https://github.com/maelstrom-software/maelstrom/issues/367)\]
+- `vet` config value added to `maelstrom-go-test`.
+  \[[356](https://github.com/maelstrom-software/maelstrom/issues/356)\]
+- `short` config value added to `maelstrom-go-test`.
+  \[[354](https://github.com/maelstrom-software/maelstrom/issues/354)\]
+- `fullpath` config value added to `maelstrom-go-test`.
+  \[[351](https://github.com/maelstrom-software/maelstrom/issues/351)\]
+- `--list-packages` command-line option to `maelstrom-to-test`.
+  \[[318](https://github.com/maelstrom-software/maelstrom/issues/318)\]
+- `extra-test-binary-args` config value added to `maelstrom-go-test`.
+  \[[363](https://github.com/maelstrom-software/maelstrom/issues/363)\]
+- `extra-test-binary-args` config value added to `cargo-maelstrom`.
+  \[[370](https://github.com/maelstrom-software/maelstrom/issues/370)\]
+- `extra-pytest-args` config value added to `maelstrom-pytest`.
+  \[[371](https://github.com/maelstrom-software/maelstrom/issues/371)\]
+  \[[372](https://github.com/maelstrom-software/maelstrom/issues/372)\]
+- `extra-pytest-collect-args` config value added to `maelstrom-pytest`.
+  \[[372](https://github.com/maelstrom-software/maelstrom/issues/372)\]
+- `extra-pytest-test-args` config value added to `maelstrom-pytest`.
+  \[[372](https://github.com/maelstrom-software/maelstrom/issues/372)\]
+- `shared-library-dependencies` layer type added.
+  \[[266](https://github.com/maelstrom-software/maelstrom/issues/266)\]
+- `stop-after` config value added.
+  \[[114](https://github.com/maelstrom-software/maelstrom/issues/114)\]
+- Scheduling priorities. Tests are run in LRT (longest remaining time) order
+  within their priority band. Test with higher priority are always run before
+  tests with lower priorities.
+- Tracking of whether or not tests failed the last time they were run. If
+  `--repeat` was specified, a test is considered to have failed if any instance
+  failed.
+- Functionality where new tests and tests that failed previously are run before
+  other tests. This function pairs wells with the new `stop-after` config value.
+  \[[380](https://github.com/maelstrom-software/maelstrom/issues/380)\]
 
 #### Changed
 - `ui` test-runner config option value now matches the same casing as the CLI option
-  (kebab-case)
+  (kebab-case).
 - UI now has improved tracking of the state of tests. The fancy UI in particular will now only show
   a test as running once it has actually started executing.
 - `quiet` config option removed from test runners, replaced with new "quiet" UI.
+  \[[374](https://github.com/maelstrom-software/maelstrom/issues/374)\]
 
 ### Fixed
 - Fixed issue with test-runner fancy UI where it would crash if the summary was too large.
-- Fixed issue with test-runners including extra trailing line in test output
+- Fixed issue with test-runners including extra trailing line in test output.
 - Fixed issue where the helpful extra comments in the file written by test runners with `--init`
   weren't being added.
 
 ### Removed
 - Removed support for the deprecated `maelstrom-test.toml` file.
+  \[[333](https://github.com/maelstrom-software/maelstrom/issues/333)\]
 
 ## [0.11.0] - 2024-07-30
 
