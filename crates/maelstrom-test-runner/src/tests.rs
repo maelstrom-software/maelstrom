@@ -1291,7 +1291,7 @@ fn expected_count_updates_packages() {
         tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
     let listing = test_listing_store.load().unwrap();
-    let mut expected_listing = fake_tests.listing();
+    let expected_listing = fake_tests.update_listing(Default::default());
     assert_eq!(listing, expected_listing);
 
     // remove bar
@@ -1316,7 +1316,7 @@ fn expected_count_updates_packages() {
 
     // new listing should match
     let listing = test_listing_store.load().unwrap();
-    fake_tests.update_listing(&mut expected_listing);
+    let expected_listing = fake_tests.update_listing(expected_listing);
     assert_eq!(listing, expected_listing);
 }
 
@@ -1346,7 +1346,7 @@ fn expected_count_updates_cases() {
         tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
     let listing = test_listing_store.load().unwrap();
-    let mut expected_listing = fake_tests.listing();
+    let expected_listing = fake_tests.update_listing(Default::default());
     assert_eq!(listing, expected_listing);
 
     // remove the test
@@ -1367,7 +1367,7 @@ fn expected_count_updates_cases() {
 
     // new listing should match
     let listing = test_listing_store.load().unwrap();
-    fake_tests.update_listing(&mut expected_listing);
+    let expected_listing = fake_tests.update_listing(expected_listing);
     assert_eq!(listing, expected_listing);
 }
 
@@ -1641,8 +1641,8 @@ fn stop_after_1_with_estimate() {
         Fs::new(),
         tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
-    let mut listing = test_listing_store.load().unwrap();
-    fake_tests.update_listing(&mut listing);
+    let listing = test_listing_store.load().unwrap();
+    let listing = fake_tests.update_listing(listing);
     test_listing_store.save(listing).unwrap();
 
     assert_eq!(

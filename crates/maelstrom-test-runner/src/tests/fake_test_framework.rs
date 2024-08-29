@@ -120,7 +120,10 @@ impl FakeTests {
         }
     }
 
-    pub fn update_listing(&self, listing: &mut TestListing<StringArtifactKey, NoCaseMetadata>) {
+    pub fn update_listing(
+        &self,
+        mut listing: TestListing<StringArtifactKey, NoCaseMetadata>,
+    ) -> TestListing<StringArtifactKey, NoCaseMetadata> {
         listing.retain_packages_and_artifacts(
             self.test_binaries
                 .iter()
@@ -144,11 +147,6 @@ impl FakeTests {
                 );
             }
         }
-    }
-
-    pub fn listing(&self) -> TestListing<StringArtifactKey, NoCaseMetadata> {
-        let mut listing = TestListing::default();
-        self.update_listing(&mut listing);
         listing
     }
 
