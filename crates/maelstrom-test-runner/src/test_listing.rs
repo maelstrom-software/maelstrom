@@ -430,11 +430,11 @@ impl<ArtifactKeyT, CaseMetadataT, DepsT> TestListingStore<ArtifactKeyT, CaseMeta
     }
 }
 
-impl<
-        ArtifactKeyT: TestArtifactKey,
-        CaseMetadataT: TestCaseMetadata,
-        DepsT: TestListingStoreDeps,
-    > TestListingStore<ArtifactKeyT, CaseMetadataT, DepsT>
+impl<ArtifactKeyT, CaseMetadataT, DepsT> TestListingStore<ArtifactKeyT, CaseMetadataT, DepsT>
+where
+    ArtifactKeyT: TestArtifactKey,
+    CaseMetadataT: TestCaseMetadata,
+    DepsT: TestListingStoreDeps,
 {
     pub fn load(&self) -> Result<TestListing<ArtifactKeyT, CaseMetadataT>> {
         let Some(contents) = self
@@ -458,14 +458,7 @@ impl<
             .into()),
         }
     }
-}
 
-impl<ArtifactKeyT, CaseMetadataT, DepsT> TestListingStore<ArtifactKeyT, CaseMetadataT, DepsT>
-where
-    ArtifactKeyT: TestArtifactKey,
-    CaseMetadataT: TestCaseMetadata,
-    DepsT: TestListingStoreDeps,
-{
     pub fn save(&self, job_listing: TestListing<ArtifactKeyT, CaseMetadataT>) -> Result<()> {
         self.deps
             .create_dir_all(self.test_listing_file.parent().unwrap())?;
