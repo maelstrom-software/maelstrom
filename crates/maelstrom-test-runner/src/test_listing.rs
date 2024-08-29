@@ -26,7 +26,7 @@ use std::{
  *  FIGLET: in memory
  */
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CaseData<CaseMetadataT> {
     timings: Vec<Duration>,
     metadata: CaseMetadataT,
