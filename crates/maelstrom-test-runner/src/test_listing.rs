@@ -324,6 +324,30 @@ enum OnDiskTestListingVersion {
     V3 = 3,
 }
 
+#[derive(Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum OnDiskCaseOutcome {
+    #[default]
+    Success,
+    Failure,
+    New,
+}
+
+impl OnDiskCaseOutcome {
+    fn success(&self) -> bool {
+        matches!(self, Self::Success)
+    }
+}
+
+impl From<&SuccessOrFailure> for OnDiskCaseOutcome {
+    fn from(outcome: &SuccessOrFailure) -> Self {
+        match outcome {
+            SuccessOrFailure::Success => Self::Success,
+            SuccessOrFailure::Failure => Self::Failure,
+        }
+    }
+}
+
 #[serde_as]
 #[derive(Clone, Serialize, Deserialize)]
 struct OnDiskCaseData<CaseMetadataT: TestCaseMetadata> {
@@ -334,7 +358,7 @@ struct OnDiskCaseData<CaseMetadataT: TestCaseMetadata> {
     #[serde(flatten)]
     metadata: CaseMetadataT,
     #[serde(default)]
-    failed: bool,
+    outcome: OnDiskCaseOutcome,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -408,7 +432,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                                                                             .cloned()
                                                                             .collect(),
                                                                         metadata: data.metadata,
-                                                                        failed: outcome.failure(),
+                                                                        outcome: outcome.into(),
                                                                     }
                                                                 } else if let Some((
                                                                     outcome,
@@ -421,13 +445,14 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                                                                             .cloned()
                                                                             .collect(),
                                                                         metadata: data.metadata,
-                                                                        failed: outcome.failure(),
+                                                                        outcome: outcome.into(),
                                                                     }
                                                                 } else {
                                                                     OnDiskCaseData {
                                                                         timings: vec![],
                                                                         metadata: data.metadata,
-                                                                        failed: true,
+                                                                        outcome:
+                                                                            OnDiskCaseOutcome::New,
                                                                     }
                                                                 }
                                                             })
@@ -464,7 +489,12 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                         Artifact::from_iter(artifact.cases.into_iter().map(|(case, data)| {
                             let timings = NonEmpty::collect(data.timings.iter().copied());
                             let when_read = timings.map(|timings| {
-                                (SuccessOrFailure::from_failure(data.failed), timings)
+                                // We should never have an outcome of "new", but if we manage to
+                                // get it, just turn it into "failure".
+                                (
+                                    SuccessOrFailure::from_failure(!data.outcome.success()),
+                                    timings,
+                                )
                             });
                             (
                                 case,
@@ -1295,25 +1325,29 @@ mod tests {
                         version = 3
 
                         [package-1."artifact-1.library".case-1-1L-1]
-                        failed = false
+                        outcome = "success"
                         timings = [0.01, 0.011]
 
                         [package-1."artifact-1.library".case-1-1L-2]
-                        failed = true
+                        outcome = "failure"
                         timings = [0.02]
 
                         [package-1."artifact-1.library".case-1-1L-3]
                         timings = [0.03]
 
                         [package-1."artifact-1.library".case-1-1L-4]
-                        failed = false
+                        outcome = "success"
                         timings = []
 
                         [package-1."artifact-1.library".case-1-1L-5]
-                        failed = true
+                        outcome = "failure"
                         timings = []
 
                         [package-1."artifact-1.library".case-1-1L-6]
+                        outcome = "new"
+                        timings = []
+
+                        [package-1."artifact-1.library".case-1-1L-7]
                         timings = []
                     "#}
                     .into(),
@@ -1339,6 +1373,7 @@ mod tests {
                     ("case-1-1L-4", None, None),
                     ("case-1-1L-5", None, None),
                     ("case-1-1L-6", None, None),
+                    ("case-1-1L-7", None, None),
                 ]),
             )]),
         )]);
@@ -1546,31 +1581,31 @@ mod tests {
 
                     [package-1."artifact-1.binary".case-1-1B-1]
                     timings = [0.013, 0.014]
-                    failed = false
+                    outcome = "success"
 
                     [package-1."artifact-1.binary".case-1-1B-2]
                     timings = [0.015, 0.016]
-                    failed = true
+                    outcome = "failure"
 
                     [package-1."artifact-1.library".case-1-1L-1]
                     timings = [0.03, 0.04]
-                    failed = false
+                    outcome = "success"
 
                     [package-1."artifact-1.library".case-1-1L-2]
                     timings = [0.025, 0.026]
-                    failed = true
+                    outcome = "failure"
 
                     [package-2."artifact-1.library".case-2-1L-1]
                     timings = []
-                    failed = true
+                    outcome = "new"
 
                     [package-3."artifact-1.binary".case-3-1B-1]
                     timings = [0.023, 0.024]
-                    failed = true
+                    outcome = "failure"
 
                     [package-3."artifact-1.binary".case-3-1B-2]
                     timings = [0.025, 0.026]
-                    failed = false
+                    outcome = "success"
                 "#},
         );
     }
