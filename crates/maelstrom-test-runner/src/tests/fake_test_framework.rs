@@ -1,6 +1,6 @@
 use crate::{
     metadata::TestMetadata,
-    test_listing::TestListing,
+    test_listing::{TestListing, TestListingStore, TestListingStoreDeps},
     ui::{self},
     BuildDir, CollectTests, NoCaseMetadata, SimpleFilter, StringArtifactKey, StringPackage,
     TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,
@@ -14,6 +14,7 @@ use maelstrom_client::spec::{JobSpec, LayerSpec};
 use maelstrom_util::{fs::Fs, root::RootBuf};
 use pretty_assertions::assert_eq;
 use std::{
+    cell::RefCell,
     collections::HashSet,
     fmt,
     path::{Path, PathBuf},
@@ -124,6 +125,25 @@ impl FakeTests {
         &self,
         mut listing: TestListing<StringArtifactKey, NoCaseMetadata>,
     ) -> TestListing<StringArtifactKey, NoCaseMetadata> {
+        struct FakeTestListingStoreDeps {
+            bytes: RefCell<Option<Vec<u8>>>,
+        }
+        impl TestListingStoreDeps for FakeTestListingStoreDeps {
+            fn read_to_string_if_exists(&self, _path: impl AsRef<Path>) -> Result<Option<String>> {
+                Ok(self
+                    .bytes
+                    .borrow()
+                    .clone()
+                    .map(|bytes| String::from_utf8(bytes).unwrap()))
+            }
+            fn create_dir_all(&self, _path: impl AsRef<Path>) -> Result<()> {
+                Ok(())
+            }
+            fn write(&self, _path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
+                self.bytes.borrow_mut().replace(contents.as_ref().to_vec());
+                Ok(())
+            }
+        }
         listing.retain_packages_and_artifacts(
             self.test_binaries
                 .iter()
@@ -147,7 +167,13 @@ impl FakeTests {
                 );
             }
         }
-        listing
+        let test_listing_store_deps = FakeTestListingStoreDeps {
+            bytes: RefCell::new(None),
+        };
+        let test_listing_store =
+            TestListingStore::new(test_listing_store_deps, RootBuf::new(PathBuf::from("")));
+        test_listing_store.save(listing).unwrap();
+        test_listing_store.load().unwrap()
     }
 
     pub fn packages(&self) -> Vec<FakeTestPackage> {
