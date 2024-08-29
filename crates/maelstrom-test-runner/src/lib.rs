@@ -35,7 +35,7 @@ use std::{
     mem, str,
     sync::{Arc, Mutex},
 };
-use test_listing::TestListingStore;
+use test_listing::{SuccessOrFailure, TestListingStore};
 use ui::{Ui, UiJobEnqueued, UiJobId, UiSender, UiSlogDrain};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
@@ -345,7 +345,7 @@ where
             &self.ui,
         )?);
 
-        let (failed_previously, estimated_duration) = self
+        let get_timing_result = self
             .queuing_deps
             .test_listing
             .lock()
@@ -353,6 +353,11 @@ where
             .as_ref()
             .unwrap()
             .get_timing(self.package.name(), &self.artifact.to_key(), case_name);
+        let (priority, estimated_duration) = match get_timing_result {
+            None => (1, None),
+            Some((SuccessOrFailure::Success, duration)) => (0, Some(duration)),
+            Some((SuccessOrFailure::Failure, duration)) => (1, Some(duration)),
+        };
 
         let (program, arguments) = self.artifact.build_command(case_name, case_metadata);
         let container = ContainerSpec {
@@ -382,7 +387,7 @@ where
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
                 estimated_duration,
                 allocate_tty: None,
-                priority: if failed_previously { 1 } else { 0 },
+                priority,
             },
             visitor,
         }

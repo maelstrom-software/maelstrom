@@ -273,36 +273,40 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         };
     }
 
+    /// Return some information about the specified test case.
+    ///
+    /// If the returned value is `Option::None`, it means that the test runner doesn't have a
+    /// record of ever running the test case.
+    ///
+    /// If the returned value is `Option::Some`, then the `SuccessOrFailure` field indicates
+    /// whether or not there were any failures the last time the test runner ran the test case. If
+    /// it is `SuccessOrFailure::Success`, it means that all test cases that were run the last
+    /// time, assuming it was run at least once, were successful. Otherwise, it means that at least
+    /// one test case was a failure. Note that a test case can be run multiple times by a test
+    /// runner with the `repeat` flag.
     pub fn get_timing(
         &self,
         package_name: &str,
         artifact_key: &ArtifactKeyT,
         case_name: &str,
-    ) -> (bool, Option<Duration>) {
-        let Some(package) = self.packages.get(package_name) else {
-            return (true, None);
-        };
-        let Some(artifact) = package.artifacts.get(artifact_key) else {
-            return (true, None);
-        };
-        let Some(case) = artifact.cases.get(case_name) else {
-            return (true, None);
-        };
-
-        match &case.when_read {
-            None => (true, None),
-            Some((outcome, timings)) => {
+    ) -> Option<(SuccessOrFailure, Duration)> {
+        self.packages
+            .get(package_name)?
+            .artifacts
+            .get(artifact_key)?
+            .cases
+            .get(case_name)?
+            .when_read
+            .as_ref()
+            .map(|(outcome, timings)| {
                 let len: u32 = timings.len().try_into().unwrap();
                 (
-                    outcome.failure(),
-                    Some(
-                        timings
-                            .iter()
-                            .fold(Duration::ZERO, |avg, timing| avg + *timing / len),
-                    ),
+                    *outcome,
+                    timings
+                        .iter()
+                        .fold(Duration::ZERO, |avg, timing| avg + *timing / len),
                 )
-            }
-        }
+            })
     }
 }
 
@@ -1120,35 +1124,23 @@ mod tests {
             )]),
         )]);
 
-        assert_eq!(
-            listing.get_timing("package-1", &artifact_1, "case-1"),
-            (true, None),
-        );
+        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-1"), None);
         assert_eq!(
             listing.get_timing("package-1", &artifact_1, "case-2"),
-            (true, Some(millis!(10))),
+            Some((Failure, millis!(10))),
         );
         assert_eq!(
             listing.get_timing("package-1", &artifact_1, "case-3"),
-            (false, Some(millis!(11))),
+            Some((Success, millis!(11))),
         );
-        assert_eq!(
-            listing.get_timing("package-1", &artifact_1, "case-4"),
-            (true, None),
-        );
-        assert_eq!(
-            listing.get_timing("package-1", &artifact_1, "case-5"),
-            (true, None),
-        );
+        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-4"), None);
+        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-5"), None);
         let artifact_1_bin = StringArtifactKey::from("artifact-1.binary");
         assert_eq!(
             listing.get_timing("package-1", &artifact_1_bin, "case-1"),
-            (true, None),
+            None,
         );
-        assert_eq!(
-            listing.get_timing("package-2", &artifact_1, "case-1"),
-            (true, None),
-        );
+        assert_eq!(listing.get_timing("package-2", &artifact_1, "case-1"), None);
     }
 
     #[test]
