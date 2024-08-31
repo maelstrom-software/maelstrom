@@ -56,15 +56,15 @@ impl CaseOutcome {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CaseData<CaseMetadataT> {
+struct CaseData<CaseMetadataT> {
     metadata: CaseMetadataT,
     when_read: Option<(CaseOutcome, NonEmpty<Duration>)>,
     this_run: Option<(CaseOutcome, NonEmpty<Duration>)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Artifact<CaseMetadataT> {
-    pub cases: HashMap<String, CaseData<CaseMetadataT>>,
+struct Artifact<CaseMetadataT> {
+    cases: HashMap<String, CaseData<CaseMetadataT>>,
 }
 
 impl<CaseMetadataT> Default for Artifact<CaseMetadataT> {
@@ -86,8 +86,8 @@ impl<CaseMetadataT: TestCaseMetadata, K: Into<String>> FromIterator<(K, CaseData
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Package<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
-    pub artifacts: HashMap<ArtifactKeyT, Artifact<CaseMetadataT>>,
+struct Package<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
+    artifacts: HashMap<ArtifactKeyT, Artifact<CaseMetadataT>>,
 }
 
 impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> Default
@@ -117,7 +117,7 @@ where
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TestListing<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
-    pub packages: HashMap<String, Package<ArtifactKeyT, CaseMetadataT>>,
+    packages: HashMap<String, Package<ArtifactKeyT, CaseMetadataT>>,
 }
 
 impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> Default
