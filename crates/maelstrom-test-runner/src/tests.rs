@@ -3,7 +3,7 @@ mod fake_test_framework;
 use crate::{
     config::{Repeat, StopAfter},
     introspect_driver::IntrospectDriver,
-    test_listing::TestListingStore,
+    test_listing::TestDbStore,
     ui::{self, Ui as _},
     BuildDir, ClientTrait, EnqueueResult, ListAction, MainApp, MainAppCombinedDeps, MainAppDeps,
     NotCollected,
@@ -1286,7 +1286,7 @@ fn expected_count_updates_packages() {
         },
     );
 
-    let test_listing_store = TestListingStore::new(
+    let test_listing_store = TestDbStore::new(
         Fs::new(),
         tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
@@ -1341,7 +1341,7 @@ fn expected_count_updates_cases() {
         },
     );
 
-    let test_listing_store = TestListingStore::new(
+    let test_listing_store = TestDbStore::new(
         Fs::new(),
         tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
@@ -1637,7 +1637,7 @@ fn stop_after_1_with_estimate() {
         test.tests[0].expected_estimated_duration = Some(Duration::from_secs(1));
     }
 
-    let test_listing_store = TestListingStore::new(
+    let test_listing_store = TestDbStore::new(
         Fs::new(),
         tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );

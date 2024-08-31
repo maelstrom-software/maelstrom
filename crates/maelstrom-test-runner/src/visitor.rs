@@ -1,5 +1,5 @@
 use crate::config::StopAfter;
-use crate::test_listing::TestListing;
+use crate::test_listing::TestDb;
 use crate::ui::{UiJobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiWeakSender};
 use crate::{NotRunEstimate, TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
@@ -127,7 +127,7 @@ impl JobStatusTracker {
 #[derive(Clone)]
 pub struct JobStatusVisitor<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     tracker: Arc<JobStatusTracker>,
-    test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT, CaseMetadataT>>>>,
+    test_listing: Arc<Mutex<Option<TestDb<ArtifactKeyT, CaseMetadataT>>>>,
     package: String,
     artifact: ArtifactKeyT,
     case: String,
@@ -145,7 +145,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tracker: Arc<JobStatusTracker>,
-        test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT, CaseMetadataT>>>>,
+        test_listing: Arc<Mutex<Option<TestDb<ArtifactKeyT, CaseMetadataT>>>>,
         package: String,
         artifact: ArtifactKeyT,
         case: String,

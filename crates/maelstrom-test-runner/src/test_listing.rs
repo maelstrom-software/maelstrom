@@ -116,12 +116,12 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TestListing<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
+pub struct TestDb<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     packages: HashMap<String, Package<ArtifactKeyT, CaseMetadataT>>,
 }
 
 impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> Default
-    for TestListing<ArtifactKeyT, CaseMetadataT>
+    for TestDb<ArtifactKeyT, CaseMetadataT>
 {
     fn default() -> Self {
         Self {
@@ -130,8 +130,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> Default
     }
 }
 
-impl<ArtifactKeyT, CaseMetadataT, K, V> FromIterator<(K, V)>
-    for TestListing<ArtifactKeyT, CaseMetadataT>
+impl<ArtifactKeyT, CaseMetadataT, K, V> FromIterator<(K, V)> for TestDb<ArtifactKeyT, CaseMetadataT>
 where
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
@@ -146,7 +145,7 @@ where
 }
 
 impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
-    TestListing<ArtifactKeyT, CaseMetadataT>
+    TestDb<ArtifactKeyT, CaseMetadataT>
 {
     pub fn update_artifact_cases<K, I, T>(&mut self, package_name: &str, artifact_key: K, cases: I)
     where
@@ -325,7 +324,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
 
 #[derive(Deserialize_repr, Eq, FromPrimitive, PartialEq, Serialize_repr)]
 #[repr(u32)]
-enum OnDiskTestListingVersion {
+enum OnDiskTestDbVersion {
     V3 = 3,
 }
 
@@ -394,8 +393,8 @@ struct OnDiskPackage<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetad
 }
 
 #[derive(Serialize, Deserialize)]
-struct OnDiskTestListing<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
-    version: OnDiskTestListingVersion,
+struct OnDiskTestDb<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
+    version: OnDiskTestDbVersion,
     #[serde(flatten)]
     #[serde(bound(serialize = ""))]
     #[serde(bound(deserialize = ""))]
@@ -403,12 +402,11 @@ struct OnDiskTestListing<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseM
 }
 
 impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
-    From<TestListing<ArtifactKeyT, CaseMetadataT>>
-    for OnDiskTestListing<ArtifactKeyT, CaseMetadataT>
+    From<TestDb<ArtifactKeyT, CaseMetadataT>> for OnDiskTestDb<ArtifactKeyT, CaseMetadataT>
 {
-    fn from(in_memory: TestListing<ArtifactKeyT, CaseMetadataT>) -> Self {
+    fn from(in_memory: TestDb<ArtifactKeyT, CaseMetadataT>) -> Self {
         Self {
-            version: OnDiskTestListingVersion::V3,
+            version: OnDiskTestDbVersion::V3,
             packages: in_memory
                 .packages
                 .into_iter()
@@ -481,10 +479,9 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
 }
 
 impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
-    From<OnDiskTestListing<ArtifactKeyT, CaseMetadataT>>
-    for TestListing<ArtifactKeyT, CaseMetadataT>
+    From<OnDiskTestDb<ArtifactKeyT, CaseMetadataT>> for TestDb<ArtifactKeyT, CaseMetadataT>
 {
-    fn from(on_disk: OnDiskTestListing<ArtifactKeyT, CaseMetadataT>) -> Self {
+    fn from(on_disk: OnDiskTestDb<ArtifactKeyT, CaseMetadataT>) -> Self {
         Self::from_iter(on_disk.packages.into_iter().map(|(package_name, package)| {
             (
                 package_name,
@@ -522,7 +519,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
  *  FIGLET: store
  */
 
-pub trait TestListingStoreDeps {
+pub trait TestDbStoreDeps {
     fn read_to_string_if_exists(&self, path: impl AsRef<Path>) -> Result<Option<String>> {
         unimplemented!("{:?}", path.as_ref());
     }
@@ -534,7 +531,7 @@ pub trait TestListingStoreDeps {
     }
 }
 
-impl TestListingStoreDeps for Fs {
+impl TestDbStoreDeps for Fs {
     fn read_to_string_if_exists(&self, path: impl AsRef<Path>) -> Result<Option<String>> {
         Fs::read_to_string_if_exists(self, path)
     }
@@ -548,35 +545,35 @@ impl TestListingStoreDeps for Fs {
     }
 }
 
-struct TestListingFile;
+struct TestDbFile;
 
-pub struct TestListingStore<ArtifactKeyT, CaseMetadataT, DepsT = Fs> {
+pub struct TestDbStore<ArtifactKeyT, CaseMetadataT, DepsT = Fs> {
     generics: PhantomData<(ArtifactKeyT, CaseMetadataT)>,
     deps: DepsT,
-    test_listing_file: RootBuf<TestListingFile>,
+    test_listing_file: RootBuf<TestDbFile>,
 }
 
 const MISSING_VERSION: &str = "missing version";
 const VERSION_NOT_AN_INTEGER: &str = "version field is not an integer";
-const TEST_LISTING_FILE: &str = "test-listing.toml";
+const TEST_DB_FILE: &str = "test-listing.toml";
 
-impl<ArtifactKeyT, CaseMetadataT, DepsT> TestListingStore<ArtifactKeyT, CaseMetadataT, DepsT> {
+impl<ArtifactKeyT, CaseMetadataT, DepsT> TestDbStore<ArtifactKeyT, CaseMetadataT, DepsT> {
     pub fn new(deps: DepsT, state_dir: impl AsRef<Root<StateDir>>) -> Self {
         Self {
             generics: PhantomData,
             deps,
-            test_listing_file: state_dir.as_ref().join(TEST_LISTING_FILE),
+            test_listing_file: state_dir.as_ref().join(TEST_DB_FILE),
         }
     }
 }
 
-impl<ArtifactKeyT, CaseMetadataT, DepsT> TestListingStore<ArtifactKeyT, CaseMetadataT, DepsT>
+impl<ArtifactKeyT, CaseMetadataT, DepsT> TestDbStore<ArtifactKeyT, CaseMetadataT, DepsT>
 where
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
-    DepsT: TestListingStoreDeps,
+    DepsT: TestDbStoreDeps,
 {
-    pub fn load(&self) -> Result<TestListing<ArtifactKeyT, CaseMetadataT>> {
+    pub fn load(&self) -> Result<TestDb<ArtifactKeyT, CaseMetadataT>> {
         let Some(contents) = self
             .deps
             .read_to_string_if_exists(&self.test_listing_file)?
@@ -590,21 +587,20 @@ where
         let Some(version) = version.as_integer() else {
             bail!(VERSION_NOT_AN_INTEGER);
         };
-        match OnDiskTestListingVersion::from_i64(version) {
+        match OnDiskTestDbVersion::from_i64(version) {
             None => Ok(Default::default()),
-            Some(OnDiskTestListingVersion::V3) => Ok(toml::from_str::<
-                OnDiskTestListing<ArtifactKeyT, CaseMetadataT>,
-            >(&contents)?
-            .into()),
+            Some(OnDiskTestDbVersion::V3) => {
+                Ok(toml::from_str::<OnDiskTestDb<ArtifactKeyT, CaseMetadataT>>(&contents)?.into())
+            }
         }
     }
 
-    pub fn save(&self, job_listing: TestListing<ArtifactKeyT, CaseMetadataT>) -> Result<()> {
+    pub fn save(&self, job_listing: TestDb<ArtifactKeyT, CaseMetadataT>) -> Result<()> {
         self.deps
             .create_dir_all(self.test_listing_file.parent().unwrap())?;
         self.deps.write(
             &self.test_listing_file,
-            toml::to_string::<OnDiskTestListing<ArtifactKeyT, CaseMetadataT>>(&job_listing.into())?,
+            toml::to_string::<OnDiskTestDb<ArtifactKeyT, CaseMetadataT>>(&job_listing.into())?,
         )
     }
 }
@@ -669,7 +665,7 @@ mod tests {
 
     #[test]
     fn update_artifact_cases() {
-        let mut listing = TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+        let mut listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
                 StringArtifactKey::from("artifact-1.library"),
@@ -702,7 +698,7 @@ mod tests {
         );
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+            TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([
                     (
@@ -755,7 +751,7 @@ mod tests {
         );
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+            TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([
                     (
@@ -794,7 +790,7 @@ mod tests {
         );
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([
+            TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
                 (
                     "package-1",
                     Package::from_iter([
@@ -847,7 +843,7 @@ mod tests {
 
         impl TestCaseMetadata for FakeCaseMetadata {}
 
-        let mut listing = TestListing::<StringArtifactKey, FakeCaseMetadata>::from_iter([(
+        let mut listing = TestDb::<StringArtifactKey, FakeCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
                 StringArtifactKey::from("artifact-1.library"),
@@ -887,7 +883,7 @@ mod tests {
         );
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, FakeCaseMetadata>::from_iter([(
+            TestDb::<StringArtifactKey, FakeCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
@@ -913,7 +909,7 @@ mod tests {
 
     #[test]
     fn retain_packages_and_artifacts() {
-        let mut listing = TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([
+        let mut listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
             (
                 "package-1",
                 Package::from_iter([
@@ -985,7 +981,7 @@ mod tests {
 
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+            TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
@@ -1008,7 +1004,7 @@ mod tests {
 
     #[test]
     fn expected_job_count() {
-        let listing = TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([
+        let listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
             (
                 "package-1",
                 Package::from_iter([
@@ -1075,7 +1071,7 @@ mod tests {
 
     #[test]
     fn add_timing_none_before() {
-        let mut listing = TestListing::default();
+        let mut listing = TestDb::default();
 
         listing.update_artifact_cases(
             "package-1",
@@ -1092,7 +1088,7 @@ mod tests {
         );
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+            TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
@@ -1114,7 +1110,7 @@ mod tests {
         );
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+            TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
@@ -1136,7 +1132,7 @@ mod tests {
         );
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+            TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
@@ -1158,7 +1154,7 @@ mod tests {
         );
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+            TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
@@ -1174,7 +1170,7 @@ mod tests {
 
     #[test]
     fn add_timing_already_too_many() {
-        let mut listing = TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+        let mut listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
                 StringArtifactKey::from("artifact-1.library"),
@@ -1204,7 +1200,7 @@ mod tests {
         );
         assert_eq!(
             listing,
-            TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+            TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
                     StringArtifactKey::from("artifact-1.library"),
@@ -1230,7 +1226,7 @@ mod tests {
     #[test]
     fn get_timing() {
         let artifact_1 = StringArtifactKey::from("artifact-1.library");
-        let listing = TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+        let listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
                 artifact_1.clone(),
@@ -1273,16 +1269,16 @@ mod tests {
     #[test]
     fn load_passes_proper_path() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, path: impl AsRef<Path>) -> Result<Option<String>> {
                 assert_eq!(
                     path.as_ref().to_str().unwrap(),
-                    format!("path/to/state/{TEST_LISTING_FILE}")
+                    format!("path/to/state/{TEST_DB_FILE}")
                 );
                 Ok(None)
             }
         }
-        let _ = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
+        let _ = TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(
             Deps,
             RootBuf::new("path/to/state".into()),
         );
@@ -1291,45 +1287,39 @@ mod tests {
     #[test]
     fn error_reading_in_load_propagates_error() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Err(anyhow!("error!"))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(store.load().unwrap_err().to_string(), "error!");
     }
 
     #[test]
     fn load_of_nonexistent_file_gives_default_listing() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(None)
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
-        assert_eq!(store.load().unwrap(), TestListing::default());
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
+        assert_eq!(store.load().unwrap(), TestDb::default());
     }
 
     #[test]
     fn load_of_file_with_invalid_toml_gives_toml_parse_error() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some(r#""garbage": { "foo", "bar" }"#.into()))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
         let error = store.load().unwrap_err().to_string();
         assert!(error.starts_with("TOML parse error"));
     }
@@ -1337,45 +1327,39 @@ mod tests {
     #[test]
     fn load_of_empty_file_gives_missing_version_error() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some("foo = 3\n".into()))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(store.load().unwrap_err().to_string(), MISSING_VERSION);
     }
 
     #[test]
     fn load_of_file_without_version_gives_missing_version_error() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some("foo = 3\n".into()))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(store.load().unwrap_err().to_string(), MISSING_VERSION);
     }
 
     #[test]
     fn load_of_file_with_non_integer_version_gives_version_not_an_integer_error() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some("version = \"v1\"\n".into()))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(
             store.load().unwrap_err().to_string(),
             VERSION_NOT_AN_INTEGER
@@ -1385,37 +1369,33 @@ mod tests {
     #[test]
     fn load_of_file_with_old_version_gives_default_listing() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some("version = 0\nfoo = \"bar\"\n".into()))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
-        assert_eq!(store.load().unwrap(), TestListing::default());
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
+        assert_eq!(store.load().unwrap(), TestDb::default());
     }
 
     #[test]
     fn load_of_file_with_newer_version_gives_default_listing() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some("version = 1000000\nfoo = \"bar\"\n".into()))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
-        assert_eq!(store.load().unwrap(), TestListing::default());
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
+        assert_eq!(store.load().unwrap(), TestDb::default());
     }
 
     #[test]
     fn load_of_file_with_correct_version_gives_deserialized_listing() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some(
                     indoc! {r#"
@@ -1451,11 +1431,9 @@ mod tests {
                 ))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
-        let expected = TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
+        let expected = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
                 StringArtifactKey::from("artifact-1.library"),
@@ -1480,7 +1458,7 @@ mod tests {
     #[test]
     fn load_of_file_with_correct_version_but_bad_toml_gives_toml_parse_error() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some(
                     indoc! {r#"
@@ -1498,10 +1476,8 @@ mod tests {
                 ))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
-            Deps,
-            RootBuf::new("".into()),
-        );
+        let store =
+            TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(Deps, RootBuf::new("".into()));
         let error = store.load().unwrap_err().to_string();
         assert!(error.starts_with("TOML parse error"));
     }
@@ -1509,17 +1485,17 @@ mod tests {
     #[test]
     fn error_creating_dir_in_save_propagates_error() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn create_dir_all(&self, _: impl AsRef<Path>) -> Result<()> {
                 Err(anyhow!("error!"))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
+        let store = TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(
             Deps,
             RootBuf::new("state".into()),
         );
         assert_eq!(
-            store.save(TestListing::default()).unwrap_err().to_string(),
+            store.save(TestDb::default()).unwrap_err().to_string(),
             "error!"
         );
     }
@@ -1527,7 +1503,7 @@ mod tests {
     #[test]
     fn error_writing_in_save_propagates_error() {
         struct Deps;
-        impl TestListingStoreDeps for Deps {
+        impl TestDbStoreDeps for Deps {
             fn create_dir_all(&self, _: impl AsRef<Path>) -> Result<()> {
                 Ok(())
             }
@@ -1535,12 +1511,12 @@ mod tests {
                 Err(anyhow!("error!"))
             }
         }
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
+        let store = TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(
             Deps,
             RootBuf::new("state".into()),
         );
         assert_eq!(
-            store.save(TestListing::default()).unwrap_err().to_string(),
+            store.save(TestDb::default()).unwrap_err().to_string(),
             "error!"
         );
     }
@@ -1551,7 +1527,7 @@ mod tests {
         write: Option<(String, String)>,
     }
 
-    impl TestListingStoreDeps for Rc<RefCell<LoggingDeps>> {
+    impl TestDbStoreDeps for Rc<RefCell<LoggingDeps>> {
         fn create_dir_all(&self, path: impl AsRef<Path>) -> Result<()> {
             self.borrow_mut()
                 .create_dir_all
@@ -1574,26 +1550,26 @@ mod tests {
     #[test]
     fn save_creates_parent_directory() {
         let deps = Rc::new(RefCell::new(LoggingDeps::default()));
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
+        let store = TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(
             deps.clone(),
             RootBuf::new("maelstrom/state/".into()),
         );
-        store.save(TestListing::default()).unwrap();
+        store.save(TestDb::default()).unwrap();
         assert_eq!(deps.borrow().create_dir_all, Some("maelstrom/state".into()));
     }
 
     #[test]
     fn save_of_default() {
         let deps = Rc::new(RefCell::new(LoggingDeps::default()));
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
+        let store = TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(
             deps.clone(),
             RootBuf::new("maelstrom/state/".into()),
         );
-        store.save(TestListing::default()).unwrap();
+        store.save(TestDb::default()).unwrap();
         assert_eq!(
             deps.borrow().write,
             Some((
-                format!("maelstrom/state/{TEST_LISTING_FILE}"),
+                format!("maelstrom/state/{TEST_DB_FILE}"),
                 "version = 3\n".into()
             ))
         );
@@ -1602,11 +1578,11 @@ mod tests {
     #[test]
     fn save_of_listing() {
         let deps = Rc::new(RefCell::new(LoggingDeps::default()));
-        let store = TestListingStore::<StringArtifactKey, NoCaseMetadata, _>::new(
+        let store = TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(
             deps.clone(),
             RootBuf::new("maelstrom/state/".into()),
         );
-        let listing = TestListing::<StringArtifactKey, NoCaseMetadata>::from_iter([
+        let listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
             (
                 "package-2",
                 Package::from_iter([(
@@ -1670,7 +1646,7 @@ mod tests {
         ]);
         store.save(listing).unwrap();
         let (actual_path, actual_contents) = deps.borrow_mut().write.take().unwrap();
-        assert_eq!(actual_path, format!("maelstrom/state/{TEST_LISTING_FILE}"));
+        assert_eq!(actual_path, format!("maelstrom/state/{TEST_DB_FILE}"));
         assert_eq!(
             actual_contents,
             indoc! {r#"

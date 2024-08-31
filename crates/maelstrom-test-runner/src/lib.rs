@@ -35,7 +35,7 @@ use std::{
     mem, str,
     sync::{Arc, Mutex},
 };
-use test_listing::{CaseOutcome, TestListingStore};
+use test_listing::{CaseOutcome, TestDbStore};
 use ui::{Ui, UiJobEnqueued, UiJobId, UiSender, UiSlogDrain};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
@@ -63,7 +63,7 @@ pub enum ListAction {
     ListTests,
 }
 
-type TestListing<TestCollectorT> = test_listing::TestListing<
+type TestDb<TestCollectorT> = test_listing::TestDb<
     <TestCollectorT as CollectTests>::ArtifactKey,
     <TestCollectorT as CollectTests>::CaseMetadata,
 >;
@@ -102,7 +102,7 @@ struct JobQueuingDeps<TestCollectorT: CollectTests> {
     filter: TestCollectorT::TestFilter,
     stderr_color: bool,
     test_metadata: AllMetadata<TestCollectorT::TestFilter>,
-    test_listing: Arc<Mutex<Option<TestListing<TestCollectorT>>>>,
+    test_listing: Arc<Mutex<Option<TestDb<TestCollectorT>>>>,
     list_action: Option<ListAction>,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
@@ -115,7 +115,7 @@ impl<TestCollectorT: CollectTests> JobQueuingDeps<TestCollectorT> {
         filter: TestCollectorT::TestFilter,
         stderr_color: bool,
         test_metadata: AllMetadata<TestCollectorT::TestFilter>,
-        test_listing: TestListing<TestCollectorT>,
+        test_listing: TestDb<TestCollectorT>,
         list_action: Option<ListAction>,
         repeat: Repeat,
         stop_after: Option<StopAfter>,
@@ -581,7 +581,7 @@ pub struct BuildDir;
 pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
     abstract_deps: MainAppDepsT,
     queuing_deps: JobQueuingDeps<MainAppDepsT::TestCollector>,
-    test_listing_store: TestListingStore<ArtifactKeyM<MainAppDepsT>, CaseMetadataM<MainAppDepsT>>,
+    test_listing_store: TestDbStore<ArtifactKeyM<MainAppDepsT>, CaseMetadataM<MainAppDepsT>>,
     log: slog::Logger,
 }
 
@@ -621,7 +621,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
 
         let mut test_metadata =
             AllMetadata::load(log.clone(), project_dir, MainAppDepsT::MAELSTROM_TEST_TOML)?;
-        let test_listing_store = TestListingStore::new(Fs::new(), &state_dir);
+        let test_listing_store = TestDbStore::new(Fs::new(), &state_dir);
         let test_listing = test_listing_store.load()?;
         let filter = TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
 

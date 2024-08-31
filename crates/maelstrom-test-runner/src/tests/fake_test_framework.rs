@@ -1,6 +1,6 @@
 use crate::{
     metadata::TestMetadata,
-    test_listing::{TestListing, TestListingStore, TestListingStoreDeps},
+    test_listing::{TestDb, TestDbStore, TestDbStoreDeps},
     ui::{self},
     BuildDir, CollectTests, NoCaseMetadata, SimpleFilter, StringArtifactKey, StringPackage,
     TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,
@@ -123,12 +123,12 @@ impl FakeTests {
 
     pub fn update_listing(
         &self,
-        mut listing: TestListing<StringArtifactKey, NoCaseMetadata>,
-    ) -> TestListing<StringArtifactKey, NoCaseMetadata> {
-        struct FakeTestListingStoreDeps {
+        mut listing: TestDb<StringArtifactKey, NoCaseMetadata>,
+    ) -> TestDb<StringArtifactKey, NoCaseMetadata> {
+        struct FakeTestDbStoreDeps {
             bytes: RefCell<Option<Vec<u8>>>,
         }
-        impl TestListingStoreDeps for FakeTestListingStoreDeps {
+        impl TestDbStoreDeps for FakeTestDbStoreDeps {
             fn read_to_string_if_exists(&self, _path: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(self
                     .bytes
@@ -174,11 +174,11 @@ impl FakeTests {
                 );
             }
         }
-        let test_listing_store_deps = FakeTestListingStoreDeps {
+        let test_listing_store_deps = FakeTestDbStoreDeps {
             bytes: RefCell::new(None),
         };
         let test_listing_store =
-            TestListingStore::new(test_listing_store_deps, RootBuf::new(PathBuf::from("")));
+            TestDbStore::new(test_listing_store_deps, RootBuf::new(PathBuf::from("")));
         test_listing_store.save(listing).unwrap();
         test_listing_store.load().unwrap()
     }
