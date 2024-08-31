@@ -160,9 +160,14 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
             .into_iter()
             .map(|(case_name, metadata)| (case_name.into(), metadata))
             .collect();
-        artifact
-            .cases
-            .retain(|case_name, _| cases.remove(case_name).is_some());
+        artifact.cases.retain(|case_name, case| {
+            if let Some(metadata) = cases.remove(case_name) {
+                case.metadata = metadata;
+                true
+            } else {
+                false
+            }
+        });
         artifact
             .cases
             .extend(cases.into_iter().map(|(case_name, metadata)| {
@@ -625,6 +630,31 @@ mod tests {
         };
     }
 
+    fn artifact_from_cases_with_metadata<MetadataT: TestCaseMetadata>(
+        iter: impl IntoIterator<
+            Item = (
+                &'static str,
+                MetadataT,
+                Option<(SuccessOrFailure, NonEmpty<Duration>)>,
+                Option<(SuccessOrFailure, NonEmpty<Duration>)>,
+            ),
+        >,
+    ) -> Artifact<MetadataT> {
+        Artifact::from_iter(
+            iter.into_iter()
+                .map(|(name, metadata, when_read, this_run)| {
+                    (
+                        name,
+                        CaseData {
+                            metadata,
+                            when_read,
+                            this_run,
+                        },
+                    )
+                }),
+        )
+    }
+
     fn artifact_from_cases(
         iter: impl IntoIterator<
             Item = (
@@ -634,16 +664,10 @@ mod tests {
             ),
         >,
     ) -> Artifact<NoCaseMetadata> {
-        Artifact::from_iter(iter.into_iter().map(|(name, when_read, this_run)| {
-            (
-                name,
-                CaseData {
-                    metadata: NoCaseMetadata,
-                    when_read,
-                    this_run,
-                },
-            )
-        }))
+        artifact_from_cases_with_metadata(
+            iter.into_iter()
+                .map(|(name, when_read, this_run)| (name, NoCaseMetadata, when_read, this_run)),
+        )
     }
 
     #[test]
@@ -811,6 +835,82 @@ mod tests {
                     )]),
                 ),
             ]),
+        );
+    }
+
+    #[test]
+    fn update_artifact_cases_with_changed_metadata() {
+        #[derive(
+            Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+        )]
+        enum FakeCaseMetadata {
+            A,
+            B,
+        }
+
+        impl TestCaseMetadata for FakeCaseMetadata {}
+
+        let mut listing = TestListing::<StringArtifactKey, FakeCaseMetadata>::from_iter([(
+            "package-1",
+            Package::from_iter([(
+                StringArtifactKey::from("artifact-1.library"),
+                artifact_from_cases_with_metadata([
+                    (
+                        "case-1-1L-1",
+                        FakeCaseMetadata::A,
+                        Some((Success, nonempty![millis!(10), millis!(11), millis!(12)])),
+                        None,
+                    ),
+                    (
+                        "case-1-1L-2",
+                        FakeCaseMetadata::A,
+                        Some((Failure, nonempty![millis!(20), millis!(21)])),
+                        None,
+                    ),
+                    (
+                        "case-1-1L-3",
+                        FakeCaseMetadata::A,
+                        None,
+                        Some((Failure, nonempty![millis!(30)])),
+                    ),
+                ]),
+            )]),
+        )]);
+
+        // Add some more cases that partially overlap with previous ones. This should retain the
+        // timings, but remove cases that no longer exist.
+        listing.update_artifact_cases(
+            "package-1",
+            StringArtifactKey::from("artifact-1.library"),
+            [
+                ("case-1-1L-2", FakeCaseMetadata::B),
+                ("case-1-1L-3", FakeCaseMetadata::B),
+                ("case-1-1L-4", FakeCaseMetadata::B),
+            ],
+        );
+        assert_eq!(
+            listing,
+            TestListing::<StringArtifactKey, FakeCaseMetadata>::from_iter([(
+                "package-1",
+                Package::from_iter([(
+                    StringArtifactKey::from("artifact-1.library"),
+                    artifact_from_cases_with_metadata([
+                        (
+                            "case-1-1L-2",
+                            FakeCaseMetadata::B,
+                            Some((Failure, nonempty![millis!(20), millis!(21)])),
+                            None,
+                        ),
+                        (
+                            "case-1-1L-3",
+                            FakeCaseMetadata::B,
+                            None,
+                            Some((Failure, nonempty![millis!(30)]))
+                        ),
+                        ("case-1-1L-4", FakeCaseMetadata::B, None, None),
+                    ]),
+                ),]),
+            )]),
         );
     }
 
