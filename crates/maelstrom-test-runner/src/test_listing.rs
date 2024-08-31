@@ -28,12 +28,12 @@ use std::{
  */
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SuccessOrFailure {
+pub enum CaseOutcome {
     Success,
     Failure,
 }
 
-impl SuccessOrFailure {
+impl CaseOutcome {
     pub fn from_failure(failure: bool) -> Self {
         if failure {
             Self::Failure
@@ -58,8 +58,8 @@ impl SuccessOrFailure {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CaseData<CaseMetadataT> {
     metadata: CaseMetadataT,
-    when_read: Option<(SuccessOrFailure, NonEmpty<Duration>)>,
-    this_run: Option<(SuccessOrFailure, NonEmpty<Duration>)>,
+    when_read: Option<(CaseOutcome, NonEmpty<Duration>)>,
+    this_run: Option<(CaseOutcome, NonEmpty<Duration>)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -258,7 +258,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
             .get_mut(case_name)
             .expect("case should have been added");
 
-        let new_outcome = SuccessOrFailure::from_failure(failed);
+        let new_outcome = CaseOutcome::from_failure(failed);
         match &mut case.this_run {
             this_run @ None => {
                 let timings = match &case.when_read {
@@ -294,7 +294,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         package_name: &str,
         artifact_key: &ArtifactKeyT,
         case_name: &str,
-    ) -> Option<(SuccessOrFailure, Duration)> {
+    ) -> Option<(CaseOutcome, Duration)> {
         self.packages
             .get(package_name)?
             .artifacts
@@ -344,11 +344,11 @@ impl OnDiskCaseOutcome {
     }
 }
 
-impl From<&SuccessOrFailure> for OnDiskCaseOutcome {
-    fn from(outcome: &SuccessOrFailure) -> Self {
+impl From<&CaseOutcome> for OnDiskCaseOutcome {
+    fn from(outcome: &CaseOutcome) -> Self {
         match outcome {
-            SuccessOrFailure::Success => Self::Success,
-            SuccessOrFailure::Failure => Self::Failure,
+            CaseOutcome::Success => Self::Success,
+            CaseOutcome::Failure => Self::Failure,
         }
     }
 }
@@ -496,10 +496,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                             let when_read = timings.map(|timings| {
                                 // We should never have an outcome of "new", but if we manage to
                                 // get it, just turn it into "failure".
-                                (
-                                    SuccessOrFailure::from_failure(!data.outcome.success()),
-                                    timings,
-                                )
+                                (CaseOutcome::from_failure(!data.outcome.success()), timings)
                             });
                             (
                                 case,
@@ -622,7 +619,7 @@ mod tests {
     use maelstrom_util::ext::OptionExt as _;
     use pretty_assertions::assert_eq;
     use std::{cell::RefCell, rc::Rc, str};
-    use SuccessOrFailure::{Failure, Success};
+    use CaseOutcome::{Failure, Success};
 
     macro_rules! millis {
         ($millis:expr) => {
@@ -635,8 +632,8 @@ mod tests {
             Item = (
                 &'static str,
                 MetadataT,
-                Option<(SuccessOrFailure, NonEmpty<Duration>)>,
-                Option<(SuccessOrFailure, NonEmpty<Duration>)>,
+                Option<(CaseOutcome, NonEmpty<Duration>)>,
+                Option<(CaseOutcome, NonEmpty<Duration>)>,
             ),
         >,
     ) -> Artifact<MetadataT> {
@@ -659,8 +656,8 @@ mod tests {
         iter: impl IntoIterator<
             Item = (
                 &'static str,
-                Option<(SuccessOrFailure, NonEmpty<Duration>)>,
-                Option<(SuccessOrFailure, NonEmpty<Duration>)>,
+                Option<(CaseOutcome, NonEmpty<Duration>)>,
+                Option<(CaseOutcome, NonEmpty<Duration>)>,
             ),
         >,
     ) -> Artifact<NoCaseMetadata> {

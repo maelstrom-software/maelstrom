@@ -35,7 +35,7 @@ use std::{
     mem, str,
     sync::{Arc, Mutex},
 };
-use test_listing::{SuccessOrFailure, TestListingStore};
+use test_listing::{CaseOutcome, TestListingStore};
 use ui::{Ui, UiJobEnqueued, UiJobId, UiSender, UiSlogDrain};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
@@ -355,8 +355,8 @@ where
             .get_timing(self.package.name(), &self.artifact.to_key(), case_name);
         let (priority, estimated_duration) = match get_timing_result {
             None => (1, None),
-            Some((SuccessOrFailure::Success, duration)) => (0, Some(duration)),
-            Some((SuccessOrFailure::Failure, duration)) => (1, Some(duration)),
+            Some((CaseOutcome::Success, duration)) => (0, Some(duration)),
+            Some((CaseOutcome::Failure, duration)) => (1, Some(duration)),
         };
 
         let (program, arguments) = self.artifact.build_command(case_name, case_metadata);
