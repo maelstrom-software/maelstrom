@@ -617,8 +617,11 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
             "stop_after" => ?stop_after
         );
 
-        let mut test_metadata =
-            AllMetadata::load(log.clone(), project_dir, MainAppDepsT::MAELSTROM_TEST_TOML)?;
+        let mut test_metadata = AllMetadata::load(
+            log.clone(),
+            project_dir,
+            MainAppDepsT::TEST_METADATA_FILE_NAME,
+        )?;
         let test_db_store = TestDbStore::new(Fs::new(), &state_dir);
         let test_db = test_db_store.load()?;
         let filter = TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;

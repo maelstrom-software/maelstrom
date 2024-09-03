@@ -355,5 +355,5 @@ pub trait MainAppDeps: Sync {
         options: &<Self::TestCollector as CollectTests>::Options,
     ) -> Result<TemplateVars>;
 
-    const MAELSTROM_TEST_TOML: &'static str;
+    const TEST_METADATA_FILE_NAME: &'static str;
 }

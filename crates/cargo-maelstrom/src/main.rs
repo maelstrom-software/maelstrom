@@ -16,7 +16,7 @@ pub fn main() -> Result<ExitCode> {
         args,
         |extra_options: &ExtraCommandLineOptions| extra_options.list.any(),
         cargo_maelstrom::get_project_dir,
-        cargo_maelstrom::MAELSTROM_TEST_TOML,
+        cargo_maelstrom::TEST_METADATA_FILE_NAME,
         cargo_maelstrom::ADDED_DEFAULT_TEST_METADATA,
         cargo_maelstrom::main,
     )

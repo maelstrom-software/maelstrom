@@ -132,7 +132,7 @@ impl MainAppDeps for TestMainAppDeps {
         Ok(TemplateVars::new())
     }
 
-    const MAELSTROM_TEST_TOML: &'static str = "maelstrom-test.toml";
+    const TEST_METADATA_FILE_NAME: &'static str = "maelstrom-test.toml";
 }
 
 #[derive(Default, Clone)]
@@ -791,7 +791,7 @@ fn ignored_test_via_config_sync() {
     };
     let project_dir = tmp_dir.path().join("project");
     Fs.create_dir_all(&project_dir).unwrap();
-    let config_path = project_dir.join(TestMainAppDeps::MAELSTROM_TEST_TOML);
+    let config_path = project_dir.join(TestMainAppDeps::TEST_METADATA_FILE_NAME);
     Fs.write(
         config_path,
         indoc! {"

@@ -12,7 +12,7 @@ pub fn main() -> Result<ExitCode> {
         env::args(),
         |extra_options: &ExtraCommandLineOptions| extra_options.list,
         |_| -> Result<Utf8PathBuf> { Ok(".".into()) },
-        maelstrom_pytest::MAELSTROM_TEST_TOML,
+        maelstrom_pytest::TEST_METADATA_FILE_NAME,
         maelstrom_pytest::ADDED_DEFAULT_TEST_METADATA,
         maelstrom_pytest::main,
     )

@@ -32,7 +32,7 @@ use std::{fmt, io};
 pub use config::Config;
 pub use maelstrom_test_runner::Logger;
 
-pub const MAELSTROM_TEST_TOML: &str = "maelstrom-go-test.toml";
+pub const TEST_METADATA_FILE_NAME: &str = "maelstrom-go-test.toml";
 pub const ADDED_DEFAULT_TEST_METADATA: &str = include_str!("added-default-test-metadata.toml");
 
 #[allow(clippy::too_many_arguments)]
@@ -691,7 +691,7 @@ impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
         Ok(TemplateVars::new())
     }
 
-    const MAELSTROM_TEST_TOML: &'static str = MAELSTROM_TEST_TOML;
+    const TEST_METADATA_FILE_NAME: &'static str = TEST_METADATA_FILE_NAME;
 }
 
 impl Wait for go_test::WaitHandle {

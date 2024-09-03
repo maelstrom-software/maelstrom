@@ -31,7 +31,7 @@ use std::{fmt, io};
 
 pub use maelstrom_test_runner::Logger;
 
-pub const MAELSTROM_TEST_TOML: &str = "cargo-maelstrom.toml";
+pub const TEST_METADATA_FILE_NAME: &str = "cargo-maelstrom.toml";
 pub const ADDED_DEFAULT_TEST_METADATA: &str = include_str!("added-default-test-metadata.toml");
 
 /// The Maelstrom target directory is `<target-dir>/maelstrom`.
@@ -516,7 +516,7 @@ impl MainAppDeps for DefaultMainAppDeps {
             .unwrap())
     }
 
-    const MAELSTROM_TEST_TOML: &'static str = MAELSTROM_TEST_TOML;
+    const TEST_METADATA_FILE_NAME: &'static str = TEST_METADATA_FILE_NAME;
 }
 
 impl Wait for cargo::WaitHandle {
