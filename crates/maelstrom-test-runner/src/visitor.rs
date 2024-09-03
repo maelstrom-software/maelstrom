@@ -303,7 +303,7 @@ where
                     return;
                 }
 
-                self.test_db.lock().unwrap().as_mut().unwrap().add_timing(
+                self.test_db.lock().unwrap().as_mut().unwrap().update_case(
                     self.package.as_str(),
                     self.artifact.clone(),
                     self.case.as_str(),
@@ -336,7 +336,7 @@ where
                     &self.case_str,
                     self.remove_fixture_output,
                 ));
-                self.test_db.lock().unwrap().as_mut().unwrap().add_timing(
+                self.test_db.lock().unwrap().as_mut().unwrap().update_case(
                     self.package.as_str(),
                     self.artifact.clone(),
                     self.case.as_str(),

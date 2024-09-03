@@ -159,7 +159,7 @@ impl FakeTests {
                     .map(|case| (case.name.clone(), NoCaseMetadata)),
             );
             for case in &binary.tests {
-                db.add_timing(
+                db.update_case(
                     &binary.name,
                     binary.artifact_key(),
                     &case.name,

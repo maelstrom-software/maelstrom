@@ -1,3 +1,11 @@
+//! This module provides a mechanism for querying, updating, saving and restoring a database of
+//! test cases.
+//!
+//! Test cases are grouped into artifacts, which are themselves grouped into packages. These
+//! concepts are mapped onto test-runner-specific concepts.
+//!
+//! The database is stored in a TOML file in the state directory.
+
 use crate::{TestArtifactKey, TestCaseMetadata, TestFilter};
 use anyhow::{anyhow, bail, Result};
 use maelstrom_base::{nonempty, NonEmpty};
@@ -27,6 +35,9 @@ use std::{
  *  FIGLET: in memory
  */
 
+/// Represents what happened the last time a test case was run. Generally, if there are multiple
+/// instances of a test case run in a single "run", then we will treat any failure as a failure of
+/// the entire "run".
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CaseOutcome {
     Success,
@@ -43,8 +54,8 @@ impl CaseOutcome {
     }
 
     pub fn combine(self, other: Self) -> Self {
-        if let Self::Success = self {
-            other
+        if matches!((self, other), (Self::Success, Self::Success)) {
+            Self::Success
         } else {
             Self::Failure
         }
@@ -55,14 +66,23 @@ impl CaseOutcome {
     }
 }
 
+/// Represents all known information about a test case.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CaseData<CaseMetadataT> {
+    /// The metadata comes from the test framework. These are things like "tags" or "markers".
     metadata: CaseMetadataT,
+
+    /// The information about the test case when the db was read. If `None`, it means that the test
+    /// case was just introduced, or has never been run.
     when_read: Option<(CaseOutcome, NonEmpty<Duration>)>,
+
+    /// The information about the test case that has been accumulated since the db was read.
     this_run: Option<(CaseOutcome, NonEmpty<Duration>)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// An artifact represents a test binary (for compiled languages) or a source code file (for
+/// interpreted languages). It is just a container of test cases.
 struct Artifact<CaseMetadataT> {
     cases: HashMap<String, CaseData<CaseMetadataT>>,
 }
@@ -86,6 +106,8 @@ impl<CaseMetadataT: TestCaseMetadata, K: Into<String>> FromIterator<(K, CaseData
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// A package represents a package or module in the test framework's language. It is just a
+/// container of artifacts.
 struct Package<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     artifacts: HashMap<ArtifactKeyT, Artifact<CaseMetadataT>>,
 }
@@ -116,6 +138,7 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// A database of information about test cases.
 pub struct TestDb<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     packages: HashMap<String, Package<ArtifactKeyT, CaseMetadataT>>,
 }
@@ -147,6 +170,19 @@ where
 impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
     TestDb<ArtifactKeyT, CaseMetadataT>
 {
+    /// Update the set of test cases for a particular artifact.
+    ///
+    /// If the package doesn't already exist in the database, it will be created.
+    ///
+    /// If the artifact doesn't already exist in the database, it will be created.
+    ///
+    /// For every test case provided:
+    ///   - If the case doesn't already exist in the database, it will be created.
+    ///   - Its metadata will be updated with the provided metadata.
+    ///   - Any other existing data about the case will be preserved.
+    ///
+    /// Every other pre-existing test case in the artifact that isn't specified in `cases` will be
+    /// removed from the database.
     pub fn update_artifact_cases<K, I, T>(&mut self, package_name: &str, artifact_key: K, cases: I)
     where
         K: Into<ArtifactKeyT>,
@@ -181,31 +217,37 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
             }));
     }
 
-    pub fn retain_packages_and_artifacts<'a, PI, PN, AI, AK>(&mut self, existing_packages: PI)
+    /// Remove stale test cases (and packages and artifacts).
+    ///
+    /// Only test cases for the artifacts and packages provided will be retained. The rest will be
+    /// removed.
+    pub fn retain_packages_and_artifacts<'a, PI, PN, AI, AK>(&mut self, packages: PI)
     where
         PI: IntoIterator<Item = (PN, AI)>,
         PN: Into<&'a str>,
         AI: IntoIterator<Item = AK>,
         AK: Into<ArtifactKeyT>,
     {
-        let existing_packages: HashMap<_, HashSet<_>> = existing_packages
+        let packages: HashMap<_, HashSet<_>> = packages
             .into_iter()
             .map(|(pn, ai)| (pn.into(), ai.into_iter().map(Into::into).collect()))
             .collect();
         self.packages.retain(|package_name, package| {
-            let Some(existing_artifacts) = existing_packages.get(package_name.as_str()) else {
-                return false;
-            };
-            package
-                .artifacts
-                .retain(|key, _| existing_artifacts.contains(key));
-            true
+            if let Some(artifacts) = packages.get(package_name.as_str()) {
+                package.artifacts.retain(|key, _| artifacts.contains(key));
+                true
+            } else {
+                false
+            }
         });
     }
 
-    pub fn expected_job_count<TestFilterT>(
+    /// Return the number of test cases in the database that match the given filter.
+    ///
+    /// `package_metadata` is used to provide additional information to the filter.
+    pub fn count_matching_cases<TestFilterT>(
         &self,
-        packages: &BTreeMap<String, TestFilterT::Package>,
+        package_metadata: &BTreeMap<String, TestFilterT::Package>,
         filter: &TestFilterT,
     ) -> u64
     where
@@ -219,17 +261,25 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                     .flat_map(move |(a, c)| c.cases.iter().map(move |(c, cd)| (p, a, c, cd)))
             })
             .filter(|(p, a, c, cd)| {
-                let Some(p) = packages.get(*p) else {
-                    return false;
-                };
-                filter
-                    .filter(p, Some(a), Some((c, &cd.metadata)))
-                    .expect("case is provided")
+                if let Some(p) = package_metadata.get(*p) {
+                    filter
+                        .filter(p, Some(a), Some((c, &cd.metadata)))
+                        .expect("case is provided")
+                } else {
+                    false
+                }
             })
             .count() as u64
     }
 
-    pub fn add_timing(
+    /// Update the database entry for a given test case.
+    ///
+    /// This will update the `this_run` field of the database, leaving the `when_read` field
+    /// untouched.
+    ///
+    /// The package, artifact, and case must have been previously added using
+    /// [`Self::update_artifact_cases`]. If not, the function will panic.
+    pub fn update_case(
         &mut self,
         package_name: &str,
         artifact_key: ArtifactKeyT,
@@ -250,14 +300,19 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                 .unwrap();
             }
         }
-        let package = self.packages.entry(package_name.to_owned()).or_default();
-        let artifact = package.artifacts.entry(artifact_key).or_default();
-        let case = artifact
+
+        let outcome = CaseOutcome::from_failure(failed);
+        let case = self
+            .packages
+            .get_mut(package_name)
+            .expect("package should have been added")
+            .artifacts
+            .get_mut(&artifact_key)
+            .expect("artifact should have been added")
             .cases
             .get_mut(case_name)
             .expect("case should have been added");
 
-        let new_outcome = CaseOutcome::from_failure(failed);
         match &mut case.this_run {
             this_run @ None => {
                 let timings = match &case.when_read {
@@ -268,11 +323,11 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                         timings
                     }
                 };
-                this_run.replace((new_outcome, timings));
+                this_run.replace((outcome, timings));
             }
-            Some((outcome, timings)) => {
-                add_timing(timings, timing);
-                *outcome = outcome.combine(new_outcome);
+            Some((existing_outcome, existing_timings)) => {
+                add_timing(existing_timings, timing);
+                *existing_outcome = existing_outcome.combine(outcome);
             }
         };
     }
@@ -288,7 +343,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
     /// time, assuming it was run at least once, were successful. Otherwise, it means that at least
     /// one test case was a failure. Note that a test case can be run multiple times by a test
     /// runner with the `repeat` flag.
-    pub fn get_timing(
+    pub fn get_case(
         &self,
         package_name: &str,
         artifact_key: &ArtifactKeyT,
@@ -547,6 +602,9 @@ impl TestDbStoreDeps for Fs {
 
 struct TestDbFile;
 
+/// This struct is used to read and write [`TestDb`]s.
+///
+/// Currently, it assumes that they are stored in a TOML file in a specified file.
 pub struct TestDbStore<ArtifactKeyT, CaseMetadataT, DepsT = Fs> {
     generics: PhantomData<(ArtifactKeyT, CaseMetadataT)>,
     deps: DepsT,
@@ -999,7 +1057,7 @@ mod tests {
     }
 
     #[test]
-    fn expected_job_count() {
+    fn count_matching_cases() {
         let db = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
             (
                 "package-1",
@@ -1047,14 +1105,14 @@ mod tests {
             .map(|p| (p.into(), p.into()))
             .collect();
 
-        assert_eq!(db.expected_job_count(&packages, &SimpleFilter::All), 6);
-        assert_eq!(db.expected_job_count(&packages, &SimpleFilter::None), 0);
+        assert_eq!(db.count_matching_cases(&packages, &SimpleFilter::All), 6);
+        assert_eq!(db.count_matching_cases(&packages, &SimpleFilter::None), 0);
         assert_eq!(
-            db.expected_job_count(&packages, &SimpleFilter::Package("package-1".into())),
+            db.count_matching_cases(&packages, &SimpleFilter::Package("package-1".into())),
             5
         );
         assert_eq!(
-            db.expected_job_count(
+            db.count_matching_cases(
                 &packages,
                 &SimpleFilter::ArtifactEndsWith(".library".into())
             ),
@@ -1063,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn add_timing_none_before() {
+    fn update_case_none_before() {
         let mut db = TestDb::default();
 
         db.update_artifact_cases(
@@ -1072,7 +1130,7 @@ mod tests {
             [("case-1-1L-1", NoCaseMetadata)],
         );
 
-        db.add_timing(
+        db.update_case(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1094,7 +1152,7 @@ mod tests {
             )]),
         );
 
-        db.add_timing(
+        db.update_case(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1116,7 +1174,7 @@ mod tests {
             )]),
         );
 
-        db.add_timing(
+        db.update_case(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1138,7 +1196,7 @@ mod tests {
             )]),
         );
 
-        db.add_timing(
+        db.update_case(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1162,7 +1220,7 @@ mod tests {
     }
 
     #[test]
-    fn add_timing_already_too_many() {
+    fn update_case_already_too_many() {
         let mut db = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
@@ -1184,7 +1242,7 @@ mod tests {
             )]),
         )]);
 
-        db.add_timing(
+        db.update_case(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1217,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn get_timing() {
+    fn get_case() {
         let artifact_1 = StringArtifactKey::from("artifact-1.library");
         let db = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
             "package-1",
@@ -1240,20 +1298,20 @@ mod tests {
             )]),
         )]);
 
-        assert_eq!(db.get_timing("package-1", &artifact_1, "case-1"), None);
+        assert_eq!(db.get_case("package-1", &artifact_1, "case-1"), None);
         assert_eq!(
-            db.get_timing("package-1", &artifact_1, "case-2"),
+            db.get_case("package-1", &artifact_1, "case-2"),
             Some((Failure, millis!(10))),
         );
         assert_eq!(
-            db.get_timing("package-1", &artifact_1, "case-3"),
+            db.get_case("package-1", &artifact_1, "case-3"),
             Some((Success, millis!(11))),
         );
-        assert_eq!(db.get_timing("package-1", &artifact_1, "case-4"), None);
-        assert_eq!(db.get_timing("package-1", &artifact_1, "case-5"), None);
+        assert_eq!(db.get_case("package-1", &artifact_1, "case-4"), None);
+        assert_eq!(db.get_case("package-1", &artifact_1, "case-5"), None);
         let artifact_1_bin = StringArtifactKey::from("artifact-1.binary");
-        assert_eq!(db.get_timing("package-1", &artifact_1_bin, "case-1"), None,);
-        assert_eq!(db.get_timing("package-2", &artifact_1, "case-1"), None);
+        assert_eq!(db.get_case("package-1", &artifact_1_bin, "case-1"), None,);
+        assert_eq!(db.get_case("package-2", &artifact_1, "case-1"), None);
     }
 
     #[test]

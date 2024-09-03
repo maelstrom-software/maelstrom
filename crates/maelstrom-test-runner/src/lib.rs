@@ -352,7 +352,7 @@ where
             .unwrap()
             .as_ref()
             .unwrap()
-            .get_timing(self.package.name(), &self.artifact.to_key(), case_name);
+            .get_case(self.package.name(), &self.artifact.to_key(), case_name);
         let (priority, estimated_duration) = match get_timing_result {
             None => (1, None),
             Some((CaseOutcome::Success, duration)) => (0, Some(duration)),
@@ -453,7 +453,8 @@ where
             .map(|p| (p.name().into(), p.clone()))
             .collect();
 
-        let mut expected_job_count = test_db.expected_job_count(&package_map, &queuing_deps.filter);
+        let mut expected_job_count =
+            test_db.count_matching_cases(&package_map, &queuing_deps.filter);
         drop(locked_test_db);
 
         expected_job_count *= usize::from(queuing_deps.repeat) as u64;
