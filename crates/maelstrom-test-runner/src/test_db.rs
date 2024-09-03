@@ -87,14 +87,6 @@ struct Artifact<CaseMetadataT> {
     cases: HashMap<String, CaseData<CaseMetadataT>>,
 }
 
-impl<CaseMetadataT> Default for Artifact<CaseMetadataT> {
-    fn default() -> Self {
-        Self {
-            cases: HashMap::new(),
-        }
-    }
-}
-
 impl<CaseMetadataT: TestCaseMetadata, K: Into<String>> FromIterator<(K, CaseData<CaseMetadataT>)>
     for Artifact<CaseMetadataT>
 {
@@ -110,16 +102,6 @@ impl<CaseMetadataT: TestCaseMetadata, K: Into<String>> FromIterator<(K, CaseData
 /// container of artifacts.
 struct Package<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     artifacts: HashMap<ArtifactKeyT, Artifact<CaseMetadataT>>,
-}
-
-impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> Default
-    for Package<ArtifactKeyT, CaseMetadataT>
-{
-    fn default() -> Self {
-        Self {
-            artifacts: HashMap::new(),
-        }
-    }
 }
 
 impl<ArtifactKeyT, CaseMetadataT, K, V> FromIterator<(K, V)>
@@ -189,8 +171,17 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         I: IntoIterator<Item = (T, CaseMetadataT)>,
         T: Into<String>,
     {
-        let package = self.packages.entry(package_name.into()).or_default();
-        let artifact = package.artifacts.entry(artifact_key.into()).or_default();
+        let artifact = self
+            .packages
+            .entry(package_name.into())
+            .or_insert_with(|| Package {
+                artifacts: HashMap::default(),
+            })
+            .artifacts
+            .entry(artifact_key.into())
+            .or_insert_with(|| Artifact {
+                cases: HashMap::default(),
+            });
         let mut cases: HashMap<String, CaseMetadataT> = cases
             .into_iter()
             .map(|(case_name, metadata)| (case_name.into(), metadata))
