@@ -83,26 +83,24 @@ struct CaseData<CaseMetadataT> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// An artifact represents a test binary (for compiled languages) or a source code file (for
 /// interpreted languages). It is just a container of test cases.
-struct Artifact<CaseMetadataT> {
-    cases: HashMap<String, CaseData<CaseMetadataT>>,
-}
+struct Artifact<CaseMetadataT>(HashMap<String, CaseData<CaseMetadataT>>);
 
 impl<CaseMetadataT: TestCaseMetadata, K: Into<String>> FromIterator<(K, CaseData<CaseMetadataT>)>
     for Artifact<CaseMetadataT>
 {
     fn from_iter<T: IntoIterator<Item = (K, CaseData<CaseMetadataT>)>>(iter: T) -> Self {
-        Self {
-            cases: HashMap::from_iter(iter.into_iter().map(|(k, v)| (k.into(), v))),
-        }
+        Self(HashMap::from_iter(
+            iter.into_iter().map(|(k, v)| (k.into(), v)),
+        ))
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A package represents a package or module in the test framework's language. It is just a
 /// container of artifacts.
-struct Package<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
-    artifacts: HashMap<ArtifactKeyT, Artifact<CaseMetadataT>>,
-}
+struct Package<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>(
+    HashMap<ArtifactKeyT, Artifact<CaseMetadataT>>,
+);
 
 impl<ArtifactKeyT, CaseMetadataT, K, V> FromIterator<(K, V)>
     for Package<ArtifactKeyT, CaseMetadataT>
@@ -113,25 +111,23 @@ where
     V: Into<Artifact<CaseMetadataT>>,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
-        Self {
-            artifacts: HashMap::from_iter(iter.into_iter().map(|(k, v)| (k.into(), v.into()))),
-        }
+        Self(HashMap::from_iter(
+            iter.into_iter().map(|(k, v)| (k.into(), v.into())),
+        ))
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A database of information about test cases.
-pub struct TestDb<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
-    packages: HashMap<String, Package<ArtifactKeyT, CaseMetadataT>>,
-}
+pub struct TestDb<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>(
+    HashMap<String, Package<ArtifactKeyT, CaseMetadataT>>,
+);
 
 impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> Default
     for TestDb<ArtifactKeyT, CaseMetadataT>
 {
     fn default() -> Self {
-        Self {
-            packages: HashMap::new(),
-        }
+        Self(HashMap::default())
     }
 }
 
@@ -143,9 +139,9 @@ where
     V: Into<Package<ArtifactKeyT, CaseMetadataT>>,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
-        Self {
-            packages: HashMap::from_iter(iter.into_iter().map(|(k, v)| (k.into(), v.into()))),
-        }
+        Self(HashMap::from_iter(
+            iter.into_iter().map(|(k, v)| (k.into(), v.into())),
+        ))
     }
 }
 
@@ -172,21 +168,17 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         T: Into<String>,
     {
         let artifact = self
-            .packages
+            .0
             .entry(package_name.into())
-            .or_insert_with(|| Package {
-                artifacts: HashMap::default(),
-            })
-            .artifacts
+            .or_insert_with(|| Package(HashMap::default()))
+            .0
             .entry(artifact_key.into())
-            .or_insert_with(|| Artifact {
-                cases: HashMap::default(),
-            });
+            .or_insert_with(|| Artifact(HashMap::default()));
         let mut cases: HashMap<String, CaseMetadataT> = cases
             .into_iter()
             .map(|(case_name, metadata)| (case_name.into(), metadata))
             .collect();
-        artifact.cases.retain(|case_name, case| {
+        artifact.0.retain(|case_name, case| {
             if let Some(metadata) = cases.remove(case_name) {
                 case.metadata = metadata;
                 true
@@ -195,7 +187,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
             }
         });
         artifact
-            .cases
+            .0
             .extend(cases.into_iter().map(|(case_name, metadata)| {
                 (
                     case_name,
@@ -223,9 +215,9 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
             .into_iter()
             .map(|(pn, ai)| (pn.into(), ai.into_iter().map(Into::into).collect()))
             .collect();
-        self.packages.retain(|package_name, package| {
+        self.0.retain(|package_name, package| {
             if let Some(artifacts) = packages.get(package_name.as_str()) {
-                package.artifacts.retain(|key, _| artifacts.contains(key));
+                package.0.retain(|key, _| artifacts.contains(key));
                 true
             } else {
                 false
@@ -244,12 +236,11 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
     where
         TestFilterT: TestFilter<ArtifactKey = ArtifactKeyT, CaseMetadata = CaseMetadataT>,
     {
-        self.packages
+        self.0
             .iter()
             .flat_map(|(p, a)| {
-                a.artifacts
-                    .iter()
-                    .flat_map(move |(a, c)| c.cases.iter().map(move |(c, cd)| (p, a, c, cd)))
+                a.0.iter()
+                    .flat_map(move |(a, c)| c.0.iter().map(move |(c, cd)| (p, a, c, cd)))
             })
             .filter(|(p, a, c, cd)| {
                 if let Some(p) = package_metadata.get(*p) {
@@ -294,13 +285,13 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
 
         let outcome = CaseOutcome::from_failure(failed);
         let case = self
-            .packages
+            .0
             .get_mut(package_name)
             .expect("package should have been added")
-            .artifacts
+            .0
             .get_mut(&artifact_key)
             .expect("artifact should have been added")
-            .cases
+            .0
             .get_mut(case_name)
             .expect("case should have been added");
 
@@ -340,11 +331,11 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         artifact_key: &ArtifactKeyT,
         case_name: &str,
     ) -> Option<(CaseOutcome, Duration)> {
-        self.packages
+        self.0
             .get(package_name)?
-            .artifacts
+            .0
             .get(artifact_key)?
-            .cases
+            .0
             .get(case_name)?
             .when_read
             .as_ref()
@@ -454,14 +445,14 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         Self {
             version: OnDiskTestDbVersion::V3,
             packages: in_memory
-                .packages
+                .0
                 .into_iter()
                 .map(|(package_name, package)| {
                     (
                         package_name,
                         OnDiskPackage {
                             artifacts: package
-                                .artifacts
+                                .0
                                 .into_iter()
                                 .map(|(key, artifact)| {
                                     (
@@ -469,7 +460,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
                                         OnDiskArtifact {
                                             cases: {
                                                 let mut cases =
-                                                    Vec::from_iter(artifact.cases.into_iter().map(
+                                                    Vec::from_iter(artifact.0.into_iter().map(
                                                         |(case, data)| {
                                                             (case, {
                                                                 if let Some((outcome, timings)) =
