@@ -550,7 +550,7 @@ struct TestDbFile;
 pub struct TestDbStore<ArtifactKeyT, CaseMetadataT, DepsT = Fs> {
     generics: PhantomData<(ArtifactKeyT, CaseMetadataT)>,
     deps: DepsT,
-    test_listing_file: RootBuf<TestDbFile>,
+    db_file: RootBuf<TestDbFile>,
 }
 
 const MISSING_VERSION: &str = "missing version";
@@ -562,7 +562,7 @@ impl<ArtifactKeyT, CaseMetadataT, DepsT> TestDbStore<ArtifactKeyT, CaseMetadataT
         Self {
             generics: PhantomData,
             deps,
-            test_listing_file: state_dir.as_ref().join(TEST_DB_FILE),
+            db_file: state_dir.as_ref().join(TEST_DB_FILE),
         }
     }
 }
@@ -574,10 +574,7 @@ where
     DepsT: TestDbStoreDeps,
 {
     pub fn load(&self) -> Result<TestDb<ArtifactKeyT, CaseMetadataT>> {
-        let Some(contents) = self
-            .deps
-            .read_to_string_if_exists(&self.test_listing_file)?
-        else {
+        let Some(contents) = self.deps.read_to_string_if_exists(&self.db_file)? else {
             return Ok(Default::default());
         };
         let mut table: toml::Table = toml::from_str(&contents)?;
@@ -595,12 +592,11 @@ where
         }
     }
 
-    pub fn save(&self, job_listing: TestDb<ArtifactKeyT, CaseMetadataT>) -> Result<()> {
-        self.deps
-            .create_dir_all(self.test_listing_file.parent().unwrap())?;
+    pub fn save(&self, db: TestDb<ArtifactKeyT, CaseMetadataT>) -> Result<()> {
+        self.deps.create_dir_all(self.db_file.parent().unwrap())?;
         self.deps.write(
-            &self.test_listing_file,
-            toml::to_string::<OnDiskTestDb<ArtifactKeyT, CaseMetadataT>>(&job_listing.into())?,
+            &self.db_file,
+            toml::to_string::<OnDiskTestDb<ArtifactKeyT, CaseMetadataT>>(&db.into())?,
         )
     }
 }
@@ -665,7 +661,7 @@ mod tests {
 
     #[test]
     fn update_artifact_cases() {
-        let mut listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+        let mut db = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
                 StringArtifactKey::from("artifact-1.library"),
@@ -687,7 +683,7 @@ mod tests {
 
         // Add some more cases with the same artifact name, but a different kind, in the same
         // package.
-        listing.update_artifact_cases(
+        db.update_artifact_cases(
             "package-1",
             StringArtifactKey::from("artifact-1.binary"),
             [
@@ -697,7 +693,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([
@@ -731,7 +727,7 @@ mod tests {
 
         // Add some more cases that partially overlap with previous ones. This should retain the
         // timings, but remove cases that no longer exist.
-        listing.update_artifact_cases(
+        db.update_artifact_cases(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             [
@@ -740,7 +736,7 @@ mod tests {
                 ("case-1-1L-4", NoCaseMetadata),
             ],
         );
-        listing.update_artifact_cases(
+        db.update_artifact_cases(
             "package-1",
             StringArtifactKey::from("artifact-1.binary"),
             [
@@ -750,7 +746,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([
@@ -779,7 +775,7 @@ mod tests {
         );
 
         // Add some more cases for a different package. They should be independent.
-        listing.update_artifact_cases(
+        db.update_artifact_cases(
             "package-2",
             StringArtifactKey::from("artifact-1.library"),
             [
@@ -789,7 +785,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
                 (
                     "package-1",
@@ -843,7 +839,7 @@ mod tests {
 
         impl TestCaseMetadata for FakeCaseMetadata {}
 
-        let mut listing = TestDb::<StringArtifactKey, FakeCaseMetadata>::from_iter([(
+        let mut db = TestDb::<StringArtifactKey, FakeCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
                 StringArtifactKey::from("artifact-1.library"),
@@ -872,7 +868,7 @@ mod tests {
 
         // Add some more cases that partially overlap with previous ones. This should retain the
         // timings, but remove cases that no longer exist.
-        listing.update_artifact_cases(
+        db.update_artifact_cases(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             [
@@ -882,7 +878,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, FakeCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
@@ -909,7 +905,7 @@ mod tests {
 
     #[test]
     fn retain_packages_and_artifacts() {
-        let mut listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
+        let mut db = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
             (
                 "package-1",
                 Package::from_iter([
@@ -965,7 +961,7 @@ mod tests {
             ),
         ]);
 
-        listing.retain_packages_and_artifacts([
+        db.retain_packages_and_artifacts([
             (
                 "package-1",
                 vec![
@@ -980,7 +976,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
@@ -1004,7 +1000,7 @@ mod tests {
 
     #[test]
     fn expected_job_count() {
-        let listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
+        let db = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
             (
                 "package-1",
                 Package::from_iter([
@@ -1051,17 +1047,14 @@ mod tests {
             .map(|p| (p.into(), p.into()))
             .collect();
 
-        assert_eq!(listing.expected_job_count(&packages, &SimpleFilter::All), 6);
+        assert_eq!(db.expected_job_count(&packages, &SimpleFilter::All), 6);
+        assert_eq!(db.expected_job_count(&packages, &SimpleFilter::None), 0);
         assert_eq!(
-            listing.expected_job_count(&packages, &SimpleFilter::None),
-            0
-        );
-        assert_eq!(
-            listing.expected_job_count(&packages, &SimpleFilter::Package("package-1".into())),
+            db.expected_job_count(&packages, &SimpleFilter::Package("package-1".into())),
             5
         );
         assert_eq!(
-            listing.expected_job_count(
+            db.expected_job_count(
                 &packages,
                 &SimpleFilter::ArtifactEndsWith(".library".into())
             ),
@@ -1071,15 +1064,15 @@ mod tests {
 
     #[test]
     fn add_timing_none_before() {
-        let mut listing = TestDb::default();
+        let mut db = TestDb::default();
 
-        listing.update_artifact_cases(
+        db.update_artifact_cases(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             [("case-1-1L-1", NoCaseMetadata)],
         );
 
-        listing.add_timing(
+        db.add_timing(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1087,7 +1080,7 @@ mod tests {
             millis!(10),
         );
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
@@ -1101,7 +1094,7 @@ mod tests {
             )]),
         );
 
-        listing.add_timing(
+        db.add_timing(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1109,7 +1102,7 @@ mod tests {
             millis!(11),
         );
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
@@ -1123,7 +1116,7 @@ mod tests {
             )]),
         );
 
-        listing.add_timing(
+        db.add_timing(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1131,7 +1124,7 @@ mod tests {
             millis!(12),
         );
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
@@ -1145,7 +1138,7 @@ mod tests {
             )]),
         );
 
-        listing.add_timing(
+        db.add_timing(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1153,7 +1146,7 @@ mod tests {
             millis!(13),
         );
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
@@ -1170,7 +1163,7 @@ mod tests {
 
     #[test]
     fn add_timing_already_too_many() {
-        let mut listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+        let mut db = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
                 StringArtifactKey::from("artifact-1.library"),
@@ -1191,7 +1184,7 @@ mod tests {
             )]),
         )]);
 
-        listing.add_timing(
+        db.add_timing(
             "package-1",
             StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
@@ -1199,7 +1192,7 @@ mod tests {
             millis!(15),
         );
         assert_eq!(
-            listing,
+            db,
             TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
                 "package-1",
                 Package::from_iter([(
@@ -1226,7 +1219,7 @@ mod tests {
     #[test]
     fn get_timing() {
         let artifact_1 = StringArtifactKey::from("artifact-1.library");
-        let listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
+        let db = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([(
             "package-1",
             Package::from_iter([(
                 artifact_1.clone(),
@@ -1247,23 +1240,20 @@ mod tests {
             )]),
         )]);
 
-        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-1"), None);
+        assert_eq!(db.get_timing("package-1", &artifact_1, "case-1"), None);
         assert_eq!(
-            listing.get_timing("package-1", &artifact_1, "case-2"),
+            db.get_timing("package-1", &artifact_1, "case-2"),
             Some((Failure, millis!(10))),
         );
         assert_eq!(
-            listing.get_timing("package-1", &artifact_1, "case-3"),
+            db.get_timing("package-1", &artifact_1, "case-3"),
             Some((Success, millis!(11))),
         );
-        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-4"), None);
-        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-5"), None);
+        assert_eq!(db.get_timing("package-1", &artifact_1, "case-4"), None);
+        assert_eq!(db.get_timing("package-1", &artifact_1, "case-5"), None);
         let artifact_1_bin = StringArtifactKey::from("artifact-1.binary");
-        assert_eq!(
-            listing.get_timing("package-1", &artifact_1_bin, "case-1"),
-            None,
-        );
-        assert_eq!(listing.get_timing("package-2", &artifact_1, "case-1"), None);
+        assert_eq!(db.get_timing("package-1", &artifact_1_bin, "case-1"), None,);
+        assert_eq!(db.get_timing("package-2", &artifact_1, "case-1"), None);
     }
 
     #[test]
@@ -1298,7 +1288,7 @@ mod tests {
     }
 
     #[test]
-    fn load_of_nonexistent_file_gives_default_listing() {
+    fn load_of_nonexistent_file_gives_default_db() {
         struct Deps;
         impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
@@ -1367,7 +1357,7 @@ mod tests {
     }
 
     #[test]
-    fn load_of_file_with_old_version_gives_default_listing() {
+    fn load_of_file_with_old_version_gives_default_db() {
         struct Deps;
         impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
@@ -1380,7 +1370,7 @@ mod tests {
     }
 
     #[test]
-    fn load_of_file_with_newer_version_gives_default_listing() {
+    fn load_of_file_with_newer_version_gives_default_db() {
         struct Deps;
         impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
@@ -1393,7 +1383,7 @@ mod tests {
     }
 
     #[test]
-    fn load_of_file_with_correct_version_gives_deserialized_listing() {
+    fn load_of_file_with_correct_version_gives_deserialized_db() {
         struct Deps;
         impl TestDbStoreDeps for Deps {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
@@ -1576,13 +1566,13 @@ mod tests {
     }
 
     #[test]
-    fn save_of_listing() {
+    fn save_of_db() {
         let deps = Rc::new(RefCell::new(LoggingDeps::default()));
         let store = TestDbStore::<StringArtifactKey, NoCaseMetadata, _>::new(
             deps.clone(),
             RootBuf::new("maelstrom/state/".into()),
         );
-        let listing = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
+        let db = TestDb::<StringArtifactKey, NoCaseMetadata>::from_iter([
             (
                 "package-2",
                 Package::from_iter([(
@@ -1644,7 +1634,7 @@ mod tests {
                 )]),
             ),
         ]);
-        store.save(listing).unwrap();
+        store.save(db).unwrap();
         let (actual_path, actual_contents) = deps.borrow_mut().write.take().unwrap();
         assert_eq!(actual_path, format!("maelstrom/state/{TEST_DB_FILE}"));
         assert_eq!(

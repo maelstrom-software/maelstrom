@@ -121,9 +121,9 @@ impl FakeTests {
         }
     }
 
-    pub fn update_listing(
+    pub fn update_db(
         &self,
-        mut listing: TestDb<StringArtifactKey, NoCaseMetadata>,
+        mut db: TestDb<StringArtifactKey, NoCaseMetadata>,
     ) -> TestDb<StringArtifactKey, NoCaseMetadata> {
         struct FakeTestDbStoreDeps {
             bytes: RefCell<Option<Vec<u8>>>,
@@ -144,13 +144,13 @@ impl FakeTests {
                 Ok(())
             }
         }
-        listing.retain_packages_and_artifacts(
+        db.retain_packages_and_artifacts(
             self.test_binaries
                 .iter()
                 .map(|binary| (binary.name.as_str(), [binary.artifact_key()])),
         );
         for binary in &self.test_binaries {
-            listing.update_artifact_cases(
+            db.update_artifact_cases(
                 &binary.name,
                 binary.artifact_key(),
                 binary
@@ -159,7 +159,7 @@ impl FakeTests {
                     .map(|case| (case.name.clone(), NoCaseMetadata)),
             );
             for case in &binary.tests {
-                listing.add_timing(
+                db.add_timing(
                     &binary.name,
                     binary.artifact_key(),
                     &case.name,
@@ -174,13 +174,12 @@ impl FakeTests {
                 );
             }
         }
-        let test_listing_store_deps = FakeTestDbStoreDeps {
+        let db_store_deps = FakeTestDbStoreDeps {
             bytes: RefCell::new(None),
         };
-        let test_listing_store =
-            TestDbStore::new(test_listing_store_deps, RootBuf::new(PathBuf::from("")));
-        test_listing_store.save(listing).unwrap();
-        test_listing_store.load().unwrap()
+        let db_store = TestDbStore::new(db_store_deps, RootBuf::new(PathBuf::from("")));
+        db_store.save(db).unwrap();
+        db_store.load().unwrap()
     }
 
     pub fn packages(&self) -> Vec<FakeTestPackage> {

@@ -127,7 +127,7 @@ impl JobStatusTracker {
 #[derive(Clone)]
 pub struct JobStatusVisitor<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     tracker: Arc<JobStatusTracker>,
-    test_listing: Arc<Mutex<Option<TestDb<ArtifactKeyT, CaseMetadataT>>>>,
+    test_db: Arc<Mutex<Option<TestDb<ArtifactKeyT, CaseMetadataT>>>>,
     package: String,
     artifact: ArtifactKeyT,
     case: String,
@@ -145,7 +145,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tracker: Arc<JobStatusTracker>,
-        test_listing: Arc<Mutex<Option<TestDb<ArtifactKeyT, CaseMetadataT>>>>,
+        test_db: Arc<Mutex<Option<TestDb<ArtifactKeyT, CaseMetadataT>>>>,
         package: String,
         artifact: ArtifactKeyT,
         case: String,
@@ -156,7 +156,7 @@ where
     ) -> Self {
         Self {
             tracker,
-            test_listing,
+            test_db,
             package,
             artifact,
             case,
@@ -303,18 +303,13 @@ where
                     return;
                 }
 
-                self.test_listing
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .add_timing(
-                        self.package.as_str(),
-                        self.artifact.clone(),
-                        self.case.as_str(),
-                        job_failed,
-                        duration,
-                    );
+                self.test_db.lock().unwrap().as_mut().unwrap().add_timing(
+                    self.package.as_str(),
+                    self.artifact.clone(),
+                    self.case.as_str(),
+                    job_failed,
+                    duration,
+                );
                 exit_code
             }
             Ok((
@@ -341,18 +336,13 @@ where
                     &self.case_str,
                     self.remove_fixture_output,
                 ));
-                self.test_listing
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .add_timing(
-                        self.package.as_str(),
-                        self.artifact.clone(),
-                        self.case.as_str(),
-                        true,
-                        duration,
-                    );
+                self.test_db.lock().unwrap().as_mut().unwrap().add_timing(
+                    self.package.as_str(),
+                    self.artifact.clone(),
+                    self.case.as_str(),
+                    true,
+                    duration,
+                );
                 ExitCode::FAILURE
             }
             Ok((_, Err(JobError::Execution(err)))) => {

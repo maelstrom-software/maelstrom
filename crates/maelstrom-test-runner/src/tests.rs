@@ -1286,13 +1286,13 @@ fn expected_count_updates_packages() {
         },
     );
 
-    let test_listing_store = TestDbStore::new(
+    let test_db_store = TestDbStore::new(
         Fs::new(),
         tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
-    let listing = test_listing_store.load().unwrap();
-    let expected_listing = fake_tests.update_listing(Default::default());
-    assert_eq!(listing, expected_listing);
+    let test_db = test_db_store.load().unwrap();
+    let expected_test_db = fake_tests.update_db(Default::default());
+    assert_eq!(test_db, expected_test_db);
 
     // remove bar
     let fake_tests = FakeTests {
@@ -1314,10 +1314,10 @@ fn expected_count_updates_packages() {
         },
     );
 
-    // new listing should match
-    let listing = test_listing_store.load().unwrap();
-    let expected_listing = fake_tests.update_listing(expected_listing);
-    assert_eq!(listing, expected_listing);
+    // new test_db should match
+    let test_db = test_db_store.load().unwrap();
+    let expected_test_db = fake_tests.update_db(expected_test_db);
+    assert_eq!(test_db, expected_test_db);
 }
 
 #[test]
@@ -1341,13 +1341,13 @@ fn expected_count_updates_cases() {
         },
     );
 
-    let test_listing_store = TestDbStore::new(
+    let test_db_store = TestDbStore::new(
         Fs::new(),
         tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
-    let listing = test_listing_store.load().unwrap();
-    let expected_listing = fake_tests.update_listing(Default::default());
-    assert_eq!(listing, expected_listing);
+    let test_db = test_db_store.load().unwrap();
+    let expected_test_db = fake_tests.update_db(Default::default());
+    assert_eq!(test_db, expected_test_db);
 
     // remove the test
     let fake_tests = FakeTests {
@@ -1365,10 +1365,10 @@ fn expected_count_updates_cases() {
         },
     );
 
-    // new listing should match
-    let listing = test_listing_store.load().unwrap();
-    let expected_listing = fake_tests.update_listing(expected_listing);
-    assert_eq!(listing, expected_listing);
+    // new test_db should match
+    let test_db = test_db_store.load().unwrap();
+    let expected_test_db = fake_tests.update_db(expected_test_db);
+    assert_eq!(test_db, expected_test_db);
 }
 
 #[test]
@@ -1637,13 +1637,13 @@ fn stop_after_1_with_estimate() {
         test.tests[0].expected_estimated_duration = Some(Duration::from_secs(1));
     }
 
-    let test_listing_store = TestDbStore::new(
+    let test_db_store = TestDbStore::new(
         Fs::new(),
         tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
-    let listing = test_listing_store.load().unwrap();
-    let listing = fake_tests.update_listing(listing);
-    test_listing_store.save(listing).unwrap();
+    let test_db = test_db_store.load().unwrap();
+    let test_db = fake_tests.update_db(test_db);
+    test_db_store.save(test_db).unwrap();
 
     assert_eq!(
         run_all_tests_sync(

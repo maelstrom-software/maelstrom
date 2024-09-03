@@ -102,7 +102,7 @@ struct JobQueuingDeps<TestCollectorT: CollectTests> {
     filter: TestCollectorT::TestFilter,
     stderr_color: bool,
     test_metadata: AllMetadata<TestCollectorT::TestFilter>,
-    test_listing: Arc<Mutex<Option<TestDb<TestCollectorT>>>>,
+    test_db: Arc<Mutex<Option<TestDb<TestCollectorT>>>>,
     list_action: Option<ListAction>,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
@@ -115,7 +115,7 @@ impl<TestCollectorT: CollectTests> JobQueuingDeps<TestCollectorT> {
         filter: TestCollectorT::TestFilter,
         stderr_color: bool,
         test_metadata: AllMetadata<TestCollectorT::TestFilter>,
-        test_listing: TestDb<TestCollectorT>,
+        test_db: TestDb<TestCollectorT>,
         list_action: Option<ListAction>,
         repeat: Repeat,
         stop_after: Option<StopAfter>,
@@ -125,7 +125,7 @@ impl<TestCollectorT: CollectTests> JobQueuingDeps<TestCollectorT> {
             filter,
             stderr_color,
             test_metadata,
-            test_listing: Arc::new(Mutex::new(Some(test_listing))),
+            test_db: Arc::new(Mutex::new(Some(test_db))),
             list_action,
             repeat,
             stop_after,
@@ -234,8 +234,8 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     let mut cases = artifact.list_tests()?;
 
     let artifact_key = artifact.to_key();
-    let mut listing = queuing_deps.test_listing.lock().unwrap();
-    listing.as_mut().unwrap().update_artifact_cases(
+    let mut test_db = queuing_deps.test_db.lock().unwrap();
+    test_db.as_mut().unwrap().update_artifact_cases(
         package.name(),
         artifact_key.clone(),
         cases.clone(),
@@ -318,7 +318,7 @@ where
 
         let visitor = JobStatusVisitor::new(
             queuing_state.tracker.clone(),
-            self.queuing_deps.test_listing.clone(),
+            self.queuing_deps.test_db.clone(),
             self.package.name().into(),
             self.artifact.to_key(),
             case_name.to_owned(),
@@ -347,7 +347,7 @@ where
 
         let get_timing_result = self
             .queuing_deps
-            .test_listing
+            .test_db
             .lock()
             .unwrap()
             .as_ref()
@@ -444,19 +444,17 @@ where
 
         let packages = deps.test_collector().get_packages(&ui)?;
 
-        let mut locked_test_listing = queuing_deps.test_listing.lock().unwrap();
-        let test_listing = locked_test_listing.as_mut().unwrap();
-        test_listing
-            .retain_packages_and_artifacts(packages.iter().map(|p| (p.name(), p.artifacts())));
+        let mut locked_test_db = queuing_deps.test_db.lock().unwrap();
+        let test_db = locked_test_db.as_mut().unwrap();
+        test_db.retain_packages_and_artifacts(packages.iter().map(|p| (p.name(), p.artifacts())));
 
         let package_map: BTreeMap<_, _> = packages
             .iter()
             .map(|p| (p.name().into(), p.clone()))
             .collect();
 
-        let mut expected_job_count =
-            test_listing.expected_job_count(&package_map, &queuing_deps.filter);
-        drop(locked_test_listing);
+        let mut expected_job_count = test_db.expected_job_count(&package_map, &queuing_deps.filter);
+        drop(locked_test_db);
 
         expected_job_count *= usize::from(queuing_deps.repeat) as u64;
         ui.update_length(expected_job_count);
@@ -581,7 +579,7 @@ pub struct BuildDir;
 pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
     abstract_deps: MainAppDepsT,
     queuing_deps: JobQueuingDeps<MainAppDepsT::TestCollector>,
-    test_listing_store: TestDbStore<ArtifactKeyM<MainAppDepsT>, CaseMetadataM<MainAppDepsT>>,
+    test_db_store: TestDbStore<ArtifactKeyM<MainAppDepsT>, CaseMetadataM<MainAppDepsT>>,
     log: slog::Logger,
 }
 
@@ -621,8 +619,8 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
 
         let mut test_metadata =
             AllMetadata::load(log.clone(), project_dir, MainAppDepsT::MAELSTROM_TEST_TOML)?;
-        let test_listing_store = TestDbStore::new(Fs::new(), &state_dir);
-        let test_listing = test_listing_store.load()?;
+        let test_db_store = TestDbStore::new(Fs::new(), &state_dir);
+        let test_db = test_db_store.load()?;
         let filter = TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
 
         let vars = abstract_deps.get_template_vars(&collector_options)?;
@@ -634,13 +632,13 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
                 filter,
                 stderr_color,
                 test_metadata,
-                test_listing,
+                test_db,
                 list_action,
                 repeat,
                 stop_after,
                 collector_options,
             )?,
-            test_listing_store,
+            test_db_store,
             log,
         })
     }
@@ -863,10 +861,10 @@ where
         let summary = self.queuing.state.tracker.ui_summary(nre);
         self.ui.finished(summary);
 
-        self.deps.test_listing_store.save(
+        self.deps.test_db_store.save(
             self.deps
                 .queuing_deps
-                .test_listing
+                .test_db
                 .lock()
                 .unwrap()
                 .take()
