@@ -621,6 +621,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
             log.clone(),
             project_dir,
             MainAppDepsT::TEST_METADATA_FILE_NAME,
+            MainAppDepsT::DEFAULT_TEST_METADATA_CONTENTS,
         )?;
         let test_db_store = TestDbStore::new(Fs::new(), &state_dir);
         let test_db = test_db_store.load()?;
@@ -1015,8 +1016,8 @@ pub fn main<
     args: ArgsIntoIterT,
     is_list: IsListFn,
     get_project_dir: GetProjectDirFn,
-    test_toml_name: &str,
-    test_toml_specific_contents: &str,
+    test_metadata_file_name: &str,
+    test_metadata_default_contents: &str,
     main: MainFn,
 ) -> Result<ExitCode>
 where
@@ -1058,8 +1059,8 @@ where
     } else if extra_options.as_ref().init {
         alternative_mains::init(
             &get_project_dir(&config)?,
-            test_toml_name,
-            test_toml_specific_contents,
+            test_metadata_file_name,
+            test_metadata_default_contents,
         )
     } else {
         main(config, extra_options, bg_proc, logger, stderr_is_tty, ui)

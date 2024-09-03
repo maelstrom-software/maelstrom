@@ -33,7 +33,7 @@ pub use config::Config;
 pub use maelstrom_test_runner::Logger;
 
 pub const TEST_METADATA_FILE_NAME: &str = "maelstrom-go-test.toml";
-pub const ADDED_DEFAULT_TEST_METADATA: &str = include_str!("added-default-test-metadata.toml");
+pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
 
 #[allow(clippy::too_many_arguments)]
 fn create_client(
@@ -692,6 +692,13 @@ impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
     }
 
     const TEST_METADATA_FILE_NAME: &'static str = TEST_METADATA_FILE_NAME;
+    const DEFAULT_TEST_METADATA_CONTENTS: &'static str = DEFAULT_TEST_METADATA_CONTENTS;
+}
+
+#[test]
+fn default_test_metadata_parses() {
+    use maelstrom_test_runner::metadata::AllMetadata;
+    AllMetadata::<pattern::Pattern>::from_str(DEFAULT_TEST_METADATA_CONTENTS).unwrap();
 }
 
 impl Wait for go_test::WaitHandle {

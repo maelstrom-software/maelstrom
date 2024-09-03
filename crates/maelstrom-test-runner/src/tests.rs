@@ -133,6 +133,18 @@ impl MainAppDeps for TestMainAppDeps {
     }
 
     const TEST_METADATA_FILE_NAME: &'static str = "maelstrom-test.toml";
+    const DEFAULT_TEST_METADATA_CONTENTS: &'static str = r#"
+        [[directives]]
+        layers = [
+            { stubs = [ "/{proc,sys,tmp}/", "/dev/{full,null,random,urandom,zero}" ] },
+        ]
+        mounts = [
+            { type = "tmp", mount_point = "/tmp" },
+            { type = "proc", mount_point = "/proc" },
+            { type = "sys", mount_point = "/sys" },
+            { type = "devices", devices = ["full", "null", "random", "urandom", "zero"] },
+        ]
+    "#;
 }
 
 #[derive(Default, Clone)]

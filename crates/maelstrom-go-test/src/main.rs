@@ -12,7 +12,7 @@ pub fn main() -> Result<ExitCode> {
         |extra_options: &ExtraCommandLineOptions| extra_options.list.any(),
         |_| Ok(".".into()),
         maelstrom_go_test::TEST_METADATA_FILE_NAME,
-        maelstrom_go_test::ADDED_DEFAULT_TEST_METADATA,
+        maelstrom_go_test::DEFAULT_TEST_METADATA_CONTENTS,
         maelstrom_go_test::main,
     )
 }

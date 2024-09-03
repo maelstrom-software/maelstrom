@@ -356,4 +356,5 @@ pub trait MainAppDeps: Sync {
     ) -> Result<TemplateVars>;
 
     const TEST_METADATA_FILE_NAME: &'static str;
+    const DEFAULT_TEST_METADATA_CONTENTS: &'static str;
 }

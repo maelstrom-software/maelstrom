@@ -3,11 +3,7 @@ mod directive;
 use crate::TestFilter;
 use anyhow::{anyhow, Context as _, Result};
 use directive::TestDirective;
-use enumset::enum_set;
-use maelstrom_base::{
-    GroupId, JobDeviceForTomlAndJson, JobMount, JobMountForTomlAndJson, JobNetwork, Timeout,
-    UserId, Utf8PathBuf,
-};
+use maelstrom_base::{GroupId, JobMount, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::{
     spec::{EnvironmentSpec, ImageSpec, LayerSpec, PossiblyImage},
     ProjectDir,
@@ -19,84 +15,11 @@ use std::{
     str::{self, FromStr},
 };
 
-/// This file is what we write out for the user when `--init` is provided. It should contain the
-/// same data as `AllMetadata::default()` but it contains nice formatting, comments, and examples.
-pub const DEFAULT_TEST_METADATA: &str = include_str!("default-test-metadata.toml");
-
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AllMetadata<TestFilterT> {
     #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
     directives: Vec<TestDirective<TestFilterT>>,
-}
-
-impl<TestFilterT> Default for AllMetadata<TestFilterT> {
-    /// The default test metadata is used when there is no configuration file. It provides some
-    /// commonly used functionality by test processes in an attempt to give a good default.
-    fn default() -> Self {
-        let single_directive = TestDirective {
-            filter: None,
-            include_shared_libraries: None,
-            network: None,
-            enable_writable_file_system: None,
-            working_directory: None,
-            user: None,
-            group: None,
-            timeout: None,
-            // Create directories and files for mounting special file-systems and device files
-            layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Stubs {
-                stubs: vec![
-                    "/{proc,sys,tmp}/".into(),
-                    "/dev/{full,null,random,urandom,zero}".into(),
-                ],
-            }])),
-            environment: None,
-            mounts: Some(vec![
-                // Mount a tempfs at /tmp. Many tests use this for creating temporary files.
-                JobMountForTomlAndJson::Tmp {
-                    mount_point: "/tmp".into(),
-                },
-                // Mount proc at /proc. It is somewhat common to access information about the
-                // current process via files in /proc/self
-                JobMountForTomlAndJson::Proc {
-                    mount_point: "/proc".into(),
-                },
-                // Mount sys at /sys. Accessing OS configuration values in /sys/kernel can be
-                // somewhat common.
-                JobMountForTomlAndJson::Sys {
-                    mount_point: "/sys".into(),
-                },
-                // These special devices are fairly commonly used. Especially /dev/null.
-                JobMountForTomlAndJson::Devices {
-                    devices: enum_set!(
-                        JobDeviceForTomlAndJson::Full
-                            | JobDeviceForTomlAndJson::Null
-                            | JobDeviceForTomlAndJson::Random
-                            | JobDeviceForTomlAndJson::Urandom
-                            | JobDeviceForTomlAndJson::Zero
-                    ),
-                },
-            ]),
-            added_environment: Default::default(),
-            added_layers: vec![],
-            added_mounts: vec![],
-            image: None,
-            ignore: None,
-        };
-        Self {
-            directives: vec![single_directive],
-        }
-    }
-}
-
-#[test]
-fn all_metadata_default_matches_default_file() {
-    // Verifies that it actually parses as valid TOML
-    let parsed_default_file =
-        AllMetadata::<crate::SimpleFilter>::from_str(DEFAULT_TEST_METADATA).unwrap();
-
-    // Matches what do when there is no file.
-    assert_eq!(parsed_default_file, AllMetadata::default());
 }
 
 #[derive(Debug, Default, Eq, PartialEq)]
@@ -226,6 +149,17 @@ impl TestMetadata {
     }
 }
 
+impl<TestFilterT: TestFilter> FromStr for AllMetadata<TestFilterT>
+where
+    TestFilterT::Err: Display,
+{
+    type Err = anyhow::Error;
+
+    fn from_str(contents: &str) -> Result<Self> {
+        Ok(toml::from_str(contents)?)
+    }
+}
+
 impl<TestFilterT: TestFilter> AllMetadata<TestFilterT>
 where
     TestFilterT::Err: Display,
@@ -273,19 +207,16 @@ where
         self.get_metadata_for_test(package, artifact, case)
     }
 
-    fn from_str(contents: &str) -> Result<Self> {
-        Ok(toml::from_str(contents)?)
-    }
-
     pub fn load(
         log: slog::Logger,
         project_dir: impl AsRef<Root<ProjectDir>>,
-        maelstrom_test_toml: &str,
+        test_metadata_file_name: &str,
+        default_test_metadata_contents: &str,
     ) -> Result<Self> {
         struct MaelstromTestTomlFile;
         let path = project_dir
             .as_ref()
-            .join::<MaelstromTestTomlFile>(maelstrom_test_toml);
+            .join::<MaelstromTestTomlFile>(test_metadata_file_name);
         if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
             return Self::from_str(&contents)
                 .with_context(|| format!("parsing {}", path.display()));
@@ -296,7 +227,8 @@ where
             "no test metadata configuration found, using default";
             "search_path" => ?path,
         );
-        Ok(Default::default())
+        Ok(Self::from_str(default_test_metadata_contents)
+            .expect("embedded default test metadata TOML is valid"))
     }
 }
 
@@ -346,7 +278,13 @@ mod tests {
             Mutex::new(slog_json::Json::default(log_output.clone())).map(slog::Fuse),
             slog::o!(),
         );
-        let res = AllMetadata::<SimpleFilter>::load(log, &project_dir, "simple-test.toml").unwrap();
+        let res = AllMetadata::<SimpleFilter>::load(
+            log,
+            &project_dir,
+            "simple-test.toml",
+            "[[directives]]",
+        )
+        .unwrap();
 
         let log_lines = log_output.lines();
 
@@ -358,7 +296,12 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let (res, log_lines) = load_test(&t);
 
-        assert_eq!(res, AllMetadata::default());
+        assert_eq!(
+            res,
+            AllMetadata {
+                directives: vec![TestDirective::default()]
+            }
+        );
 
         assert_eq!(log_lines.len(), 1, "{log_lines:?}");
         assert_eq!(

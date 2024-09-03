@@ -1,3 +1,43 @@
+# Because it has no `filter` field, this directive applies to all tests.
+[[directives]]
+
+# Don't bother enabling the network. We can set to "loopback" to run on the
+# cluster using only the loopback network, or to "local" to only run on the
+# local machine but with full network access.
+#
+# This is the default value:
+# network = "disabled"
+
+# Don't bother creating a writable container for our test. It can still write to /tmp .
+#
+# This is the default value:
+# enable_writable_file_system = false
+
+# Have our tests run with root as a working directory.
+#
+# This is the default value:
+# working_directory = "/"
+
+# Run our test as root.
+#
+# These are the default values:
+# user = 0
+# group = 0
+
+# This layer just includes files and directories for mounting the following
+# file-systems and devices.
+layers = [
+    { stubs = [ "/{proc,sys,tmp}/", "/dev/{full,null,random,urandom,zero}" ] },
+]
+
+# Provide /tmp, /proc, /sys, and some devices in /dev/. These are used pretty
+# commonly by tests.
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
+    { type = "devices", devices = ["full", "null", "random", "urandom", "zero"] },
+]
 
 # Uncomment this line to forward the RUST_BACKTRACE environment variable.
 # Later directives can override the `environment` key, but the `added_environment` key is only
