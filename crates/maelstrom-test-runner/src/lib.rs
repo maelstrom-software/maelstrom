@@ -3,7 +3,7 @@ pub mod config;
 mod deps;
 mod introspect_driver;
 pub mod metadata;
-pub mod test_listing;
+pub mod test_db;
 pub mod ui;
 pub mod visitor;
 
@@ -35,7 +35,7 @@ use std::{
     mem, str,
     sync::{Arc, Mutex},
 };
-use test_listing::{CaseOutcome, TestDbStore};
+use test_db::{CaseOutcome, TestDbStore};
 use ui::{Ui, UiJobEnqueued, UiJobId, UiSender, UiSlogDrain};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
@@ -63,7 +63,7 @@ pub enum ListAction {
     ListTests,
 }
 
-type TestDb<TestCollectorT> = test_listing::TestDb<
+type TestDb<TestCollectorT> = test_db::TestDb<
     <TestCollectorT as CollectTests>::ArtifactKey,
     <TestCollectorT as CollectTests>::CaseMetadata,
 >;

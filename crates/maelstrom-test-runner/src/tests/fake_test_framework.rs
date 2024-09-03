@@ -1,6 +1,6 @@
 use crate::{
     metadata::TestMetadata,
-    test_listing::{TestDb, TestDbStore, TestDbStoreDeps},
+    test_db::{TestDb, TestDbStore, TestDbStoreDeps},
     ui::{self},
     BuildDir, CollectTests, NoCaseMetadata, SimpleFilter, StringArtifactKey, StringPackage,
     TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,

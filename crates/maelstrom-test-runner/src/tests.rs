@@ -3,7 +3,7 @@ mod fake_test_framework;
 use crate::{
     config::{Repeat, StopAfter},
     introspect_driver::IntrospectDriver,
-    test_listing::TestDbStore,
+    test_db::TestDbStore,
     ui::{self, Ui as _},
     BuildDir, ClientTrait, EnqueueResult, ListAction, MainApp, MainAppCombinedDeps, MainAppDeps,
     NotCollected,
