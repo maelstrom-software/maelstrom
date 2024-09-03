@@ -60,10 +60,6 @@ impl CaseOutcome {
             Self::Failure
         }
     }
-
-    pub fn failure(&self) -> bool {
-        matches!(self, Self::Failure)
-    }
 }
 
 /// Represents all known information about a test case.
@@ -264,7 +260,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
     pub fn update_case(
         &mut self,
         package_name: &str,
-        artifact_key: ArtifactKeyT,
+        artifact_key: &ArtifactKeyT,
         case_name: &str,
         failed: bool,
         timing: Duration,
@@ -289,7 +285,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
             .get_mut(package_name)
             .expect("package should have been added")
             .0
-            .get_mut(&artifact_key)
+            .get_mut(artifact_key)
             .expect("artifact should have been added")
             .0
             .get_mut(case_name)
@@ -374,15 +370,20 @@ enum OnDiskCaseOutcome {
     New,
 }
 
-impl OnDiskCaseOutcome {
-    fn success(&self) -> bool {
-        matches!(self, Self::Success)
+impl From<OnDiskCaseOutcome> for CaseOutcome {
+    fn from(on_disk: OnDiskCaseOutcome) -> Self {
+        // We should never have an outcome of "new", but if we manage to get it, just turn it into
+        // "failure".
+        match on_disk {
+            OnDiskCaseOutcome::New | OnDiskCaseOutcome::Failure => Self::Failure,
+            OnDiskCaseOutcome::Success => Self::Success,
+        }
     }
 }
 
-impl From<&CaseOutcome> for OnDiskCaseOutcome {
-    fn from(outcome: &CaseOutcome) -> Self {
-        match outcome {
+impl From<CaseOutcome> for OnDiskCaseOutcome {
+    fn from(in_memory: CaseOutcome) -> Self {
+        match in_memory {
             CaseOutcome::Success => Self::Success,
             CaseOutcome::Failure => Self::Failure,
         }
@@ -402,12 +403,87 @@ struct OnDiskCaseData<CaseMetadataT: TestCaseMetadata> {
     outcome: OnDiskCaseOutcome,
 }
 
+impl<CaseMetadataT: TestCaseMetadata> From<CaseData<CaseMetadataT>>
+    for OnDiskCaseData<CaseMetadataT>
+{
+    fn from(in_memory: CaseData<CaseMetadataT>) -> Self {
+        if let Some((outcome, timings)) = in_memory.this_run {
+            OnDiskCaseData {
+                timings: timings.into_iter().collect(),
+                metadata: in_memory.metadata,
+                outcome: outcome.into(),
+            }
+        } else if let Some((outcome, timings)) = in_memory.when_read {
+            OnDiskCaseData {
+                timings: timings.into_iter().collect(),
+                metadata: in_memory.metadata,
+                outcome: outcome.into(),
+            }
+        } else {
+            OnDiskCaseData {
+                timings: vec![],
+                metadata: in_memory.metadata,
+                outcome: OnDiskCaseOutcome::New,
+            }
+        }
+    }
+}
+
+impl<CaseMetadataT: TestCaseMetadata> From<OnDiskCaseData<CaseMetadataT>>
+    for CaseData<CaseMetadataT>
+{
+    fn from(on_disk: OnDiskCaseData<CaseMetadataT>) -> Self {
+        let timings = NonEmpty::collect(on_disk.timings);
+        let when_read = timings.map(|timings| {
+            // We should never have an outcome of "new", but if we manage to
+            // get it, just turn it into "failure".
+            (on_disk.outcome.into(), timings)
+        });
+        Self {
+            metadata: on_disk.metadata,
+            when_read,
+            this_run: None,
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 struct OnDiskArtifact<CaseMetadataT: TestCaseMetadata> {
     #[serde(bound(serialize = ""))]
     #[serde(bound(deserialize = ""))]
     cases: BTreeMap<String, OnDiskCaseData<CaseMetadataT>>,
+}
+
+impl<CaseMetadataT: TestCaseMetadata> From<Artifact<CaseMetadataT>>
+    for OnDiskArtifact<CaseMetadataT>
+{
+    fn from(in_memory: Artifact<CaseMetadataT>) -> Self {
+        Self {
+            cases: {
+                let mut cases = Vec::from_iter(
+                    in_memory
+                        .0
+                        .into_iter()
+                        .map(|(case, data)| (case, data.into())),
+                );
+                cases.sort_by(|(name1, _), (name2, _)| name1.cmp(name2));
+                cases.into_iter().collect()
+            },
+        }
+    }
+}
+
+impl<CaseMetadataT: TestCaseMetadata> From<OnDiskArtifact<CaseMetadataT>>
+    for Artifact<CaseMetadataT>
+{
+    fn from(on_disk: OnDiskArtifact<CaseMetadataT>) -> Self {
+        on_disk
+            .cases
+            .into_iter()
+            .map(|(case, data)| (case, data.into()))
+            .collect()
+    }
 }
 
 #[serde_as]
@@ -429,6 +505,32 @@ struct OnDiskPackage<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetad
     artifacts: BTreeMap<OnDiskArtifactKey<ArtifactKeyT>, OnDiskArtifact<CaseMetadataT>>,
 }
 
+impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
+    From<Package<ArtifactKeyT, CaseMetadataT>> for OnDiskPackage<ArtifactKeyT, CaseMetadataT>
+{
+    fn from(in_memory: Package<ArtifactKeyT, CaseMetadataT>) -> Self {
+        Self {
+            artifacts: in_memory
+                .0
+                .into_iter()
+                .map(|(key, artifact)| (OnDiskArtifactKey { key }, artifact.into()))
+                .collect(),
+        }
+    }
+}
+
+impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
+    From<OnDiskPackage<ArtifactKeyT, CaseMetadataT>> for Package<ArtifactKeyT, CaseMetadataT>
+{
+    fn from(on_disk: OnDiskPackage<ArtifactKeyT, CaseMetadataT>) -> Self {
+        on_disk
+            .artifacts
+            .into_iter()
+            .map(|(key, artifact)| (key.key, Artifact::from(artifact)))
+            .collect()
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct OnDiskTestDb<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     version: OnDiskTestDbVersion,
@@ -447,69 +549,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
             packages: in_memory
                 .0
                 .into_iter()
-                .map(|(package_name, package)| {
-                    (
-                        package_name,
-                        OnDiskPackage {
-                            artifacts: package
-                                .0
-                                .into_iter()
-                                .map(|(key, artifact)| {
-                                    (
-                                        OnDiskArtifactKey { key },
-                                        OnDiskArtifact {
-                                            cases: {
-                                                let mut cases =
-                                                    Vec::from_iter(artifact.0.into_iter().map(
-                                                        |(case, data)| {
-                                                            (case, {
-                                                                if let Some((outcome, timings)) =
-                                                                    &data.this_run
-                                                                {
-                                                                    OnDiskCaseData {
-                                                                        timings: timings
-                                                                            .iter()
-                                                                            .cloned()
-                                                                            .collect(),
-                                                                        metadata: data.metadata,
-                                                                        outcome: outcome.into(),
-                                                                    }
-                                                                } else if let Some((
-                                                                    outcome,
-                                                                    timings,
-                                                                )) = &data.when_read
-                                                                {
-                                                                    OnDiskCaseData {
-                                                                        timings: timings
-                                                                            .iter()
-                                                                            .cloned()
-                                                                            .collect(),
-                                                                        metadata: data.metadata,
-                                                                        outcome: outcome.into(),
-                                                                    }
-                                                                } else {
-                                                                    OnDiskCaseData {
-                                                                        timings: vec![],
-                                                                        metadata: data.metadata,
-                                                                        outcome:
-                                                                            OnDiskCaseOutcome::New,
-                                                                    }
-                                                                }
-                                                            })
-                                                        },
-                                                    ));
-                                                cases.sort_by(|(name1, _), (name2, _)| {
-                                                    name1.cmp(name2)
-                                                });
-                                                cases.into_iter().collect()
-                                            },
-                                        },
-                                    )
-                                })
-                                .collect(),
-                        },
-                    )
-                })
+                .map(|(package_name, package)| (package_name, package.into()))
                 .collect(),
         }
     }
@@ -519,32 +559,11 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
     From<OnDiskTestDb<ArtifactKeyT, CaseMetadataT>> for TestDb<ArtifactKeyT, CaseMetadataT>
 {
     fn from(on_disk: OnDiskTestDb<ArtifactKeyT, CaseMetadataT>) -> Self {
-        Self::from_iter(on_disk.packages.into_iter().map(|(package_name, package)| {
-            (
-                package_name,
-                Package::from_iter(package.artifacts.into_iter().map(|(key, artifact)| {
-                    (
-                        key.key,
-                        Artifact::from_iter(artifact.cases.into_iter().map(|(case, data)| {
-                            let timings = NonEmpty::collect(data.timings.iter().copied());
-                            let when_read = timings.map(|timings| {
-                                // We should never have an outcome of "new", but if we manage to
-                                // get it, just turn it into "failure".
-                                (CaseOutcome::from_failure(!data.outcome.success()), timings)
-                            });
-                            (
-                                case,
-                                CaseData {
-                                    metadata: data.metadata,
-                                    when_read,
-                                    this_run: None,
-                                },
-                            )
-                        })),
-                    )
-                })),
-            )
-        }))
+        on_disk
+            .packages
+            .into_iter()
+            .map(|(package_name, package)| (package_name, Package::from(package)))
+            .collect()
     }
 }
 
@@ -1114,7 +1133,7 @@ mod tests {
 
         db.update_case(
             "package-1",
-            StringArtifactKey::from("artifact-1.library"),
+            &StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             false,
             millis!(10),
@@ -1136,7 +1155,7 @@ mod tests {
 
         db.update_case(
             "package-1",
-            StringArtifactKey::from("artifact-1.library"),
+            &StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             true,
             millis!(11),
@@ -1158,7 +1177,7 @@ mod tests {
 
         db.update_case(
             "package-1",
-            StringArtifactKey::from("artifact-1.library"),
+            &StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             false,
             millis!(12),
@@ -1180,7 +1199,7 @@ mod tests {
 
         db.update_case(
             "package-1",
-            StringArtifactKey::from("artifact-1.library"),
+            &StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             false,
             millis!(13),
@@ -1226,7 +1245,7 @@ mod tests {
 
         db.update_case(
             "package-1",
-            StringArtifactKey::from("artifact-1.library"),
+            &StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             false,
             millis!(15),

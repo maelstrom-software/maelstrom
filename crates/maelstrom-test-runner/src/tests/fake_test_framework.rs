@@ -161,7 +161,7 @@ impl FakeTests {
             for case in &binary.tests {
                 db.update_case(
                     &binary.name,
-                    binary.artifact_key(),
+                    &binary.artifact_key(),
                     &case.name,
                     !matches!(
                         &case.outcome,

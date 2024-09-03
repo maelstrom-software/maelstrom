@@ -305,7 +305,7 @@ where
 
                 self.test_db.lock().unwrap().as_mut().unwrap().update_case(
                     self.package.as_str(),
-                    self.artifact.clone(),
+                    &self.artifact,
                     self.case.as_str(),
                     job_failed,
                     duration,
@@ -338,7 +338,7 @@ where
                 ));
                 self.test_db.lock().unwrap().as_mut().unwrap().update_case(
                     self.package.as_str(),
-                    self.artifact.clone(),
+                    &self.artifact,
                     self.case.as_str(),
                     true,
                     duration,
