@@ -139,7 +139,7 @@ impl<StreamT: io::Read> GenericTestArtifactStream<StreamT> {
             if !pkg.built_tests.is_empty() {
                 assert!(!pkg.unbuilt_non_test_binaries.is_empty());
                 for b in &pkg.unbuilt_non_test_binaries {
-                    slog::warn!(
+                    slog::debug!(
                         self.log,
                         "didn't receive build notification for {id:?} binary {b:?}"
                     );
