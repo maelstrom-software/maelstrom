@@ -53,8 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a test as running once it has actually started executing.
 - `quiet` config option removed from test runners, replaced with new "quiet" UI.
   \[[374](https://github.com/maelstrom-software/maelstrom/issues/374)\]
-- Demoted warning to debug message concerning un-built test binaries in cargo-maelstrom.
+- Demoted warning to debug message concerning un-built test binaries in `cargo-maelstrom`.
   \[[359](https://github.com/maelstrom-software/maelstrom/issues/359)\]
+- Forward `RUST_BACKTRACE` and `RUST_LIB_BACKTRACE` by default in `cargo-maelstrom`.
+  \[[386](https://github.com/maelstrom-software/maelstrom/issues/386)\]
 
 ### Fixed
 - Fixed issue with test-runner fancy UI where it would crash if the summary was too large.

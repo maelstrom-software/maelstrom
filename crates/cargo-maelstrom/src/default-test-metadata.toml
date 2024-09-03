@@ -39,10 +39,12 @@ mounts = [
     { type = "devices", devices = ["full", "null", "random", "urandom", "zero"] },
 ]
 
-# Uncomment this line to forward the RUST_BACKTRACE environment variable.
+# Forward the RUST_BACKTRACE and RUST_LIB_BACKTRACE environment variables.
 # Later directives can override the `environment` key, but the `added_environment` key is only
 # additive. By using it here we ensure it applies to all tests regardless of other directives.
-# added_environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}" }
+[directives.added_environment]
+RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}"
+RUST_LIB_BACKTRACE = "$env{RUST_LIB_BACKTRACE:-0}"
 
 # This directive shows how to use a container image from hub.docker.com.
 # This directive will override some things from the other one we defined above, but it will inherit

@@ -21,4 +21,11 @@ mounts = [
     { type = "sys", mount_point = "/sys" },
     { type = "devices", devices = ["full", "null", "random", "urandom", "zero"] },
 ]
+
+# Forward the RUST_BACKTRACE and RUST_LIB_BACKTRACE environment variables.
+# Later directives can override the `environment` key, but the `added_environment` key is only
+# additive. By using it here we ensure it applies to all tests regardless of other directives.
+[directives.added_environment]
+RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}"
+RUST_LIB_BACKTRACE = "$env{RUST_LIB_BACKTRACE:-0}"
 ```
