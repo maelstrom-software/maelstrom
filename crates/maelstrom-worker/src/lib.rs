@@ -166,7 +166,7 @@ pub struct DispatcherAdapter {
     layer_building_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
-pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 100;
+pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
 
 impl DispatcherAdapter {
     #[allow(clippy::too_many_arguments)]

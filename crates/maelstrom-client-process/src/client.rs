@@ -214,7 +214,7 @@ impl ClientState {
 const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 
 /// Maximum number of layers to build simultaneously
-const MAX_IN_FLIGHT_LAYER_BUILDS: usize = 100;
+const MAX_IN_FLIGHT_LAYER_BUILDS: usize = 10;
 
 impl Client {
     pub fn new() -> Self {
