@@ -1787,3 +1787,23 @@ mod tests {
 pub fn abort() -> ! {
     unsafe { libc::abort() }
 }
+
+#[repr(u32)]
+pub enum RlimitResource {
+    NoFile = libc::RLIMIT_NOFILE,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Rlimit {
+    pub current: u64,
+    pub max: u64,
+}
+
+pub fn getrlimit(resource: RlimitResource) -> Result<Rlimit, Errno> {
+    let mut rlimit: libc::rlimit = unsafe { mem::zeroed() };
+    Errno::result(unsafe { libc::getrlimit(resource as u32, &mut rlimit) })?;
+    Ok(Rlimit {
+        current: rlimit.rlim_cur,
+        max: rlimit.rlim_max,
+    })
+}
