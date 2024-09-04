@@ -30,7 +30,7 @@ use tokio::{
 ///
 /// This limit is put in place to try to have some control on the amount of tasks and memory being
 /// used by a FUSE connection.
-const MAX_INFLIGHT: usize = 1000;
+pub const MAX_INFLIGHT: usize = 30;
 
 /// The handle returned by [`fuse_mount_namespace`]. It can be used make the child exit (thus
 /// removing the mount) also it provides a way to get the path to the mount (via `/proc/`)
