@@ -322,13 +322,23 @@ impl Default for ReaderCache {
     }
 }
 
+/// The maximum size of the reader cache.
+pub const READER_CACHE_SIZE: u64 = 300 + 300 + 200;
+
 impl ReaderCache {
     pub fn new() -> Self {
-        Self {
+        let s = Self {
             dir_readers: LruCache::new(300.try_into().unwrap()),
             file_readers: LruCache::new(300.try_into().unwrap()),
             data_files: LruCache::new(200.try_into().unwrap()),
-        }
+        };
+        assert_eq!(
+            usize::from(s.dir_readers.cap())
+                + usize::from(s.file_readers.cap())
+                + usize::from(s.data_files.cap()),
+            READER_CACHE_SIZE as usize
+        );
+        s
     }
 
     async fn open_dir(
