@@ -9,7 +9,7 @@ mod layer_fs;
 pub mod local_worker;
 pub mod signals;
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use cache::{Cache, CacheDir, StdFs};
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
@@ -27,7 +27,7 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{
     async_fs,
-    config::common::{BrokerAddr, InlineLimit},
+    config::common::{BrokerAddr, InlineLimit, Slots},
     fs::Fs,
     manifest::AsyncManifestReader,
     net,
@@ -512,11 +512,44 @@ async fn wait_for_signal(log: Logger) -> Result<()> {
     Err(anyhow!("signal {signal}"))
 }
 
+/// For the number of slots, what is the maximum number of files we will open. This attempts to
+/// come up with a number by doing some math, but nothing is guaranteeing the result.
+fn open_file_max(slots: Slots) -> u64 {
+    let existing_open_files: u64 = 3 /* stdout, stdin, stderr */;
+    let per_slot_estimate: u64 = 6 /* unix socket, FUSE connection, (stdout, stderr) * 2 */ +
+        maelstrom_fuse::MAX_INFLIGHT as u64 /* each FUSE request opens a file */;
+    existing_open_files
+        + maelstrom_layer_fs::READER_CACHE_SIZE
+        + per_slot_estimate * u16::from(slots) as u64
+        + (MAX_IN_FLIGHT_LAYERS_BUILDS * maelstrom_layer_fs::LAYER_BUILDING_FILE_MAX) as u64
+}
+
+fn round_to_multiple(n: u64, k: u64) -> u64 {
+    if n % k == 0 {
+        n
+    } else {
+        n + (k - (n % k))
+    }
+}
+
+/// Check if the open file limit is high enough to fit our estimate of how many files we need.
+pub fn check_open_file_limit(slots: Slots, extra: u64) -> Result<()> {
+    let limit = linux::getrlimit(linux::RlimitResource::NoFile)?;
+    let estimate = open_file_max(slots) + extra;
+    if limit.current < estimate {
+        let estimate = round_to_multiple(estimate, 1024);
+        bail!("Open file limit is too low. Increase limit by running `ulimit -n {estimate}`");
+    }
+    Ok(())
+}
+
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
 #[tokio::main]
 pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config, "pid" => process::id());
+
+    check_open_file_limit(config.slots, 0)?;
 
     let (read_stream, mut write_stream) = TcpStream::connect(config.broker.inner())
         .await
