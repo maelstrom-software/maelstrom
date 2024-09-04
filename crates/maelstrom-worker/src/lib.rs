@@ -533,9 +533,10 @@ fn round_to_multiple(n: u64, k: u64) -> u64 {
 }
 
 /// Check if the open file limit is high enough to fit our estimate of how many files we need.
-pub fn check_open_file_limit(slots: Slots, extra: u64) -> Result<()> {
+pub fn check_open_file_limit(log: &Logger, slots: Slots, extra: u64) -> Result<()> {
     let limit = linux::getrlimit(linux::RlimitResource::NoFile)?;
     let estimate = open_file_max(slots) + extra;
+    debug!(log, "checking open file limit"; "limit" => ?limit.current, "estimate" => estimate);
     if limit.current < estimate {
         let estimate = round_to_multiple(estimate, 1024);
         bail!("Open file limit is too low. Increase limit by running `ulimit -n {estimate}`");
@@ -549,7 +550,7 @@ pub fn check_open_file_limit(slots: Slots, extra: u64) -> Result<()> {
 pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config, "pid" => process::id());
 
-    check_open_file_limit(config.slots, 0)?;
+    check_open_file_limit(&log, config.slots, 0)?;
 
     let (read_stream, mut write_stream) = TcpStream::connect(config.broker.inner())
         .await
