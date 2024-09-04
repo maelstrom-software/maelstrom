@@ -163,7 +163,10 @@ pub struct DispatcherAdapter {
     blob_dir: RootBuf<BlobDir>,
     layer_fs_cache: Arc<tokio::sync::Mutex<ReaderCache>>,
     manifest_digest_cache: ManifestDigestCache,
+    layer_building_semaphore: Arc<tokio::sync::Semaphore>,
 }
+
+pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 100;
 
 impl DispatcherAdapter {
     #[allow(clippy::too_many_arguments)]
@@ -190,6 +193,9 @@ impl DispatcherAdapter {
             ),
             dispatcher_sender,
             log,
+            layer_building_semaphore: Arc::new(tokio::sync::Semaphore::new(
+                MAX_IN_FLIGHT_LAYERS_BUILDS,
+            )),
         })
     }
 
@@ -284,7 +290,10 @@ impl Deps for DispatcherAdapter {
         let sender = self.dispatcher_sender.clone();
         let log = self.log.clone();
         let blob_dir = self.blob_dir.clone();
+        let sem = self.layer_building_semaphore.clone();
         task::spawn(async move {
+            let _permit = sem.acquire().await.unwrap();
+
             debug!(log, "building bottom FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_bottom_layer(
                 log.clone(),
@@ -312,7 +321,10 @@ impl Deps for DispatcherAdapter {
         let sender = self.dispatcher_sender.clone();
         let log = self.log.clone();
         let blob_dir = self.blob_dir.clone();
+        let sem = self.layer_building_semaphore.clone();
         task::spawn(async move {
+            let _permit = sem.acquire().await.unwrap();
+
             debug!(log, "building upper FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_upper_layer(
                 log.clone(),
