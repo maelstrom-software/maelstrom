@@ -16,11 +16,12 @@ use maelstrom_base::{
 };
 use maelstrom_util::{async_fs::Fs, ext::BoolExt as _, manifest::AsyncManifestReader, root::Root};
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::path::Path;
 use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncSeek};
 use tokio_tar::{Archive, EntryType};
+
+pub const DIRECTORY_DATA_WRITER_CACHE_SIZE: usize = 20;
 
 struct DirectoryDataWriterCache<'fs> {
     data_fs: &'fs Fs,
@@ -28,12 +29,10 @@ struct DirectoryDataWriterCache<'fs> {
 }
 
 impl<'fs> DirectoryDataWriterCache<'fs> {
-    const CACHE_SIZE: usize = 100;
-
     fn new(data_fs: &'fs Fs) -> Self {
         Self {
             data_fs,
-            cache: LruCache::new(Self::CACHE_SIZE.try_into().unwrap()),
+            cache: LruCache::new(DIRECTORY_DATA_WRITER_CACHE_SIZE.try_into().unwrap()),
         }
     }
 
@@ -59,6 +58,8 @@ impl<'fs> DirectoryDataWriterCache<'fs> {
         Ok(())
     }
 }
+
+pub const LAYER_BUILDING_FILE_MAX: usize = DIRECTORY_DATA_WRITER_CACHE_SIZE + 1;
 
 /// Creates a LayerFS bottom layer using a manifest or a tar file as input.
 pub struct BottomLayerBuilder<'fs> {
@@ -692,49 +693,6 @@ impl<'fs> DoubleFsWalk<'fs> {
     }
 }
 
-struct DirectoryDataWriterStack<'fs> {
-    layer_fs: &'fs LayerFs,
-    writers: Vec<(FileId, DirectoryDataWriter)>,
-    seen: HashSet<FileId>,
-}
-
-#[anyhow_trace]
-impl<'fs> DirectoryDataWriterStack<'fs> {
-    fn new(layer_fs: &'fs LayerFs) -> Self {
-        Self {
-            layer_fs,
-            writers: vec![],
-            seen: HashSet::new(),
-        }
-    }
-
-    async fn get_writer(&mut self, file_id: FileId) -> Result<&mut DirectoryDataWriter> {
-        if self.seen.contains(&file_id) {
-            while self.writers.last().unwrap().0 != file_id {
-                let (old_id, mut writer) = self.writers.pop().unwrap();
-                writer.flush().await?;
-                self.seen.remove(&old_id).assert_is_true();
-            }
-            return Ok(&mut self.writers.last_mut().unwrap().1);
-        }
-
-        self.writers.push((
-            file_id,
-            DirectoryDataWriter::new(self.layer_fs, &self.layer_fs.data_fs, file_id).await?,
-        ));
-        self.seen.insert(file_id).assert_is_true();
-
-        return Ok(&mut self.writers.last_mut().unwrap().1);
-    }
-
-    async fn flush(&mut self) -> Result<()> {
-        for (_, writer) in &mut self.writers {
-            writer.flush().await?;
-        }
-        Ok(())
-    }
-}
-
 /// Builds an upper layer LayerFS layer using a bottom layer as input.
 pub struct UpperLayerBuilder<'fs> {
     upper: LayerFs,
@@ -809,14 +767,14 @@ impl<'fs> UpperLayerBuilder<'fs> {
     /// lower layer.
     pub async fn fill_from_bottom_layer(&mut self, other: &LayerFs) -> Result<()> {
         self.hard_link_files(other).await?;
-        let mut dir_writers = DirectoryDataWriterStack::new(&self.upper);
+        let mut dir_writers = DirectoryDataWriterCache::new(&self.upper.data_fs);
         let upper_id = self.upper.layer_super().await?.layer_id;
         let mut walker = DoubleFsWalk::new(self.lower, other).await?;
         while let Some(res) = walker.next().await? {
             match res {
                 LeftRight::Left(entry) => {
                     let dir_id = FileId::new(upper_id, entry.right_parent.offset());
-                    let writer = dir_writers.get_writer(dir_id).await?;
+                    let writer = dir_writers.get_writer(&self.upper, dir_id).await?;
                     writer.insert_entry(&entry.key, entry.data).await?;
                 }
                 LeftRight::Right(entry) | LeftRight::Both(_, entry) => {
@@ -824,13 +782,13 @@ impl<'fs> UpperLayerBuilder<'fs> {
                         continue; // whiteout means we just ignore this entry
                     };
                     let dir_id = FileId::new(upper_id, entry.right_parent.offset());
-                    let writer = dir_writers.get_writer(dir_id).await?;
+                    let writer = dir_writers.get_writer(&self.upper, dir_id).await?;
                     let file_id = FileId::new(upper_id, data.file_id.offset());
                     data.file_id = file_id;
                     let kind = data.kind;
                     writer.insert_entry(&entry.key, data).await?;
                     if kind == FileType::Directory {
-                        dir_writers.get_writer(file_id).await?;
+                        dir_writers.get_writer(&self.upper, file_id).await?;
                     }
                 }
             }
