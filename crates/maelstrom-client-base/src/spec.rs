@@ -7,7 +7,7 @@
 pub mod substitute;
 
 use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, bail, Error, Result};
 use derive_more::From;
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
@@ -181,6 +181,23 @@ pub struct ContainerSpec {
     pub network: JobNetwork,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
+}
+
+impl ContainerSpec {
+    pub fn check_for_local_network_and_sys_mount(&self) -> Result<()> {
+        if self.network == JobNetwork::Local
+            && self
+                .mounts
+                .iter()
+                .any(|m| matches!(m, JobMount::Sys { .. }))
+        {
+            bail!(
+                "A \"sys\" mount is not compatible with local networking. \
+                Check the documentation for the \"network\" field of \"JobSpec\"."
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, From, Clone, Debug, PartialEq, Eq)]

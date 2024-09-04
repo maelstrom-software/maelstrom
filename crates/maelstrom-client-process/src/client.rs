@@ -601,7 +601,10 @@ impl Client {
                     .ok_or_else(|| anyhow!("container {n:?} unknown"))?
                     .clone()
             }
-            ContainerRef::Inline(c) => c,
+            ContainerRef::Inline(c) => {
+                c.check_for_local_network_and_sys_mount()?;
+                c
+            }
         };
 
         let mut layers = container.layers;
@@ -660,6 +663,8 @@ impl Client {
     pub async fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {
         let state = self.state_machine.active()?;
         let mut locked = state.locked.lock().await;
+
+        container.check_for_local_network_and_sys_mount()?;
 
         debug!(state.log, "add_container"; "name" => ?name, "container" => ?container);
         if let Some(existing) = locked.containers.insert(name, container) {

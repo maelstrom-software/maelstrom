@@ -1,11 +1,11 @@
 use assert_matches::assert_matches;
 use maelstrom_base::{
-    JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobTerminationStatus, Utf8Path,
-    Utf8PathBuf,
+    JobCompleted, JobEffects, JobMount, JobNetwork, JobOutcome, JobOutputResult,
+    JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, ProjectDir, StateDir,
+    ContainerImageDepotDir, ContainerSpec, ProjectDir, StateDir,
 };
 use maelstrom_client_base::spec::{JobSpec, LayerSpec, PrefixOptions, SymlinkSpec};
 use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
@@ -121,6 +121,46 @@ impl ClientFixture {
             Regex::new("(?s)^\nrunning 1 test\n(.*)test .* \\.\\.\\. ok\n\n.*$").unwrap();
         let captured = output_re.captures(output).unwrap().get(1).unwrap();
         captured.as_str().to_owned()
+    }
+
+    fn add_container_expecting_error(
+        &self,
+        name: String,
+        layers: Vec<LayerSpec>,
+        mounts: Vec<JobMount>,
+        network: JobNetwork,
+    ) -> anyhow::Error {
+        let spec = ContainerSpec {
+            image: None,
+            layers,
+            root_overlay: Default::default(),
+            environment: vec![],
+            working_directory: None,
+            mounts,
+            network,
+            user: None,
+            group: None,
+        };
+        self.client.add_container(name, spec).unwrap_err()
+    }
+
+    fn run_job_expecting_error(
+        &self,
+        added_layers: Vec<LayerSpec>,
+        mounts: Vec<JobMount>,
+        network: JobNetwork,
+    ) -> anyhow::Error {
+        let mut layers = self.layers.clone();
+        layers.extend(added_layers);
+        let spec = JobSpec::new(self.self_path.clone(), layers)
+            .mounts(mounts)
+            .network(network)
+            .arguments(["--exact", "single_test", "--nocapture"])
+            .environment([
+                ("INSIDE_JOB", "yes"),
+                ("TEST_LINE", &self.test_line.to_string()),
+            ]);
+        self.client.run_job(spec).unwrap_err()
     }
 }
 
@@ -304,6 +344,38 @@ fn symlinks_test(fix: &ClientFixture) {
     )
 }
 
+fn sys_local_network_error_test(fix: &ClientFixture) {
+    let error1 = fix.run_job_expecting_error(
+        vec![LayerSpec::Stubs {
+            stubs: vec!["/sys/".into()],
+        }],
+        vec![JobMount::Sys {
+            mount_point: "/sys".into(),
+        }],
+        JobNetwork::Local,
+    );
+    let error2 = fix.add_container_expecting_error(
+        "my_container".into(),
+        vec![LayerSpec::Stubs {
+            stubs: vec!["/sys/".into()],
+        }],
+        vec![JobMount::Sys {
+            mount_point: "/sys".into(),
+        }],
+        JobNetwork::Local,
+    );
+    for error in [error1, error2] {
+        assert!(error.to_string().contains(
+            "A \"sys\" mount is not compatible with local networking. \
+            Check the documentation for the \"network\" field of \"JobSpec\"."
+        ));
+    }
+}
+
+fn panic_test_job() {
+    panic!("this job wasn't expected to run");
+}
+
 /// Starting up the local-worker in the dev profile can be slow, so just run all the tests with the
 /// one local-worker to speed things up.
 #[test]
@@ -317,4 +389,5 @@ fn single_test() {
     fix.run_test(glob_test, paths_test_job);
     fix.run_test(stubs_test, paths_test_job);
     fix.run_test(symlinks_test, paths_test_job);
+    fix.run_test(sys_local_network_error_test, panic_test_job);
 }

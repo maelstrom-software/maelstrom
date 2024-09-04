@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `mount_point` of "/" is now disallowed when parsing devices in test metadata files. This didn't
   produce a job that worked previously, this now just fails earlier.
   \[[344](https://github.com/maelstrom-software/maelstrom/issues/344)\]
+- A job with local networking and a "sys" mount now errors with a nicer message before even running.
+  \[[389](https://github.com/maelstrom-software/maelstrom/issues/389)\]
 
 ### Fixed
 - Fixed issue with test-runner fancy UI where it would crash if the summary was too large.
