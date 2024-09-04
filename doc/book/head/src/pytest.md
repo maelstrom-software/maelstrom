@@ -8,15 +8,17 @@ First generate a `maelstrom-pytest.toml` file
 maelstrom-pytest --init
 ```
 
-Then update the file to include a python image
+Then update the image in the file to have the version of Python you desire.
 ```toml
 [[directives]]
 image = "docker://python:3.11-slim"
 ```
-This example installs an [image from Docker](https://hub.docker.com/_/python)
+The default configuration and our example uses an
+[image from Docker](https://hub.docker.com/_/python)
 
 ## Including Your Project Python Files
 So that your tests can be run from the container, your project's python must be included.
+Update the `added_layers` in the file to make sure it includes your project's Python.
 ```toml
 added_layers = [ { glob = "**.py" } ]
 ```

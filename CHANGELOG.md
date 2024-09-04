@@ -57,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   \[[359](https://github.com/maelstrom-software/maelstrom/issues/359)\]
 - Forward `RUST_BACKTRACE` and `RUST_LIB_BACKTRACE` by default in `cargo-maelstrom`.
   \[[386](https://github.com/maelstrom-software/maelstrom/issues/386)\]
+- `maelstrom-pytest` default test metadata has been updated to be better and contain examples
+  \[[324](https://github.com/maelstrom-software/maelstrom/issues/324)\]
+  \[[326](https://github.com/maelstrom-software/maelstrom/issues/326)\]
 
 ### Fixed
 - Fixed issue with test-runner fancy UI where it would crash if the summary was too large.

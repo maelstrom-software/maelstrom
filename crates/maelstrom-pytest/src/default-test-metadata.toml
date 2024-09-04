@@ -1,6 +1,15 @@
 # Because it has no `filter` field, this directive applies to all tests.
 [[directives]]
 
+# To run Python tests we recommend using some prepared container image.
+# This directive is using a container image from hub.docker.com.
+# We are choosing an image with Python 3.12.3.
+image = "docker://python:3.12.3-slim"
+
+# By default, we will use the layers and environment variables, but you can uncomment this line to
+# customize what gets used.
+# image.use = [ "environment", "layers" ]
+
 # Don't bother enabling the network. We can set to "loopback" to run on the
 # cluster using only the loopback network, or to "local" to only run on the
 # local machine but with full network access.
@@ -24,9 +33,14 @@
 # user = 0
 # group = 0
 
-# This layer just includes files and directories for mounting the following
-# file-systems and devices.
-layers = [
+# Use `added_layers` here since we want to add to what are provided by the image.
+added_layers = [
+    # This layer includes all the Python files from our project.
+    { glob = "**.{py,pyc,pyi}" },
+    # Include pyproject.toml if it exists.
+    { glob = "pyproject.toml" },
+    # This layer just includes files and directories for mounting the following
+    # file-systems and devices.
     { stubs = [ "/{proc,sys,tmp}/", "/dev/{full,null,random,urandom,zero}" ] },
 ]
 
@@ -38,3 +52,34 @@ mounts = [
     { type = "sys", mount_point = "/sys" },
     { type = "devices", devices = ["full", "null", "random", "urandom", "zero"] },
 ]
+
+# Later directives can override the `environment` key, but the `added_environment` key is only
+# additive. By using it here we ensure it applies to all tests regardless of other directives.
+[directives.added_environment]
+# If we are using the xdist plugin, we need to tell it we don't want any parallelism since we are
+# only running one test per process.
+PYTEST_XDIST_AUTO_NUM_WORKERS = "1"
+
+# This directive illustrates how to apply a change to one specific test
+# "tests.py::Tests::my_special_test".
+# Here we change the user and group to be used for this test to 1000.
+# Everything else we inherit from the first directive in this file.
+#
+# [[directives]]
+# filter = "node_id.equals(tests.py::Tests::my_special_test)"
+# user = 1000
+# group = 1000
+
+# Some useful filters to use in directives.
+#
+# # Select all tests with the name "my_test".
+# filter = "name.equals(my_test)"
+#
+# # Select all tests with either the "foo" or "bar" marker.
+# filter = "markers.contains(foo) || markers.contains(bar)"
+#
+# # Select tests that have a node_id starting with "foo.py"
+# filter = "node_id.starts_with(foo.py)"
+
+# # Select tests that have a node_id ending with "::CommonTests::test_it"
+# filter = "node_id.ends_with(::CommonTests::test_it)"
