@@ -60,6 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `maelstrom-pytest` default test metadata has been updated to be better and contain examples
   \[[324](https://github.com/maelstrom-software/maelstrom/issues/324)\]
   \[[326](https://github.com/maelstrom-software/maelstrom/issues/326)\]
+- A `mount_point` of "/" is now disallowed when parsing devices in test metadata files. This didn't
+  produce a job that worked previously, this now just fails earlier.
+  \[[344](https://github.com/maelstrom-software/maelstrom/issues/344)\]
 
 ### Fixed
 - Fixed issue with test-runner fancy UI where it would crash if the summary was too large.

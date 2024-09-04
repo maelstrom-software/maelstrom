@@ -168,6 +168,13 @@ macro_rules! utf8_path_buf {
 }
 
 #[macro_export]
+macro_rules! non_root_utf8_path_buf {
+    ($e:expr) => {
+        maelstrom_base::NonRootUtf8PathBuf::try_from(maelstrom_base::Utf8PathBuf::from($e)).unwrap()
+    };
+}
+
+#[macro_export]
 macro_rules! utf8_path_buf_vec {
     [$($e:expr),*] => {
         vec![$($crate::utf8_path_buf!($e)),*]

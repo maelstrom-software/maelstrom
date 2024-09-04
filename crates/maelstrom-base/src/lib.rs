@@ -121,13 +121,51 @@ impl From<JobDeviceForTomlAndJson> for JobDevice {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Into)]
+#[serde(transparent)]
+pub struct NonRootUtf8PathBuf(Utf8PathBuf);
+
+impl<'de> Deserialize<'de> for NonRootUtf8PathBuf {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let path = Utf8PathBuf::deserialize(deserializer)?;
+        path.try_into()
+            .map_err(|e: NonRootUtf8PathBufTryFromError| D::Error::custom(e.to_string()))
+    }
+}
+
+#[derive(Debug)]
+pub struct NonRootUtf8PathBufTryFromError;
+
+impl fmt::Display for NonRootUtf8PathBufTryFromError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "a path of \"/\" not allowed")
+    }
+}
+
+impl Error for NonRootUtf8PathBufTryFromError {}
+
+impl TryFrom<Utf8PathBuf> for NonRootUtf8PathBuf {
+    type Error = NonRootUtf8PathBufTryFromError;
+
+    fn try_from(v: Utf8PathBuf) -> Result<Self, Self::Error> {
+        if v == "/" {
+            return Err(NonRootUtf8PathBufTryFromError);
+        }
+        Ok(Self(v))
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
 pub enum JobMountForTomlAndJson {
     Bind {
-        mount_point: Utf8PathBuf,
+        mount_point: NonRootUtf8PathBuf,
         local_path: Utf8PathBuf,
         #[serde(default)]
         read_only: bool,
@@ -136,19 +174,19 @@ pub enum JobMountForTomlAndJson {
         devices: EnumSet<JobDeviceForTomlAndJson>,
     },
     Devpts {
-        mount_point: Utf8PathBuf,
+        mount_point: NonRootUtf8PathBuf,
     },
     Mqueue {
-        mount_point: Utf8PathBuf,
+        mount_point: NonRootUtf8PathBuf,
     },
     Proc {
-        mount_point: Utf8PathBuf,
+        mount_point: NonRootUtf8PathBuf,
     },
     Sys {
-        mount_point: Utf8PathBuf,
+        mount_point: NonRootUtf8PathBuf,
     },
     Tmp {
-        mount_point: Utf8PathBuf,
+        mount_point: NonRootUtf8PathBuf,
     },
 }
 
@@ -188,18 +226,28 @@ impl From<JobMountForTomlAndJson> for JobMount {
                 local_path,
                 read_only,
             } => JobMount::Bind {
-                mount_point,
+                mount_point: mount_point.into(),
                 local_path,
                 read_only,
             },
             JobMountForTomlAndJson::Devices { devices } => JobMount::Devices {
                 devices: devices.into_iter().map(JobDevice::from).collect(),
             },
-            JobMountForTomlAndJson::Devpts { mount_point } => JobMount::Devpts { mount_point },
-            JobMountForTomlAndJson::Mqueue { mount_point } => JobMount::Mqueue { mount_point },
-            JobMountForTomlAndJson::Proc { mount_point } => JobMount::Proc { mount_point },
-            JobMountForTomlAndJson::Sys { mount_point } => JobMount::Sys { mount_point },
-            JobMountForTomlAndJson::Tmp { mount_point } => JobMount::Tmp { mount_point },
+            JobMountForTomlAndJson::Devpts { mount_point } => JobMount::Devpts {
+                mount_point: mount_point.into(),
+            },
+            JobMountForTomlAndJson::Mqueue { mount_point } => JobMount::Mqueue {
+                mount_point: mount_point.into(),
+            },
+            JobMountForTomlAndJson::Proc { mount_point } => JobMount::Proc {
+                mount_point: mount_point.into(),
+            },
+            JobMountForTomlAndJson::Sys { mount_point } => JobMount::Sys {
+                mount_point: mount_point.into(),
+            },
+            JobMountForTomlAndJson::Tmp { mount_point } => JobMount::Tmp {
+                mount_point: mount_point.into(),
+            },
         }
     }
 }

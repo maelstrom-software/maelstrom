@@ -262,7 +262,8 @@ mod tests {
     use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{
-        glob_layer, paths_layer, so_deps_layer, string, tar_layer, utf8_path_buf,
+        glob_layer, non_root_utf8_path_buf, paths_layer, so_deps_layer, string, tar_layer,
+        utf8_path_buf,
     };
     use toml::de::Error as TomlError;
 
@@ -377,15 +378,15 @@ mod tests {
             TestDirective {
                 mounts: Some(vec![
                     JobMountForTomlAndJson::Proc {
-                        mount_point: utf8_path_buf!("/proc")
+                        mount_point: non_root_utf8_path_buf!("/proc")
                     },
                     JobMountForTomlAndJson::Bind {
-                        mount_point: utf8_path_buf!("/bind"),
+                        mount_point: non_root_utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
                         read_only: false,
                     },
                     JobMountForTomlAndJson::Bind {
-                        mount_point: utf8_path_buf!("/bind2"),
+                        mount_point: non_root_utf8_path_buf!("/bind2"),
                         local_path: utf8_path_buf!("/local2"),
                         read_only: true,
                     },
@@ -413,9 +414,9 @@ mod tests {
             .unwrap(),
             TestDirective {
                 added_mounts: vec![
-                    JobMountForTomlAndJson::Proc { mount_point: utf8_path_buf!("/proc") },
+                    JobMountForTomlAndJson::Proc { mount_point: non_root_utf8_path_buf!("/proc") },
                     JobMountForTomlAndJson::Bind {
-                        mount_point: utf8_path_buf!("/bind"),
+                        mount_point: non_root_utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
                         read_only: true,
                     },
@@ -440,10 +441,10 @@ mod tests {
             .unwrap(),
             TestDirective {
                 mounts: Some(vec![JobMountForTomlAndJson::Proc {
-                    mount_point: utf8_path_buf!("/proc"),
+                    mount_point: non_root_utf8_path_buf!("/proc"),
                 }]),
                 added_mounts: vec![JobMountForTomlAndJson::Tmp {
-                    mount_point: utf8_path_buf!("/tmp"),
+                    mount_point: non_root_utf8_path_buf!("/tmp"),
                 }],
                 ..Default::default()
             }
@@ -515,13 +516,29 @@ mod tests {
             .unwrap(),
             TestDirective {
                 mounts: Some(vec![JobMountForTomlAndJson::Bind {
-                    mount_point: utf8_path_buf!("/bind"),
+                    mount_point: non_root_utf8_path_buf!("/bind"),
                     local_path: utf8_path_buf!("/a"),
                     read_only: false,
                 }]),
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn mount_point_of_root_is_disallowed() {
+        let mounts = [
+            r#"{ type = "bind", mount_point = "/", local_path = "/a" }"#,
+            r#"{ type = "proc", mount_point = "/" }"#,
+            r#"{ type = "tmp", mount_point = "/" }"#,
+            r#"{ type = "sys", mount_point = "/" }"#,
+        ];
+        for mount in mounts {
+            assert!(parse_test_directive(&format!("mounts = [ {mount} ]"))
+                .unwrap_err()
+                .to_string()
+                .contains("a path of \"/\" not allowed"));
+        }
     }
 
     #[test]

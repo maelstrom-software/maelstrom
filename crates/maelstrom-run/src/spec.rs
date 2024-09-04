@@ -361,7 +361,7 @@ impl<'de> de::Deserialize<'de> for Job {
 mod tests {
     use super::*;
     use maelstrom_base::{enum_set, nonempty, JobDevice, JobDeviceForTomlAndJson, JobMount};
-    use maelstrom_test::{string, string_vec, tar_layer, utf8_path_buf};
+    use maelstrom_test::{non_root_utf8_path_buf, string, string_vec, tar_layer, utf8_path_buf};
     use maplit::btreemap;
 
     #[test]
@@ -382,7 +382,7 @@ mod tests {
                 environment: Some([("FOO", "foo"), ("BAR", "bar")].into_environment()),
                 mounts: Some(vec![
                     JobMountForTomlAndJson::Tmp {
-                        mount_point: utf8_path_buf!("/tmp"),
+                        mount_point: non_root_utf8_path_buf!("/tmp"),
                     },
                     JobMountForTomlAndJson::Devices {
                         devices: enum_set! {JobDeviceForTomlAndJson::Null},

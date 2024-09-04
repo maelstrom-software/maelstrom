@@ -335,9 +335,9 @@ pub enum JobMount {
 }
 ```
 
-These are extra file systems mounts put into the job's environment. They are
-applied in order, and **the `mount_point` must already exist in the file
-system**. Providing the mount point is one of the use cases for the "stubs" layer type.
+These are extra file systems mounts put into the job's environment. They are applied in order, and
+**the `mount_point` must already exist in the file system**. Also the mount point must not be "/".
+Providing the mount point is one of the use cases for the "stubs" layer type.
 
 Every mount type except `Devices` has a `mount_point` field, which is relative
 to the root of the file system, even if there is a
