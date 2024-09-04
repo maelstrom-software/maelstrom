@@ -47,11 +47,8 @@ mounts = [
 # # Only apply to tests in the "require_full_os" package.
 # filter = "package.equals(github.org/maelstrom/requires_full_os)"
 #
-# # This is the name of the hub.docker.com image to use.
-# image.name = "alpline"
-#
-# # This is the tag to use when downloading the image.
-# image.tag = "latest"
+# # This refers to a hub.docker.com image.
+# image.name = "docker://alpline:latest"
 #
 # # What do we wish to actually utilize from the image?
 # # Here we pick environment variables and file-system.
