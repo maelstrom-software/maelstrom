@@ -65,6 +65,7 @@ struct ClientState {
     container_image_depot: ContainerImageDepot,
     log: Logger,
     locked: Arc<Mutex<ClientStateLocked>>,
+    layer_building_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 struct ClientStateLocked {
@@ -142,9 +143,11 @@ impl ClientState {
             locked: self.locked.clone(),
         };
         let layer_builder = self.layer_builder.clone();
+        let sem = self.layer_building_semaphore.clone();
         let locked = self.locked.clone();
         tokio::task::spawn(async move {
             let build_fn = async {
+                let _permit = sem.acquire().await.unwrap();
                 let (artifact_path, artifact_type) =
                     layer_builder.build_layer(layer.clone(), &uploader).await?;
                 let artifact_digest = uploader.upload(&artifact_path).await?;
@@ -209,6 +212,9 @@ impl ClientState {
 
 /// For files under this size, the data is stashed in the manifest rather than uploaded separately
 const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
+
+/// Maximum number of layers to build simultaneously
+const MAX_IN_FLIGHT_LAYER_BUILDS: usize = 100;
 
 impl Client {
     pub fn new() -> Self {
@@ -502,6 +508,9 @@ impl Client {
                         cached_layers: LayerCache::new(),
                         containers: HashMap::new(),
                     })),
+                    layer_building_semaphore: Arc::new(tokio::sync::Semaphore::new(
+                        MAX_IN_FLIGHT_LAYER_BUILDS,
+                    )),
                 },
                 join_set,
                 worker_handle,
