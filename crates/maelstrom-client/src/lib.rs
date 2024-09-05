@@ -241,9 +241,7 @@ impl Client {
                 .await?
                 .into_inner();
             tokio::task::spawn(async move {
-                if let Err(e) = handle_log_messages(&rpc_log, log_stream).await {
-                    slog::error!(&rpc_log, "remote logging failed"; "error" => ?e);
-                }
+                let _ = handle_log_messages(&rpc_log, log_stream).await;
             });
             Ok(tonic::Response::new(proto::Void {}))
         })?;
