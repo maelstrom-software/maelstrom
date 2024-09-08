@@ -469,10 +469,19 @@ impl JobStatusEntry {
     }
 }
 
-#[allow(dead_code)]
 struct CompletedJob {
+    #[allow(dead_code)]
     name: String,
     status: UiJobStatus,
+}
+
+impl CompletedJob {
+    fn is_failure(&self) -> bool {
+        matches!(
+            self.status,
+            UiJobStatus::Failure(_) | UiJobStatus::Error(_) | UiJobStatus::TimedOut
+        )
+    }
 }
 
 impl From<UiJobResult> for CompletedJob {
@@ -529,11 +538,19 @@ impl JobStatuses {
         self.completed.len() as u64
     }
 
+    fn failed(&self) -> u64 {
+        self.completed.values().filter(|j| j.is_failure()).count() as u64
+    }
+
     fn running_tests(&self) -> impl Iterator<Item = (&str, &Instant)> {
         self.running
             .values()
             .filter(|t| t.is_state(JobState::Running))
             .map(|t| (t.name.as_str(), t.start_time.as_ref().unwrap()))
+    }
+
+    fn failed_tests(&self) -> impl Iterator<Item = &CompletedJob> {
+        self.completed.values().filter(|t| t.is_failure())
     }
 
     fn counts(&self) -> JobStateCounts {

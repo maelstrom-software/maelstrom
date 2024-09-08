@@ -1,6 +1,6 @@
 mod multi_gauge;
 
-use super::{JobStatuses, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
+use super::{CompletedJob, JobStatuses, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use anyhow::{bail, Result};
 use derive_more::From;
 use indicatif::HumanBytes;
@@ -259,6 +259,16 @@ fn format_running_test(name: &str, time: &Instant) -> Row<'static> {
     Row::new([Cell::from(name.to_owned()), Cell::from(duration)])
 }
 
+fn format_failed_test(t: &CompletedJob) -> Row<'static> {
+    let status = match t.status {
+        UiJobStatus::Ok | UiJobStatus::Ignored => unreachable!(),
+        UiJobStatus::Failure(_) => "failed".red(),
+        UiJobStatus::Error(_) => "error".red(),
+        UiJobStatus::TimedOut => "timed out".red(),
+    };
+    Row::new([Cell::from(t.name.to_owned()), Cell::from(status)])
+}
+
 #[derive(From)]
 enum PrintAbove {
     #[from]
@@ -447,6 +457,7 @@ impl Ui for FancyUi {
         self.producing_build_output = false;
         self.enqueue_status = None;
         self.remote_progress.clear();
+        self.jobs = Default::default();
 
         terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
 
@@ -494,6 +505,31 @@ impl FancyUi {
             [Constraint::Fill(1), Constraint::Length(4)],
         )
         .block(create_block(format!("Running Tests{}", omitted_trailer)))
+        .gray()
+        .render(area, buf);
+    }
+
+    fn render_failed_tests(&mut self, area: Rect, buf: &mut Buffer) {
+        let create_block = |title: String| Block::bordered().gray().title(title.bold());
+
+        let omitted_tests = self
+            .jobs
+            .failed()
+            .saturating_sub((area.height as u64).saturating_sub(2));
+        let omitted_trailer = (omitted_tests > 0)
+            .then(|| format!(" ({omitted_tests} tests not shown)"))
+            .unwrap_or_default();
+        let mut failed_tests: Vec<_> = self.jobs.failed_tests().collect();
+        failed_tests.sort_by_key(|j| &j.name);
+        Table::new(
+            failed_tests
+                .into_iter()
+                .rev()
+                .skip(omitted_tests as usize)
+                .map(format_failed_test),
+            [Constraint::Fill(1), Constraint::Length(4)],
+        )
+        .block(create_block(format!("Failed Tests{}", omitted_trailer)))
         .gray()
         .render(area, buf);
     }
@@ -661,6 +697,13 @@ impl Widget for &mut FancyUi {
             }
             if self.producing_build_output {
                 sections.push((Constraint::Length(5), FancyUi::render_build_output as _));
+            }
+            if self.jobs.failed() > 0 {
+                let max_height = (self.jobs.failed() + 2).try_into().unwrap_or(u16::MAX);
+                sections.push((
+                    Constraint::Max(max_height),
+                    FancyUi::render_failed_tests as SectionFnPtr,
+                ));
             }
             if self.enqueue_status.is_some() {
                 sections.push((Constraint::Length(1), FancyUi::render_enqueue_status as _));
