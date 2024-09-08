@@ -553,6 +553,11 @@ impl FancyUi {
 
         let d = self.expected_total_jobs;
 
+        let num_failed = self.jobs.failed();
+        let failure_trailer = (num_failed > 0)
+            .then(|| format!(" ({num_failed}f)"))
+            .unwrap_or_default();
+
         MultiGauge::default()
             .gauge(build_gauge(tailwind::GREEN.c800, self.jobs.completed(), d))
             .gauge(build_gauge(tailwind::BLUE.c800, self.jobs.running(), d))
@@ -563,11 +568,12 @@ impl FancyUi {
                 d,
             ))
             .label(format!(
-                "{}w {}p {}r {}c / {d}e",
+                "{}w {}p {}r {}c{} / {d}e",
                 self.jobs.waiting_for_artifacts(),
                 self.jobs.pending(),
                 self.jobs.running(),
                 self.jobs.completed(),
+                failure_trailer
             ))
             .render(area, buf);
     }

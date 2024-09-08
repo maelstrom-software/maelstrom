@@ -41,6 +41,9 @@ pub trait ProgressIndicator {
     /// Update progress with job states.
     fn update_job_states(&self, _counts: JobStateCounts) {}
 
+    /// Update progress with new number of failed tests.
+    fn update_failed(&self, _failed: u64) {}
+
     /// Tick any spinners.
     fn tick(&mut self) {}
 

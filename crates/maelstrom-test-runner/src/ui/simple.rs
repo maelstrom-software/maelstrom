@@ -285,6 +285,11 @@ where
                     job_finished(prog, &res);
                     jobs.job_finished(res);
                     prog.update_job_states(jobs.counts());
+
+                    let num_failed = jobs.failed();
+                    if num_failed > 0 {
+                        prog.update_failed(num_failed);
+                    }
                 }
                 UiMessage::UpdatePendingJobsCount(count) => prog.update_length(count),
                 UiMessage::JobEnqueued(msg) => {

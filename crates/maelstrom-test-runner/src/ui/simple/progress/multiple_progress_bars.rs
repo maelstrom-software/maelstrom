@@ -7,6 +7,7 @@ use std::{
     cmp::max,
     collections::{HashMap, HashSet},
 };
+use unicode_width::UnicodeWidthStr as _;
 
 #[derive(Default)]
 struct RemoteProgressBarTracker {
@@ -85,7 +86,12 @@ where
 
         let mut bars = HashMap::new();
         for (state, color) in JobState::iter().zip(COLORS) {
-            let bar = multi_bar.add(super::make_main_progress_bar(color, state.to_string(), 21));
+            let max_len = "complete (xxx failed)".width();
+            let bar = multi_bar.add(super::make_main_progress_bar(
+                color,
+                state.to_string(),
+                max_len,
+            ));
             bars.insert(state, bar);
         }
         Self {
@@ -161,6 +167,11 @@ where
             let pos = max(jobs, self.state.finished);
             bar.set_position(pos);
         }
+    }
+
+    fn update_failed(&self, failed: u64) {
+        let bar = self.bars.get(&JobState::Complete).unwrap();
+        bar.set_message(format!("completed ({failed} failed)"));
     }
 
     fn done_queuing_jobs(&mut self) {
