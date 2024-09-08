@@ -208,7 +208,7 @@ impl<'lines> slog_term::Decorator for UiSlogDecorator<'lines> {
     }
 }
 
-fn format_finished(res: UiJobResult) -> Vec<PrintAbove> {
+fn format_finished(res: &UiJobResult) -> Vec<PrintAbove> {
     let result_span: Span = match &res.status {
         UiJobStatus::Ok => "OK".green(),
         UiJobStatus::Failure(_) => "FAIL".red(),
@@ -217,7 +217,7 @@ fn format_finished(res: UiJobResult) -> Vec<PrintAbove> {
         UiJobStatus::Ignored => "IGNORED".yellow(),
     };
 
-    let case = res.name.bold();
+    let case = res.name.clone().bold();
     let mut line = vec![Cell::from(case), Cell::from(result_span)];
 
     if let Some(d) = res.duration {
@@ -232,13 +232,13 @@ fn format_finished(res: UiJobResult) -> Vec<PrintAbove> {
         output.extend(details.split('\n').map(|l| Line::from(l.to_owned()).into()));
     }
 
-    for l in res.stdout {
-        output.push(Line::from(l).into());
+    for l in &res.stdout {
+        output.push(Line::from(l.clone()).into());
     }
 
-    for l in res.stderr {
+    for l in &res.stderr {
         output.push(
-            ["stderr: ".red(), l.into()]
+            ["stderr: ".red(), l.to_owned().into()]
                 .into_iter()
                 .collect::<Line<'static>>()
                 .into(),
@@ -397,8 +397,8 @@ impl Ui for FancyUi {
                     UiMessage::List(_) => {}
                     UiMessage::JobUpdated(msg) => self.jobs.job_updated(msg.job_id, msg.status),
                     UiMessage::JobFinished(res) => {
-                        self.jobs.job_finished(res.job_id);
-                        self.print_above.extend(format_finished(res));
+                        self.print_above.extend(format_finished(&res));
+                        self.jobs.job_finished(res);
                     }
                     UiMessage::UpdatePendingJobsCount(count) => {
                         self.expected_total_jobs = count;

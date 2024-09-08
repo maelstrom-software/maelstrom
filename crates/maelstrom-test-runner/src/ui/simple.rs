@@ -71,7 +71,7 @@ where
     }
 }
 
-fn job_finished<ProgressIndicatorT>(prog: &mut ProgressIndicatorT, res: UiJobResult)
+fn job_finished<ProgressIndicatorT>(prog: &mut ProgressIndicatorT, res: &UiJobResult)
 where
     ProgressIndicatorT: ProgressIndicator,
 {
@@ -108,12 +108,12 @@ where
     });
 
     if let Some(details) = res.status.details() {
-        prog.println(details);
+        prog.println(details.to_owned());
     }
-    for line in res.stdout {
-        prog.println(line);
+    for line in &res.stdout {
+        prog.println(line.to_owned());
     }
-    for line in res.stderr {
+    for line in &res.stderr {
         prog.eprintln(line);
     }
 
@@ -282,9 +282,9 @@ where
                     prog.update_job_states(jobs.counts());
                 }
                 UiMessage::JobFinished(res) => {
-                    jobs.job_finished(res.job_id);
+                    job_finished(prog, &res);
+                    jobs.job_finished(res);
                     prog.update_job_states(jobs.counts());
-                    job_finished(prog, res);
                 }
                 UiMessage::UpdatePendingJobsCount(count) => prog.update_length(count),
                 UiMessage::JobEnqueued(msg) => {

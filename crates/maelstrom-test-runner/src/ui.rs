@@ -96,10 +96,10 @@ pub enum UiJobStatus {
 }
 
 impl UiJobStatus {
-    fn details(self) -> Option<String> {
+    fn details(&self) -> Option<&str> {
         match self {
-            Self::Failure(d) => d,
-            Self::Error(d) => Some(d),
+            Self::Failure(Some(d)) => Some(d.as_str()),
+            Self::Error(d) => Some(d.as_str()),
             _ => None,
         }
     }
@@ -469,53 +469,68 @@ impl JobStatusEntry {
     }
 }
 
+#[allow(dead_code)]
+struct CompletedJob {
+    name: String,
+    status: UiJobStatus,
+}
+
+impl From<UiJobResult> for CompletedJob {
+    fn from(res: UiJobResult) -> Self {
+        Self {
+            name: res.name,
+            status: res.status,
+        }
+    }
+}
+
 #[derive(Default)]
 struct JobStatuses {
-    map: HashMap<UiJobId, JobStatusEntry>,
-    completed: u64,
+    running: HashMap<UiJobId, JobStatusEntry>,
+    completed: HashMap<UiJobId, CompletedJob>,
 }
 
 impl JobStatuses {
     fn job_updated(&mut self, job_id: UiJobId, status: JobRunningStatus) {
-        self.map.get_mut(&job_id).unwrap().update(status)
+        self.running.get_mut(&job_id).unwrap().update(status)
     }
 
-    fn job_finished(&mut self, job_id: UiJobId) {
-        self.map.remove(&job_id);
-        self.completed += 1;
+    fn job_finished(&mut self, res: UiJobResult) {
+        self.running.remove(&res.job_id);
+        self.completed.insert(res.job_id, CompletedJob::from(res));
     }
 
     fn job_enqueued(&mut self, job_id: UiJobId, name: String) {
-        self.map.insert(job_id, JobStatusEntry::new(name));
+        self.running.insert(job_id, JobStatusEntry::new(name));
     }
 
     fn waiting_for_artifacts(&self) -> u64 {
-        self.map
+        self.running
             .values()
             .filter(|e| e.is_state(JobState::WaitingForArtifacts))
             .count() as u64
     }
 
     fn pending(&self) -> u64 {
-        self.map
+        self.running
             .values()
             .filter(|e| e.is_state(JobState::Pending))
             .count() as u64
     }
 
     fn running(&self) -> u64 {
-        self.map
+        self.running
             .values()
             .filter(|e| e.is_state(JobState::Running))
             .count() as u64
     }
 
     fn completed(&self) -> u64 {
-        self.completed
+        self.completed.len() as u64
     }
 
     fn running_tests(&self) -> impl Iterator<Item = (&str, &Instant)> {
-        self.map
+        self.running
             .values()
             .filter(|t| t.is_state(JobState::Running))
             .map(|t| (t.name.as_str(), t.start_time.as_ref().unwrap()))
