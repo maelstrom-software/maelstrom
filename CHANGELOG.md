@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Functionality where new tests and tests that failed previously are run before
   other tests. This function pairs wells with the new `stop-after` config value.
   \[[380](https://github.com/maelstrom-software/maelstrom/issues/380)\]
+- Fancy UI lists failed tests in a dialog before it has finished running tests.
+  \[[391](https://github.com/maelstrom-software/maelstrom/issues/391)\]
+- Simple and Facny UI indicate the number of failed tests in their respective progress bars.
+  \[[391](https://github.com/maelstrom-software/maelstrom/issues/391)\]
 
 #### Changed
 - `ui` test-runner config option value now matches the same casing as the CLI option
