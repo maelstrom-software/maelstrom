@@ -1215,7 +1215,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     paths: path
                         .strip_prefix("PATH=")
                         .unwrap()
-                        .split(|c| c == ':')
+                        .split(':')
                         .filter(|dir| !dir.is_empty())
                         .map(|dir| {
                             let mut bump_string = BumpString::from_str_in(dir, bump);

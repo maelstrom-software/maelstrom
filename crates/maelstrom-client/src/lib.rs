@@ -235,7 +235,7 @@ impl Client {
 
         slog::debug!(s.log, "opening log stream");
         let rpc_log = s.log.clone();
-        s.send_sync(|mut client| async move {
+        s.send_sync_unit(|mut client| async move {
             let log_stream = client
                 .stream_log_messages(proto::Void {})
                 .await?
@@ -260,7 +260,7 @@ impl Client {
         slog::debug!(s.log, "client sending start"; "request" => ?req);
 
         let req = req.into_proto_buf();
-        s.send_sync(|mut client| async move { client.start(req).await })?;
+        s.send_sync_unit(|mut client| async move { client.start(req).await })?;
         slog::debug!(s.log, "client completed start");
 
         Ok(s)
@@ -309,6 +309,17 @@ impl Client {
         self.send_async(builder)?
             .recv()
             .with_context(|| "receiving RPC response from client process")?
+    }
+
+    /// This is a less confusing way to write `self.send_sync::<_, _, ()>`
+    fn send_sync_unit<BuilderT, FutureT>(&self, builder: BuilderT) -> Result<()>
+    where
+        BuilderT: FnOnce(ClientProcessClient<tonic::transport::Channel>) -> FutureT,
+        BuilderT: Send + Sync + 'static,
+        FutureT:
+            Future<Output = result::Result<tonic::Response<proto::Void>, tonic::Status>> + Send,
+    {
+        self.send_sync(builder)
     }
 
     pub fn add_job(
