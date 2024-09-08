@@ -48,6 +48,8 @@ jobs:
     # up prepended to PATH, which then causes problems.
     - name: Remove Rust provided by GitHub.
       run: rm -rf ~/.cargo/bin ~/.rustup
+    - name: Disable apparmor container restrictions
+      run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
     - name: Set up Rust Cache
       uses: actions/cache@v4
       with:
