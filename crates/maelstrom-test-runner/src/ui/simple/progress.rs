@@ -19,7 +19,7 @@ pub trait ProgressIndicator {
     fn println(&mut self, msg: String);
 
     /// Prints a line to stdout while not interfering with any progress bars
-    fn println_width(&mut self, cb: impl PrintWidthCb<String>);
+    fn println_width<'a>(&mut self, cb: impl PrintWidthCb<'a, String>);
 
     /// Prints a line to stdout while not interfering with any progress bars. Prefixes line with
     /// "stderr"
@@ -51,7 +51,7 @@ pub trait ProgressIndicator {
     fn done_queuing_jobs(&mut self) {}
 
     /// Called when all jobs are done
-    fn finished(&mut self, _summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+    fn finished<'a>(&mut self, _summary: impl PrintWidthCb<'a, Vec<String>>) -> Result<()> {
         Ok(())
     }
 }

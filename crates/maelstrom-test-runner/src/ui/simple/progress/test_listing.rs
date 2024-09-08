@@ -35,7 +35,7 @@ where
         self.enqueue_spinner.println(msg);
     }
 
-    fn println_width(&mut self, cb: impl PrintWidthCb<String>) {
+    fn println_width<'a>(&mut self, cb: impl PrintWidthCb<'a, String>) {
         self.println(cb(self.term.width() as usize));
     }
 
@@ -78,7 +78,7 @@ where
         let _ = self.term.flush();
     }
 
-    fn println_width(&mut self, cb: impl PrintWidthCb<String>) {
+    fn println_width<'a>(&mut self, cb: impl PrintWidthCb<'a, String>) {
         self.println(cb(self.term.width() as usize));
     }
 }

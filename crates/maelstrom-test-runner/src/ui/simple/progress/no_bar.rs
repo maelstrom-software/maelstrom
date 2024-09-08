@@ -20,11 +20,11 @@ where
         let _ = self.term.flush();
     }
 
-    fn println_width(&mut self, cb: impl PrintWidthCb<String>) {
+    fn println_width<'a>(&mut self, cb: impl PrintWidthCb<'a, String>) {
         self.println(cb(self.term.width() as usize));
     }
 
-    fn finished(&mut self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+    fn finished<'a>(&mut self, summary: impl PrintWidthCb<'a, Vec<String>>) -> Result<()> {
         for line in summary(self.term.width() as usize) {
             self.println(line)
         }

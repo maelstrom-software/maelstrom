@@ -108,7 +108,7 @@ where
         com.println(msg);
     }
 
-    fn println_width(&mut self, cb: impl PrintWidthCb<String>) {
+    fn println_width<'a>(&mut self, cb: impl PrintWidthCb<'a, String>) {
         self.println(cb(self.term.width() as usize));
     }
 
@@ -169,7 +169,7 @@ where
         self.enqueue_spinner.finish_and_clear();
     }
 
-    fn finished(&mut self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+    fn finished<'a>(&mut self, summary: impl PrintWidthCb<'a, Vec<String>>) -> Result<()> {
         for bar in self.bars.values() {
             bar.finish_and_clear();
         }

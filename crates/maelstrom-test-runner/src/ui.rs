@@ -80,10 +80,10 @@ impl Ui for Box<dyn Ui> {
     }
 }
 
-pub trait PrintWidthCb<RetT>: FnOnce(usize) -> RetT + Send + Sync + 'static {}
+pub trait PrintWidthCb<'a, RetT>: FnOnce(usize) -> RetT + Send + Sync + 'a {}
 
-impl<PrintCbT, RetT> PrintWidthCb<RetT> for PrintCbT where
-    PrintCbT: FnOnce(usize) -> RetT + Send + Sync + 'static
+impl<'a, PrintCbT, RetT> PrintWidthCb<'a, RetT> for PrintCbT where
+    PrintCbT: FnOnce(usize) -> RetT + Send + Sync + 'a
 {
 }
 
