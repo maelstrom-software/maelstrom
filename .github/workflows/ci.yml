@@ -62,7 +62,7 @@ jobs:
     - name: Test
       run: ./scripts/run-tests-on-maelstrom.sh || true
     - name: Inspect somethings
-      run: /home/runner/work/maelstrom/maelstrom/target/release/build/openssl-sys-*/build-script-main
+      run: ldd /home/runner/work/maelstrom/maelstrom/target/release/build/openssl-sys-*/build-script-main
 
   deploy-documentation:
     name: Build and Deploy Documentation
