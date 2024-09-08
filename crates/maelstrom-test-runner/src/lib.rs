@@ -98,7 +98,7 @@ type ArtifactStreamM<MainAppDepsT> =
     <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::ArtifactStream;
 
 /// A collection of dependencies that are used while enqueuing jobs.
-struct JobQueuingDeps<TestCollectorT: CollectTests> {
+struct EnqueuingDeps<TestCollectorT: CollectTests> {
     filter: TestCollectorT::TestFilter,
     stderr_color: bool,
     test_metadata: AllMetadata<TestCollectorT::TestFilter>,
@@ -109,7 +109,7 @@ struct JobQueuingDeps<TestCollectorT: CollectTests> {
     collector_options: TestCollectorT::Options,
 }
 
-impl<TestCollectorT: CollectTests> JobQueuingDeps<TestCollectorT> {
+impl<TestCollectorT: CollectTests> EnqueuingDeps<TestCollectorT> {
     #[allow(clippy::too_many_arguments)]
     fn new(
         filter: TestCollectorT::TestFilter,
@@ -135,8 +135,8 @@ impl<TestCollectorT: CollectTests> JobQueuingDeps<TestCollectorT> {
 }
 
 /// This is state about the jobs being enqueued used the MainApp.
-struct JobQueuingState<'a, TestCollectorT: CollectTests> {
-    deps: &'a JobQueuingDeps<TestCollectorT>,
+struct EnqueuedJobState<'a, TestCollectorT: CollectTests> {
+    deps: &'a EnqueuingDeps<TestCollectorT>,
     tracker: Arc<JobStatusTracker>,
     jobs_queued: u64,
     expected_job_count: u64,
@@ -144,8 +144,8 @@ struct JobQueuingState<'a, TestCollectorT: CollectTests> {
     next_ui_job_id: u32,
 }
 
-impl<'a, TestCollectorT: CollectTests> JobQueuingState<'a, TestCollectorT> {
-    fn new(deps: &'a JobQueuingDeps<TestCollectorT>, expected_job_count: u64) -> Self {
+impl<'a, TestCollectorT: CollectTests> EnqueuedJobState<'a, TestCollectorT> {
+    fn new(deps: &'a EnqueuingDeps<TestCollectorT>, expected_job_count: u64) -> Self {
         Self {
             deps,
             tracker: Arc::new(JobStatusTracker::new(deps.stop_after)),
@@ -200,9 +200,9 @@ impl<'a, TestCollectorT: CollectTests> JobQueuingState<'a, TestCollectorT> {
 ///
 /// This object is stored inside `JobQueuing` and is used to keep track of which artifact it is
 /// currently enqueuing from.
-struct ArtifactQueuing<'a, MainAppDepsT: MainAppDeps> {
+struct TestToEnqueuePerArtifactGenerator<'a, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
-    queuing_deps: &'a JobQueuingDeps<MainAppDepsT::TestCollector>,
+    enqueuing_deps: &'a EnqueuingDeps<MainAppDepsT::TestCollector>,
     deps: &'a MainAppDepsT,
     ui: UiSender,
     artifact: ArtifactM<MainAppDepsT>,
@@ -220,7 +220,7 @@ struct TestListingResult<CaseMetadataT> {
 
 fn list_test_cases<TestCollectorT: CollectTests>(
     log: slog::Logger,
-    queuing_deps: &JobQueuingDeps<TestCollectorT>,
+    enqueuing_deps: &EnqueuingDeps<TestCollectorT>,
     ui: &UiSender,
     artifact: &TestCollectorT::Artifact,
     package: &TestCollectorT::Package,
@@ -234,7 +234,7 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     let mut cases = artifact.list_tests()?;
 
     let artifact_key = artifact.to_key();
-    let mut test_db = queuing_deps.test_db.lock().unwrap();
+    let mut test_db = enqueuing_deps.test_db.lock().unwrap();
     test_db.as_mut().unwrap().update_artifact_cases(
         package.name(),
         artifact_key.clone(),
@@ -242,7 +242,7 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     );
 
     cases.retain(|(c, cd)| {
-        queuing_deps
+        enqueuing_deps
             .filter
             .filter(package, Some(&artifact_key), Some((c.as_str(), cd)))
             .expect("should have case")
@@ -253,21 +253,21 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     })
 }
 
-impl<'a, MainAppDepsT> ArtifactQueuing<'a, MainAppDepsT>
+impl<'a, MainAppDepsT> TestToEnqueuePerArtifactGenerator<'a, MainAppDepsT>
 where
     MainAppDepsT: MainAppDeps,
 {
     #[allow(clippy::too_many_arguments)]
     fn new(
         log: slog::Logger,
-        queuing_deps: &'a JobQueuingDeps<MainAppDepsT::TestCollector>,
+        enqueuing_deps: &'a EnqueuingDeps<MainAppDepsT::TestCollector>,
         deps: &'a MainAppDepsT,
         ui: UiSender,
         artifact: ArtifactM<MainAppDepsT>,
         package: PackageM<MainAppDepsT>,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
-        let listing = list_test_cases(log.clone(), queuing_deps, &ui, &artifact, &package)?;
+        let listing = list_test_cases(log.clone(), enqueuing_deps, &ui, &artifact, &package)?;
 
         ui.update_enqueue_status(format!("generating artifacts for {}", package.name()));
         slog::debug!(
@@ -278,7 +278,7 @@ where
 
         Ok(Self {
             log,
-            queuing_deps,
+            enqueuing_deps,
             deps,
             ui,
             artifact,
@@ -291,7 +291,7 @@ where
 
     fn build_job_from_case(
         &mut self,
-        queuing_state: &mut JobQueuingState<'a, MainAppDepsT::TestCollector>,
+        enqueued_job_state: &mut EnqueuedJobState<'a, MainAppDepsT::TestCollector>,
         case_name: &str,
         case_metadata: &CaseMetadataM<MainAppDepsT>,
     ) -> Result<CollectionResult<MainAppDepsT>> {
@@ -302,13 +302,13 @@ where
             .update_enqueue_status(format!("processing {case_str}"));
         slog::debug!(self.log, "enqueuing test case"; "case" => &case_str);
 
-        if self.queuing_deps.list_action.is_some() {
+        if self.enqueuing_deps.list_action.is_some() {
             self.ui.list(case_str);
             return Ok(NotCollected::Listed.into());
         }
 
         let test_metadata = self
-            .queuing_deps
+            .enqueuing_deps
             .test_metadata
             .get_metadata_for_test_with_env(
                 &self.package,
@@ -317,8 +317,8 @@ where
             )?;
 
         let visitor = JobStatusVisitor::new(
-            queuing_state.tracker.clone(),
-            self.queuing_deps.test_db.clone(),
+            enqueued_job_state.tracker.clone(),
+            self.enqueuing_deps.test_db.clone(),
             self.package.name().into(),
             self.artifact.to_key(),
             case_name.to_owned(),
@@ -330,7 +330,7 @@ where
         );
 
         if self.ignored_cases.contains(case_name) || test_metadata.ignore {
-            let ui_job_id = queuing_state.track_outstanding(&case_str, &self.ui);
+            let ui_job_id = enqueued_job_state.track_outstanding(&case_str, &self.ui);
             visitor.job_ignored(ui_job_id);
             return Ok(NotCollected::Ignored.into());
         }
@@ -346,7 +346,7 @@ where
         )?);
 
         let get_timing_result = self
-            .queuing_deps
+            .enqueuing_deps
             .test_db
             .lock()
             .unwrap()
@@ -403,12 +403,12 @@ where
     /// Meant to be called until it returns `CollectionResult::NotCollected(NotCollected::Done)`
     fn collect_one(
         &mut self,
-        queuing_state: &mut JobQueuingState<'a, MainAppDepsT::TestCollector>,
+        enqueued_job_state: &mut EnqueuedJobState<'a, MainAppDepsT::TestCollector>,
     ) -> Result<CollectionResult<MainAppDepsT>> {
         let Some((case_name, case_metadata)) = self.cases.next() else {
             return Ok(NotCollected::Done.into());
         };
-        self.build_job_from_case(queuing_state, &case_name, &case_metadata)
+        self.build_job_from_case(enqueued_job_state, &case_name, &case_metadata)
     }
 }
 
@@ -416,26 +416,26 @@ where
 ///
 /// This object is like an iterator, it maintains a position in the test listing and returns the
 /// next thing when asked.
-struct JobQueuing<'a, MainAppDepsT: MainAppDeps> {
+struct TestToEnqueueGenerator<'a, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
-    state: JobQueuingState<'a, MainAppDepsT::TestCollector>,
+    state: EnqueuedJobState<'a, MainAppDepsT::TestCollector>,
     deps: &'a MainAppDepsT,
     ui: UiSender,
     wait_handle: Option<BuildHandleM<MainAppDepsT>>,
     packages: BTreeMap<PackageIdM<MainAppDepsT>, PackageM<MainAppDepsT>>,
     package_match: bool,
     artifacts: Option<ArtifactStreamM<MainAppDepsT>>,
-    artifact_queuing: Option<ArtifactQueuing<'a, MainAppDepsT>>,
+    artifact_queuing: Option<TestToEnqueuePerArtifactGenerator<'a, MainAppDepsT>>,
     timeout_override: Option<Option<Timeout>>,
 }
 
-impl<'a, MainAppDepsT> JobQueuing<'a, MainAppDepsT>
+impl<'a, MainAppDepsT> TestToEnqueueGenerator<'a, MainAppDepsT>
 where
     MainAppDepsT: MainAppDeps,
 {
     fn new(
         log: slog::Logger,
-        queuing_deps: &'a JobQueuingDeps<MainAppDepsT::TestCollector>,
+        enqueuing_deps: &'a EnqueuingDeps<MainAppDepsT::TestCollector>,
         deps: &'a MainAppDepsT,
         ui: UiSender,
         timeout_override: Option<Option<Timeout>>,
@@ -444,7 +444,7 @@ where
 
         let packages = deps.test_collector().get_packages(&ui)?;
 
-        let mut locked_test_db = queuing_deps.test_db.lock().unwrap();
+        let mut locked_test_db = enqueuing_deps.test_db.lock().unwrap();
         let test_db = locked_test_db.as_mut().unwrap();
         test_db.retain_packages_and_artifacts(packages.iter().map(|p| (p.name(), p.artifacts())));
 
@@ -454,15 +454,15 @@ where
             .collect();
 
         let mut expected_job_count =
-            test_db.count_matching_cases(&package_map, &queuing_deps.filter);
+            test_db.count_matching_cases(&package_map, &enqueuing_deps.filter);
         drop(locked_test_db);
 
-        expected_job_count *= usize::from(queuing_deps.repeat) as u64;
+        expected_job_count *= usize::from(enqueuing_deps.repeat) as u64;
         ui.update_length(expected_job_count);
 
         let selected_packages: BTreeMap<_, _> = packages
             .iter()
-            .filter(|p| queuing_deps.filter.filter(p, None, None).unwrap_or(true))
+            .filter(|p| enqueuing_deps.filter.filter(p, None, None).unwrap_or(true))
             .map(|p| (p.id(), p.clone()))
             .collect();
 
@@ -472,13 +472,16 @@ where
         );
 
         let building_tests = !selected_packages.is_empty()
-            && matches!(queuing_deps.list_action, None | Some(ListAction::ListTests));
+            && matches!(
+                enqueuing_deps.list_action,
+                None | Some(ListAction::ListTests)
+            );
 
         let (wait_handle, artifacts) = building_tests
             .then(|| {
                 deps.test_collector().start(
-                    queuing_deps.stderr_color,
-                    &queuing_deps.collector_options,
+                    enqueuing_deps.stderr_color,
+                    &enqueuing_deps.collector_options,
                     selected_packages.values().collect(),
                     &ui,
                 )
@@ -488,7 +491,7 @@ where
 
         Ok(Self {
             log,
-            state: JobQueuingState::new(queuing_deps, expected_job_count),
+            state: EnqueuedJobState::new(enqueuing_deps, expected_job_count),
             deps,
             ui,
             packages: selected_packages,
@@ -519,7 +522,7 @@ where
             .get(&artifact.package())
             .expect("artifact for unknown package");
 
-        self.artifact_queuing = Some(ArtifactQueuing::new(
+        self.artifact_queuing = Some(TestToEnqueuePerArtifactGenerator::new(
             self.log.clone(),
             self.state.deps,
             self.deps,
@@ -579,7 +582,7 @@ pub struct BuildDir;
 /// since it can contain things which live longer than scoped threads and thus shared among them.
 pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
     abstract_deps: MainAppDepsT,
-    queuing_deps: JobQueuingDeps<MainAppDepsT::TestCollector>,
+    enqueuing_deps: EnqueuingDeps<MainAppDepsT::TestCollector>,
     test_db_store: TestDbStore<ArtifactKeyM<MainAppDepsT>, CaseMetadataM<MainAppDepsT>>,
     log: slog::Logger,
 }
@@ -633,7 +636,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
 
         Ok(Self {
             abstract_deps,
-            queuing_deps: JobQueuingDeps::new(
+            enqueuing_deps: EnqueuingDeps::new(
                 filter,
                 stderr_color,
                 test_metadata,
@@ -712,11 +715,11 @@ impl<MainAppDepsT: MainAppDeps> TestToEnqueue<MainAppDepsT> {
     fn enqueue(
         self,
         state: &MainAppCombinedDeps<MainAppDepsT>,
-        queuing_state: &mut JobQueuingState<'_, MainAppDepsT::TestCollector>,
+        enqueued_job_state: &mut EnqueuedJobState<'_, MainAppDepsT::TestCollector>,
         ui: &UiSender,
     ) -> Result<EnqueueResult> {
         let case_str = self.case_str;
-        let ui_job_id = queuing_state.track_outstanding(&case_str, ui);
+        let ui_job_id = enqueued_job_state.track_outstanding(&case_str, ui);
         ui.update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&state.log, "submitting job"; "case" => &case_str);
         let cb = move |res| self.visitor.job_update(ui_job_id, res);
@@ -760,7 +763,7 @@ enum EnqueueStage<MainAppDepsT: MainAppDeps> {
 
 struct MainApp<'deps, IntrospectDriverT, MainAppDepsT: MainAppDeps> {
     deps: &'deps MainAppCombinedDeps<MainAppDepsT>,
-    queuing: JobQueuing<'deps, MainAppDepsT>,
+    generator: TestToEnqueueGenerator<'deps, MainAppDepsT>,
     introspect_driver: IntrospectDriverT,
     ui: UiSender,
     stage: EnqueueStage<MainAppDepsT>,
@@ -784,16 +787,16 @@ where
 
         slog::debug!(deps.log, "main app created");
 
-        let queuing = JobQueuing::new(
+        let generator = TestToEnqueueGenerator::new(
             deps.log.clone(),
-            &deps.queuing_deps,
+            &deps.enqueuing_deps,
             &deps.abstract_deps,
             ui.clone(),
             timeout_override,
         )?;
         Ok(Self {
             deps,
-            queuing,
+            generator,
             introspect_driver,
             ui,
             stage: EnqueueStage::NeedTest,
@@ -803,13 +806,13 @@ where
     /// Enqueue one test as a job on the `Client`. This is meant to be called repeatedly until
     /// `EnqueueResult::Done` is returned, or an error is encountered.
     pub fn enqueue_one(&mut self) -> Result<EnqueueResult> {
-        if self.queuing.state.tracker.is_failure_limit_reached() {
+        if self.generator.state.tracker.is_failure_limit_reached() {
             return Ok(NotCollected::Done.into());
         }
 
-        let repeat_times = usize::from(self.deps.queuing_deps.repeat);
+        let repeat_times = usize::from(self.deps.enqueuing_deps.repeat);
         match mem::take(&mut self.stage) {
-            EnqueueStage::NeedTest => match self.queuing.collect_one()? {
+            EnqueueStage::NeedTest => match self.generator.collect_one()? {
                 CollectionResult::Collected(test) => {
                     if repeat_times > 1 {
                         self.stage = EnqueueStage::Repeating {
@@ -817,11 +820,11 @@ where
                             test: test.clone(),
                         };
                     }
-                    test.enqueue(self.deps, &mut self.queuing.state, &self.ui)
+                    test.enqueue(self.deps, &mut self.generator.state, &self.ui)
                 }
                 CollectionResult::NotCollected(NotCollected::Done) => {
                     self.stage = EnqueueStage::Done;
-                    self.queuing.state.all_jobs_queued = true;
+                    self.generator.state.all_jobs_queued = true;
                     Ok(NotCollected::Done.into())
                 }
                 CollectionResult::NotCollected(res) => Ok(res.into()),
@@ -835,7 +838,7 @@ where
                         times: times - 1,
                     };
                 }
-                test.enqueue(self.deps, &mut self.queuing.state, &self.ui)
+                test.enqueue(self.deps, &mut self.generator.state, &self.ui)
             }
             EnqueueStage::Done => Ok(NotCollected::Done.into()),
         }
@@ -843,16 +846,16 @@ where
 
     /// Indicates that we have finished enqueuing jobs.
     fn done_queuing(&mut self) -> Result<()> {
-        slog::debug!(self.queuing.log, "draining");
-        self.ui.update_length(self.queuing.state.jobs_queued);
+        slog::debug!(self.generator.log, "draining");
+        self.ui.update_length(self.generator.state.jobs_queued);
         self.ui.done_queuing_jobs();
         Ok(())
     }
 
     /// Waits for all outstanding jobs to finish.
     fn wait_for_tests(&mut self) -> Result<()> {
-        slog::debug!(self.queuing.log, "waiting for outstanding jobs");
-        self.queuing
+        slog::debug!(self.generator.log, "waiting for outstanding jobs");
+        self.generator
             .state
             .tracker
             .wait_for_outstanding_or_failure_limit_reached();
@@ -862,13 +865,13 @@ where
 
     /// Displays a summary, and obtains an `ExitCode`
     fn finish(self) -> Result<ExitCode> {
-        let nre = self.queuing.state.not_run_estimate();
-        let summary = self.queuing.state.tracker.ui_summary(nre);
+        let nre = self.generator.state.not_run_estimate();
+        let summary = self.generator.state.tracker.ui_summary(nre);
         self.ui.finished(summary);
 
         self.deps.test_db_store.save(
             self.deps
-                .queuing_deps
+                .enqueuing_deps
                 .test_db
                 .lock()
                 .unwrap()
@@ -876,7 +879,7 @@ where
                 .unwrap(),
         )?;
 
-        Ok(self.queuing.state.tracker.exit_code())
+        Ok(self.generator.state.tracker.exit_code())
     }
 }
 
