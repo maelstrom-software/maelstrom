@@ -49,7 +49,6 @@ pub trait SchedulerDeps {
     type WorkerArtifactFetcherSender;
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
     fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker);
-    #[allow(dead_code)]
     fn send_message_to_monitor(
         &mut self,
         sender: &mut Self::MonitorSender,

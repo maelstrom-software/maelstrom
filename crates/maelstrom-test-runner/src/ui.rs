@@ -470,7 +470,6 @@ impl JobStatusEntry {
 }
 
 struct CompletedJob {
-    #[allow(dead_code)]
     name: String,
     status: UiJobStatus,
 }
