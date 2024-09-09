@@ -51,7 +51,7 @@ jobs:
     - name: Disable apparmor container restrictions
       run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
     - name: Get Rust version
-      run: echo "RUST_VERSION=$(rustc --version | cut -d' ' -f2)" >> $GITHUB_ENV
+      run: echo "RUST_VERSION=$(nix develop --command rustc --version | cut -d' ' -f2)" >> $GITHUB_ENV
     - name: Set up Rust Cache
       uses: actions/cache@v4
       with:
