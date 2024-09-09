@@ -50,6 +50,8 @@ jobs:
       run: rm -rf ~/.cargo/bin ~/.rustup
     - name: Disable apparmor container restrictions
       run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+    - name: Install Nix Flake
+      run: nix develop --command echo done
     - name: Get Rust version
       run: echo "RUST_VERSION=$(nix develop --command rustc --version | cut -d' ' -f2)" >> $GITHUB_ENV
     - name: Set up Rust Cache
