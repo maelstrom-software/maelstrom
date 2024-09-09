@@ -322,6 +322,7 @@ mod tests {
     use maelstrom_util::manifest::AsyncManifestReader;
     use maplit::hashmap;
     use std::collections::HashMap;
+    use std::os::unix::fs::MetadataExt as _;
     use tempfile::tempdir;
 
     fn hash_data(data: &[u8]) -> Sha256Digest {
@@ -928,6 +929,10 @@ mod tests {
         let libb_hash = fix.hash_file(libb_path.as_std_path()).await;
         let ld_linux_hash = fix.hash_file(ld_linux_path.as_std_path()).await;
 
+        let liba_mode = fix.fs.metadata(&liba_path).await.unwrap().mode();
+        let libb_mode = fix.fs.metadata(&libb_path).await.unwrap().mode();
+        let ld_linux_mode = fix.fs.metadata(&ld_linux_path).await.unwrap().mode();
+
         let manifest = fix
             .build_layer(LayerSpec::SharedLibraryDependencies {
                 binary_paths: vec![test_binary.into()],
@@ -942,17 +947,17 @@ mod tests {
             vec![
                 ExpectedManifestEntry::new(
                     liba_path.as_str(),
-                    0o100775,
+                    liba_mode,
                     ManifestEntryData::File(ManifestFileData::Digest(liba_hash)),
                 ),
                 ExpectedManifestEntry::new(
                     libb_path.as_str(),
-                    0o100775,
+                    libb_mode,
                     ManifestEntryData::File(ManifestFileData::Digest(libb_hash)),
                 ),
                 ExpectedManifestEntry::new(
                     ld_linux_path.as_str(),
-                    0o100755,
+                    ld_linux_mode,
                     ManifestEntryData::File(ManifestFileData::Digest(ld_linux_hash)),
                 ),
             ],
