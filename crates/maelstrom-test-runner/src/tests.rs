@@ -1,12 +1,12 @@
 mod fake_test_framework;
 
 use crate::{
+    app::{EnqueueResult, MainApp, NotCollected},
     config::{Repeat, StopAfter},
     introspect_driver::IntrospectDriver,
     test_db::TestDbStore,
     ui::{self, Ui as _},
-    BuildDir, ClientTrait, EnqueueResult, ListAction, MainApp, MainAppCombinedDeps, MainAppDeps,
-    NotCollected,
+    BuildDir, ClientTrait, ListAction, MainAppCombinedDeps, MainAppDeps,
 };
 use anyhow::Result;
 use fake_test_framework::{
