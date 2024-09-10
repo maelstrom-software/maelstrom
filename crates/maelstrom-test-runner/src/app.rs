@@ -1,15 +1,17 @@
+mod introspect_driver;
+mod visitor;
+
 #[cfg(test)]
 mod tests;
 
 use crate::config::{Repeat, StopAfter};
-use crate::introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use crate::metadata::AllMetadata;
 use crate::test_db::{CaseOutcome, TestDbStore};
 use crate::ui::{Ui, UiJobEnqueued, UiJobId, UiSender};
-use crate::visitor::{JobStatusTracker, JobStatusVisitor};
 use crate::*;
 use anyhow::Result;
 use derive_more::From;
+use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use maelstrom_base::{JobRootOverlay, Timeout};
 use maelstrom_client::{
     spec::{ContainerSpec, JobSpec},
@@ -21,6 +23,7 @@ use std::{
     mem, str,
     sync::{Arc, Mutex},
 };
+use visitor::{JobStatusTracker, JobStatusVisitor};
 
 /// A collection of dependencies that are used while enqueuing jobs.
 struct EnqueuingDeps<TestCollectorT: CollectTests> {

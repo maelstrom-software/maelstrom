@@ -1,8 +1,7 @@
 use crate::fake_test_framework;
 use crate::{
-    app::{EnqueueResult, MainApp, NotCollected},
+    app::{introspect_driver::IntrospectDriver, EnqueueResult, MainApp, NotCollected},
     config::{Repeat, StopAfter},
-    introspect_driver::IntrospectDriver,
     test_db::TestDbStore,
     ui::{self, Ui as _},
     BuildDir, ClientTrait, ListAction, MainAppCombinedDeps, MainAppDeps,

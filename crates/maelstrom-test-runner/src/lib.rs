@@ -2,11 +2,9 @@ mod alternative_mains;
 mod app;
 pub mod config;
 mod deps;
-mod introspect_driver;
 pub mod metadata;
 pub mod test_db;
 pub mod ui;
-pub mod visitor;
 
 #[cfg(test)]
 pub mod fake_test_framework;
