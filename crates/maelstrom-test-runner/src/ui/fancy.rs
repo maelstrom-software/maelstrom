@@ -687,13 +687,10 @@ impl Widget for &mut FancyUi {
         let mut sections = vec![];
 
         if self.all_done.is_none() {
-            if self.jobs.running() > 0 {
-                let max_height = (self.jobs.running() + 2).try_into().unwrap_or(u16::MAX);
-                sections.push((
-                    Constraint::Max(max_height),
-                    FancyUi::render_running_tests as SectionFnPtr,
-                ));
-            }
+            sections.push((
+                Constraint::Fill(1),
+                FancyUi::render_running_tests as SectionFnPtr,
+            ));
             if !self.remote_progress.is_empty() {
                 let max_height = self.remote_progress.len().try_into().unwrap_or(u16::MAX);
                 sections.push((
