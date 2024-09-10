@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate::config::{Repeat, StopAfter};
 use crate::introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use crate::metadata::AllMetadata;

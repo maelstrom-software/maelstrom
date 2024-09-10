@@ -1,5 +1,4 @@
-mod fake_test_framework;
-
+use crate::fake_test_framework;
 use crate::{
     app::{EnqueueResult, MainApp, NotCollected},
     config::{Repeat, StopAfter},

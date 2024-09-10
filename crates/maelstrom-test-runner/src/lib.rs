@@ -9,7 +9,7 @@ pub mod ui;
 pub mod visitor;
 
 #[cfg(test)]
-mod tests;
+pub mod fake_test_framework;
 
 pub use app::{run_app_with_ui_multithreaded, MainAppCombinedDeps};
 pub use deps::*;
