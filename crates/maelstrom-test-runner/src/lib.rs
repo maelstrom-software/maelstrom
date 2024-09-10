@@ -471,12 +471,7 @@ where
             "selected_packages" => ?Vec::from_iter(selected_packages.keys()),
         );
 
-        let building_tests = !selected_packages.is_empty()
-            && matches!(
-                enqueuing_deps.list_action,
-                None | Some(ListAction::ListTests)
-            );
-
+        let building_tests = !selected_packages.is_empty();
         let (wait_handle, artifacts) = building_tests
             .then(|| {
                 deps.test_collector().start(
