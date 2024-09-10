@@ -1,5 +1,6 @@
 mod alternative_mains;
 mod app;
+mod app2;
 pub mod config;
 mod deps;
 pub mod metadata;
@@ -10,6 +11,10 @@ pub mod ui;
 pub mod fake_test_framework;
 
 pub use app::{run_app_with_ui_multithreaded, MainAppCombinedDeps};
+pub use app2::{
+    run_app_with_ui_multithreaded as run_app_with_ui_multithreaded2,
+    MainAppCombinedDeps as MainAppCombinedDeps2,
+};
 pub use deps::*;
 
 use anyhow::Result;
