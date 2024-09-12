@@ -462,7 +462,7 @@ async fn dispatcher_main(
     let mount_dir = config.cache_root.join::<MountDir>("mount");
     let tmpfs_dir = config.cache_root.join::<TmpfsDir>("upper");
     let cache_root = config.cache_root.join::<CacheDir>("artifacts");
-    let blob_dir = cache_root.join::<BlobDir>("blob/sha256");
+    let blob_dir = cache_root.join::<BlobDir>("sha256/blob");
 
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
     let cache = Cache::new(StdFs, cache_root, config.cache_size, log.clone());

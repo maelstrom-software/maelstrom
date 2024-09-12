@@ -240,14 +240,14 @@ impl<FsT: Fs> Cache<FsT> {
         }
         path.pop();
 
+        path.push("sha256");
         for kind in EntryKind::iter() {
-            let mut path = path.clone();
             path.push(kind.to_string());
-            path.push("sha256");
             if fs.file_exists(&path) {
                 Self::remove_in_background(&mut fs, &root, &path);
             }
             fs.mkdir_recursively(&path);
+            path.pop();
         }
 
         Cache {
@@ -405,8 +405,8 @@ impl<FsT: Fs> Cache<FsT> {
     /// Return the directory path for the artifact referenced by `digest`.
     fn cache_path(root: &Path, key: &Key) -> PathBuf {
         let mut path = root.to_owned();
-        path.push(key.kind.to_string());
         path.push("sha256");
+        path.push(key.kind.to_string());
         path.push(key.digest.to_string());
         path
     }
@@ -633,12 +633,12 @@ mod tests {
         fixture.get_artifact(
             digest!(42),
             jid!(1),
-            GetArtifact::Get(long_path!("/z/blob/sha256", 42)),
+            GetArtifact::Get(long_path!("/z/sha256/blob", 42)),
         );
         fixture.got_artifact_success(
             digest!(42),
             100,
-            (long_path!("/z/blob/sha256", 42), vec![jid!(1)]),
+            (long_path!("/z/sha256/blob", 42), vec![jid!(1)]),
             vec![],
         );
     }
@@ -651,7 +651,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(42),
             10000,
-            (long_path!("/z/blob/sha256", 42), vec![jid!(1)]),
+            (long_path!("/z/sha256/blob", 42), vec![jid!(1)]),
             vec![],
         );
 
@@ -660,7 +660,7 @@ mod tests {
             vec![
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
-                    long_path!("/z/blob/sha256", 42),
+                    long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 1)),
@@ -684,11 +684,11 @@ mod tests {
         fixture.got_artifact_success(
             digest!(3),
             4,
-            (long_path!("/z/blob/sha256", 3), vec![jid!(3)]),
+            (long_path!("/z/sha256/blob", 3), vec![jid!(3)]),
             vec![
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
-                    long_path!("/z/blob/sha256", 1),
+                    long_path!("/z/sha256/blob", 1),
                     short_path!("/z/removing", 1),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 1)),
@@ -700,11 +700,11 @@ mod tests {
         fixture.got_artifact_success(
             digest!(4),
             4,
-            (long_path!("/z/blob/sha256", 4), vec![jid!(4)]),
+            (long_path!("/z/sha256/blob", 4), vec![jid!(4)]),
             vec![
                 FileExists(short_path!("/z/removing", 2)),
                 Rename(
-                    long_path!("/z/blob/sha256", 2),
+                    long_path!("/z/sha256/blob", 2),
                     short_path!("/z/removing", 2),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 2)),
@@ -734,11 +734,11 @@ mod tests {
         fixture.got_artifact_success(
             digest!(4),
             3,
-            (long_path!("/z/blob/sha256", 4), vec![jid!(4)]),
+            (long_path!("/z/sha256/blob", 4), vec![jid!(4)]),
             vec![
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
-                    long_path!("/z/blob/sha256", 3),
+                    long_path!("/z/sha256/blob", 3),
                     short_path!("/z/removing", 1),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 1)),
@@ -758,7 +758,7 @@ mod tests {
             digest!(42),
             100,
             (
-                long_path!("/z/blob/sha256", 42),
+                long_path!("/z/sha256/blob", 42),
                 vec![jid!(1), jid!(2), jid!(3)],
             ),
             vec![],
@@ -777,7 +777,7 @@ mod tests {
             digest!(42),
             10000,
             (
-                long_path!("/z/blob/sha256", 42),
+                long_path!("/z/sha256/blob", 42),
                 vec![jid!(1), jid!(2), jid!(3)],
             ),
             vec![],
@@ -790,7 +790,7 @@ mod tests {
             vec![
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
-                    long_path!("/z/blob/sha256", 42),
+                    long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 1)),
@@ -808,7 +808,7 @@ mod tests {
         fixture.get_artifact(
             digest!(42),
             jid!(1),
-            GetArtifact::Success(long_path!("/z/blob/sha256", 42)),
+            GetArtifact::Success(long_path!("/z/sha256/blob", 42)),
         );
 
         fixture.decrement_ref_count(digest!(42), vec![]);
@@ -817,7 +817,7 @@ mod tests {
             vec![
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
-                    long_path!("/z/blob/sha256", 42),
+                    long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 1)),
@@ -836,17 +836,17 @@ mod tests {
         fixture.get_artifact(
             digest!(42),
             jid!(2),
-            GetArtifact::Success(long_path!("/z/blob/sha256", 42)),
+            GetArtifact::Success(long_path!("/z/sha256/blob", 42)),
         );
         fixture.get_artifact(
             digest!(43),
             jid!(3),
-            GetArtifact::Get(long_path!("/z/blob/sha256", 43)),
+            GetArtifact::Get(long_path!("/z/sha256/blob", 43)),
         );
         fixture.got_artifact_success(
             digest!(43),
             100,
-            (long_path!("/z/blob/sha256", 43), vec![jid!(3)]),
+            (long_path!("/z/sha256/blob", 43), vec![jid!(3)]),
             vec![],
         );
 
@@ -855,7 +855,7 @@ mod tests {
             vec![
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
-                    long_path!("/z/blob/sha256", 42),
+                    long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 1)),
@@ -871,7 +871,7 @@ mod tests {
         fixture.got_artifact_failure(
             digest!(42),
             vec![jid!(1)],
-            vec![FileExists(long_path!("/z/blob/sha256", 42))],
+            vec![FileExists(long_path!("/z/sha256/blob", 42))],
         );
     }
 
@@ -880,13 +880,13 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
-            .insert(long_path!("/z/blob/sha256", 42));
+            .insert(long_path!("/z/sha256/blob", 42));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
         fixture.get_artifact(
             digest!(42),
             jid!(1),
-            GetArtifact::Get(long_path!("/z/blob/sha256", 42)),
+            GetArtifact::Get(long_path!("/z/sha256/blob", 42)),
         );
     }
 
@@ -895,7 +895,7 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
-            .insert(long_path!("/z/blob/sha256", 42));
+            .insert(long_path!("/z/sha256/blob", 42));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
@@ -904,10 +904,10 @@ mod tests {
             digest!(42),
             vec![jid!(1)],
             vec![
-                FileExists(long_path!("/z/blob/sha256", 42)),
+                FileExists(long_path!("/z/sha256/blob", 42)),
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
-                    long_path!("/z/blob/sha256", 42),
+                    long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 1)),
@@ -920,7 +920,7 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
-            .insert(long_path!("/z/blob/sha256", 42));
+            .insert(long_path!("/z/sha256/blob", 42));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
@@ -931,10 +931,10 @@ mod tests {
             digest!(42),
             vec![jid!(1), jid!(2), jid!(3)],
             vec![
-                FileExists(long_path!("/z/blob/sha256", 42)),
+                FileExists(long_path!("/z/sha256/blob", 42)),
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
-                    long_path!("/z/blob/sha256", 42),
+                    long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 1)),
@@ -951,13 +951,13 @@ mod tests {
         fixture.got_artifact_failure(
             digest!(42),
             vec![jid!(1)],
-            vec![FileExists(long_path!("/z/blob/sha256", 42))],
+            vec![FileExists(long_path!("/z/sha256/blob", 42))],
         );
 
         fixture.get_artifact(
             digest!(42),
             jid!(2),
-            GetArtifact::Get(long_path!("/z/blob/sha256", 42)),
+            GetArtifact::Get(long_path!("/z/sha256/blob", 42)),
         );
     }
 
@@ -966,7 +966,7 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
-            .insert(long_path!("/z/blob/sha256", 42));
+            .insert(long_path!("/z/sha256/blob", 42));
         test_cache_fs
             .existing_files
             .insert(short_path!("/z/removing", 1));
@@ -984,13 +984,13 @@ mod tests {
             digest!(42),
             vec![jid!(1)],
             vec![
-                FileExists(long_path!("/z/blob/sha256", 42)),
+                FileExists(long_path!("/z/sha256/blob", 42)),
                 FileExists(short_path!("/z/removing", 1)),
                 FileExists(short_path!("/z/removing", 2)),
                 FileExists(short_path!("/z/removing", 3)),
                 FileExists(short_path!("/z/removing", 4)),
                 Rename(
-                    long_path!("/z/blob/sha256", 42),
+                    long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 4),
                 ),
                 RemoveRecursively(short_path!("/z/removing", 4)),
@@ -1004,12 +1004,12 @@ mod tests {
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
-            FileExists(path_buf!("/z/blob/sha256")),
-            MkdirRecursively(path_buf!("/z/blob/sha256")),
-            FileExists(path_buf!("/z/bottom_fs_layer/sha256")),
-            MkdirRecursively(path_buf!("/z/bottom_fs_layer/sha256")),
-            FileExists(path_buf!("/z/upper_fs_layer/sha256")),
-            MkdirRecursively(path_buf!("/z/upper_fs_layer/sha256")),
+            FileExists(path_buf!("/z/sha256/blob")),
+            MkdirRecursively(path_buf!("/z/sha256/blob")),
+            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
+            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
 
@@ -1029,12 +1029,12 @@ mod tests {
             ReadDir(path_buf!("/z/removing")),
             RemoveRecursively(short_path!("/z/removing", 10)),
             RemoveRecursively(short_path!("/z/removing", 20)),
-            FileExists(path_buf!("/z/blob/sha256")),
-            MkdirRecursively(path_buf!("/z/blob/sha256")),
-            FileExists(path_buf!("/z/bottom_fs_layer/sha256")),
-            MkdirRecursively(path_buf!("/z/bottom_fs_layer/sha256")),
-            FileExists(path_buf!("/z/upper_fs_layer/sha256")),
-            MkdirRecursively(path_buf!("/z/upper_fs_layer/sha256")),
+            FileExists(path_buf!("/z/sha256/blob")),
+            MkdirRecursively(path_buf!("/z/sha256/blob")),
+            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
+            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
 
@@ -1043,38 +1043,38 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
-            .insert(path_buf!("/z/blob/sha256"));
+            .insert(path_buf!("/z/sha256/blob"));
         test_cache_fs
             .existing_files
-            .insert(path_buf!("/z/bottom_fs_layer/sha256"));
+            .insert(path_buf!("/z/sha256/bottom_fs_layer"));
         test_cache_fs
             .existing_files
-            .insert(path_buf!("/z/upper_fs_layer/sha256"));
+            .insert(path_buf!("/z/sha256/upper_fs_layer"));
         let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
-            FileExists(path_buf!("/z/blob/sha256")),
+            FileExists(path_buf!("/z/sha256/blob")),
             FileExists(short_path!("/z/removing", 1)),
-            Rename(path_buf!("/z/blob/sha256"), short_path!("/z/removing", 1)),
+            Rename(path_buf!("/z/sha256/blob"), short_path!("/z/removing", 1)),
             RemoveRecursively(short_path!("/z/removing", 1)),
-            MkdirRecursively(path_buf!("/z/blob/sha256")),
-            FileExists(path_buf!("/z/bottom_fs_layer/sha256")),
+            MkdirRecursively(path_buf!("/z/sha256/blob")),
+            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
             FileExists(short_path!("/z/removing", 2)),
             Rename(
-                path_buf!("/z/bottom_fs_layer/sha256"),
+                path_buf!("/z/sha256/bottom_fs_layer"),
                 short_path!("/z/removing", 2),
             ),
             RemoveRecursively(short_path!("/z/removing", 2)),
-            MkdirRecursively(path_buf!("/z/bottom_fs_layer/sha256")),
-            FileExists(path_buf!("/z/upper_fs_layer/sha256")),
+            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
+            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
             FileExists(short_path!("/z/removing", 3)),
             Rename(
-                path_buf!("/z/upper_fs_layer/sha256"),
+                path_buf!("/z/sha256/upper_fs_layer"),
                 short_path!("/z/removing", 3),
             ),
             RemoveRecursively(short_path!("/z/removing", 3)),
-            MkdirRecursively(path_buf!("/z/upper_fs_layer/sha256")),
+            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
 }

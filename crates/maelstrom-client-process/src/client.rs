@@ -390,7 +390,7 @@ impl Client {
                 let mount_dir = cache_root.join::<local_worker::MountDir>("mount");
                 let tmpfs_dir = cache_root.join::<local_worker::TmpfsDir>("upper");
                 let cache_root = cache_root.join::<local_worker::CacheDir>("artifacts");
-                let blob_dir = cache_root.join::<local_worker::BlobDir>("blob/sha256");
+                let blob_dir = cache_root.join::<local_worker::BlobDir>("sha256/blob");
 
                 // Create the local_worker's cache. This is the same cache as the "real" worker
                 // uses.
