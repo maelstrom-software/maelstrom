@@ -14,7 +14,7 @@ See the [0.11.0 release
 notes](https://github.com/maelstrom-software/maelstrom/releases/tag/v0.11.0)
 for a complete list of changes. This post will give a tour of the two large changes.
 
-## New Terminal UI
+### New Terminal UI
 
 We've overhauled our terminal UI to deliver some features we are very excited about.
 
@@ -61,7 +61,7 @@ uploads and container image downloads.
 
 <img src="maelstrom_ui_progress.png" alt="Progress Bar" width="90%"/>
 
-## Go Test Runner
+### Go Test Runner
 
 We're also excited to announce a new Go test runner:
 <tt>maelstrom-go-test</tt>. This is a drop-in replacement for <tt>go test</tt>.
