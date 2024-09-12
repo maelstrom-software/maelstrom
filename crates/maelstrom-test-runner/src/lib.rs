@@ -10,11 +10,24 @@ pub mod ui;
 #[cfg(test)]
 pub mod fake_test_framework;
 
+#[cfg(not(feature = "new-app"))]
 pub use app::{run_app_with_ui_multithreaded, MainAppCombinedDeps};
+
+#[cfg(not(feature = "new-app"))]
 pub use app2::{
     run_app_with_ui_multithreaded as run_app_with_ui_multithreaded2,
     MainAppCombinedDeps as MainAppCombinedDeps2,
 };
+
+#[cfg(feature = "new-app")]
+pub use app2::{run_app_with_ui_multithreaded, MainAppCombinedDeps};
+
+#[cfg(feature = "new-app")]
+pub use app::{
+    run_app_with_ui_multithreaded as run_app_with_ui_multithreaded2,
+    MainAppCombinedDeps as MainAppCombinedDeps2,
+};
+
 pub use deps::*;
 
 use anyhow::Result;
@@ -32,7 +45,7 @@ use std::{
 };
 use ui::{Ui, UiSender, UiSlogDrain};
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NotRunEstimate {
     About(u64),
     Exactly(u64),

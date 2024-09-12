@@ -106,7 +106,7 @@ impl TestArtifactKey for StringArtifactKey {}
 
 pub trait TestPackageId: Clone + Ord + fmt::Debug {}
 
-pub trait TestArtifact: fmt::Debug {
+pub trait TestArtifact: fmt::Debug + Send + Sync + 'static {
     type ArtifactKey: TestArtifactKey;
     type PackageId: TestPackageId;
     type CaseMetadata: TestCaseMetadata;
@@ -128,7 +128,7 @@ pub trait TestArtifact: fmt::Debug {
     ) -> String;
 }
 
-pub trait TestPackage: Clone + fmt::Debug {
+pub trait TestPackage: Clone + fmt::Debug + Send + Sync + 'static {
     type PackageId: TestPackageId;
     type ArtifactKey: TestArtifactKey;
     fn name(&self) -> &str;
@@ -145,7 +145,7 @@ pub trait CollectTests {
         CaseMetadata = Self::CaseMetadata,
     >;
 
-    type BuildHandle: Wait;
+    type BuildHandle: Wait + Send + Sync;
     type PackageId: TestPackageId;
     type Package: TestPackage<PackageId = Self::PackageId, ArtifactKey = Self::ArtifactKey>;
     type ArtifactKey: TestArtifactKey;
@@ -154,7 +154,7 @@ pub trait CollectTests {
         PackageId = Self::PackageId,
         CaseMetadata = Self::CaseMetadata,
     >;
-    type ArtifactStream: Iterator<Item = Result<Self::Artifact>>;
+    type ArtifactStream: Iterator<Item = Result<Self::Artifact>> + Send;
     type CaseMetadata: TestCaseMetadata;
 
     type Options;

@@ -87,6 +87,7 @@ impl<'a, PrintCbT, RetT> PrintWidthCb<'a, RetT> for PrintCbT where
 {
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum UiJobStatus {
     Ok,
     Failure(Option<String>),
@@ -105,6 +106,7 @@ impl UiJobStatus {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct UiJobSummary {
     pub failed: Vec<String>,
     pub ignored: Vec<String>,
@@ -178,6 +180,7 @@ impl UiJobSummary {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct UiJobResult {
     pub name: String,
     pub job_id: UiJobId,
@@ -190,20 +193,41 @@ pub struct UiJobResult {
 #[derive(Debug, Copy, Clone, From, Into, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UiJobId(u32);
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct UiJobUpdate {
     pub job_id: UiJobId,
     pub status: JobRunningStatus,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct UiJobEnqueued {
     pub job_id: UiJobId,
     pub name: String,
 }
 
+pub struct LogRecord(slog_async::AsyncRecord);
+
+// The tests compare UiMessages but slog_async::AsyncRecord isn't comparable, so we hack around
+// that here.
+impl PartialEq<Self> for LogRecord {
+    fn eq(&self, _other: &Self) -> bool {
+        unimplemented!()
+    }
+}
+
+impl Eq for LogRecord {}
+
+impl fmt::Debug for LogRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LogRecord(..)")
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum UiMessage {
     BuildOutputLine(String),
     BuildOutputChunk(Vec<u8>),
-    SlogRecord(slog_async::AsyncRecord),
+    SlogRecord(LogRecord),
     List(String),
     JobUpdated(UiJobUpdate),
     JobFinished(UiJobResult),
@@ -255,7 +279,7 @@ impl UiSender {
 
     /// Display a slog log messages.
     pub fn slog_record(&self, r: slog_async::AsyncRecord) {
-        let _ = self.send.send(UiMessage::SlogRecord(r));
+        let _ = self.send.send(UiMessage::SlogRecord(LogRecord(r)));
     }
 
     /// When being used for listing tests, display a line of listing output.
@@ -306,6 +330,10 @@ impl UiSender {
     /// some kind of "results" or "summary" to the user.
     pub fn finished(&self, summary: UiJobSummary) {
         let _ = self.send.send(UiMessage::AllJobsFinished(summary));
+    }
+
+    pub fn send_raw(&self, msg: UiMessage) {
+        let _ = self.send.send(msg);
     }
 }
 

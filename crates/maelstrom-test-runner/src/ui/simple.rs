@@ -275,7 +275,7 @@ where
                 UiMessage::SlogRecord(r) => {
                     let slog_dec = ProgressSlogDecorator::new(prog, stdout_is_tty);
                     let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
-                    let _ = r.log_to(&slog_drain);
+                    let _ = r.0.log_to(&slog_drain);
                 }
                 UiMessage::JobUpdated(msg) => {
                     jobs.job_updated(msg.job_id, msg.status);

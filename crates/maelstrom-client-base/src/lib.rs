@@ -58,7 +58,7 @@ impl From<proto::Error> for anyhow::Error {
     }
 }
 
-#[derive(IntoProtoBuf, TryFromProtoBuf)]
+#[derive(Debug, PartialEq, Eq, IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::RemoteProgress")]
 pub struct RemoteProgress {
     pub name: String,
@@ -66,7 +66,7 @@ pub struct RemoteProgress {
     pub progress: u64,
 }
 
-#[derive(Default, IntoProtoBuf, TryFromProtoBuf)]
+#[derive(Debug, Default, PartialEq, Eq, IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::IntrospectResponse")]
 pub struct IntrospectResponse {
     pub artifact_uploads: Vec<RemoteProgress>,

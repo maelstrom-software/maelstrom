@@ -275,17 +275,17 @@ pub struct TestCollector {
     pub target_dir: RootBuf<BuildDir>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FakeTestArtifact {
-    name: String,
-    tests: Vec<String>,
-    ignored_tests: Vec<String>,
-    path: PathBuf,
-    package: FakePackageId,
+    pub name: String,
+    pub tests: Vec<String>,
+    pub ignored_tests: Vec<String>,
+    pub path: PathBuf,
+    pub package: FakePackageId,
 }
 
 #[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
-pub struct FakePackageId(String);
+pub struct FakePackageId(pub String);
 
 impl TestPackageId for FakePackageId {}
 
@@ -337,7 +337,7 @@ impl TestArtifact for FakeTestArtifact {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FakeTestPackage {
     pub name: String,
     pub artifacts: Vec<StringArtifactKey>,
@@ -391,6 +391,7 @@ impl TestFilter for FakeTestFilter {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TestOptions;
 
 impl CollectTests for TestCollector {

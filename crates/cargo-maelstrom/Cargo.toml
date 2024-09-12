@@ -11,6 +11,9 @@ repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[features]
+new-app = ["maelstrom-test-runner/new-app"]
+
 [dependencies]
 anyhow.workspace = true
 cargo_metadata.workspace = true

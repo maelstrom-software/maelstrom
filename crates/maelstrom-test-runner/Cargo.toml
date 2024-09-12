@@ -9,6 +9,9 @@ repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[features]
+new-app = []
+
 [dependencies]
 anyhow.workspace = true
 byteorder.workspace = true
@@ -48,8 +51,10 @@ xdg.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+colored-diff.workspace = true
 enum-map.workspace = true
 indoc.workspace = true
+itertools.workspace = true
 maelstrom-test.workspace = true
 maplit.workspace = true
 pretty_assertions.workspace = true

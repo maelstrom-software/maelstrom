@@ -386,7 +386,7 @@ impl Ui for FancyUi {
             match recv.recv_timeout(Duration::from_millis(33)) {
                 Ok(msg) => match msg {
                     UiMessage::SlogRecord(r) => {
-                        let _ = r.log_to(&slog_drain);
+                        let _ = r.0.log_to(&slog_drain);
                         self.print_above.extend(
                             log_lines
                                 .borrow_mut()
