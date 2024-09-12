@@ -1,11 +1,11 @@
 use super::{
-    AllMetadataM, ArtifactM, CaseMetadataM, CollectOptionsM, Deps, MainAppMessage, MainAppMessageM,
-    PackageIdM, PackageM, TestDbM,
+    job_output::build_ui_job_result_and_exit_code, AllMetadataM, ArtifactM, CaseMetadataM,
+    CollectOptionsM, Deps, MainAppMessage, MainAppMessageM, PackageIdM, PackageM, TestDbM,
 };
 use crate::test_db::CaseOutcome;
-use crate::ui::{UiJobId as JobId, UiJobResult, UiJobStatus, UiMessage};
+use crate::ui::{UiJobId as JobId, UiMessage};
 use crate::*;
-use maelstrom_base::{JobRootOverlay, Timeout};
+use maelstrom_base::{ClientJobId, JobOutcomeResult, JobRootOverlay, Timeout};
 use maelstrom_client::{spec::JobSpec, ContainerSpec, JobStatus};
 use maelstrom_util::{ext::OptionExt as _, process::ExitCode};
 use std::collections::{BTreeMap, HashMap};
@@ -24,6 +24,7 @@ pub struct MainApp<'deps, DepsT: Deps> {
     collector_options: &'deps CollectOptionsM<DepsT>,
     num_enqueued: u64,
     fatal_error: Result<()>,
+    exit_code: ExitCode,
 }
 
 impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
@@ -47,6 +48,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             collector_options,
             num_enqueued: 0,
             fatal_error: Ok(()),
+            exit_code: ExitCode::SUCCESS,
         }
     }
 
@@ -171,20 +173,32 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         self.deps.start_shutdown();
     }
 
-    fn receive_job_update(&mut self, job_id: JobId, result: Result<JobStatus>) {
-        if matches!(result, Err(_) | Ok(JobStatus::Completed { .. })) {
-            let name = self.jobs.remove(&job_id).expect("job finishes only once");
-            self.deps.send_ui_msg(UiMessage::JobFinished(UiJobResult {
-                name,
-                job_id,
-                duration: None,
-                status: UiJobStatus::Ok,
-                stdout: vec![],
-                stderr: vec![],
-            }));
+    fn receive_job_finished(
+        &mut self,
+        job_id: JobId,
+        result: Result<(ClientJobId, JobOutcomeResult)>,
+    ) {
+        let name = self.jobs.remove(&job_id).expect("job finishes only once");
+        let (ui_job_res, exit_code) =
+            build_ui_job_result_and_exit_code::<DepsT::TestCollector>(job_id, &name, result);
+        self.deps.send_ui_msg(UiMessage::JobFinished(ui_job_res));
+
+        if self.exit_code == ExitCode::SUCCESS {
+            self.exit_code = exit_code;
         }
 
         self.check_for_done();
+    }
+
+    fn receive_job_update(&mut self, job_id: JobId, result: Result<JobStatus>) {
+        match result {
+            Ok(JobStatus::Completed {
+                client_job_id,
+                result,
+            }) => self.receive_job_finished(job_id, Ok((client_job_id, result))),
+            Err(err) => self.receive_job_finished(job_id, Err(err)),
+            _ => {}
+        }
     }
 
     fn receive_collection_finished(&mut self) {
@@ -196,7 +210,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
     pub fn main_return_value(&mut self) -> Result<ExitCode> {
         mem::replace(&mut self.fatal_error, Ok(()))?;
-        Ok(ExitCode::SUCCESS)
+        Ok(self.exit_code)
     }
 
     pub fn receive_message(&mut self, message: MainAppMessageM<DepsT>) {

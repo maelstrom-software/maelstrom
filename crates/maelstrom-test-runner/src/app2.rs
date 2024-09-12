@@ -1,3 +1,4 @@
+mod job_output;
 mod main_app;
 
 #[cfg(test)]

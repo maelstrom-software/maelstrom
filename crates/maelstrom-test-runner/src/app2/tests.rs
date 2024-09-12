@@ -9,7 +9,7 @@ use crate::{NoCaseMetadata, StringArtifactKey};
 use anyhow::anyhow;
 use itertools::Itertools as _;
 use maelstrom_base::{
-    ClientJobId, JobCompleted, JobDevice, JobEffects, JobMount, JobNetwork, JobOutcome,
+    ClientJobId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork, JobOutcome,
     JobOutputResult, JobRootOverlay, JobTerminationStatus,
 };
 use maelstrom_client::{
@@ -17,6 +17,7 @@ use maelstrom_client::{
     JobStatus,
 };
 use maelstrom_simex::SimulationExplorer;
+use maelstrom_util::process::ExitCode;
 use std::cell::RefCell;
 use std::str::FromStr as _;
 use std::time::Duration;
@@ -168,21 +169,35 @@ fn default_metadata() -> AllMetadata<FakeTestFilter> {
 
 macro_rules! script_test {
     ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
-        paste::paste! {
-            #[test]
-            fn $test_name() {
-                let deps = TestDeps::default();
-                let all_metadata = default_metadata();
-                let test_db = TestDb::default();
-                let collector_options = TestOptions;
-                let mut fixture = Fixture::new(&deps, &all_metadata, test_db, &collector_options);
-                $(
-                    fixture.receive_message($in_msg);
-                    fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
-                )+
-                fixture.assert_return_value("Ok(ExitCode(Success))");
-            }
+        script_test!($test_name, ExitCode::SUCCESS, $($in_msg => { $($out_msg,)* };)+);
+    };
+    ($test_name:ident, $exit_code:expr, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
+        #[test]
+        fn $test_name() {
+            let deps = TestDeps::default();
+            let all_metadata = default_metadata();
+            let test_db = TestDb::default();
+            let collector_options = TestOptions;
+            let mut fixture = Fixture::new(&deps, &all_metadata, test_db, &collector_options);
+            $(
+                fixture.receive_message($in_msg);
+                fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
+            )+
+            fixture.assert_return_value(&format!("Ok({:?})", $exit_code));
+        }
+    }
+}
 
+macro_rules! script_test_with_error_simex {
+    ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
+        script_test_with_error_simex!(
+            $test_name, ExitCode::SUCCESS, $($in_msg => { $($out_msg,)* };)+
+        );
+    };
+    ($test_name:ident, $exit_code:expr, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
+        script_test!($test_name, $exit_code, $($in_msg => { $($out_msg,)* };)+);
+
+        paste::paste! {
             #[test]
             fn [< $test_name _error_simex >] () {
                 let mut simex = SimulationExplorer::default();
@@ -207,7 +222,7 @@ macro_rules! script_test {
                 }
             }
         }
-    };
+    }
 }
 
 fn fake_pkg<'a>(name: &str, artifacts: impl IntoIterator<Item = &'a str>) -> FakeTestPackage {
@@ -264,7 +279,7 @@ fn default_container() -> ContainerRef {
     })
 }
 
-script_test! {
+script_test_with_error_simex! {
     no_packages,
     Start => {
         GetPackages
@@ -274,7 +289,7 @@ script_test! {
     }
 }
 
-script_test! {
+script_test_with_error_simex! {
     no_artifacts,
     Start => {
         GetPackages
@@ -294,7 +309,7 @@ script_test! {
     };
 }
 
-script_test! {
+script_test_with_error_simex! {
     no_tests_listed,
     Start => {
         GetPackages
@@ -326,8 +341,399 @@ script_test! {
     };
 }
 
-script_test! {
-    single_test,
+macro_rules! test_output_test_inner {
+    ($macro_name:ident, $name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr) => {
+        $macro_name! {
+            $name,
+            $exit_code,
+            Start => {
+                GetPackages
+            };
+            Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+                StartCollection {
+                    color: false,
+                    options: TestOptions,
+                    packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+                }
+            };
+            ArtifactBuilt {
+                artifact: fake_artifact("foo_test", "foo_pkg"),
+            } => {
+                ListTests {
+                    artifact: fake_artifact("foo_test", "foo_pkg"),
+                }
+            };
+            TestsListed {
+                artifact: fake_artifact("foo_test", "foo_pkg"),
+                listing: vec![("test_a".into(), NoCaseMetadata)]
+            } => {
+                AddJob {
+                    job_id: JobId::from(1),
+                    spec: JobSpec {
+                        container: default_container(),
+                        program: "/foo_test_bin".into(),
+                        arguments: vec![
+                            "test_a".into(),
+                        ],
+                        timeout: None,
+                        estimated_duration: None,
+                        allocate_tty: None,
+                        priority: 1,
+                    },
+                },
+                SendUiMsg {
+                    msg: UiMessage::UpdatePendingJobsCount(1)
+                }
+            };
+            CollectionFinished => {
+                SendUiMsg {
+                    msg: UiMessage::DoneQueuingJobs,
+                }
+            };
+            JobUpdate { job_id: JobId::from(1), result: $job_outcome.map(|result| {
+                JobStatus::Completed {
+                    client_job_id: ClientJobId::from(1),
+                    result,
+                }
+            })} => {
+                SendUiMsg {
+                    msg: UiMessage::JobFinished($job_result)
+                },
+                StartShutdown
+            };
+        }
+    };
+}
+
+macro_rules! test_output_test {
+    ($name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr) => {
+        test_output_test_inner!(script_test, $name, $job_outcome, $job_result, $exit_code);
+    };
+}
+
+macro_rules! test_output_test_with_error_simex {
+    ($name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr) => {
+        test_output_test_inner!(
+            script_test_with_error_simex,
+            $name,
+            $job_outcome,
+            $job_result,
+            $exit_code
+        );
+    };
+}
+
+test_output_test_with_error_simex! {
+    single_test_success,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(0),
+        effects: JobEffects {
+            stdout: JobOutputResult::None,
+            stderr: JobOutputResult::None,
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::Ok,
+        stdout: vec![],
+        stderr: vec![],
+    },
+    ExitCode::SUCCESS
+}
+
+test_output_test! {
+    single_test_non_zero_status_code,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(1),
+        effects: JobEffects {
+            stdout: JobOutputResult::None,
+            stderr: JobOutputResult::None,
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::Failure(None),
+        stdout: vec![],
+        stderr: vec![],
+    },
+    ExitCode::from(1)
+}
+
+test_output_test! {
+    single_test_signaled,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Signaled(9),
+        effects: JobEffects {
+            stdout: JobOutputResult::None,
+            stderr: JobOutputResult::Inline(b"signal yo".as_slice().into()),
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::Failure(Some("killed by signal 9".into())),
+        stdout: vec![],
+        stderr: vec!["signal yo".into()],
+    },
+    ExitCode::FAILURE
+}
+
+test_output_test! {
+    single_test_timed_out,
+    Ok(Ok(JobOutcome::TimedOut(
+        JobEffects {
+            stdout: JobOutputResult::None,
+            stderr: JobOutputResult::None,
+            duration: Duration::from_secs(1)
+        }
+    ))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::TimedOut,
+        stdout: vec![],
+        stderr: vec![],
+    },
+    ExitCode::FAILURE
+}
+
+test_output_test! {
+    single_test_execution_error,
+    Ok(Err(JobError::Execution("test error".into()))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: None,
+        status: UiJobStatus::Error("execution error: test error".into()),
+        stdout: vec![],
+        stderr: vec![],
+    },
+    ExitCode::FAILURE
+}
+
+test_output_test! {
+    single_test_system,
+    Ok(Err(JobError::System("test error".into()))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: None,
+        status: UiJobStatus::Error("system error: test error".into()),
+        stdout: vec![],
+        stderr: vec![],
+    },
+    ExitCode::FAILURE
+}
+
+test_output_test! {
+    single_test_remote_error,
+    Err(anyhow!("test error")),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: None,
+        status: UiJobStatus::Error("remote error: test error".into()),
+        stdout: vec![],
+        stderr: vec![],
+    },
+    ExitCode::FAILURE
+}
+
+test_output_test! {
+    single_test_stdout_stderr_preserved_on_failure,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(1),
+        effects: JobEffects {
+            stdout: JobOutputResult::Inline(b"hello\nstdout".as_slice().into()),
+            stderr: JobOutputResult::Inline(b"hello\nstderr".as_slice().into()),
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::Failure(None),
+        stdout: vec!["hello".into(), "stdout".into()],
+        stderr: vec!["hello".into(), "stderr".into()],
+    },
+    ExitCode::from(1)
+}
+
+test_output_test! {
+    single_test_stdout_stderr_preserved_on_timeout,
+    Ok(Ok(JobOutcome::TimedOut(
+        JobEffects {
+            stdout: JobOutputResult::Inline(b"hello\nstdout".as_slice().into()),
+            stderr: JobOutputResult::Inline(b"hello\nstderr".as_slice().into()),
+            duration: Duration::from_secs(1)
+        }
+    ))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::TimedOut,
+        stdout: vec!["hello".into(), "stdout".into()],
+        stderr: vec!["hello".into(), "stderr".into()],
+    },
+    ExitCode::FAILURE
+}
+
+test_output_test! {
+    single_test_stdout_stderr_discarded_on_success,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(0),
+        effects: JobEffects {
+            stdout: JobOutputResult::Inline(b"hello\nstdout".as_slice().into()),
+            stderr: JobOutputResult::Inline(b"hello\nstderr".as_slice().into()),
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::Ok,
+        stdout: vec![],
+        stderr: vec![],
+    },
+    ExitCode::SUCCESS
+}
+
+test_output_test! {
+    single_test_stdout_stderr_truncated,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(1),
+        effects: JobEffects {
+            stdout: JobOutputResult::Truncated {
+                first: b"hello\nstdout".as_slice().into(), truncated: 12
+            },
+            stderr: JobOutputResult::Truncated {
+                first: b"hello\nstderr".as_slice().into(), truncated: 12
+            },
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::Failure(None),
+        stdout: vec![
+            "hello".into(), "stdout".into(), "job 1: stdout truncated, 12 bytes lost".into()
+        ],
+        stderr: vec![
+            "hello".into(), "stderr".into(), "job 1: stderr truncated, 12 bytes lost".into()
+        ],
+    },
+    ExitCode::from(1)
+}
+
+test_output_test! {
+    single_test_ignored_from_output,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(0),
+        effects: JobEffects {
+            stdout: JobOutputResult::Inline(b"fixture: ignoring test test_a".as_slice().into()),
+            stderr: JobOutputResult::None,
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: None,
+        status: UiJobStatus::Ignored,
+        stdout: vec![],
+        stderr: vec![],
+    },
+    ExitCode::SUCCESS
+}
+
+test_output_test! {
+    single_test_ignored_from_truncated_output,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(0),
+        effects: JobEffects {
+            stdout: JobOutputResult::Truncated {
+                first: b"fixture: ignoring test test_a".as_slice().into(),
+                truncated: 12
+            },
+            stderr: JobOutputResult::None,
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: None,
+        status: UiJobStatus::Ignored,
+        stdout: vec![],
+        stderr: vec![],
+    },
+    ExitCode::SUCCESS
+}
+
+test_output_test! {
+    single_test_fixture_output_removed,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(1),
+        effects: JobEffects {
+            stdout: JobOutputResult::Inline(
+                b"fixture: a\ntest stdout\nfixture: b\ntest_a FAILED\n".as_slice().into()
+            ),
+            stderr: JobOutputResult::None,
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::Failure(None),
+        stdout: vec!["test stdout".into()],
+        stderr: vec![],
+    },
+    ExitCode::from(1)
+}
+
+test_output_test! {
+    single_test_fixture_output_removed_truncated,
+    Ok(Ok(JobOutcome::Completed(JobCompleted {
+        status: JobTerminationStatus::Exited(1),
+        effects: JobEffects {
+            stdout: JobOutputResult::Truncated {
+                first: b"fixture: a\ntest stdout\nfixture: b\ntest_a FAILED\n".as_slice().into(),
+                truncated: 12
+            },
+            stderr: JobOutputResult::None,
+            duration: Duration::from_secs(1)
+        }
+    }))),
+    UiJobResult {
+        name: "foo_pkg test_a".into(),
+        job_id: JobId::from(1),
+        duration: Some(Duration::from_secs(1)),
+        status: UiJobStatus::Failure(None),
+        stdout: vec!["test stdout".into(), "job 1: stdout truncated, 12 bytes lost".into()],
+        stderr: vec![],
+    },
+    ExitCode::from(1)
+}
+
+script_test_with_error_simex! {
+    one_failure_one_success_exit_code,
+    ExitCode::from(1),
     Start => {
         GetPackages
     };
@@ -347,7 +753,7 @@ script_test! {
     };
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
-        listing: vec![("test_a".into(), NoCaseMetadata)]
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)]
     } => {
         AddJob {
             job_id: JobId::from(1),
@@ -365,6 +771,23 @@ script_test! {
         },
         SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(1)
+        },
+        AddJob {
+            job_id: JobId::from(2),
+            spec: JobSpec {
+                container: default_container(),
+                program: "/foo_test_bin".into(),
+                arguments: vec![
+                    "test_b".into(),
+                ],
+                timeout: None,
+                estimated_duration: None,
+                allocate_tty: None,
+                priority: 1,
+            },
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(2)
         }
     };
     CollectionFinished => {
@@ -372,24 +795,54 @@ script_test! {
             msg: UiMessage::DoneQueuingJobs,
         }
     };
-    JobUpdate { job_id: JobId::from(1), result: Ok(JobStatus::Completed {
-        client_job_id: ClientJobId::from(1),
-        result: Ok(JobOutcome::Completed(JobCompleted {
-            status: JobTerminationStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: Duration::from_secs(1)
-            }
-        }))
-    }) } => {
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: Ok(JobStatus::Completed {
+            client_job_id: ClientJobId::from(1),
+            result: Ok(JobOutcome::Completed(JobCompleted {
+                status: JobTerminationStatus::Exited(1),
+                effects: JobEffects {
+                    stdout: JobOutputResult::None,
+                    stderr: JobOutputResult::None,
+                    duration: Duration::from_secs(1)
+                }
+            }))
+        })
+    } => {
         SendUiMsg {
             msg: UiMessage::JobFinished(
                 UiJobResult {
                     name: "foo_pkg test_a".into(),
                     job_id: JobId::from(1),
-                    duration: None,
-                    status: UiJobStatus::Ok,
+                    duration: Some(Duration::from_secs(1)),
+                    status: UiJobStatus::Failure(None),
+                    stdout: vec![],
+                    stderr: vec![],
+                }
+            )
+        },
+    };
+    JobUpdate {
+        job_id: JobId::from(2),
+        result: Ok(JobStatus::Completed {
+            client_job_id: ClientJobId::from(1),
+            result: Ok(JobOutcome::Completed(JobCompleted {
+                status: JobTerminationStatus::Exited(1),
+                effects: JobEffects {
+                    stdout: JobOutputResult::None,
+                    stderr: JobOutputResult::None,
+                    duration: Duration::from_secs(1)
+                }
+            }))
+        })
+    } => {
+        SendUiMsg {
+            msg: UiMessage::JobFinished(
+                UiJobResult {
+                    name: "foo_pkg test_b".into(),
+                    job_id: JobId::from(2),
+                    duration: Some(Duration::from_secs(1)),
+                    status: UiJobStatus::Failure(None),
                     stdout: vec![],
                     stderr: vec![],
                 }

@@ -440,6 +440,12 @@ impl CollectTests for TestCollector {
             .collect()
     }
 
+    fn was_test_ignored(case_str: &str, lines: &[String]) -> bool {
+        lines
+            .into_iter()
+            .any(|line| line == &format!("fixture: ignoring test {case_str}"))
+    }
+
     fn get_packages(&self, _ui: &ui::UiSender) -> Result<Vec<FakeTestPackage>> {
         Ok(self.tests.packages())
     }
