@@ -3,17 +3,18 @@ title = "About Maelstrom"
 template = "index.html"
 +++
 
-Maelstrom packages your tests into hermetic micro-containers, then distributes them to be run on an
-arbitrarily large cluster of test-runners, or locally on your machine. You might use Maelstrom to
-run your tests because:
+Maelstrom packages your tests into micro-containers, then distributes them to be run on an
+arbitrarily large cluster of test-runners, or locally on your machine using a custom-built, super-fast container runtime. 
 
 <a href="https://maelstrom-software.com/doc/book/latest/" class="rightimg wrap"><img src="images/Architecture Small.png" alt="" /></a>
+
+You might use Maelstrom to run your tests because:
 
 - **It's easy.** Maelstrom functions as a drop-in replacement for
   <tt>cargo-test</tt>, <tt>go test</tt>, and <tt>pytest</tt>. In most cases, it
   just works with your existing tests with minimal configuration.
-- **It's reliable.** Maelstrom runs every test hermetically in its own lightweight container and
-  runs each test independently, eliminating confusing errors caused by inter-test or implicit
+- **It's reliable.** Maelstrom runs every test isolated in its own lightweight container and
+  runs each test independently, eliminating errors caused by inter-test or implicit
   test-environment dependencies.
 - **It's scalable.** You can run Maelstrom as a cluster &mdash; add more worker machines to linearly
   increase test throughput.
@@ -28,7 +29,7 @@ run your tests because:
 Maelstrom is currently available for Rust, Go, and Pytest on Linux.  C++,
 Typescript, and Java are coming soon.
 
-While our focus thus far has been on running tests, Maelstrom's underlying job execution system is
+While our focus has been on running tests, Maelstrom's underlying job execution system is
 general-purpose. We provide a command line utility to run arbitrary commands, as well a gRPC-based
 API and Rust bindings for programmatic access and control.
 
