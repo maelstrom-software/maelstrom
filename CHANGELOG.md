@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.0] - 2024-09-12
 
 #### Added
 - `maelstrom-go-test` now edits out some lines from test failures that come
@@ -730,7 +730,7 @@ There were a lot of large changes in this release. At a high level:
 - A Rust test runner that uses the clustered job runner: `cargo-metest`.
 - A bunch of other library packages that are used internally.
 
-[unreleased]: https://github.com/maelstrom-software/maelstrom/compare/v0.11.0...HEAD
+[0.12.0]: https://github.com/maelstrom-software/maelstrom/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/maelstrom-software/maelstrom/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/maelstrom-software/maelstrom/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/maelstrom-software/maelstrom/compare/v0.8.0...v0.9.0
