@@ -1,6 +1,6 @@
 # What is Maelstrom?
 
-Maelstrom is a suite of tools for running tests in hermetic micro-containers
+Maelstrom is a suite of tools for running tests in isolated micro-containers
 locally on your machine or distributed across arbitrarily large clusters.
 Maelstrom currently has test runners for Rust, Go, and Python, with more on the
 way. You might use Maelstrom to run your tests because:
@@ -8,7 +8,7 @@ way. You might use Maelstrom to run your tests because:
 * It's easy. Maelstrom provides drop-in replacements for `cargo test`, `go test`, and
   `pytest`. In most cases, it just works with your existing tests with minimal
   configuration.
-* It's reliable. Maelstrom runs every test hermetically in its own lightweight
+* It's reliable. Maelstrom runs every test isolated in its own lightweight
   container, eliminating confusing errors caused by inter-test or implicit
   test-environment dependencies.
 * It's scalable. Maelstrom can be run as a cluster. You can add more worker machines to

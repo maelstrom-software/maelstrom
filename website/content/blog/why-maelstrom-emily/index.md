@@ -6,7 +6,7 @@ draft = true
 +++
 
 Maelstrom is an open-source, clustered test runner that allows developers to
-run their tests hermetically, in parallel, and with the ability to scale up or
+run their tests isolated, in parallel, and with the ability to scale up or
 down resources as their needs require. We built Maelstrom because the amount of
 waste in the technology industry among developers is staggering.
 
@@ -105,7 +105,7 @@ if it’s passing tests on your machine, it will pass in CI.
 ## Conclusion
 
 These concepts aren’t new. Mainstream discussions about code hygiene
-and best practices identified decades ago that hermetic, early testing is the
+and best practices identified decades ago that isolated, early testing is the
 ideal practice for overall code quality and team efficiency. The thing that’s
 changed is that now we have access to the technology needed to make it a
 practical solution rather than simply a theorhetical one.
@@ -125,7 +125,7 @@ So – who better than us to solve it?
 Today, Maelstrom offers an open source, clustered test runner for rust and
 python, with other languages soon to follow. While the vision of pulling up a
 UI where you can see the second your code breaks may not be realized today,
-Maelstrom offers a wicked-fast, clustered, hermetic testing environment,
+Maelstrom offers a wicked-fast, clustered, isolated testing environment,
 entirely for free.
 
 Check us out on [github](https://github.com/maelstrom-software/maelstrom), and
