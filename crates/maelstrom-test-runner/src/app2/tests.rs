@@ -241,6 +241,58 @@ script_test! {
 }
 
 script_test! {
+    no_artifacts,
+    Start => {
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", [])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", [])]
+        }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        },
+        StartShutdown
+    };
+}
+
+script_test! {
+    no_tests_listed,
+    Start => {
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![]
+    } => {
+        StartShutdown
+    };
+}
+
+script_test! {
     single_test,
     Start => {
         GetPackages
