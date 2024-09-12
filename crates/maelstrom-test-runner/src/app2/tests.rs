@@ -6,6 +6,7 @@ use crate::metadata::{AllMetadata, TestMetadata};
 use crate::test_db::TestDb;
 use crate::ui::{UiJobId as JobId, UiJobResult, UiJobStatus, UiMessage};
 use crate::{NoCaseMetadata, StringArtifactKey};
+use anyhow::anyhow;
 use itertools::Itertools as _;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobDevice, JobEffects, JobMount, JobNetwork, JobOutcome,
@@ -15,6 +16,7 @@ use maelstrom_client::{
     spec::{ContainerRef, ContainerSpec, JobSpec, LayerSpec},
     JobStatus,
 };
+use maelstrom_simex::SimulationExplorer;
 use std::cell::RefCell;
 use std::str::FromStr as _;
 use std::time::Duration;
@@ -139,6 +141,11 @@ impl<'deps> Fixture<'deps> {
     fn receive_message(&mut self, call: MainAppMessageM<TestDeps>) {
         self.app.receive_message(call);
     }
+
+    fn assert_return_value(&mut self, str_expr: &str) {
+        let ret = self.app.main_return_value();
+        assert_eq!(format!("{ret:?}"), str_expr);
+    }
 }
 
 fn default_metadata() -> AllMetadata<FakeTestFilter> {
@@ -161,17 +168,44 @@ fn default_metadata() -> AllMetadata<FakeTestFilter> {
 
 macro_rules! script_test {
     ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
-        #[test]
-        fn $test_name() {
-            let deps = TestDeps::default();
-            let all_metadata = default_metadata();
-            let test_db = TestDb::default();
-            let collector_options = TestOptions;
-            let mut fixture = Fixture::new(&deps, &all_metadata, test_db, &collector_options);
-            $(
-                fixture.receive_message($in_msg);
-                fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
-            )+
+        paste::paste! {
+            #[test]
+            fn $test_name() {
+                let deps = TestDeps::default();
+                let all_metadata = default_metadata();
+                let test_db = TestDb::default();
+                let collector_options = TestOptions;
+                let mut fixture = Fixture::new(&deps, &all_metadata, test_db, &collector_options);
+                $(
+                    fixture.receive_message($in_msg);
+                    fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
+                )+
+                fixture.assert_return_value("Ok(ExitCode(Success))");
+            }
+
+            #[test]
+            fn [< $test_name _error_simex >] () {
+                let mut simex = SimulationExplorer::default();
+                while let Some(mut simulation) = simex.next_simulation() {
+                    let deps = TestDeps::default();
+                    let all_metadata = default_metadata();
+                    let test_db = TestDb::default();
+                    let collector_options = TestOptions;
+                    let mut fixture = Fixture::new(&deps, &all_metadata, test_db, &collector_options);
+                    $(
+                        if simulation.choose_bool() {
+                            fixture.receive_message(FatalError { error: anyhow!("simex error") });
+                            fixture.assert_return_value("Err(simex error)");
+                            continue;
+                        }
+                        fixture.receive_message($in_msg);
+                        fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
+                    )+
+
+                    fixture.receive_message(FatalError { error: anyhow!("simex error") });
+                    fixture.assert_return_value("Err(simex error)");
+                }
+            }
         }
     };
 }

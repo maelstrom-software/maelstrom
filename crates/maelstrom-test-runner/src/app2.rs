@@ -13,6 +13,7 @@ use maelstrom_client::{
 };
 use maelstrom_util::{ext::OptionExt as _, fs::Fs, process::ExitCode, root::Root};
 use std::collections::{BTreeMap, HashMap};
+use std::mem;
 use std::sync::mpsc::{Receiver, Sender};
 
 type ArtifactM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Artifact;
@@ -58,6 +59,7 @@ struct MainApp<'deps, DepsT: Deps> {
     pending_listings: u64,
     collector_options: &'deps CollectOptionsM<DepsT>,
     num_enqueued: u64,
+    fatal_error: Result<()>,
 }
 
 impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
@@ -80,6 +82,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             pending_listings: 0,
             collector_options,
             num_enqueued: 0,
+            fatal_error: Ok(()),
         }
     }
 
@@ -87,7 +90,8 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         self.deps.get_packages();
     }
 
-    fn main_return_value(&self) -> Result<ExitCode> {
+    fn main_return_value(&mut self) -> Result<ExitCode> {
+        mem::replace(&mut self.fatal_error, Ok(()))?;
         Ok(ExitCode::SUCCESS)
     }
 
@@ -203,8 +207,9 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         self.check_for_done();
     }
 
-    fn receive_fatal_error(&mut self, _error: anyhow::Error) {
-        todo!()
+    fn receive_fatal_error(&mut self, error: anyhow::Error) {
+        self.fatal_error = Err(error);
+        self.deps.start_shutdown();
     }
 
     fn receive_job_update(&mut self, job_id: JobId, result: Result<JobStatus>) {
