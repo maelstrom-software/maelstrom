@@ -12,7 +12,9 @@ use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
     ffi::OsString,
-    fmt, fs,
+    fmt,
+    fs::{self, File},
+    io::Write as _,
     iter::IntoIterator,
     mem,
     num::NonZeroU32,
@@ -21,6 +23,8 @@ use std::{
     string::ToString,
     thread,
 };
+
+const CACHEDIR_TAG_CONTENTS: [u8; 43] = *b"Signature: 8a477f597d28d172789f06886806bc55";
 
 /// Dependencies that [Cache] has on the file system.
 pub trait Fs {
@@ -49,6 +53,10 @@ pub trait Fs {
     /// Return and iterator that will yield all of the children of a directory. Panic on file
     /// system error or if `path` doesn't exist or isn't a directory.
     fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>>;
+
+    /// Create a file with given `path` and `contents`. Panic on file system error, including if
+    /// the file already exists.
+    fn create_file(&self, path: &Path, contents: &[u8]);
 }
 
 /// The standard implementation of CacheFs that uses [std] and [rand].
@@ -83,6 +91,10 @@ impl Fs for StdFs {
 
     fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
         Box::new(fs::read_dir(path).unwrap().map(|de| de.unwrap().path()))
+    }
+
+    fn create_file(&self, path: &Path, contents: &[u8]) {
+        File::create_new(path).unwrap().write_all(contents).unwrap();
     }
 }
 
@@ -254,6 +266,12 @@ impl<FsT: Fs> Cache<FsT> {
             &path,
             ["removing", "sha256", "CACHEDIR.TAG"],
         );
+
+        path.push("CACHEDIR.TAG");
+        if !fs.file_exists(&path) {
+            fs.create_file(&path, &CACHEDIR_TAG_CONTENTS);
+        }
+        path.pop();
 
         path.push("sha256");
         fs.mkdir_recursively(&path);
@@ -502,6 +520,7 @@ mod tests {
         RemoveRecursively(PathBuf),
         MkdirRecursively(PathBuf),
         ReadDir(PathBuf),
+        CreateFile(PathBuf, Box<[u8]>),
     }
 
     #[derive(Default)]
@@ -550,6 +569,13 @@ mod tests {
                     .clone()
                     .into_iter(),
             )
+        }
+
+        fn create_file(&self, path: &Path, content: &[u8]) {
+            self.messages.borrow_mut().push(CreateFile(
+                path.to_owned(),
+                content.to_vec().into_boxed_slice(),
+            ));
         }
     }
 
@@ -1045,6 +1071,34 @@ mod tests {
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
+            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            CreateFile(
+                path_buf!("/z/CACHEDIR.TAG"),
+                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
+            ),
+            MkdirRecursively(path_buf!("/z/sha256")),
+            ReadDir(path_buf!("/z/sha256")),
+            FileExists(path_buf!("/z/sha256/blob")),
+            MkdirRecursively(path_buf!("/z/sha256/blob")),
+            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
+            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
+        ]);
+    }
+
+    #[test]
+    fn new_does_not_write_cachedir_tag_if_it_exists() {
+        let mut test_cache_fs = TestFs::default();
+        test_cache_fs
+            .existing_files
+            .insert(path_buf!("/z/CACHEDIR.TAG"));
+        let mut fixture = Fixture::new(test_cache_fs, 1000);
+        fixture.expect_messages_in_specific_order(vec![
+            MkdirRecursively(path_buf!("/z/removing")),
+            ReadDir(path_buf!("/z/removing")),
+            ReadDir(path_buf!("/z")),
+            FileExists(path_buf!("/z/CACHEDIR.TAG")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
@@ -1076,6 +1130,11 @@ mod tests {
             RemoveRecursively(short_path!("/z/removing", 10)),
             RemoveRecursively(short_path!("/z/removing", 20)),
             ReadDir(path_buf!("/z")),
+            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            CreateFile(
+                path_buf!("/z/CACHEDIR.TAG"),
+                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
+            ),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
@@ -1111,6 +1170,11 @@ mod tests {
             FileExists(short_path!("/z/removing", 2)),
             Rename(path_buf!("/z/baz"), short_path!("/z/removing", 2)),
             RemoveRecursively(short_path!("/z/removing", 2)),
+            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            CreateFile(
+                path_buf!("/z/CACHEDIR.TAG"),
+                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
+            ),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
@@ -1139,6 +1203,11 @@ mod tests {
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
+            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            CreateFile(
+                path_buf!("/z/CACHEDIR.TAG"),
+                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
+            ),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(short_path!("/z/removing", 1)),
@@ -1173,6 +1242,11 @@ mod tests {
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
+            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            CreateFile(
+                path_buf!("/z/CACHEDIR.TAG"),
+                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
+            ),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
