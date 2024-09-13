@@ -307,7 +307,7 @@ impl<FsT: Fs> Cache<FsT> {
         jid: JobId,
     ) -> GetArtifact {
         let key = Key::new(kind, digest);
-        let cache_path = Self::cache_path(&self.root, &key);
+        let cache_path = self.cache_path(&key);
         match self.entries.entry(key) {
             HashEntry::Vacant(entry) => {
                 entry.insert(Entry::DownloadingAndExtracting(vec![jid]));
@@ -349,7 +349,7 @@ impl<FsT: Fs> Cache<FsT> {
         let Some(Entry::DownloadingAndExtracting(jobs)) = self.entries.remove(&key) else {
             panic!("Got got_artifact in unexpected state");
         };
-        let cache_path = Self::cache_path(&self.root, &key);
+        let cache_path = self.cache_path(&key);
         if self.fs.file_exists(&cache_path) {
             Self::remove_in_background(&mut self.fs, &self.root, &cache_path);
         }
@@ -389,7 +389,7 @@ impl<FsT: Fs> Cache<FsT> {
             "byte_used_target" => %ByteSize::b(self.bytes_used_target)
         );
         self.possibly_remove_some();
-        (Self::cache_path(&self.root, &key), jobs)
+        (self.cache_path(&key), jobs)
     }
 
     /// Notify the cache that a reference to an artifact is no longer needed.
@@ -461,9 +461,8 @@ impl<FsT: Fs> Cache<FsT> {
     }
 
     /// Return the directory path for the artifact referenced by `digest`.
-    fn cache_path(root: &Path, key: &Key) -> PathBuf {
-        let mut path = root.to_owned();
-        path.push("sha256");
+    fn cache_path(&self, key: &Key) -> PathBuf {
+        let mut path = self.root.join("sha256");
         path.push(key.kind.to_string());
         path.push(key.digest.to_string());
         path
@@ -479,11 +478,8 @@ impl<FsT: Fs> Cache<FsT> {
             let Some(Entry::InHeap { bytes_used, .. }) = self.entries.remove(&key) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
-            Self::remove_in_background(
-                &mut self.fs,
-                &self.root,
-                &Self::cache_path(&self.root, &key),
-            );
+            let cache_path = self.cache_path(&key);
+            Self::remove_in_background(&mut self.fs, &self.root, &cache_path);
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
                 "key" => ?key,
