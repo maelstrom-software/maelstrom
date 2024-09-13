@@ -243,6 +243,18 @@ fn fake_artifact(name: &str, pkg: &str) -> FakeTestArtifact {
     }
 }
 
+fn test_spec(name: &str) -> JobSpec {
+    JobSpec {
+        container: default_container(),
+        program: "/foo_test_bin".into(),
+        arguments: vec![name.into()],
+        timeout: None,
+        estimated_duration: None,
+        allocate_tty: None,
+        priority: 1,
+    }
+}
+
 fn default_container() -> ContainerRef {
     ContainerRef::Inline(ContainerSpec {
         image: None,
@@ -335,7 +347,8 @@ script_test_with_error_simex! {
     };
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
-        listing: vec![]
+        listing: vec![],
+        ignored_listing: vec![]
     } => {
         StartShutdown
     };
@@ -365,21 +378,12 @@ macro_rules! test_output_test_inner {
             };
             TestsListed {
                 artifact: fake_artifact("foo_test", "foo_pkg"),
-                listing: vec![("test_a".into(), NoCaseMetadata)]
+                listing: vec![("test_a".into(), NoCaseMetadata)],
+                ignored_listing: vec![]
             } => {
                 AddJob {
                     job_id: JobId::from(1),
-                    spec: JobSpec {
-                        container: default_container(),
-                        program: "/foo_test_bin".into(),
-                        arguments: vec![
-                            "test_a".into(),
-                        ],
-                        timeout: None,
-                        estimated_duration: None,
-                        allocate_tty: None,
-                        priority: 1,
-                    },
+                    spec: test_spec("test_a"),
                 },
                 SendUiMsg {
                     msg: UiMessage::UpdatePendingJobsCount(1)
@@ -731,6 +735,31 @@ test_output_test! {
     ExitCode::from(1)
 }
 
+fn job_status_complete(exit_code: u8) -> anyhow::Result<JobStatus> {
+    Ok(JobStatus::Completed {
+        client_job_id: ClientJobId::from(1),
+        result: Ok(JobOutcome::Completed(JobCompleted {
+            status: JobTerminationStatus::Exited(exit_code),
+            effects: JobEffects {
+                stdout: JobOutputResult::None,
+                stderr: JobOutputResult::None,
+                duration: Duration::from_secs(1),
+            },
+        })),
+    })
+}
+
+fn ui_job_result(name: &str, job_id: u32, status: UiJobStatus) -> UiMessage {
+    UiMessage::JobFinished(UiJobResult {
+        name: name.into(),
+        job_id: JobId::from(job_id),
+        duration: (!matches!(status, UiJobStatus::Ignored)).then_some(Duration::from_secs(1)),
+        status,
+        stdout: vec![],
+        stderr: vec![],
+    })
+}
+
 script_test_with_error_simex! {
     one_failure_one_success_exit_code,
     ExitCode::from(1),
@@ -753,38 +782,19 @@ script_test_with_error_simex! {
     };
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
-        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)]
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
     } => {
         AddJob {
             job_id: JobId::from(1),
-            spec: JobSpec {
-                container: default_container(),
-                program: "/foo_test_bin".into(),
-                arguments: vec![
-                    "test_a".into(),
-                ],
-                timeout: None,
-                estimated_duration: None,
-                allocate_tty: None,
-                priority: 1,
-            },
+            spec: test_spec("test_a"),
         },
         SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(1)
         },
         AddJob {
             job_id: JobId::from(2),
-            spec: JobSpec {
-                container: default_container(),
-                program: "/foo_test_bin".into(),
-                arguments: vec![
-                    "test_b".into(),
-                ],
-                timeout: None,
-                estimated_duration: None,
-                allocate_tty: None,
-                priority: 1,
-            },
+            spec: test_spec("test_b"),
         },
         SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(2)
@@ -797,56 +807,73 @@ script_test_with_error_simex! {
     };
     JobUpdate {
         job_id: JobId::from(1),
-        result: Ok(JobStatus::Completed {
-            client_job_id: ClientJobId::from(1),
-            result: Ok(JobOutcome::Completed(JobCompleted {
-                status: JobTerminationStatus::Exited(1),
-                effects: JobEffects {
-                    stdout: JobOutputResult::None,
-                    stderr: JobOutputResult::None,
-                    duration: Duration::from_secs(1)
-                }
-            }))
-        })
+        result: job_status_complete(1),
     } => {
         SendUiMsg {
-            msg: UiMessage::JobFinished(
-                UiJobResult {
-                    name: "foo_pkg test_a".into(),
-                    job_id: JobId::from(1),
-                    duration: Some(Duration::from_secs(1)),
-                    status: UiJobStatus::Failure(None),
-                    stdout: vec![],
-                    stderr: vec![],
-                }
-            )
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Failure(None)),
         },
     };
     JobUpdate {
         job_id: JobId::from(2),
-        result: Ok(JobStatus::Completed {
-            client_job_id: ClientJobId::from(1),
-            result: Ok(JobOutcome::Completed(JobCompleted {
-                status: JobTerminationStatus::Exited(1),
-                effects: JobEffects {
-                    stdout: JobOutputResult::None,
-                    stderr: JobOutputResult::None,
-                    duration: Duration::from_secs(1)
-                }
-            }))
-        })
+        result: job_status_complete(0),
     } => {
         SendUiMsg {
-            msg: UiMessage::JobFinished(
-                UiJobResult {
-                    name: "foo_pkg test_b".into(),
-                    job_id: JobId::from(2),
-                    duration: Some(Duration::from_secs(1)),
-                    status: UiJobStatus::Failure(None),
-                    stdout: vec![],
-                    stderr: vec![],
-                }
-            )
+            msg: ui_job_result("foo_pkg test_b", 2, UiJobStatus::Ok),
+        },
+        StartShutdown
+    };
+}
+
+script_test_with_error_simex! {
+    ignored_tests,
+    ExitCode::SUCCESS,
+    Start => {
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec!["test_b".into()]
+    } => {
+        AddJob {
+            job_id: JobId::from(1),
+            spec: test_spec("test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(1)
+        },
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_b", 2, UiJobStatus::Ignored)
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(2)
+        }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
         },
         StartShutdown
     };

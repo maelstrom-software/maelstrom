@@ -1,6 +1,7 @@
 use super::{
-    job_output::build_ui_job_result_and_exit_code, AllMetadataM, ArtifactM, CaseMetadataM,
-    CollectOptionsM, Deps, MainAppMessage, MainAppMessageM, PackageIdM, PackageM, TestDbM,
+    job_output::{build_ignored_ui_job_result, build_ui_job_result_and_exit_code},
+    AllMetadataM, ArtifactM, CaseMetadataM, CollectOptionsM, Deps, MainAppMessage, MainAppMessageM,
+    PackageIdM, PackageM, TestDbM,
 };
 use crate::test_db::CaseOutcome;
 use crate::ui::{UiJobId as JobId, UiMessage};
@@ -155,14 +156,40 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.num_enqueued));
     }
 
+    fn handle_ignored_test(
+        &mut self,
+        artifact: &ArtifactM<DepsT>,
+        case_name: &str,
+        case_metadata: &CaseMetadataM<DepsT>,
+    ) {
+        let package = self
+            .packages
+            .get(&artifact.package())
+            .expect("artifact for unknown package");
+
+        let case_str = artifact.format_case(package.name(), case_name, case_metadata);
+
+        let job_id = self.vend_job_id();
+        self.num_enqueued += 1;
+        self.deps
+            .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.num_enqueued));
+        let res = build_ignored_ui_job_result(job_id, &case_str);
+        self.deps.send_ui_msg(UiMessage::JobFinished(res));
+    }
+
     fn receive_tests_listed(
         &mut self,
         artifact: ArtifactM<DepsT>,
         listing: Vec<(String, CaseMetadataM<DepsT>)>,
+        ignored_listing: Vec<String>,
     ) {
         self.pending_listings -= 1;
         for (case_name, case_metadata) in &listing {
-            self.enqueue_test(&artifact, case_name, case_metadata);
+            if ignored_listing.contains(case_name) {
+                self.handle_ignored_test(&artifact, case_name, case_metadata);
+            } else {
+                self.enqueue_test(&artifact, case_name, case_metadata);
+            }
         }
 
         self.check_for_done();
@@ -218,9 +245,11 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             MainAppMessage::Start => self.start(),
             MainAppMessage::Packages { packages } => self.receive_packages(packages),
             MainAppMessage::ArtifactBuilt { artifact } => self.receive_artifact_built(artifact),
-            MainAppMessage::TestsListed { artifact, listing } => {
-                self.receive_tests_listed(artifact, listing)
-            }
+            MainAppMessage::TestsListed {
+                artifact,
+                listing,
+                ignored_listing,
+            } => self.receive_tests_listed(artifact, listing, ignored_listing),
             MainAppMessage::FatalError { error } => self.receive_fatal_error(error),
             MainAppMessage::JobUpdate { job_id, result } => self.receive_job_update(job_id, result),
             MainAppMessage::CollectionFinished => self.receive_collection_finished(),

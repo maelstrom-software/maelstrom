@@ -115,6 +115,7 @@ enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'stati
     TestsListed {
         artifact: ArtifactT,
         listing: Vec<(String, CaseMetadataT)>,
+        ignored_listing: Vec<String>,
     },
     FatalError {
         error: anyhow::Error,
@@ -214,13 +215,27 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
 
     fn list_tests(&self, artifact: ArtifactM<Self>) {
         let sender = self.main_app_sender.clone();
-        self.scope.spawn(move || match artifact.list_tests() {
-            Ok(listing) => {
-                let _ = sender.send(MainAppMessage::TestsListed { artifact, listing });
-            }
-            Err(error) => {
-                let _ = sender.send(MainAppMessage::FatalError { error });
-            }
+        self.scope.spawn(move || {
+            let listing = match artifact.list_tests() {
+                Ok(listing) => listing,
+                Err(error) => {
+                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    return;
+                }
+            };
+            let ignored_listing = match artifact.list_ignored_tests() {
+                Ok(listing) => listing,
+                Err(error) => {
+                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    return;
+                }
+            };
+
+            let _ = sender.send(MainAppMessage::TestsListed {
+                artifact,
+                listing,
+                ignored_listing,
+            });
         });
     }
 
