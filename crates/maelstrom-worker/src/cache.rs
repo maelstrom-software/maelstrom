@@ -101,20 +101,19 @@ impl Fs for StdFs {
 /// Type returned from [Cache::get_artifact].
 #[derive(Clone, Debug, PartialEq)]
 pub enum GetArtifact {
-    /// The artifact in the cache. The caller has been given a reference that must later be
-    /// released by calling [Cache::decrement_ref_count]. The provided [PathBuf] contains the
-    /// location of the artifact.
-    Success(PathBuf),
+    /// The artifact is in the cache. The caller has been given a reference that must later be
+    /// released by calling [`Cache::decrement_ref_count`].
+    Success,
 
-    /// The artifact is not in the cache and is currently being retrieved. There is nothing for
-    /// the caller to do other than wait. The caller's [JobId] will be returned at some point from
-    /// a call to [Cache::got_artifact_success] or [Cache::got_artifact_failure].
+    /// The artifact is not in the cache and is currently being retrieved. There is nothing for the
+    /// caller to do other than wait. The caller's [`JobId`] will be returned at some point from a
+    /// call to [`Cache::got_artifact_success`] or [`Cache::got_artifact_failure`].
     Wait,
 
     /// The artifact is not in the cache but is not currently being retrieved. It's caller's
     /// responsibility to start the retrieval process. The artifact should be put in the provided
-    /// [PathBuf]. The caller's [JobId] will be returned at some point from a call to
-    /// [Cache::got_artifact_success] or [Cache::got_artifact_failure].
+    /// [`PathBuf`]. The caller's [`JobId`] will be returned at some point from a call to
+    /// [`Cache::got_artifact_success`] or [`Cache::got_artifact_failure`].
     Get(PathBuf),
 }
 
@@ -321,7 +320,7 @@ impl<FsT: Fs> Cache<FsT> {
                     }
                     Entry::InUse { ref_count, .. } => {
                         *ref_count = ref_count.checked_add(1).unwrap();
-                        GetArtifact::Success(cache_path)
+                        GetArtifact::Success
                     }
                     Entry::InHeap {
                         bytes_used,
@@ -334,7 +333,7 @@ impl<FsT: Fs> Cache<FsT> {
                             bytes_used: *bytes_used,
                         };
                         self.heap.remove(&mut self.entries, heap_index);
-                        GetArtifact::Success(cache_path)
+                        GetArtifact::Success
                     }
                 }
             }
@@ -841,11 +840,7 @@ mod tests {
         fixture.get_artifact_ign(digest!(42), jid!(1));
         fixture.got_artifact_success_ign(digest!(42), 100);
 
-        fixture.get_artifact(
-            digest!(42),
-            jid!(1),
-            GetArtifact::Success(long_path!("/z/sha256/blob", 42)),
-        );
+        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Success);
 
         fixture.decrement_ref_count(digest!(42), vec![]);
         fixture.decrement_ref_count(
@@ -869,11 +864,7 @@ mod tests {
         fixture.got_artifact_success_ign(digest!(42), 10);
         fixture.decrement_ref_count_ign(digest!(42));
 
-        fixture.get_artifact(
-            digest!(42),
-            jid!(2),
-            GetArtifact::Success(long_path!("/z/sha256/blob", 42)),
-        );
+        fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Success);
         fixture.get_artifact(
             digest!(43),
             jid!(3),
