@@ -363,7 +363,7 @@ impl<FsT: Fs> Cache<FsT> {
         kind: EntryKind,
         digest: &Sha256Digest,
         bytes_used: u64,
-    ) -> (PathBuf, Vec<JobId>) {
+    ) -> Vec<JobId> {
         let key = Key::new(kind, digest.clone());
         let entry = self
             .entries
@@ -389,7 +389,7 @@ impl<FsT: Fs> Cache<FsT> {
             "byte_used_target" => %ByteSize::b(self.bytes_used_target)
         );
         self.possibly_remove_some();
-        (self.cache_path(kind, digest), jobs)
+        jobs
     }
 
     /// Notify the cache that a reference to an artifact is no longer needed.
@@ -650,7 +650,7 @@ mod tests {
             &mut self,
             digest: Sha256Digest,
             bytes_used: u64,
-            expected: (PathBuf, Vec<JobId>),
+            expected: Vec<JobId>,
             expected_fs_operations: Vec<TestMessage>,
         ) {
             let result = self
@@ -697,12 +697,7 @@ mod tests {
             jid!(1),
             GetArtifact::Get(long_path!("/z/sha256/blob", 42)),
         );
-        fixture.got_artifact_success(
-            digest!(42),
-            100,
-            (long_path!("/z/sha256/blob", 42), vec![jid!(1)]),
-            vec![],
-        );
+        fixture.got_artifact_success(digest!(42), 100, vec![jid!(1)], vec![]);
     }
 
     #[test]
@@ -710,12 +705,7 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_messages(1000);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success(
-            digest!(42),
-            10000,
-            (long_path!("/z/sha256/blob", 42), vec![jid!(1)]),
-            vec![],
-        );
+        fixture.got_artifact_success(digest!(42), 10000, vec![jid!(1)], vec![]);
 
         fixture.decrement_ref_count(
             digest!(42),
@@ -746,7 +736,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(3),
             4,
-            (long_path!("/z/sha256/blob", 3), vec![jid!(3)]),
+            vec![jid!(3)],
             vec![
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
@@ -762,7 +752,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(4),
             4,
-            (long_path!("/z/sha256/blob", 4), vec![jid!(4)]),
+            vec![jid!(4)],
             vec![
                 FileExists(short_path!("/z/removing", 2)),
                 Rename(
@@ -796,7 +786,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(4),
             3,
-            (long_path!("/z/sha256/blob", 4), vec![jid!(4)]),
+            vec![jid!(4)],
             vec![
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
@@ -816,15 +806,7 @@ mod tests {
         fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Wait);
         fixture.get_artifact(digest!(42), jid!(3), GetArtifact::Wait);
 
-        fixture.got_artifact_success(
-            digest!(42),
-            100,
-            (
-                long_path!("/z/sha256/blob", 42),
-                vec![jid!(1), jid!(2), jid!(3)],
-            ),
-            vec![],
-        );
+        fixture.got_artifact_success(digest!(42), 100, vec![jid!(1), jid!(2), jid!(3)], vec![]);
     }
 
     #[test]
@@ -835,15 +817,7 @@ mod tests {
         fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Wait);
         fixture.get_artifact(digest!(42), jid!(3), GetArtifact::Wait);
 
-        fixture.got_artifact_success(
-            digest!(42),
-            10000,
-            (
-                long_path!("/z/sha256/blob", 42),
-                vec![jid!(1), jid!(2), jid!(3)],
-            ),
-            vec![],
-        );
+        fixture.got_artifact_success(digest!(42), 10000, vec![jid!(1), jid!(2), jid!(3)], vec![]);
 
         fixture.decrement_ref_count(digest!(42), vec![]);
         fixture.decrement_ref_count(digest!(42), vec![]);
@@ -905,12 +879,7 @@ mod tests {
             jid!(3),
             GetArtifact::Get(long_path!("/z/sha256/blob", 43)),
         );
-        fixture.got_artifact_success(
-            digest!(43),
-            100,
-            (long_path!("/z/sha256/blob", 43), vec![jid!(3)]),
-            vec![],
-        );
+        fixture.got_artifact_success(digest!(43), 100, vec![jid!(3)], vec![]);
 
         fixture.decrement_ref_count(
             digest!(42),
