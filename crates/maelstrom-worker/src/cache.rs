@@ -306,9 +306,8 @@ impl<FsT: Fs> Cache<FsT> {
         digest: Sha256Digest,
         jid: JobId,
     ) -> GetArtifact {
-        let key = Key::new(kind, digest);
-        let cache_path = self.cache_path(&key);
-        match self.entries.entry(key) {
+        let cache_path = self.cache_path(kind, &digest);
+        match self.entries.entry(Key::new(kind, digest)) {
             HashEntry::Vacant(entry) => {
                 entry.insert(Entry::DownloadingAndExtracting(vec![jid]));
                 GetArtifact::Get(cache_path)
@@ -345,11 +344,12 @@ impl<FsT: Fs> Cache<FsT> {
     /// Notify the cache that an artifact fetch has failed. The returned vector lists the jobs that
     /// are affected and that need to be canceled.
     pub fn got_artifact_failure(&mut self, kind: EntryKind, digest: &Sha256Digest) -> Vec<JobId> {
-        let key = Key::new(kind, digest.clone());
-        let Some(Entry::DownloadingAndExtracting(jobs)) = self.entries.remove(&key) else {
+        let Some(Entry::DownloadingAndExtracting(jobs)) =
+            self.entries.remove(&Key::new(kind, digest.clone()))
+        else {
             panic!("Got got_artifact in unexpected state");
         };
-        let cache_path = self.cache_path(&key);
+        let cache_path = self.cache_path(kind, digest);
         if self.fs.file_exists(&cache_path) {
             Self::remove_in_background(&mut self.fs, &self.root, &cache_path);
         }
@@ -389,7 +389,7 @@ impl<FsT: Fs> Cache<FsT> {
             "byte_used_target" => %ByteSize::b(self.bytes_used_target)
         );
         self.possibly_remove_some();
-        (self.cache_path(&key), jobs)
+        (self.cache_path(kind, digest), jobs)
     }
 
     /// Notify the cache that a reference to an artifact is no longer needed.
@@ -419,6 +419,14 @@ impl<FsT: Fs> Cache<FsT> {
                 self.possibly_remove_some();
             }
         }
+    }
+
+    /// Return the directory path for the artifact referenced by `digest`.
+    pub fn cache_path(&self, kind: EntryKind, digest: &Sha256Digest) -> PathBuf {
+        let mut path = self.root.join("sha256");
+        path.push(kind.to_string());
+        path.push(digest.to_string());
+        path
     }
 
     fn remove_all_from_directory_except<S>(
@@ -460,14 +468,6 @@ impl<FsT: Fs> Cache<FsT> {
         fs.remove_recursively_on_thread(target);
     }
 
-    /// Return the directory path for the artifact referenced by `digest`.
-    fn cache_path(&self, key: &Key) -> PathBuf {
-        let mut path = self.root.join("sha256");
-        path.push(key.kind.to_string());
-        path.push(key.digest.to_string());
-        path
-    }
-
     /// Check to see if the cache is over its goal size, and if so, try to remove the least
     /// recently used artifacts.
     fn possibly_remove_some(&mut self) {
@@ -478,7 +478,7 @@ impl<FsT: Fs> Cache<FsT> {
             let Some(Entry::InHeap { bytes_used, .. }) = self.entries.remove(&key) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
-            let cache_path = self.cache_path(&key);
+            let cache_path = self.cache_path(key.kind, &key.digest);
             Self::remove_in_background(&mut self.fs, &self.root, &cache_path);
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
