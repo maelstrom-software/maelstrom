@@ -10,11 +10,15 @@ use maelstrom_util::{
 use slog::{debug, Logger};
 use std::{
     cmp::Ordering,
-    collections::{hash_map::Entry as HashEntry, HashMap},
-    fmt, fs, mem,
+    collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
+    ffi::OsString,
+    fmt, fs,
+    iter::IntoIterator,
+    mem,
     num::NonZeroU32,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    string::ToString,
     thread,
 };
 
@@ -233,6 +237,8 @@ impl<FsT: Fs> Cache<FsT> {
         let root = root.into_path_buf();
         let mut path = root.clone();
 
+        // Everything in the `removing` subdirectory needs to be removed in the background. Start
+        // those threads up.
         path.push("removing");
         fs.mkdir_recursively(&path);
         for child in fs.read_dir(&path) {
@@ -240,7 +246,19 @@ impl<FsT: Fs> Cache<FsT> {
         }
         path.pop();
 
+        // If there are any files or directories in the top-level directory that shouldn't be
+        // there, move them to `removing` and then remove them in the background.
+        Self::remove_all_from_directory_except(
+            &mut fs,
+            &root,
+            &path,
+            ["removing", "sha256", "CACHEDIR.TAG"],
+        );
+
         path.push("sha256");
+        fs.mkdir_recursively(&path);
+        Self::remove_all_from_directory_except(&mut fs, &root, &path, EntryKind::iter());
+
         for kind in EntryKind::iter() {
             path.push(kind.to_string());
             if fs.file_exists(&path) {
@@ -381,6 +399,28 @@ impl<FsT: Fs> Cache<FsT> {
                 self.heap.push(&mut self.entries, key.clone());
                 self.next_priority = self.next_priority.checked_add(1).unwrap();
                 self.possibly_remove_some();
+            }
+        }
+    }
+
+    fn remove_all_from_directory_except<S>(
+        fs: &mut impl Fs,
+        root: &Path,
+        dir: &Path,
+        except: impl IntoIterator<Item = S>,
+    ) where
+        S: ToString,
+    {
+        let except = except
+            .into_iter()
+            .map(|e| OsString::from(e.to_string()))
+            .collect::<HashSet<_>>();
+        for entry in fs.read_dir(dir) {
+            if !entry
+                .file_name()
+                .is_some_and(|entry_name| except.contains(entry_name))
+            {
+                Self::remove_in_background(fs, root, &entry);
             }
         }
     }
@@ -1004,6 +1044,9 @@ mod tests {
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
+            ReadDir(path_buf!("/z")),
+            MkdirRecursively(path_buf!("/z/sha256")),
+            ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
             FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
@@ -1016,6 +1059,9 @@ mod tests {
     #[test]
     fn new_restarts_old_removes() {
         let mut test_cache_fs = TestFs::default();
+        test_cache_fs
+            .directories
+            .insert(path_buf!("/z"), vec![path_buf!("/z/removing")]);
         test_cache_fs.directories.insert(
             path_buf!("/z/removing"),
             vec![
@@ -1029,6 +1075,78 @@ mod tests {
             ReadDir(path_buf!("/z/removing")),
             RemoveRecursively(short_path!("/z/removing", 10)),
             RemoveRecursively(short_path!("/z/removing", 20)),
+            ReadDir(path_buf!("/z")),
+            MkdirRecursively(path_buf!("/z/sha256")),
+            ReadDir(path_buf!("/z/sha256")),
+            FileExists(path_buf!("/z/sha256/blob")),
+            MkdirRecursively(path_buf!("/z/sha256/blob")),
+            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
+            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
+        ]);
+    }
+
+    #[test]
+    fn new_removes_top_level_garbage() {
+        let mut test_cache_fs = TestFs::default();
+        test_cache_fs.directories.insert(
+            path_buf!("/z"),
+            vec![
+                path_buf!("/z/blah"),
+                path_buf!("/z/CACHEDIR.TAG"),
+                path_buf!("/z/sha256"),
+                path_buf!("/z/baz"),
+                path_buf!("/z/removing"),
+            ],
+        );
+        let mut fixture = Fixture::new(test_cache_fs, 1000);
+        fixture.expect_messages_in_specific_order(vec![
+            MkdirRecursively(path_buf!("/z/removing")),
+            ReadDir(path_buf!("/z/removing")),
+            ReadDir(path_buf!("/z")),
+            FileExists(short_path!("/z/removing", 1)),
+            Rename(path_buf!("/z/blah"), short_path!("/z/removing", 1)),
+            RemoveRecursively(short_path!("/z/removing", 1)),
+            FileExists(short_path!("/z/removing", 2)),
+            Rename(path_buf!("/z/baz"), short_path!("/z/removing", 2)),
+            RemoveRecursively(short_path!("/z/removing", 2)),
+            MkdirRecursively(path_buf!("/z/sha256")),
+            ReadDir(path_buf!("/z/sha256")),
+            FileExists(path_buf!("/z/sha256/blob")),
+            MkdirRecursively(path_buf!("/z/sha256/blob")),
+            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
+            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
+        ]);
+    }
+
+    #[test]
+    fn new_removes_garbage_in_sha256() {
+        let mut test_cache_fs = TestFs::default();
+        test_cache_fs.directories.insert(
+            path_buf!("/z/sha256"),
+            vec![
+                path_buf!("/z/sha256/blah"),
+                path_buf!("/z/sha256/blob"),
+                path_buf!("/z/sha256/baz"),
+                path_buf!("/z/sha256/bottom_fs_layer"),
+            ],
+        );
+        let mut fixture = Fixture::new(test_cache_fs, 1000);
+        fixture.expect_messages_in_specific_order(vec![
+            MkdirRecursively(path_buf!("/z/removing")),
+            ReadDir(path_buf!("/z/removing")),
+            ReadDir(path_buf!("/z")),
+            MkdirRecursively(path_buf!("/z/sha256")),
+            ReadDir(path_buf!("/z/sha256")),
+            FileExists(short_path!("/z/removing", 1)),
+            Rename(path_buf!("/z/sha256/blah"), short_path!("/z/removing", 1)),
+            RemoveRecursively(short_path!("/z/removing", 1)),
+            FileExists(short_path!("/z/removing", 2)),
+            Rename(path_buf!("/z/sha256/baz"), short_path!("/z/removing", 2)),
+            RemoveRecursively(short_path!("/z/removing", 2)),
             FileExists(path_buf!("/z/sha256/blob")),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
             FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
@@ -1054,6 +1172,9 @@ mod tests {
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
+            ReadDir(path_buf!("/z")),
+            MkdirRecursively(path_buf!("/z/sha256")),
+            ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
             FileExists(short_path!("/z/removing", 1)),
             Rename(path_buf!("/z/sha256/blob"), short_path!("/z/removing", 1)),
