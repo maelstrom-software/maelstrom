@@ -357,7 +357,8 @@ where
                 FetcherResult::Got(self.cache.cache_path(cache::EntryKind::Blob, digest))
             }
             GetArtifact::Wait => FetcherResult::Pending,
-            GetArtifact::Get(path) => {
+            GetArtifact::Get => {
+                let path = self.cache.cache_path(cache::EntryKind::Blob, digest);
                 self.artifact_fetcher
                     .start_artifact_fetch(digest.clone(), path);
                 FetcherResult::Pending
@@ -380,7 +381,8 @@ where
                     .cache_path(cache::EntryKind::BottomFsLayer, digest),
             ),
             GetArtifact::Wait => FetcherResult::Pending,
-            GetArtifact::Get(path) => {
+            GetArtifact::Get => {
+                let path = self.cache.cache_path(cache::EntryKind::BottomFsLayer, digest);
                 self.deps.build_bottom_fs_layer(
                     digest.clone(),
                     path,
@@ -407,7 +409,8 @@ where
                     .cache_path(cache::EntryKind::UpperFsLayer, digest),
             ),
             GetArtifact::Wait => FetcherResult::Pending,
-            GetArtifact::Get(path) => {
+            GetArtifact::Get => {
+                let path = self.cache.cache_path(cache::EntryKind::UpperFsLayer, digest);
                 self.deps.build_upper_fs_layer(
                     digest.clone(),
                     path,
@@ -1084,11 +1087,12 @@ mod tests {
         enqueue_mixed_artifacts_no_error_slots_available,
         Fixture::new(1, [
             (cache_key!(Blob, 41), GetArtifact::Success),
-            (cache_key!(Blob, 42), GetArtifact::Get(path_buf!("/b"))),
+            (cache_key!(Blob, 42), GetArtifact::Get),
             (cache_key!(Blob, 43), GetArtifact::Wait),
             (cache_key!(BottomFsLayer, 41), GetArtifact::Success),
         ], [], [], [
             (cache_key!(Blob, 41), path_buf!("/z/b/41")),
+            (cache_key!(Blob, 42), path_buf!("/z/b/42")),
             (cache_key!(BottomFsLayer, 41), path_buf!("/z/bl/41")),
         ]),
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (43, Tar)]))) => {
@@ -1097,8 +1101,9 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(41), jid!(1)),
             CachePath(BottomFsLayer, digest!(41)),
             CacheGetArtifact(Blob, digest!(42), jid!(1)),
+            CachePath(Blob, digest!(42)),
             CacheGetArtifact(Blob, digest!(43), jid!(1)),
-            StartArtifactFetch(digest!(42), path_buf!("/b")),
+            StartArtifactFetch(digest!(42), path_buf!("/z/b/42")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::WaitingForLayers)),
         };
         Broker(CancelJob(jid!(1))) => {

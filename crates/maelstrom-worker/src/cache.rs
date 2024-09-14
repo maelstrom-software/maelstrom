@@ -102,7 +102,8 @@ impl Fs for StdFs {
 #[derive(Clone, Debug, PartialEq)]
 pub enum GetArtifact {
     /// The artifact is in the cache. The caller has been given a reference that must later be
-    /// released by calling [`Cache::decrement_ref_count`].
+    /// released by calling [`Cache::decrement_ref_count`]. The artifact can be found at the path
+    /// returned by [`Cache::cache_path`] as long as the caller has an outstanding ref count.
     Success,
 
     /// The artifact is not in the cache and is currently being retrieved. There is nothing for the
@@ -111,10 +112,10 @@ pub enum GetArtifact {
     Wait,
 
     /// The artifact is not in the cache but is not currently being retrieved. It's caller's
-    /// responsibility to start the retrieval process. The artifact should be put in the provided
-    /// [`PathBuf`]. The caller's [`JobId`] will be returned at some point from a call to
-    /// [`Cache::got_artifact_success`] or [`Cache::got_artifact_failure`].
-    Get(PathBuf),
+    /// responsibility to start the retrieval process. The artifact should be put in the path
+    /// provided by [`Cache::cache_path`], and then either [`Cache::got_artifact_success`] or
+    /// [`Cache::got_artifact_failure`] should be called.
+    Get,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
@@ -305,11 +306,10 @@ impl<FsT: Fs> Cache<FsT> {
         digest: Sha256Digest,
         jid: JobId,
     ) -> GetArtifact {
-        let cache_path = self.cache_path(kind, &digest);
         match self.entries.entry(Key::new(kind, digest)) {
             HashEntry::Vacant(entry) => {
                 entry.insert(Entry::DownloadingAndExtracting(vec![jid]));
-                GetArtifact::Get(cache_path)
+                GetArtifact::Get
             }
             HashEntry::Occupied(entry) => {
                 let entry = entry.into_mut();
@@ -694,7 +694,7 @@ mod tests {
         fixture.get_artifact(
             digest!(42),
             jid!(1),
-            GetArtifact::Get(long_path!("/z/sha256/blob", 42)),
+            GetArtifact::Get,
         );
         fixture.got_artifact_success(digest!(42), 100, vec![jid!(1)], vec![]);
     }
@@ -868,7 +868,7 @@ mod tests {
         fixture.get_artifact(
             digest!(43),
             jid!(3),
-            GetArtifact::Get(long_path!("/z/sha256/blob", 43)),
+            GetArtifact::Get,
         );
         fixture.got_artifact_success(digest!(43), 100, vec![jid!(3)], vec![]);
 
@@ -908,7 +908,7 @@ mod tests {
         fixture.get_artifact(
             digest!(42),
             jid!(1),
-            GetArtifact::Get(long_path!("/z/sha256/blob", 42)),
+            GetArtifact::Get,
         );
     }
 
@@ -979,7 +979,7 @@ mod tests {
         fixture.get_artifact(
             digest!(42),
             jid!(2),
-            GetArtifact::Get(long_path!("/z/sha256/blob", 42)),
+            GetArtifact::Get,
         );
     }
 
