@@ -382,7 +382,9 @@ where
             ),
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
-                let path = self.cache.cache_path(cache::EntryKind::BottomFsLayer, digest);
+                let path = self
+                    .cache
+                    .cache_path(cache::EntryKind::BottomFsLayer, digest);
                 self.deps.build_bottom_fs_layer(
                     digest.clone(),
                     path,
@@ -410,7 +412,9 @@ where
             ),
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
-                let path = self.cache.cache_path(cache::EntryKind::UpperFsLayer, digest);
+                let path = self
+                    .cache
+                    .cache_path(cache::EntryKind::UpperFsLayer, digest);
                 self.deps.build_upper_fs_layer(
                     digest.clone(),
                     path,

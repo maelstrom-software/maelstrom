@@ -691,11 +691,7 @@ mod tests {
     fn get_request_for_empty() {
         let mut fixture = Fixture::new_and_clear_messages(1000);
 
-        fixture.get_artifact(
-            digest!(42),
-            jid!(1),
-            GetArtifact::Get,
-        );
+        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
         fixture.got_artifact_success(digest!(42), 100, vec![jid!(1)], vec![]);
     }
 
@@ -865,11 +861,7 @@ mod tests {
         fixture.decrement_ref_count_ign(digest!(42));
 
         fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Success);
-        fixture.get_artifact(
-            digest!(43),
-            jid!(3),
-            GetArtifact::Get,
-        );
+        fixture.get_artifact(digest!(43), jid!(3), GetArtifact::Get);
         fixture.got_artifact_success(digest!(43), 100, vec![jid!(3)], vec![]);
 
         fixture.decrement_ref_count(
@@ -905,11 +897,7 @@ mod tests {
             .insert(long_path!("/z/sha256/blob", 42));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
-        fixture.get_artifact(
-            digest!(42),
-            jid!(1),
-            GetArtifact::Get,
-        );
+        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
     }
 
     #[test]
@@ -976,11 +964,7 @@ mod tests {
             vec![FileExists(long_path!("/z/sha256/blob", 42))],
         );
 
-        fixture.get_artifact(
-            digest!(42),
-            jid!(2),
-            GetArtifact::Get,
-        );
+        fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Get);
     }
 
     #[test]
