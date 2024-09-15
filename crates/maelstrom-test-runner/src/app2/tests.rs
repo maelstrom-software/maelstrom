@@ -298,69 +298,6 @@ fn default_container() -> ContainerRef {
     })
 }
 
-script_test_with_error_simex! {
-    no_packages,
-    Start => {
-        GetPackages
-    };
-    Packages { packages: vec![] } => {
-        StartShutdown
-    }
-}
-
-script_test_with_error_simex! {
-    no_artifacts,
-    Start => {
-        GetPackages
-    };
-    Packages { packages: vec![fake_pkg("foo_pkg", [])] } => {
-        StartCollection {
-            color: false,
-            options: TestOptions,
-            packages: vec![fake_pkg("foo_pkg", [])]
-        }
-    };
-    CollectionFinished => {
-        SendUiMsg {
-            msg: UiMessage::DoneQueuingJobs,
-        },
-        StartShutdown
-    };
-}
-
-script_test_with_error_simex! {
-    no_tests_listed,
-    Start => {
-        GetPackages
-    };
-    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
-        StartCollection {
-            color: false,
-            options: TestOptions,
-            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
-        }
-    };
-    ArtifactBuilt {
-        artifact: fake_artifact("foo_test", "foo_pkg"),
-    } => {
-        ListTests {
-            artifact: fake_artifact("foo_test", "foo_pkg"),
-        }
-    };
-    CollectionFinished => {
-        SendUiMsg {
-            msg: UiMessage::DoneQueuingJobs,
-        }
-    };
-    TestsListed {
-        artifact: fake_artifact("foo_test", "foo_pkg"),
-        listing: vec![],
-        ignored_listing: vec![]
-    } => {
-        StartShutdown
-    };
-}
-
 macro_rules! test_output_test_inner {
     ($macro_name:ident, $name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr) => {
         $macro_name! {
@@ -433,6 +370,113 @@ macro_rules! test_output_test_with_error_simex {
         );
     };
 }
+
+fn job_status_complete(exit_code: u8) -> anyhow::Result<JobStatus> {
+    Ok(JobStatus::Completed {
+        client_job_id: ClientJobId::from(1),
+        result: Ok(JobOutcome::Completed(JobCompleted {
+            status: JobTerminationStatus::Exited(exit_code),
+            effects: JobEffects {
+                stdout: JobOutputResult::None,
+                stderr: JobOutputResult::None,
+                duration: Duration::from_secs(1),
+            },
+        })),
+    })
+}
+
+fn ui_job_result(name: &str, job_id: u32, status: UiJobStatus) -> UiMessage {
+    UiMessage::JobFinished(UiJobResult {
+        name: name.into(),
+        job_id: JobId::from(job_id),
+        duration: (!matches!(status, UiJobStatus::Ignored)).then_some(Duration::from_secs(1)),
+        status,
+        stdout: vec![],
+        stderr: vec![],
+    })
+}
+
+//  _            _
+// | |_ ___  ___| |_ ___
+// | __/ _ \/ __| __/ __|
+// | ||  __/\__ \ |_\__ \
+//  \__\___||___/\__|___/
+
+//            _ _           _   _
+//   ___ ___ | | | ___  ___| |_(_) ___  _ __
+//  / __/ _ \| | |/ _ \/ __| __| |/ _ \| '_ \
+// | (_| (_) | | |  __/ (__| |_| | (_) | | | |
+//  \___\___/|_|_|\___|\___|\__|_|\___/|_| |_|
+
+script_test_with_error_simex! {
+    no_packages,
+    Start => {
+        GetPackages
+    };
+    Packages { packages: vec![] } => {
+        StartShutdown
+    }
+}
+
+script_test_with_error_simex! {
+    no_artifacts,
+    Start => {
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", [])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", [])]
+        }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        },
+        StartShutdown
+    };
+}
+
+script_test_with_error_simex! {
+    no_tests_listed,
+    Start => {
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![],
+        ignored_listing: vec![]
+    } => {
+        StartShutdown
+    };
+}
+
+//  _            _                 _               _
+// | |_ ___  ___| |_    ___  _   _| |_ _ __  _   _| |_
+// | __/ _ \/ __| __|  / _ \| | | | __| '_ \| | | | __|
+// | ||  __/\__ \ |_  | (_) | |_| | |_| |_) | |_| | |_
+//  \__\___||___/\__|  \___/ \__,_|\__| .__/ \__,_|\__|
+//                                    |_|
 
 test_output_test_with_error_simex! {
     single_test_success,
@@ -742,30 +786,12 @@ test_output_test! {
     ExitCode::from(1)
 }
 
-fn job_status_complete(exit_code: u8) -> anyhow::Result<JobStatus> {
-    Ok(JobStatus::Completed {
-        client_job_id: ClientJobId::from(1),
-        result: Ok(JobOutcome::Completed(JobCompleted {
-            status: JobTerminationStatus::Exited(exit_code),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: Duration::from_secs(1),
-            },
-        })),
-    })
-}
-
-fn ui_job_result(name: &str, job_id: u32, status: UiJobStatus) -> UiMessage {
-    UiMessage::JobFinished(UiJobResult {
-        name: name.into(),
-        job_id: JobId::from(job_id),
-        duration: (!matches!(status, UiJobStatus::Ignored)).then_some(Duration::from_secs(1)),
-        status,
-        stdout: vec![],
-        stderr: vec![],
-    })
-}
+//                  _ _   _       _        _            _
+//  _ __ ___  _   _| | |_(_)_ __ | | ___  | |_ ___  ___| |_ ___
+// | '_ ` _ \| | | | | __| | '_ \| |/ _ \ | __/ _ \/ __| __/ __|
+// | | | | | | |_| | | |_| | |_) | |  __/ | ||  __/\__ \ |_\__ \
+// |_| |_| |_|\__,_|_|\__|_| .__/|_|\___|  \__\___||___/\__|___/
+//                         |_|
 
 script_test_with_error_simex! {
     one_failure_one_success_exit_code,
