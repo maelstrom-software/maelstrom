@@ -1,12 +1,12 @@
 use super::{
     job_output::{build_ignored_ui_job_result, build_ui_job_result_and_exit_code},
-    AllMetadataM, ArtifactM, CaseMetadataM, CollectOptionsM, Deps, MainAppMessage, MainAppMessageM,
-    PackageIdM, PackageM, TestDbM,
+    ArtifactM, CaseMetadataM, Deps, MainAppMessage, MainAppMessageM, PackageIdM, PackageM, TestDbM,
+    TestingOptionsM,
 };
 use crate::test_db::CaseOutcome;
 use crate::ui::{UiJobId as JobId, UiMessage};
 use crate::*;
-use maelstrom_base::{ClientJobId, JobOutcomeResult, JobRootOverlay, Timeout};
+use maelstrom_base::{ClientJobId, JobOutcomeResult, JobRootOverlay};
 use maelstrom_client::{spec::JobSpec, ContainerSpec, JobStatus};
 use maelstrom_util::{ext::OptionExt as _, process::ExitCode};
 use std::collections::{BTreeMap, HashMap};
@@ -14,15 +14,13 @@ use std::mem;
 
 pub struct MainApp<'deps, DepsT: Deps> {
     deps: &'deps DepsT,
+    options: &'deps TestingOptionsM<DepsT>,
     packages: BTreeMap<PackageIdM<DepsT>, PackageM<DepsT>>,
     next_job_id: u32,
-    test_metadata: &'deps AllMetadataM<DepsT>,
     test_db: TestDbM<DepsT>,
-    timeout_override: Option<Option<Timeout>>,
     jobs: HashMap<JobId, String>,
     collection_finished: bool,
     pending_listings: u64,
-    collector_options: &'deps CollectOptionsM<DepsT>,
     num_enqueued: u64,
     fatal_error: Result<()>,
     exit_code: ExitCode,
@@ -31,22 +29,18 @@ pub struct MainApp<'deps, DepsT: Deps> {
 impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     pub fn new(
         deps: &'deps DepsT,
-        test_metadata: &'deps AllMetadataM<DepsT>,
+        options: &'deps TestingOptionsM<DepsT>,
         test_db: TestDbM<DepsT>,
-        timeout_override: Option<Option<Timeout>>,
-        collector_options: &'deps CollectOptionsM<DepsT>,
     ) -> Self {
         Self {
             deps,
+            options,
             packages: BTreeMap::new(),
             next_job_id: 1,
-            test_metadata,
             test_db,
-            timeout_override,
             jobs: HashMap::new(),
             collection_finished: false,
             pending_listings: 0,
-            collector_options,
             num_enqueued: 0,
             fatal_error: Ok(()),
             exit_code: ExitCode::SUCCESS,
@@ -71,7 +65,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         if !packages.is_empty() {
             let color = false;
             self.deps
-                .start_collection(color, self.collector_options, packages);
+                .start_collection(color, &self.options.collector_options, packages);
         } else {
             self.collection_finished = true;
         }
@@ -102,6 +96,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             .expect("artifact for unknown package");
 
         let test_metadata = self
+            .options
             .test_metadata
             .get_metadata_for_test_with_env(package, &artifact.to_key(), (case_name, case_metadata))
             .expect("XXX this error isn't real");
@@ -141,7 +136,10 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             container,
             program,
             arguments,
-            timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
+            timeout: self
+                .options
+                .timeout_override
+                .unwrap_or(test_metadata.timeout),
             estimated_duration,
             allocate_tty: None,
             priority,

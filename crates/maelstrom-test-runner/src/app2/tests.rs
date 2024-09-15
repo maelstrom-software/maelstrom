@@ -1,4 +1,4 @@
-use super::{Deps, MainApp, MainAppMessage::*, MainAppMessageM};
+use super::{Deps, MainApp, MainAppMessage::*, MainAppMessageM, TestingOptions};
 use crate::fake_test_framework::{
     FakePackageId, FakeTestArtifact, FakeTestFilter, FakeTestPackage, TestCollector, TestOptions,
 };
@@ -111,12 +111,11 @@ struct Fixture<'deps> {
 impl<'deps> Fixture<'deps> {
     fn new(
         deps: &'deps TestDeps,
-        test_metadata: &'deps AllMetadata<FakeTestFilter>,
+        options: &'deps TestingOptions<FakeTestFilter, TestOptions>,
         test_db: TestDb<StringArtifactKey, NoCaseMetadata>,
-        collector_options: &'deps TestOptions,
     ) -> Self {
         Self {
-            app: MainApp::new(deps, test_metadata, test_db, None, collector_options),
+            app: MainApp::new(deps, options, test_db),
             deps,
         }
     }
@@ -167,6 +166,15 @@ fn default_metadata() -> AllMetadata<FakeTestFilter> {
     .unwrap()
 }
 
+fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
+    TestingOptions {
+        test_metadata: default_metadata(),
+        filter: "all".parse().unwrap(),
+        collector_options: TestOptions,
+        timeout_override: None,
+    }
+}
+
 macro_rules! script_test {
     ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
         script_test!($test_name, ExitCode::SUCCESS, $($in_msg => { $($out_msg,)* };)+);
@@ -175,10 +183,9 @@ macro_rules! script_test {
         #[test]
         fn $test_name() {
             let deps = TestDeps::default();
-            let all_metadata = default_metadata();
+            let options = default_testing_options();
             let test_db = TestDb::default();
-            let collector_options = TestOptions;
-            let mut fixture = Fixture::new(&deps, &all_metadata, test_db, &collector_options);
+            let mut fixture = Fixture::new(&deps, &options, test_db);
             $(
                 fixture.receive_message($in_msg);
                 fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
@@ -203,10 +210,9 @@ macro_rules! script_test_with_error_simex {
                 let mut simex = SimulationExplorer::default();
                 while let Some(mut simulation) = simex.next_simulation() {
                     let deps = TestDeps::default();
-                    let all_metadata = default_metadata();
+                    let options = default_testing_options();
                     let test_db = TestDb::default();
-                    let collector_options = TestOptions;
-                    let mut fixture = Fixture::new(&deps, &all_metadata, test_db, &collector_options);
+                    let mut fixture = Fixture::new(&deps, &options, test_db);
                     $(
                         if simulation.choose_bool() {
                             fixture.receive_message(FatalError { error: anyhow!("simex error") });

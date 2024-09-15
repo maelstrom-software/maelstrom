@@ -25,8 +25,8 @@ type CollectOptionsM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::
 type PackageM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Package;
 type PackageIdM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::PackageId;
 type TestFilterM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::TestFilter;
-type AllMetadataM<DepsT> = AllMetadata<TestFilterM<DepsT>>;
 type TestDbM<DepsT> = TestDb<ArtifactKeyM<DepsT>, CaseMetadataM<DepsT>>;
+type TestingOptionsM<DepsT> = TestingOptions<TestFilterM<DepsT>, CollectOptionsM<DepsT>>;
 
 trait Deps {
     type TestCollector: CollectTests;
@@ -49,13 +49,21 @@ trait Deps {
     fn send_ui_msg(&self, msg: UiMessage);
 }
 
+/// Immutable information used to control the testing invocation.
+struct TestingOptions<TestFilterT, CollectOptionsT> {
+    test_metadata: AllMetadata<TestFilterT>,
+    #[expect(dead_code)]
+    filter: TestFilterT,
+    collector_options: CollectOptionsT,
+    timeout_override: Option<Option<Timeout>>,
+}
+
 pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
     abstract_deps: MainAppDepsT,
     log: slog::Logger,
-    test_metadata: AllMetadata<super::TestFilterM<MainAppDepsT>>,
-    collector_options: super::CollectOptionsM<MainAppDepsT>,
     test_db_store:
         TestDbStore<super::ArtifactKeyM<MainAppDepsT>, super::CaseMetadataM<MainAppDepsT>>,
+    options: TestingOptions<super::TestFilterM<MainAppDepsT>, super::CollectOptionsM<MainAppDepsT>>,
 }
 
 impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
@@ -72,8 +80,8 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         abstract_deps: MainAppDepsT,
-        _include_filter: Vec<String>,
-        _exclude_filter: Vec<String>,
+        include_filter: Vec<String>,
+        exclude_filter: Vec<String>,
         _list_action: Option<ListAction>,
         _repeat: Repeat,
         _stop_after: Option<StopAfter>,
@@ -94,12 +102,18 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         let vars = abstract_deps.get_template_vars(&collector_options)?;
         test_metadata.replace_template_vars(&vars)?;
 
+        let filter = super::TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
+
         Ok(Self {
             abstract_deps,
             log,
-            test_metadata,
             test_db_store,
-            collector_options,
+            options: TestingOptions {
+                test_metadata,
+                filter,
+                collector_options,
+                timeout_override: None,
+            },
         })
     }
 }
@@ -276,7 +290,7 @@ fn main_app_channel_reader<DepsT: Deps>(
 /// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
 /// application on this thread using the UI until it is completed.
 pub fn run_app_with_ui_multithreaded<MainAppDepsT>(
-    deps: MainAppCombinedDeps<MainAppDepsT>,
+    mut deps: MainAppCombinedDeps<MainAppDepsT>,
     logging_output: LoggingOutput,
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,
@@ -287,10 +301,11 @@ where
     let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
     let (ui_handle, ui_sender) = ui.start_ui_thread(logging_output, deps.log.clone());
 
-    let test_metadata = &deps.test_metadata;
-    let collector_options = &deps.collector_options;
-    let test_db = deps.test_db_store.load()?;
+    deps.options.timeout_override = timeout_override;
     let abs_deps = &deps.abstract_deps;
+    let options = &deps.options;
+
+    let test_db = deps.test_db_store.load()?;
 
     let exit_code = std::thread::scope(move |scope| {
         main_app_sender.send(MainAppMessage::Start).unwrap();
@@ -301,13 +316,7 @@ where
             ui: ui_sender,
         };
 
-        let mut app = MainApp::new(
-            &deps,
-            test_metadata,
-            test_db,
-            timeout_override,
-            collector_options,
-        );
+        let mut app = MainApp::new(&deps, options, test_db);
         main_app_channel_reader(&mut app, main_app_receiver)
     })?;
 
