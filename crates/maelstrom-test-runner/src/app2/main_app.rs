@@ -3,6 +3,7 @@ use super::{
     ArtifactM, CaseMetadataM, Deps, MainAppMessage, MainAppMessageM, PackageIdM, PackageM, TestDbM,
     TestingOptionsM,
 };
+use crate::metadata::TestMetadata;
 use crate::test_db::CaseOutcome;
 use crate::ui::{UiJobId as JobId, UiMessage};
 use crate::*;
@@ -90,29 +91,20 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
     fn enqueue_test(
         &mut self,
+        test_metadata: TestMetadata,
+        package_name: &str,
         artifact: &ArtifactM<DepsT>,
         case_name: &str,
         case_metadata: &CaseMetadataM<DepsT>,
     ) {
-        let package = self
-            .packages
-            .get(&artifact.package())
-            .expect("artifact for unknown package");
-
-        let test_metadata = self
-            .options
-            .test_metadata
-            .get_metadata_for_test_with_env(package, &artifact.to_key(), (case_name, case_metadata))
-            .expect("XXX this error isn't real");
-
-        let case_str = artifact.format_case(package.name(), case_name, case_metadata);
+        let case_str = artifact.format_case(package_name, case_name, case_metadata);
 
         let mut layers = test_metadata.layers.clone();
         layers.extend(self.deps.get_test_layers(artifact, &test_metadata));
 
-        let get_timing_result =
-            self.test_db
-                .get_case(package.name(), &artifact.to_key(), case_name);
+        let get_timing_result = self
+            .test_db
+            .get_case(package_name, &artifact.to_key(), case_name);
         let (priority, estimated_duration) = match get_timing_result {
             None => (1, None),
             Some((CaseOutcome::Success, duration)) => (0, Some(duration)),
@@ -160,16 +152,12 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
     fn handle_ignored_test(
         &mut self,
+        package_name: &str,
         artifact: &ArtifactM<DepsT>,
         case_name: &str,
         case_metadata: &CaseMetadataM<DepsT>,
     ) {
-        let package = self
-            .packages
-            .get(&artifact.package())
-            .expect("artifact for unknown package");
-
-        let case_str = artifact.format_case(package.name(), case_name, case_metadata);
+        let case_str = artifact.format_case(package_name, case_name, case_metadata);
 
         let job_id = self.vend_job_id();
         self.num_enqueued += 1;
@@ -177,6 +165,49 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.num_enqueued));
         let res = build_ignored_ui_job_result(job_id, &case_str);
         self.deps.send_ui_msg(UiMessage::JobFinished(res));
+    }
+
+    fn maybe_enqueue_test(
+        &mut self,
+        artifact: &ArtifactM<DepsT>,
+        case_name: &String,
+        case_metadata: &CaseMetadataM<DepsT>,
+        ignored_listing: &[String],
+    ) {
+        let package = self
+            .packages
+            .get(&artifact.package())
+            .expect("artifact for unknown package");
+        let package_name = package.name().to_owned();
+
+        let case_tuple = (case_name.as_str(), case_metadata);
+        let selected = self
+            .options
+            .filter
+            .filter(package, Some(&artifact.to_key()), Some(case_tuple))
+            .expect("should have case");
+
+        if !selected {
+            return;
+        }
+
+        let test_metadata = self
+            .options
+            .test_metadata
+            .get_metadata_for_test_with_env(package, &artifact.to_key(), case_tuple)
+            .expect("we always parse valid test metadata");
+
+        if ignored_listing.contains(case_name) || test_metadata.ignore {
+            self.handle_ignored_test(&package_name, artifact, case_name, case_metadata);
+        } else {
+            self.enqueue_test(
+                test_metadata,
+                &package_name,
+                artifact,
+                case_name,
+                case_metadata,
+            );
+        }
     }
 
     fn receive_tests_listed(
@@ -187,30 +218,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     ) {
         self.pending_listings -= 1;
         for (case_name, case_metadata) in &listing {
-            let package = self
-                .packages
-                .get(&artifact.package())
-                .expect("artifact for unknown package");
-
-            let selected = self
-                .options
-                .filter
-                .filter(
-                    package,
-                    Some(&artifact.to_key()),
-                    Some((case_name.as_str(), case_metadata)),
-                )
-                .expect("should have case");
-
-            if !selected {
-                continue;
-            }
-
-            if ignored_listing.contains(case_name) {
-                self.handle_ignored_test(&artifact, case_name, case_metadata);
-            } else {
-                self.enqueue_test(&artifact, case_name, case_metadata);
-            }
+            self.maybe_enqueue_test(&artifact, case_name, case_metadata, &ignored_listing);
         }
 
         self.check_for_done();

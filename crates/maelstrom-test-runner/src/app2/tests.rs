@@ -149,22 +149,21 @@ impl<'deps> Fixture<'deps> {
     }
 }
 
+const DEFAULT_METADATA_STR: &str = r#"
+    [[directives]]
+    layers = [
+        { stubs = [ "/{proc,sys,tmp}/", "/dev/{full,null,random,urandom,zero}" ] },
+    ]
+    mounts = [
+        { type = "tmp", mount_point = "/tmp" },
+        { type = "proc", mount_point = "/proc" },
+        { type = "sys", mount_point = "/sys" },
+        { type = "devices", devices = ["full", "null", "random", "urandom", "zero"] },
+    ]
+"#;
+
 fn default_metadata() -> AllMetadata<FakeTestFilter> {
-    AllMetadata::from_str(
-        r#"
-            [[directives]]
-            layers = [
-                { stubs = [ "/{proc,sys,tmp}/", "/dev/{full,null,random,urandom,zero}" ] },
-            ]
-            mounts = [
-                { type = "tmp", mount_point = "/tmp" },
-                { type = "proc", mount_point = "/proc" },
-                { type = "sys", mount_point = "/sys" },
-                { type = "devices", devices = ["full", "null", "random", "urandom", "zero"] },
-            ]
-        "#,
-    )
-    .unwrap()
+    AllMetadata::from_str(DEFAULT_METADATA_STR).unwrap()
 }
 
 fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
@@ -918,6 +917,70 @@ script_test_with_error_simex! {
         artifact: fake_artifact("foo_test", "foo_pkg"),
         listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
         ignored_listing: vec!["test_b".into()]
+    } => {
+        AddJob {
+            job_id: JobId::from(1),
+            spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(1)
+        },
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_b", 2, UiJobStatus::Ignored)
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(2)
+        }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
+        },
+        StartShutdown
+    };
+}
+
+script_test_with_error_simex! {
+    ignored_tests_via_directive,
+    @ test_metadata = AllMetadata::from_str(
+        &format!("{DEFAULT_METADATA_STR}{}",
+            r#"
+                [[directives]]
+                filter = "name = \"test_b\""
+                ignore = true
+            "#
+        )
+    ).unwrap(),
+    ExitCode::SUCCESS,
+    Start => {
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
     } => {
         AddJob {
             job_id: JobId::from(1),
