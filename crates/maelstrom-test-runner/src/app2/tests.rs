@@ -1,4 +1,5 @@
 use super::{Deps, MainApp, MainAppMessage::*, MainAppMessageM, TestingOptions};
+use crate::deps::SimpleFilter;
 use crate::fake_test_framework::{
     FakePackageId, FakeTestArtifact, FakeTestFilter, FakeTestPackage, TestCollector, TestOptions,
 };
@@ -169,7 +170,7 @@ fn default_metadata() -> AllMetadata<FakeTestFilter> {
 fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
     TestingOptions {
         test_metadata: default_metadata(),
-        filter: "all".parse().unwrap(),
+        filter: SimpleFilter::All.into(),
         collector_options: TestOptions,
         timeout_override: None,
     }

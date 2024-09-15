@@ -6,6 +6,7 @@ use crate::{
     TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,
 };
 use anyhow::Result;
+use derive_more::From;
 use maelstrom_base::{
     stats::JobState, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobTerminationStatus,
     Utf8PathBuf,
@@ -361,6 +362,7 @@ impl TestPackage for FakeTestPackage {
     }
 }
 
+#[derive(From)]
 pub struct FakeTestFilter(SimpleFilter);
 
 impl std::str::FromStr for FakeTestFilter {
