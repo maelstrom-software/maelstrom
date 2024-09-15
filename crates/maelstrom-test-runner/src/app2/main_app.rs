@@ -58,7 +58,11 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     }
 
     fn receive_packages(&mut self, packages: Vec<PackageM<DepsT>>) {
-        self.packages = packages.into_iter().map(|p| (p.id(), p)).collect();
+        self.packages = packages
+            .into_iter()
+            .filter(|p| self.options.filter.filter(p, None, None).unwrap_or(true))
+            .map(|p| (p.id(), p))
+            .collect();
 
         let packages: Vec<_> = self.packages.values().collect();
 
