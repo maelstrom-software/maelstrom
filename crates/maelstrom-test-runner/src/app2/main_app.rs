@@ -183,6 +183,25 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     ) {
         self.pending_listings -= 1;
         for (case_name, case_metadata) in &listing {
+            let package = self
+                .packages
+                .get(&artifact.package())
+                .expect("artifact for unknown package");
+
+            let selected = self
+                .options
+                .filter
+                .filter(
+                    package,
+                    Some(&artifact.to_key()),
+                    Some((case_name.as_str(), case_metadata)),
+                )
+                .expect("should have case");
+
+            if !selected {
+                continue;
+            }
+
             if ignored_listing.contains(case_name) {
                 self.handle_ignored_test(&artifact, case_name, case_metadata);
             } else {

@@ -52,7 +52,6 @@ trait Deps {
 /// Immutable information used to control the testing invocation.
 struct TestingOptions<TestFilterT, CollectOptionsT> {
     test_metadata: AllMetadata<TestFilterT>,
-    #[expect(dead_code)]
     filter: TestFilterT,
     collector_options: CollectOptionsT,
     timeout_override: Option<Option<Timeout>>,

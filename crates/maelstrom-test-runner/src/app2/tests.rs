@@ -177,14 +177,31 @@ fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
 }
 
 macro_rules! script_test {
-    ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
-        script_test!($test_name, ExitCode::SUCCESS, $($in_msg => { $($out_msg,)* };)+);
+    (
+        $test_name:ident,
+        $(@ $arg_key:ident = $arg_value:expr,)*
+        $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?
+    ) => {
+        script_test!(
+            $test_name,
+            $(@ $arg_key:ident = $arg_value,)*
+            ExitCode::SUCCESS,
+            $($in_msg => { $($out_msg,)* };)+
+        );
     };
-    ($test_name:ident, $exit_code:expr, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
+    (
+        $test_name:ident,
+        $(@ $arg_key:ident = $arg_value:expr,)*
+        $exit_code:expr,
+        $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?
+    ) => {
         #[test]
         fn $test_name() {
             let deps = TestDeps::default();
-            let options = default_testing_options();
+            let options = TestingOptions {
+                $($arg_key: $arg_value,)*
+                ..default_testing_options()
+            };
             let test_db = TestDb::default();
             let mut fixture = Fixture::new(&deps, &options, test_db);
             $(
@@ -197,13 +214,30 @@ macro_rules! script_test {
 }
 
 macro_rules! script_test_with_error_simex {
-    ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
+    (
+        $test_name:ident,
+        $(@ $arg_key:ident = $arg_value:expr,)*
+        $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?
+    ) => {
         script_test_with_error_simex!(
-            $test_name, ExitCode::SUCCESS, $($in_msg => { $($out_msg,)* };)+
+            $test_name,
+            $(@ $arg_key = $arg_value,)*
+            ExitCode::SUCCESS,
+            $($in_msg => { $($out_msg,)* };)+
         );
     };
-    ($test_name:ident, $exit_code:expr, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
-        script_test!($test_name, $exit_code, $($in_msg => { $($out_msg,)* };)+);
+    (
+        $test_name:ident,
+        $(@ $arg_key:ident = $arg_value:expr,)*
+        $exit_code:expr,
+        $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?
+    ) => {
+        script_test!(
+            $test_name,
+            $(@ $arg_key = $arg_value,)*
+            $exit_code,
+            $($in_msg => { $($out_msg,)* };)+
+        );
 
         paste::paste! {
             #[test]
@@ -211,7 +245,10 @@ macro_rules! script_test_with_error_simex {
                 let mut simex = SimulationExplorer::default();
                 while let Some(mut simulation) = simex.next_simulation() {
                     let deps = TestDeps::default();
-                    let options = default_testing_options();
+                    let options = TestingOptions {
+                        $($arg_key: $arg_value,)*
+                        ..default_testing_options()
+                    };
                     let test_db = TestDb::default();
                     let mut fixture = Fixture::new(&deps, &options, test_db);
                     $(
@@ -895,6 +932,60 @@ script_test_with_error_simex! {
         SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(2)
         }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
+        },
+        StartShutdown
+    };
+}
+
+//   __ _ _ _            _
+//  / _(_) | |_ ___ _ __(_)_ __   __ _
+// | |_| | | __/ _ \ '__| | '_ \ / _` |
+// |  _| | | ||  __/ |  | | | | | (_| |
+// |_| |_|_|\__\___|_|  |_|_| |_|\__, |
+//                               |___/
+
+script_test_with_error_simex! {
+    filtering_cases,
+    @ filter = SimpleFilter::Name("test_a".into()).into(),
+    Start => { GetPackages };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
+    } => {
+        AddJob {
+            job_id: JobId::from(1),
+            spec: test_spec("test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(1)
+        },
     };
     CollectionFinished => {
         SendUiMsg {
