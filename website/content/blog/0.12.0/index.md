@@ -9,6 +9,11 @@ significant usability improvements to the Maelstrom test runners.
 
 <!-- more -->
 
+See the [0.12.0 release
+notes](https://github.com/maelstrom-software/maelstrom/releases/tag/v0.12.0)
+for a complete list of changes. Or check out our [github
+repository](https://github.com/maelstrom-software/maelstrom) to learn more.
+
 ## Test Priorities
 
 In Maelstrom 0.9.0, we introduced the feature where tests are run in [LPT
