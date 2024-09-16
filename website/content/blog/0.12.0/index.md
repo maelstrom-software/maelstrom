@@ -1,11 +1,11 @@
 +++
 title = "Maelstrom 0.12.0 Release"
 date = 2024-09-16
-weight = 1000
+weight = 999
 +++
 
-We're excited to announce Maelstrom 0.12.0. In this release, we made a lot of
-usability improvements to the Maelstrom test runners.
+We're excited to announce Maelstrom 0.12.0. In this release, we made
+significant usability improvements to the Maelstrom test runners.
 
 <!-- more -->
 
@@ -98,5 +98,6 @@ This release features an improved test-runner UI:
 
 <img src="maelstrom_failed_tests.png" alt="Failed Tests Dialog" width="90%"/>
 
-See the [0.12.0 release notes](https://github.com/maelstrom-software/maelstrom/releases/tag/v0.12.0)
+See the [0.12.0 release
+notes](https://github.com/maelstrom-software/maelstrom/releases/tag/v0.12.0)
 for a complete list of changes.
