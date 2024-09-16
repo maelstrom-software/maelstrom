@@ -3,7 +3,7 @@ use anyhow::Result;
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_client::{
     spec::{JobSpec, LayerSpec},
-    IntrospectResponse, JobStatus,
+    ImageSpec, IntrospectResponse, JobStatus,
 };
 use maelstrom_util::template::TemplateVars;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -182,6 +182,10 @@ pub trait CollectTests {
     }
 
     fn get_packages(&self, ui: &ui::UiSender) -> Result<Vec<Self::Package>>;
+
+    fn build_test_layers(&self, _images: Vec<ImageSpec>, _ui: &ui::UiSender) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub trait TestFilter: Sized + FromStr<Err = anyhow::Error> {

@@ -198,6 +198,23 @@ where
             .try_fold(TestMetadata::default(), |m, d| m.try_fold(d))
     }
 
+    pub fn get_all_images(&self) -> Vec<ImageSpec> {
+        self.directives
+            .iter()
+            .filter_map(|d| {
+                d.image.as_ref().map(|name| ImageSpec {
+                    name: name.into(),
+                    use_environment: matches!(&d.environment, Some(PossiblyImage::Image)),
+                    use_layers: matches!(&d.layers, Some(PossiblyImage::Image)),
+                    use_working_directory: matches!(
+                        &d.working_directory,
+                        Some(PossiblyImage::Image)
+                    ),
+                })
+            })
+            .collect()
+    }
+
     pub fn get_metadata_for_test_with_env(
         &self,
         package: &TestFilterT::Package,

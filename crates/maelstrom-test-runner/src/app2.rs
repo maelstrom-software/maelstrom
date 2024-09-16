@@ -358,6 +358,11 @@ where
     let options = &deps.options;
     let client = abs_deps.client();
 
+    // This is where the pytest runner builds pip packages.
+    abs_deps
+        .test_collector()
+        .build_test_layers(deps.options.test_metadata.get_all_images(), &ui)?;
+
     let test_db = deps.test_db_store.load()?;
 
     let done = Event::new();

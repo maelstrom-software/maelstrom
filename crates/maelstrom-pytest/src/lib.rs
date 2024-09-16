@@ -28,9 +28,11 @@ use maelstrom_util::{
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::{hash_map::Entry, HashMap};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Mutex;
 use std::{fmt, io};
 
 pub use config::{Config, PytestConfigValues};
@@ -102,6 +104,7 @@ impl<'client> DefaultMainAppDeps<'client> {
                 project_dir: project_dir.to_owned(),
                 build_dir: build_dir.to_owned(),
                 cache_dir: cache_dir.to_owned(),
+                test_layers: Mutex::new(HashMap::new()),
             },
         })
     }
@@ -160,6 +163,7 @@ struct PytestTestCollector<'client> {
     build_dir: RootBuf<BuildDir>,
     cache_dir: RootBuf<CacheDir>,
     client: &'client Client,
+    test_layers: Mutex<HashMap<ImageSpec, LayerSpec>>,
 }
 
 impl<'client> PytestTestCollector<'client> {
@@ -292,6 +296,26 @@ impl<'client> PytestTestCollector<'client> {
 
         Ok(upper.try_into()?)
     }
+
+    fn build_test_layer(&self, image: ImageSpec, ui: &UiSender) -> Result<Option<LayerSpec>> {
+        let image_name: ImageName = image.name.parse()?;
+        let ImageName::Docker(ref_) = image_name else {
+            return Ok(None);
+        };
+        if ref_.name() != "python" {
+            return Ok(None);
+        }
+
+        let packages_path = self.get_pip_packages(image, &ref_, ui)?;
+        let packages_path = packages_path.strip_prefix(&self.project_dir).unwrap();
+        Ok(Some(LayerSpec::Glob {
+            glob: format!("{packages_path}/**"),
+            prefix_options: PrefixOptions {
+                strip_prefix: Some(packages_path.into()),
+                ..Default::default()
+            },
+        }))
+    }
 }
 
 #[derive(Debug)]
@@ -418,30 +442,27 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         &self,
         _artifact: &PytestTestArtifact,
         metadata: &TestMetadata,
-        ind: &UiSender,
+        _ui: &UiSender,
     ) -> Result<Vec<LayerSpec>> {
         match &metadata.image {
             Some(image) => {
-                let image_name: ImageName = image.name.parse()?;
-                let ImageName::Docker(ref_) = image_name else {
-                    return Ok(vec![]);
-                };
-                if ref_.name() != "python" {
-                    return Ok(vec![]);
-                }
-
-                let packages_path = self.get_pip_packages(image.clone(), &ref_, ind)?;
-                let packages_path = packages_path.strip_prefix(&self.project_dir).unwrap();
-                Ok(vec![LayerSpec::Glob {
-                    glob: format!("{packages_path}/**"),
-                    prefix_options: PrefixOptions {
-                        strip_prefix: Some(packages_path.into()),
-                        ..Default::default()
-                    },
-                }])
+                let test_layers = self.test_layers.lock().unwrap();
+                Ok(test_layers.get(image).into_iter().cloned().collect())
             }
             _ => Ok(vec![]),
         }
+    }
+
+    fn build_test_layers(&self, images: Vec<ImageSpec>, ui: &UiSender) -> Result<()> {
+        let mut test_layers = self.test_layers.lock().unwrap();
+        for image in images {
+            if let Entry::Vacant(e) = test_layers.entry(image.clone()) {
+                if let Some(layer) = self.build_test_layer(image, ui)? {
+                    e.insert(layer);
+                }
+            }
+        }
+        Ok(())
     }
 
     fn get_packages(&self, _ui: &UiSender) -> Result<Vec<PytestPackage>> {

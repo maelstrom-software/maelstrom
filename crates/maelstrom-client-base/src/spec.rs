@@ -47,7 +47,7 @@ where
     }
 }
 
-#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[proto(proto_buf_type = "proto::ImageSpec")]
 pub struct ImageSpec {
     pub name: String,

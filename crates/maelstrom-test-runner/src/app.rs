@@ -812,6 +812,12 @@ where
 {
     let (ui_handle, ui_sender) = ui.start_ui_thread(logging_output, deps.log.clone());
 
+    // This is where the pytest runner builds pip packages.
+    deps.abstract_deps.test_collector().build_test_layers(
+        deps.enqueuing_deps.test_metadata.get_all_images(),
+        &ui_sender,
+    )?;
+
     let exit_code_res = std::thread::scope(|scope| {
         let mut app = MainApp::new(
             &deps,
