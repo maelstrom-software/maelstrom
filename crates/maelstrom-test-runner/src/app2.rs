@@ -59,6 +59,7 @@ struct TestingOptions<TestFilterT, CollectOptionsT> {
     stderr_color: bool,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
+    listing: bool,
 }
 
 pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
@@ -85,7 +86,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         abstract_deps: MainAppDepsT,
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
-        _list_action: Option<ListAction>,
+        list_action: Option<ListAction>,
         repeat: Repeat,
         stop_after: Option<StopAfter>,
         stderr_color: bool,
@@ -119,6 +120,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
                 stderr_color,
                 repeat,
                 stop_after,
+                listing: list_action.is_some(),
             },
         })
     }

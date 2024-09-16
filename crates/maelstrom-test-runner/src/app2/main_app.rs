@@ -129,13 +129,15 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         let failure_limit_reached = self.failure_limit_reached();
 
         if all_pending_stuff_done || failure_limit_reached {
-            self.deps
-                .send_ui_msg(UiMessage::AllJobsFinished(UiJobSummary {
-                    succeeded: self.test_count(TestResult::Succeeded),
-                    failed: self.test_listing(TestResult::Failed),
-                    ignored: self.test_listing(TestResult::Ignored),
-                    not_run: (!all_pending_stuff_done).then(|| self.not_run_estimate()),
-                }));
+            if !self.options.listing {
+                self.deps
+                    .send_ui_msg(UiMessage::AllJobsFinished(UiJobSummary {
+                        succeeded: self.test_count(TestResult::Succeeded),
+                        failed: self.test_listing(TestResult::Failed),
+                        ignored: self.test_listing(TestResult::Ignored),
+                        not_run: (!all_pending_stuff_done).then(|| self.not_run_estimate()),
+                    }));
+            }
             self.deps.start_shutdown();
         }
     }
@@ -301,6 +303,12 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             .expect("should have case");
 
         if !selected {
+            return;
+        }
+
+        if self.options.listing {
+            let case_str = artifact.format_case(&package_name, case_name, case_metadata);
+            self.deps.send_ui_msg(UiMessage::List(case_str));
             return;
         }
 
