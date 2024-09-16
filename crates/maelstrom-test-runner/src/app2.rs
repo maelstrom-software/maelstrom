@@ -14,9 +14,10 @@ use maelstrom_client::{
     spec::{JobSpec, LayerSpec},
     JobStatus, ProjectDir, StateDir,
 };
-use maelstrom_util::{fs::Fs, process::ExitCode, root::Root};
+use maelstrom_util::{fs::Fs, process::ExitCode, root::Root, sync::Event};
 use main_app::MainApp;
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::Duration;
 
 type ArtifactM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Artifact;
 type ArtifactKeyM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::ArtifactKey;
@@ -288,6 +289,21 @@ fn main_app_channel_reader<DepsT: Deps>(
     }
 }
 
+/// Grab introspect data from the client process periodically and send it to the UI. Exit when the
+/// done event has been set.
+fn introspect_loop(done: &Event, client: &impl ClientTrait, ui: UiSender) {
+    loop {
+        let Ok(introspect_resp) = client.introspect() else {
+            break;
+        };
+        ui.update_introspect_state(introspect_resp);
+
+        if !done.wait_timeout(Duration::from_millis(500)).timed_out() {
+            break;
+        }
+    }
+}
+
 /// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
 /// application on this thread using the UI until it is completed.
 pub fn run_app_with_ui_multithreaded<MainAppDepsT>(
@@ -305,8 +321,12 @@ where
     deps.options.timeout_override = timeout_override;
     let abs_deps = &deps.abstract_deps;
     let options = &deps.options;
+    let client = abs_deps.client();
 
     let test_db = deps.test_db_store.load()?;
+
+    let done_ = Event::new();
+    let done = &done_;
 
     let main_res = std::thread::scope(move |scope| {
         main_app_sender.send(MainAppMessage::Start).unwrap();
@@ -314,11 +334,16 @@ where
             deps: abs_deps,
             scope,
             main_app_sender,
-            ui: ui_sender,
+            ui: ui_sender.clone(),
         };
 
+        scope.spawn(move || introspect_loop(done, client, ui_sender));
+
         let app = MainApp::new(&deps, options, test_db);
-        main_app_channel_reader(app, main_app_receiver)
+        let res = main_app_channel_reader(app, main_app_receiver);
+        done.set();
+
+        res
     });
 
     ui_handle.join()?;
