@@ -4,8 +4,8 @@ date = 2024-09-16
 weight = 1000
 +++
 
-We're excited to announce Maelstrom 0.12.0. In this release, we added
-improvements to configuration for all test runners, job scheduling, and UI.
+We're excited to announce Maelstrom 0.12.0. In this release, we made a lot of
+usability improvements to the Maelstrom test runners.
 
 <!-- more -->
 
@@ -36,8 +36,8 @@ This release introduces the <tt>stop-after</tt> configuration value. When this i
 set, Maelstrom will bail out early if the given number of failures are
 encountered.
 
-This change pairs well with the new scheduling changes. If you run, say `cargo
-maelstrom --stop-after=1`, then it will exercise your new tests first, and bail
+This change pairs well with the new scheduling changes. If you run, say <tt>cargo
+maelstrom -\-stop-after=1</tt>, then it will exercise your new tests first, and bail
 out immediately if any of them fail. Then, while you're fixing your code to
 make tests pass, Maelstrom will run all of the tests that previously failed
 first, and bail out if any of them failed again. This really reduces the
@@ -49,11 +49,11 @@ Maelstrom 0.12.0 adds the ability to pass arbitrary arguments to the underlying
 test binaries, and in the case of Pytest, to Pytest at various stages.
 
 For example:
-- `cargo maelstrom -- --force-run-in-process` passes `--force-run-in-processs`
+- `cargo maelstrom -- --force-run-in-process` passes <tt>-\-force-run-in-processs</tt>
   to the Rust test binaries when running tests.
-- `maelstrom-go-test -- -test.parallel 12` passes `-test.parallel 12` to the Go
+- `maelstrom-go-test -- -test.parallel 12` passes <tt>-test.parallel 12</tt> to the Go
   test binaries when running tests.
-- `maelstrom-pytest -- -n1` passes `-n` to Pytest when running tests.
+- `maelstrom-pytest -- -n1` passes </tt>-n1</tt> to Pytest when running tests.
 
 In addition, the <tt>extra-pytest-collect-args</tt>,
 <tt>extra-pytest-test-args</tt>, and <tt>extra-pytest-args</tt> configuration
