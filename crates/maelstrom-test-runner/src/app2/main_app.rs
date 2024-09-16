@@ -46,7 +46,7 @@ pub struct MainApp<'deps, DepsT: Deps> {
     jobs: HashMap<JobId, JobInfo<ArtifactKeyM<DepsT>>>,
     collection_finished: bool,
     pending_listings: u64,
-    num_enqueued: u64,
+    jobs_queued: u64,
     expected_job_count: u64,
     test_results: Vec<(String, TestResult)>,
     fatal_error: Result<()>,
@@ -69,7 +69,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             jobs: HashMap::new(),
             collection_finished: false,
             pending_listings: 0,
-            num_enqueued: 0,
+            jobs_queued: 0,
             expected_job_count: 0,
             test_results: vec![],
             fatal_error: Ok(()),
@@ -84,6 +84,13 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         self.deps.get_packages();
     }
 
+    fn test_count(&self, result: TestResult) -> usize {
+        self.test_results
+            .iter()
+            .filter(|(_, r)| r == &result)
+            .count()
+    }
+
     fn test_listing(&self, result: TestResult) -> Vec<String> {
         self.test_results
             .iter()
@@ -92,14 +99,42 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             .collect()
     }
 
+    fn failure_limit_reached(&self) -> bool {
+        self.options
+            .stop_after
+            .is_some_and(|limit| self.test_count(TestResult::Failed) >= limit.into())
+    }
+
+    fn not_run_estimate(&self) -> NotRunEstimate {
+        let completed = self.test_results.len() as u64;
+
+        if self.collection_finished && self.pending_listings == 0 {
+            // If we queued everything, we know exactly how many tests didn't run
+            NotRunEstimate::Exactly(self.jobs_queued - completed)
+        } else if self.expected_job_count >= self.jobs_queued {
+            // If our expectation looks okay, then lets trust it
+            NotRunEstimate::About(self.expected_job_count - completed)
+        } else if self.jobs_queued > 0 && self.jobs_queued > completed {
+            // Otherwise, if we have any jobs we queued but didn't complete, we can say it is at
+            // least that much
+            NotRunEstimate::GreaterThan(self.jobs_queued - completed)
+        } else {
+            NotRunEstimate::Unknown
+        }
+    }
+
     fn check_for_done(&mut self) {
-        if self.jobs.is_empty() && self.pending_listings == 0 && self.collection_finished {
+        let all_pending_stuff_done =
+            self.jobs.is_empty() && self.pending_listings == 0 && self.collection_finished;
+        let failure_limit_reached = self.failure_limit_reached();
+
+        if all_pending_stuff_done || failure_limit_reached {
             self.deps
                 .send_ui_msg(UiMessage::AllJobsFinished(UiJobSummary {
-                    succeeded: self.test_listing(TestResult::Succeeded).len(),
+                    succeeded: self.test_count(TestResult::Succeeded),
                     failed: self.test_listing(TestResult::Failed),
                     ignored: self.test_listing(TestResult::Ignored),
-                    not_run: None,
+                    not_run: (!all_pending_stuff_done).then(|| self.not_run_estimate()),
                 }));
             self.deps.start_shutdown();
         }
@@ -218,10 +253,10 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             name: case_str,
         }));
 
-        self.num_enqueued += 1;
-        if self.num_enqueued > self.expected_job_count {
+        self.jobs_queued += 1;
+        if self.jobs_queued > self.expected_job_count {
             self.deps
-                .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.num_enqueued));
+                .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.jobs_queued));
         }
     }
 
@@ -235,10 +270,10 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         let case_str = artifact.format_case(package_name, case_name, case_metadata);
 
         let job_id = self.vend_job_id();
-        self.num_enqueued += 1;
-        if self.num_enqueued > self.expected_job_count {
+        self.jobs_queued += 1;
+        if self.jobs_queued > self.expected_job_count {
             self.deps
-                .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.num_enqueued));
+                .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.jobs_queued));
         }
         let res = build_ignored_ui_job_result(job_id, &case_str);
         self.deps.send_ui_msg(UiMessage::JobFinished(res));
