@@ -26,27 +26,27 @@ last time they were run. Now, new tests always have highest priority, followed
 by tests that failed the last time they were run, followed by all other tests.
 Within a priority band, LPT scheduling is still used.
 
-We find that this change really improves the edit-compile-test loop for us,
-since we find out very quickly if our changes --- either newly added tests or
-fixes to broken tests --- worked or not.
+We've found this substantially improves the edit-compile-test loop. We find out
+immediately if our changes work, whether they are newly added tests or fixes to
+broken tests.
 
 ## New <tt>stop-after</tt> Configuration Value
 
-This release introduces the <tt>stop-after</tt> configuration value. When this is
-set, Maelstrom will bail out early if the given number of failures are
+This release introduces the <tt>stop-after</tt> configuration value. When this
+is set, Maelstrom will bail out early if the given number of failures are
 encountered.
 
-This change pairs well with the new scheduling changes. If you run, say <tt>cargo
-maelstrom -\-stop-after=1</tt>, then it will exercise your new tests first, and bail
-out immediately if any of them fail. Then, while you're fixing your code to
-make tests pass, Maelstrom will run all of the tests that previously failed
-first, and bail out if any of them failed again. This really reduces the
-latency of the edit-compile-test loop.
+This change pairs well with the new scheduling changes. For instance, if you
+run `cargo maelstrom --stop-after=1` it will exercise your new tests first and
+bail out immediately if any of them fail. Then, while you're fixing your code,
+Maelstrom will run all of the tests that previously failed first, and bail out
+if any of them fail again. This dramatically reduces the latency of the
+edit-compile-test loop.
 
 ## Passing Extra Arguments to Test Binaries and Pytest
 
 Maelstrom 0.12.0 adds the ability to pass arbitrary arguments to the underlying
-test binaries, and in the case of Pytest, to Pytest at various stages.
+test binaries.
 
 For example:
 - `cargo maelstrom -- --force-run-in-process` passes <tt>-\-force-run-in-processs</tt>
