@@ -286,7 +286,11 @@ impl PrintAbove {
     fn height(&self, width: u16) -> u16 {
         match self {
             Self::StatusLine(_, _) => 1,
-            Self::Output(l) => l.line_count(width).try_into().unwrap_or(u16::MAX),
+            // XXX: This causes truncation of the log-line
+            Self::Output(l) => std::cmp::min(
+                l.line_count(width).try_into().unwrap_or(u16::MAX),
+                u16::MAX / width,
+            ),
         }
     }
 }
