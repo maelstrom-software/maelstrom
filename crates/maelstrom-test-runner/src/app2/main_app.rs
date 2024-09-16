@@ -78,6 +78,9 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     }
 
     fn start(&mut self) {
+        self.deps.send_ui_msg(UiMessage::UpdateEnqueueStatus(
+            DepsT::TestCollector::ENQUEUE_MESSAGE.into(),
+        ));
         self.deps.get_packages();
     }
 

@@ -482,6 +482,9 @@ macro_rules! test_output_test_inner {
             expected_exit_code = $exit_code,
             expected_test_db_out = [$test_db_entry],
             Start => {
+                SendUiMsg {
+                    msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+                },
                 GetPackages
             };
             Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
@@ -595,7 +598,12 @@ macro_rules! test_db_test {
             test_db_in = [$($db_entry_in),*],
             expected_exit_code = ExitCode::SUCCESS,
             expected_test_db_out = [$($db_entry_out),*],
-            Start => { GetPackages };
+            Start => {
+                SendUiMsg {
+                    msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+                },
+                GetPackages
+            };
             Packages {
                 packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
             } => {
@@ -727,6 +735,9 @@ script_test_with_error_simex! {
     no_packages,
     expected_test_db_out = [],
     Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
         GetPackages
     };
     Packages { packages: vec![] } => {
@@ -746,6 +757,9 @@ script_test_with_error_simex! {
     no_artifacts,
     expected_test_db_out = [],
     Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
         GetPackages
     };
     Packages { packages: vec![fake_pkg("foo_pkg", [])] } => {
@@ -776,6 +790,9 @@ script_test! {
     @ stderr_color = true,
     expected_test_db_out = [],
     Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
         GetPackages
     };
     Packages { packages: vec![fake_pkg("foo_pkg", [])] } => {
@@ -807,6 +824,9 @@ script_test_with_error_simex! {
         TestDbEntry::empty_artifact("foo_pkg", "foo_test")
     ],
     Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
         GetPackages
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
@@ -1281,6 +1301,9 @@ script_test_with_error_simex! {
         TestDbEntry::success("foo_pkg", "foo_test", "test_b", nonempty![Duration::from_secs(1)])
     ],
     Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
         GetPackages
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
@@ -1368,6 +1391,9 @@ script_test_with_error_simex! {
         TestDbEntry::new("foo_pkg", "foo_test", "test_b")
     ],
     Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
         GetPackages
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
@@ -1449,6 +1475,9 @@ script_test_with_error_simex! {
         TestDbEntry::new("foo_pkg", "foo_test", "test_b")
     ],
     Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
         GetPackages
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
@@ -1528,7 +1557,12 @@ script_test_with_error_simex! {
         TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),
         TestDbEntry::new("foo_pkg", "foo_test", "test_b")
     ],
-    Start => { GetPackages };
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
             color: false,
@@ -1592,7 +1626,12 @@ script_test_with_error_simex! {
     expected_test_db_out = [
         TestDbEntry::success("bar_pkg", "bar_test", "test_a", nonempty![Duration::from_secs(1)])
     ],
-    Start => { GetPackages };
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
     Packages {
         packages: vec![fake_pkg("foo_pkg", ["foo_test"]), fake_pkg("bar_pkg", ["bar_test"])]
     } => {
@@ -1662,7 +1701,12 @@ script_test_with_error_simex! {
         TestDbEntry::success("bar_pkg", "bar_test", "test_a", nonempty![Duration::from_secs(1)]),
         TestDbEntry::new("bar_pkg", "bar_test", "test_b")
     ],
-    Start => { GetPackages };
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
     Packages {
         packages: vec![fake_pkg("foo_pkg", ["foo_test"]), fake_pkg("bar_pkg", ["bar_test"])]
     } => {
@@ -1750,7 +1794,12 @@ script_test_with_error_simex! {
             nonempty![Duration::from_secs(1), Duration::from_secs(1)]
         )
     ],
-    Start => { GetPackages };
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
     Packages {
         packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
     } => {
@@ -1847,7 +1896,12 @@ script_test_with_error_simex! {
     expected_test_db_out = [
         TestDbEntry::success("bar_pkg", "bar_test", "test_a", nonempty![Duration::from_secs(1)])
     ],
-    Start => { GetPackages };
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
     Packages {
         packages: vec![fake_pkg("bar_pkg", ["bar_test"])]
     } => {
@@ -1940,7 +1994,12 @@ script_test_with_error_simex! {
         TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),
         TestDbEntry::success("foo_pkg", "foo_test", "test_b", nonempty![Duration::from_secs(1)])
     ],
-    Start => { GetPackages };
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
             color: false,
