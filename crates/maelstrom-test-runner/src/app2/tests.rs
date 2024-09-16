@@ -5,17 +5,20 @@ use crate::fake_test_framework::{
 };
 use crate::metadata::{AllMetadata, TestMetadata};
 use crate::test_db::{OnDiskTestDb, TestDb};
-use crate::ui::{UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
+use crate::ui::{
+    UiJobEnqueued, UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,
+};
 use crate::{NoCaseMetadata, StringArtifactKey};
 use anyhow::anyhow;
 use itertools::Itertools as _;
 use maelstrom_base::{
-    nonempty, ClientJobId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
-    JobOutcome, JobOutputResult, JobRootOverlay, JobTerminationStatus, NonEmpty,
+    nonempty, ClientJobId, JobBrokerStatus, JobCompleted, JobDevice, JobEffects, JobError,
+    JobMount, JobNetwork, JobOutcome, JobOutputResult, JobRootOverlay, JobTerminationStatus,
+    JobWorkerStatus, NonEmpty,
 };
 use maelstrom_client::{
     spec::{ContainerRef, ContainerSpec, JobSpec, LayerSpec},
-    JobStatus,
+    JobRunningStatus, JobStatus,
 };
 use maelstrom_simex::SimulationExplorer;
 use maelstrom_util::process::ExitCode;
@@ -505,6 +508,12 @@ macro_rules! test_output_test_inner {
                     spec: test_spec("foo_test", "test_a"),
                 },
                 SendUiMsg {
+                    msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                        job_id: JobId::from(1),
+                        name: "foo_pkg test_a".into()
+                    })
+                },
+                SendUiMsg {
                     msg: UiMessage::UpdatePendingJobsCount(1)
                 }
             };
@@ -615,9 +624,21 @@ macro_rules! test_db_test {
                     job_id: JobId::from(1),
                     spec: $test_a_job_spec,
                 },
+                SendUiMsg {
+                    msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                        job_id: JobId::from(1),
+                        name: "foo_pkg test_a".into()
+                    })
+                },
                 AddJob {
                     job_id: JobId::from(2),
                     spec: $test_b_job_spec,
+                },
+                SendUiMsg {
+                    msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                        job_id: JobId::from(2),
+                        name: "foo_pkg test_b".into()
+                    })
                 },
             };
             CollectionFinished => {
@@ -666,6 +687,17 @@ fn job_status_complete(exit_code: u8) -> anyhow::Result<JobStatus> {
             },
         })),
     })
+}
+
+fn job_status_running() -> anyhow::Result<JobStatus> {
+    Ok(JobStatus::Running(job_running_status_executing()))
+}
+
+fn job_running_status_executing() -> JobRunningStatus {
+    JobRunningStatus::AtBroker(JobBrokerStatus::AtWorker(
+        1.into(),
+        JobWorkerStatus::Executing,
+    ))
 }
 
 fn ui_job_result(name: &str, job_id: u32, status: UiJobStatus) -> UiMessage {
@@ -1275,11 +1307,23 @@ script_test_with_error_simex! {
             spec: test_spec("foo_test", "test_a"),
         },
         SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(1)
         },
         AddJob {
             job_id: JobId::from(2),
             spec: test_spec("foo_test", "test_b"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(2),
+                name: "foo_pkg test_b".into()
+            })
         },
         SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(2)
@@ -1348,6 +1392,12 @@ script_test_with_error_simex! {
         AddJob {
             job_id: JobId::from(1),
             spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
         },
         SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(1)
@@ -1425,6 +1475,12 @@ script_test_with_error_simex! {
             spec: test_spec("foo_test", "test_a"),
         },
         SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(1)
         },
         SendUiMsg {
@@ -1497,6 +1553,12 @@ script_test_with_error_simex! {
             spec: test_spec("foo_test", "test_a"),
         },
         SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(1)
         },
     };
@@ -1555,6 +1617,12 @@ script_test_with_error_simex! {
         AddJob {
             job_id: JobId::from(1),
             spec: test_spec("bar_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "bar_pkg test_a".into()
+            })
         },
         SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(1)
@@ -1619,6 +1687,12 @@ script_test_with_error_simex! {
         AddJob {
             job_id: JobId::from(1),
             spec: test_spec("bar_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "bar_pkg test_a".into()
+            })
         },
         SendUiMsg {
             msg: UiMessage::UpdatePendingJobsCount(1)
@@ -1709,6 +1783,12 @@ script_test_with_error_simex! {
                 ..test_spec("foo_test", "test_a")
             }
         },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
+        },
         AddJob {
             job_id: JobId::from(2),
             spec: JobSpec {
@@ -1716,6 +1796,12 @@ script_test_with_error_simex! {
                 priority: 0,
                 ..test_spec("foo_test", "test_b")
             }
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(2),
+                name: "foo_pkg test_b".into()
+            })
         },
     };
     CollectionFinished => {
@@ -1839,4 +1925,118 @@ test_db_test! {
         priority: 0,
         ..test_spec("foo_test", "test_b")
     }
+}
+
+//                         _               _            _
+//  _ __ _   _ _ __  _ __ (_)_ __   __ _  | |_ ___  ___| |_ ___
+// | '__| | | | '_ \| '_ \| | '_ \ / _` | | __/ _ \/ __| __/ __|
+// | |  | |_| | | | | | | | | | | | (_| | | ||  __/\__ \ |_\__ \
+// |_|   \__,_|_| |_|_| |_|_|_| |_|\__, |  \__\___||___/\__|___/
+//                                 |___/
+
+script_test_with_error_simex! {
+    running_tests,
+    expected_test_db_out = [
+        TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),
+        TestDbEntry::success("foo_pkg", "foo_test", "test_b", nonempty![Duration::from_secs(1)])
+    ],
+    Start => { GetPackages };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
+    } => {
+        AddJob {
+            job_id: JobId::from(1),
+            spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(1)
+        },
+        AddJob {
+            job_id: JobId::from(2),
+            spec: test_spec("foo_test", "test_b"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(2),
+                name: "foo_pkg test_b".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(2)
+        },
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_running()
+    } => {
+        SendUiMsg {
+            msg: UiMessage::JobUpdated(UiJobUpdate {
+                job_id: JobId::from(1),
+                status: job_running_status_executing(),
+            })
+        },
+    };
+    JobUpdate {
+        job_id: JobId::from(2),
+        result: job_status_running()
+    } => {
+        SendUiMsg {
+            msg: UiMessage::JobUpdated(UiJobUpdate {
+                job_id: JobId::from(2),
+                status: job_running_status_executing(),
+            })
+        },
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
+        },
+    };
+    JobUpdate {
+        job_id: JobId::from(2),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_b", 2, UiJobStatus::Ok)
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 2,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
+        StartShutdown
+    };
 }

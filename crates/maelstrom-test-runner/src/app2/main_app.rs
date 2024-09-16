@@ -5,7 +5,9 @@ use super::{
 };
 use crate::metadata::TestMetadata;
 use crate::test_db::CaseOutcome;
-use crate::ui::{UiJobId as JobId, UiJobStatus, UiJobSummary, UiMessage};
+use crate::ui::{
+    UiJobEnqueued, UiJobId as JobId, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,
+};
 use crate::*;
 use maelstrom_base::{ClientJobId, JobOutcomeResult, JobRootOverlay};
 use maelstrom_client::{spec::JobSpec, ContainerSpec, JobStatus};
@@ -202,11 +204,15 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         self.deps.add_job(job_id, spec);
         let job_info = JobInfo {
             case_name: case_name.into(),
-            case_str,
+            case_str: case_str.clone(),
             package_name: package_name.into(),
             artifact_key: artifact.to_key(),
         };
         self.jobs.insert(job_id, job_info).assert_is_none();
+        self.deps.send_ui_msg(UiMessage::JobEnqueued(UiJobEnqueued {
+            job_id,
+            name: case_str,
+        }));
 
         self.num_enqueued += 1;
         if self.num_enqueued > self.expected_job_count {
@@ -343,8 +349,10 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
                 client_job_id,
                 result,
             }) => self.receive_job_finished(job_id, Ok((client_job_id, result))),
+            Ok(JobStatus::Running(status)) => self
+                .deps
+                .send_ui_msg(UiMessage::JobUpdated(UiJobUpdate { job_id, status })),
             Err(err) => self.receive_job_finished(job_id, Err(err)),
-            _ => {}
         }
     }
 
