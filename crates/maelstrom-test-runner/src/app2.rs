@@ -18,6 +18,7 @@ use maelstrom_util::{fs::Fs, process::ExitCode, root::Root, sync::Event};
 use main_app::MainApp;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
+use std_semaphore::Semaphore;
 
 type ArtifactM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Artifact;
 type ArtifactKeyM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::ArtifactKey;
@@ -158,6 +159,27 @@ struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     main_app_sender: Sender<MainAppMessageM<Self>>,
     ui: UiSender,
+    semaphore: &'deps Semaphore,
+}
+
+const MAX_NUM_BACKGROUND_THREADS: isize = 200;
+
+impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope, MainAppDepsT> {
+    fn new(
+        deps: &'deps MainAppDepsT,
+        scope: &'scope std::thread::Scope<'scope, 'deps>,
+        main_app_sender: Sender<MainAppMessageM<Self>>,
+        ui: UiSender,
+        semaphore: &'deps Semaphore,
+    ) -> Self {
+        Self {
+            deps,
+            scope,
+            main_app_sender,
+            ui,
+            semaphore,
+        }
+    }
 }
 
 impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
@@ -171,6 +193,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
         options: &CollectOptionsM<Self>,
         packages: Vec<&PackageM<Self>>,
     ) {
+        let sem = self.semaphore;
         let sender = self.main_app_sender.clone();
         match self
             .deps
@@ -179,6 +202,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
         {
             Ok((build_handle, artifact_stream)) => {
                 self.scope.spawn(move || {
+                    let _guard = sem.access();
                     for artifact in artifact_stream {
                         match artifact {
                             Ok(artifact) => {
@@ -209,18 +233,21 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
     }
 
     fn get_packages(&self) {
+        let sem = self.semaphore;
         let deps = self.deps;
         let sender = self.main_app_sender.clone();
         let ui = self.ui.clone();
-        self.scope
-            .spawn(move || match deps.test_collector().get_packages(&ui) {
+        self.scope.spawn(move || {
+            let _guard = sem.access();
+            match deps.test_collector().get_packages(&ui) {
                 Ok(packages) => {
                     let _ = sender.send(MainAppMessage::Packages { packages });
                 }
                 Err(error) => {
                     let _ = sender.send(MainAppMessage::FatalError { error });
                 }
-            });
+            }
+        });
     }
 
     fn add_job(&self, job_id: JobId, spec: JobSpec) {
@@ -236,8 +263,10 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
     }
 
     fn list_tests(&self, artifact: ArtifactM<Self>) {
+        let sem = self.semaphore;
         let sender = self.main_app_sender.clone();
         self.scope.spawn(move || {
+            let _guard = sem.access();
             let listing = match artifact.list_tests() {
                 Ok(listing) => listing,
                 Err(error) => {
@@ -322,7 +351,7 @@ where
     MainAppDepsT: MainAppDeps,
 {
     let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
-    let (ui_handle, ui_sender) = ui.start_ui_thread(logging_output, deps.log.clone());
+    let (ui_handle, ui) = ui.start_ui_thread(logging_output, deps.log.clone());
 
     deps.options.timeout_override = timeout_override;
     let abs_deps = &deps.abstract_deps;
@@ -331,19 +360,14 @@ where
 
     let test_db = deps.test_db_store.load()?;
 
-    let done_ = Event::new();
-    let done = &done_;
+    let done = Event::new();
+    let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
 
-    let main_res = std::thread::scope(move |scope| {
+    let main_res = std::thread::scope(|scope| {
         main_app_sender.send(MainAppMessage::Start).unwrap();
-        let deps = MainAppDepsAdapter {
-            deps: abs_deps,
-            scope,
-            main_app_sender,
-            ui: ui_sender.clone(),
-        };
+        let deps = MainAppDepsAdapter::new(abs_deps, scope, main_app_sender, ui.clone(), &sem);
 
-        scope.spawn(move || introspect_loop(done, client, ui_sender));
+        scope.spawn(|| introspect_loop(&done, client, ui));
 
         let app = MainApp::new(&deps, options, test_db);
         let res = main_app_channel_reader(app, main_app_receiver);

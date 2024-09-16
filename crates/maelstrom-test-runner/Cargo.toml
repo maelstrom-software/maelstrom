@@ -40,6 +40,7 @@ serde_with.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 slog.workspace = true
+std-semaphore.workspace = true
 strum.workspace = true
 tui-term.workspace = true
 throbber-widgets-tui.workspace = true
