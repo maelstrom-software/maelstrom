@@ -397,6 +397,10 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     }
 
     fn receive_job_update(&mut self, job_id: JobId, result: Result<JobStatus>) {
+        if self.failure_limit_reached() {
+            return;
+        }
+
         match result {
             Ok(JobStatus::Completed {
                 client_job_id,
