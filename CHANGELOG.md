@@ -9,7 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.0] - 2024-09-12
 
-#### Added
+### General
+
+The focus of this release was on usability improvements.
+
+#### Test Scheduling Priorities
+
+We added a new priority field to every job to allow the client to indicate
+higher-priority jobs. The tests runners now use this to elevate the priorities
+of new and previouly-failed tests. This way, users get immediate feedback about
+whether or not their changes fixed their tests.
+
+#### New Configuration Values
+
+We added a `stop-after` configuration value to all of the test runners. The
+test runner will stop executing after this many failures. This pairs well with
+the new scheduling priorities. Running `cargo maelstrom --stop-after=1` will
+give immediate feedback on whether your new tests failed, or whether your
+changes intended to fix a failing test worked.
+
+#### Passing Extra Arguments to Tests
+
+We added a number of configuration values to allow the passing of arbitrary
+arguments to test binaries. In the case of Pytest, we also added configuration
+values to enable passing arbirary arguments to the collect phase, the
+test-running phase, or both.
+
+The extra arguments can also be passed after `--` on the command line, like
+this: `maelstrom-go-test -- -test.parallel 12`.
+
+#### More `maelstrom-go-test` Features
+
+We added the `vet`, `short`, and `fullpath` pass-through configuration values
+to `maelstrom-go-test`. We also added `maelstrom-go-test --list-packages`.
+
+#### Better Default Metadata
+
+We updated the default metadata for the test runners to be more useful. Each
+test runner now has its own, specific, default metadata.
+
+`cargo maelstrom` now passes `RUST_BACKTRACE` and `RUST_LIB_BACKTRACE` to the
+test binaries.
+
+`maelstrom-pytest` now has much better defaults, as is [documented
+here](https://maelstrom-software.com/doc/book/0.12.0/pytest/spec/default.html).
+
+#### UI Improvements
+
+The test-runner UI has been improved in a number of ways to provide more
+information about the state of tests. See below for more information.
+
+#### Shared-Library Dependencies
+
+We added a new ayer type called `shared-library-dependencies`, which includes
+the closure of shared libraries required to run a list of binaries. This makes
+it easier to include external binaries and their dependencies in test
+containers.
+
+### Added
 - `maelstrom-go-test` now edits out some lines from test failures that come
   from the `go test` test fixture code.
   \[[369](https://github.com/maelstrom-software/maelstrom/issues/369)\]
@@ -52,7 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple and Facny UI indicate the number of failed tests in their respective progress bars.
   \[[391](https://github.com/maelstrom-software/maelstrom/issues/391)\]
 
-#### Changed
+### Changed
 - `ui` test-runner config option value now matches the same casing as the CLI option
   (kebab-case).
 - UI now has improved tracking of the state of tests. The fancy UI in particular will now only show

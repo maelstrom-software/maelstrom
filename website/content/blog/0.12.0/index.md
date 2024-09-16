@@ -1,53 +1,100 @@
 +++
 title = "Maelstrom 0.12.0 Release"
-date = 2024-09-09
+date = 2024-09-16
 weight = 1000
-draft = true
 +++
 
-We're excited to announce Maelstrom 0.12.0. In this release, we added improvements to configuration for all test runners, job scheduling, and UI.
+We're excited to announce Maelstrom 0.12.0. In this release, we added
+improvements to configuration for all test runners, job scheduling, and UI.
 
 <!-- more -->
 
-## Test Runner Configuration Improvements
+## Test Priorities
 
-We added new CLI and configuration options, all of which are available on the command-line.
+In Maelstrom 0.9.0, we introduced the feature where tests are run in [LPT
+order](https://en.wikipedia.org/wiki/Longest-processing-time-first_scheduling).
+Maelstrom uses tests' historical run times to predict future run times, and
+then schedules the tests that are predicted to take the longest time first.
+This is really great way to shorten the makespan (total time it takes to run a
+batch of tests) without a lot of work. Computing a schedule that gives a
+minimal makespan is NP-hard, but LPT scheduling gives us makespans that are no
+worse than 133% of the optimal schedule.
 
-Improvements available for all Maelstrom test runners:
-- <tt>stop-after</tt> Have the test runner stop after the given number of failures.
-- <tt>extra-*-args</tt> Pass arbitrary arguments through to the underlying test or test framework.
+With this release, Malestrom now has an improved scheduling algorithm.
+Maelstrom now keeps track of which tests are new and which tests failed the
+last time they were run. Now, new tests always have highest priority, followed
+by tests that failed the last time they were run, followed by all other tests.
+Within a priority band, LPT scheduling is still used.
 
-See the book pages for more information:
-- [Cargo Configuration Values](https://maelstrom-software.com/doc/book/0.12.0/cargo-maelstrom/config.html)
-- [Pytest Configuration Values](https://maelstrom-software.com/doc/book/0.12.0/pytest/config.html)
-- [Go Test Configuration Values](https://maelstrom-software.com/doc/book/0.12.0/go-test/config.html)
+We find that this change really improves the edit-compile-test loop for us,
+since we find out very quickly if our changes --- either newly added tests or
+fixes to broken tests --- worked or not.
 
-Improvement now available for the Go test runner:
-- <tt>vet</tt>, <tt>short</tt>, <tt>fullpath</tt> pass-through options added
-- <tt>--list-packages</tt> List all packages
+## New <tt>stop-after</tt> Configuration Value
 
-See the book page for more information [Go Test Configuration Values](https://maelstrom-software.com/doc/book/0.12.0/go-test/config.html)
+This release introduces the <tt>stop-after</tt> configuration value. When this is
+set, Maelstrom will bail out early if the given number of failures are
+encountered.
 
-## Test Metadata Improvements
+This change pairs well with the new scheduling changes. If you run, say `cargo
+maelstrom --stop-after=1`, then it will exercise your new tests first, and bail
+out immediately if any of them fail. Then, while you're fixing your code to
+make tests pass, Maelstrom will run all of the tests that previously failed
+first, and bail out if any of them failed again. This really reduces the
+latency of the edit-compile-test loop.
 
-We added a new layer type called <tt>shared-library-dependencies</tt>, which includes the closure of
-shared libraries required to run a list of binaries.
+## Passing Extra Arguments to Test Binaries and Pytest
 
-We updated the default test metadata configuration for all tests runners. The Python test runner, in
-particular, is significantly easier to use out-of-the-box.
+Maelstrom 0.12.0 adds the ability to pass arbitrary arguments to the underlying
+test binaries, and in the case of Pytest, to Pytest at various stages.
 
-## Scheduling Improvements
+For example:
+- `cargo maelstrom -- --force-run-in-process` passes `--force-run-in-processs`
+  to the Rust test binaries when running tests.
+- `maelstrom-go-test -- -test.parallel 12` passes `-test.parallel 12` to the Go
+  test binaries when running tests.
+- `maelstrom-pytest -- -n1` passes `-n` to Pytest when running tests.
 
-We added a new priority for jobs that prioritizes previously failed tests, so they run sooner. Though, tests with the longest remaining time are still run first in their given priority band.
-See the book page for more information: [Test Execution Order](https://maelstrom-software.com/doc/book/0.12.0/cargo-maelstrom/test-execution-order.html)
+In addition, the <tt>extra-pytest-collect-args</tt>,
+<tt>extra-pytest-test-args</tt>, and <tt>extra-pytest-args</tt> configuration
+values can be used to tell <tt>maelstrom-pytest</tt> to pass extra arguments to
+Pytest in the collect phase, in the test-running phase, or both, respectively.
+
+## More Configuration Values for <tt>maelstrom-go-test</tt>
+
+Malestrom 0.12.0 updates <tt>maelstrom-go-test</tt> with more configuration
+values that add functionality found in <tt>go test</tt>:
+- <tt>vet</tt>
+- <tt>short</tt>
+- <tt>fullpath</tt>
+
+Also, `maelstrom-go-test --list-packages` now works, similar to how `cargo
+maelstrom --list-packages` does.
+
+## Shared-Library Dependencies
+
+This release of Maelstrom adds a new layer type called
+<tt>shared-library-dependencies</tt>, which includes the closure of shared
+libraries required to run a list of binaries. This makes it easier to include
+external binaries and their dependencies in test containers.
+
+## Better Default Metadata
+
+All of the tests runners in Maelstrom 0.12.0 now have updated default metadata
+configurations. These are now test-runner-specific. For example, <tt>cargo
+maelstrom</tt> now forwards <tt>RUST\_BACKTRACE</tt> and <tt>RUST\_LIB\_BACKTRACE</tt>.
+
+With this change, the Python test runner is now significantly easier to use
+out-of-the-box.
 
 ## UI Improvements
 
-We improved the test runner UI with:
-
-- Better tracking for the state of tests. Both UIs include counts of jobs in various states, and the way
-  these states are counted has been improved to remove previous tiny inaccuracies.
-- A listing of failed tests now appears in the Fancy UI. The Simple UI shows a count.
+This release features an improved test-runner UI:
+- Both the <tt>fancy</tt> and <tt>simple</tt> UIs now show the counts of tests
+  in each various state.
+- The <tt>fancy</tt> UI now includes a listing of failed tests during the test
+  run. Before, this was only shown in a summary at the end of the test run.
+- The <tt>simple</tt> UI now includes a running count of failed tests.
 
 <img src="maelstrom_failed_tests.png" alt="Failed Tests Dialog" width="90%"/>
 
