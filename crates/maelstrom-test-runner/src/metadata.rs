@@ -22,7 +22,7 @@ pub struct AllMetadata<TestFilterT> {
     directives: Vec<TestDirective<TestFilterT>>,
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TestMetadata {
     include_shared_libraries: Option<bool>,
     pub image: Option<ImageSpec>,

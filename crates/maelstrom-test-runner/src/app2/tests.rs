@@ -1,4 +1,5 @@
 use super::{Deps, MainApp, MainAppMessage::*, MainAppMessageM, TestingOptions};
+use crate::config::Repeat;
 use crate::deps::SimpleFilter;
 use crate::fake_test_framework::{
     FakePackageId, FakeTestArtifact, FakeTestFilter, FakeTestPackage, TestCollector, TestOptions,
@@ -288,6 +289,7 @@ fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
         collector_options: TestOptions,
         timeout_override: None,
         stderr_color: false,
+        repeat: Repeat::try_from(1).unwrap(),
     }
 }
 
@@ -2093,6 +2095,359 @@ script_test_with_error_simex! {
                 succeeded: 2,
                 failed: vec![],
                 ignored: vec![],
+                not_run: None,
+            })
+        },
+        StartShutdown
+    };
+}
+
+//                            _
+//  _ __ ___ _ __   ___  __ _| |_
+// | '__/ _ \ '_ \ / _ \/ _` | __|
+// | | |  __/ |_) |  __/ (_| | |_
+// |_|  \___| .__/ \___|\__,_|\__|
+//          |_|
+
+script_test_with_error_simex! {
+    repeat_2_success,
+    @ repeat = Repeat::try_from(2).unwrap(),
+    expected_test_db_out = [
+        TestDbEntry::success(
+            "foo_pkg",
+            "foo_test",
+            "test_a",
+            nonempty![Duration::from_secs(1), Duration::from_secs(1)]
+        ),
+        TestDbEntry::success(
+            "foo_pkg",
+            "foo_test",
+            "test_b",
+            nonempty![Duration::from_secs(1), Duration::from_secs(1)]
+        )
+    ],
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
+    } => {
+        AddJob {
+            job_id: JobId::from(1),
+            spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(1)
+        },
+
+        AddJob {
+            job_id: JobId::from(2),
+            spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(2),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(2)
+        },
+
+        AddJob {
+            job_id: JobId::from(3),
+            spec: test_spec("foo_test", "test_b"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(3),
+                name: "foo_pkg test_b".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(3)
+        },
+
+        AddJob {
+            job_id: JobId::from(4),
+            spec: test_spec("foo_test", "test_b"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(4),
+                name: "foo_pkg test_b".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(4)
+        }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok),
+        },
+    };
+    JobUpdate {
+        job_id: JobId::from(2),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 2, UiJobStatus::Ok),
+        },
+    };
+    JobUpdate {
+        job_id: JobId::from(3),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_b", 3, UiJobStatus::Ok),
+        },
+    };
+    JobUpdate {
+        job_id: JobId::from(4),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_b", 4, UiJobStatus::Ok),
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 4,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
+        StartShutdown
+    };
+}
+
+script_test_with_error_simex! {
+    repeat_2_single_failure,
+    @ repeat = Repeat::try_from(2).unwrap(),
+    test_db_in = [],
+    expected_exit_code = ExitCode::from(1),
+    expected_test_db_out = [
+        TestDbEntry::failure(
+            "foo_pkg",
+            "foo_test",
+            "test_a",
+            nonempty![Duration::from_secs(1), Duration::from_secs(1)]
+        )
+    ],
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
+    } => {
+        AddJob {
+            job_id: JobId::from(1),
+            spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(1)
+        },
+
+        AddJob {
+            job_id: JobId::from(2),
+            spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(2),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(2)
+        },
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok),
+        },
+    };
+    JobUpdate {
+        job_id: JobId::from(2),
+        result: job_status_complete(1),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 2, UiJobStatus::Failure(None)),
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 1,
+                failed: vec!["foo_pkg test_a".into()],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
+        StartShutdown
+    };
+}
+
+script_test_with_error_simex! {
+    ignored_tests_not_repeated,
+    @ repeat = Repeat::try_from(2).unwrap(),
+    expected_test_db_out = [
+        TestDbEntry::success(
+            "foo_pkg",
+            "foo_test",
+            "test_a",
+            nonempty![Duration::from_secs(1), Duration::from_secs(1)]
+        ),
+        TestDbEntry::new("foo_pkg", "foo_test", "test_b")
+    ],
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec!["test_b".into()]
+    } => {
+        AddJob {
+            job_id: JobId::from(1),
+            spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(1)
+        },
+        AddJob {
+            job_id: JobId::from(2),
+            spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(2),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(2)
+        },
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_b", 3, UiJobStatus::Ignored)
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(3)
+        }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
+        },
+    };
+    JobUpdate {
+        job_id: JobId::from(2),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 2, UiJobStatus::Ok)
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 2,
+                failed: vec![],
+                ignored: vec!["foo_pkg test_b".into()],
                 not_run: None,
             })
         },

@@ -161,8 +161,9 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     ) {
         let case_str = artifact.format_case(package_name, case_name, case_metadata);
 
-        let mut layers = test_metadata.layers.clone();
-        layers.extend(self.deps.get_test_layers(artifact, &test_metadata));
+        let test_layers = self.deps.get_test_layers(artifact, &test_metadata);
+        let mut layers = test_metadata.layers;
+        layers.extend(test_layers);
 
         let get_timing_result = self
             .test_db
@@ -277,13 +278,15 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         if ignored_listing.contains(case_name) || test_metadata.ignore {
             self.handle_ignored_test(&package_name, artifact, case_name, case_metadata);
         } else {
-            self.enqueue_test(
-                test_metadata,
-                &package_name,
-                artifact,
-                case_name,
-                case_metadata,
-            );
+            for _ in 0..self.options.repeat.into() {
+                self.enqueue_test(
+                    test_metadata.clone(),
+                    &package_name,
+                    artifact,
+                    case_name,
+                    case_metadata,
+                );
+            }
         }
     }
 
