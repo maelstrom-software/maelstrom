@@ -343,6 +343,10 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             self.maybe_enqueue_test(&artifact, case_name, case_metadata, &ignored_listing);
         }
 
+        if self.pending_listings == 0 && self.collection_finished {
+            self.deps.send_ui_msg(UiMessage::DoneQueuingJobs);
+        }
+
         self.check_for_done();
     }
 
@@ -399,7 +403,9 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
     fn receive_collection_finished(&mut self) {
         self.collection_finished = true;
-        self.deps.send_ui_msg(UiMessage::DoneQueuingJobs);
+        if self.pending_listings == 0 {
+            self.deps.send_ui_msg(UiMessage::DoneQueuingJobs);
+        }
 
         self.check_for_done();
     }
