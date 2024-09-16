@@ -47,6 +47,38 @@ pub fn event() -> (EventSender, EventReceiver) {
     (EventSender { _sender }, EventReceiver(receiver))
 }
 
+#[derive(Default)]
+pub struct Event {
+    completed: std::sync::Mutex<bool>,
+    condvar: std::sync::Condvar,
+}
+
+impl Event {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set(&self) {
+        *self.completed.lock().unwrap() = true;
+        self.condvar.notify_all();
+    }
+
+    pub fn wait(&self) {
+        let _guard = self
+            .condvar
+            .wait_while(self.completed.lock().unwrap(), |completed| !*completed)
+            .unwrap();
+    }
+
+    pub fn wait_timeout(&self, dur: std::time::Duration) -> std::sync::WaitTimeoutResult {
+        let (_guard, result) = self
+            .condvar
+            .wait_timeout_while(self.completed.lock().unwrap(), dur, |completed| !*completed)
+            .unwrap();
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,5 +162,32 @@ mod tests {
         drop(event_receiver);
         channel_sender.send(()).unwrap();
         handle.await.unwrap();
+    }
+
+    #[test]
+    fn sync_event_wait() {
+        let event = Event::new();
+
+        std::thread::scope(|scope| {
+            let t1 = scope.spawn(|| event.wait());
+            let t2 = scope.spawn(|| event.wait());
+
+            std::thread::sleep(Duration::from_millis(10));
+            assert!(!t1.is_finished());
+            assert!(!t2.is_finished());
+
+            event.set();
+            t1.join().unwrap();
+            t2.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn sync_event_wait_timeout() {
+        let event = Event::new();
+
+        assert!(event.wait_timeout(Duration::from_millis(5)).timed_out());
+        event.set();
+        assert!(!event.wait_timeout(Duration::from_millis(5)).timed_out());
     }
 }
