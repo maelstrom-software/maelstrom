@@ -11,14 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### General
 
-The focus of this release was on usability improvements.
+The focus of this release was usability improvements for test runners.
 
 #### Test Scheduling Priorities
 
-We added a new priority field to every job to allow the client to indicate
-higher-priority jobs. The tests runners now use this to elevate the priorities
-of new and previouly-failed tests. This way, users get immediate feedback about
-whether or not their changes fixed their tests.
+We added a new priority field to the job struct to allow the client to indicate
+higher-priority jobs. The tests runners now use this field to elevate the
+priorities of new and previously-failed tests. This way, users get immediate
+feedback about whether or not their changes fixed their tests.
 
 #### New Configuration Values
 
@@ -32,7 +32,7 @@ changes intended to fix a failing test worked.
 
 We added a number of configuration values to allow the passing of arbitrary
 arguments to test binaries. In the case of Pytest, we also added configuration
-values to enable passing arbirary arguments to the collect phase, the
+values to enable passing arbitrary arguments to the collect phase, the
 test-running phase, or both.
 
 The extra arguments can also be passed after `--` on the command line, like
@@ -61,7 +61,7 @@ information about the state of tests. See below for more information.
 
 #### Shared-Library Dependencies
 
-We added a new ayer type called `shared-library-dependencies`, which includes
+We added a new layer type called `shared-library-dependencies`, which includes
 the closure of shared libraries required to run a list of binaries. This makes
 it easier to include external binaries and their dependencies in test
 containers.
@@ -106,7 +106,7 @@ containers.
   \[[380](https://github.com/maelstrom-software/maelstrom/issues/380)\]
 - Fancy UI lists failed tests in a dialog before it has finished running tests.
   \[[391](https://github.com/maelstrom-software/maelstrom/issues/391)\]
-- Simple and Facny UI indicate the number of failed tests in their respective progress bars.
+- Simple and Fancy UI indicate the number of failed tests in their respective progress bars.
   \[[391](https://github.com/maelstrom-software/maelstrom/issues/391)\]
 
 ### Changed

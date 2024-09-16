@@ -20,7 +20,7 @@ batch of tests) without a lot of work. Computing a schedule that gives a
 minimal makespan is NP-hard, but LPT scheduling gives us makespans that are no
 worse than 133% of the optimal schedule.
 
-With this release, Malestrom now has an improved scheduling algorithm.
+With this release, Maelstrom now has an improved scheduling algorithm.
 Maelstrom now keeps track of which tests are new and which tests failed the
 last time they were run. Now, new tests always have highest priority, followed
 by tests that failed the last time they were run, followed by all other tests.
@@ -49,7 +49,7 @@ Maelstrom 0.12.0 adds the ability to pass arbitrary arguments to the underlying
 test binaries.
 
 For example:
-- `cargo maelstrom -- --force-run-in-process` passes <tt>-\-force-run-in-processs</tt>
+- `cargo maelstrom -- --force-run-in-process` passes <tt>-\-force-run-in-process</tt>
   to the Rust test binaries when running tests.
 - `maelstrom-go-test -- -test.parallel 12` passes <tt>-test.parallel 12</tt> to the Go
   test binaries when running tests.
@@ -62,7 +62,7 @@ Pytest in the collect phase, in the test-running phase, or both, respectively.
 
 ## More Configuration Values for <tt>maelstrom-go-test</tt>
 
-Malestrom 0.12.0 updates <tt>maelstrom-go-test</tt> with more configuration
+Maelstrom 0.12.0 updates <tt>maelstrom-go-test</tt> with more configuration
 values that add functionality found in <tt>go test</tt>:
 - <tt>vet</tt>
 - <tt>short</tt>
