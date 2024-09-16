@@ -4,14 +4,14 @@ use crate::fake_test_framework::{
     FakePackageId, FakeTestArtifact, FakeTestFilter, FakeTestPackage, TestCollector, TestOptions,
 };
 use crate::metadata::{AllMetadata, TestMetadata};
-use crate::test_db::TestDb;
+use crate::test_db::{OnDiskTestDb, TestDb};
 use crate::ui::{UiJobId as JobId, UiJobResult, UiJobStatus, UiMessage};
 use crate::{NoCaseMetadata, StringArtifactKey};
 use anyhow::anyhow;
 use itertools::Itertools as _;
 use maelstrom_base::{
-    ClientJobId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork, JobOutcome,
-    JobOutputResult, JobRootOverlay, JobTerminationStatus,
+    nonempty, ClientJobId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
+    JobOutcome, JobOutputResult, JobRootOverlay, JobTerminationStatus, NonEmpty,
 };
 use maelstrom_client::{
     spec::{ContainerRef, ContainerSpec, JobSpec, LayerSpec},
@@ -20,6 +20,7 @@ use maelstrom_client::{
 use maelstrom_simex::SimulationExplorer;
 use maelstrom_util::process::ExitCode;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::str::FromStr as _;
 use std::time::Duration;
 use TestMessage::*;
@@ -143,10 +144,121 @@ impl<'deps> Fixture<'deps> {
         self.app.receive_message(call);
     }
 
-    fn assert_return_value(&mut self, str_expr: &str) {
-        let ret = self.app.main_return_value();
+    fn assert_return_value_error(self, str_expr: &str) {
+        let ret = self.app.main_return_value().map(|_| ());
         assert_eq!(format!("{ret:?}"), str_expr);
     }
+
+    fn assert_return_value(
+        self,
+        expected_exit_code: ExitCode,
+        expected_test_db: TestDb<StringArtifactKey, NoCaseMetadata>,
+    ) {
+        let (exit_code, test_db) = self.app.main_return_value().unwrap();
+        assert_eq!(expected_exit_code, exit_code);
+
+        let expected_test_db_on_disk: OnDiskTestDb<_, _> = expected_test_db.into();
+        let test_db_on_disk: OnDiskTestDb<_, _> = test_db.into();
+        assert_eq!(expected_test_db_on_disk, test_db_on_disk);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TestDbEntry {
+    package_name: String,
+    artifact_name: Option<String>,
+    case_name: Option<String>,
+    entry_data: Option<(crate::test_db::CaseOutcome, NonEmpty<Duration>)>,
+}
+
+impl TestDbEntry {
+    fn new(package_name: &str, artifact_name: &str, case_name: &str) -> Self {
+        Self {
+            package_name: package_name.into(),
+            artifact_name: Some(artifact_name.into()),
+            case_name: Some(case_name.into()),
+            entry_data: None,
+        }
+    }
+
+    fn failure(
+        package_name: &str,
+        artifact_name: &str,
+        case_name: &str,
+        durations: NonEmpty<Duration>,
+    ) -> Self {
+        Self {
+            entry_data: Some((crate::test_db::CaseOutcome::Failure, durations)),
+            ..Self::new(package_name, artifact_name, case_name)
+        }
+    }
+
+    fn success(
+        package_name: &str,
+        artifact_name: &str,
+        case_name: &str,
+        durations: NonEmpty<Duration>,
+    ) -> Self {
+        Self {
+            entry_data: Some((crate::test_db::CaseOutcome::Success, durations)),
+            ..Self::new(package_name, artifact_name, case_name)
+        }
+    }
+
+    fn empty_artifact(package_name: &str, artifact_name: &str) -> Self {
+        Self {
+            package_name: package_name.into(),
+            artifact_name: Some(artifact_name.into()),
+            case_name: None,
+            entry_data: None,
+        }
+    }
+}
+
+fn test_db_from_entries<IterT>(entries: IterT) -> TestDb<StringArtifactKey, NoCaseMetadata>
+where
+    IterT: IntoIterator<Item = TestDbEntry>,
+    IterT::IntoIter: Clone,
+{
+    let entries_iter = entries.into_iter();
+    let packages: HashSet<_> = entries_iter.clone().map(|e| e.package_name).collect();
+    TestDb::from_iter(packages.into_iter().map(|pkg| {
+        (
+            pkg.clone(),
+            crate::test_db::Package::from_iter(
+                entries_iter
+                    .clone()
+                    .filter(|e| e.package_name == pkg && e.artifact_name.is_some())
+                    .map(|e| {
+                        let artifact = e.artifact_name.as_ref().unwrap().as_str();
+                        let cases: Vec<_> = entries_iter
+                            .clone()
+                            .filter(|e| {
+                                e.package_name == pkg
+                                    && e.artifact_name.as_ref().is_some_and(|a| a == artifact)
+                                        & e.case_name.is_some()
+                            })
+                            .map(|e| (e.case_name, e.entry_data))
+                            .collect();
+                        (
+                            StringArtifactKey::from(artifact),
+                            crate::test_db::Artifact::from_iter(cases.into_iter().map(
+                                |(case, entry_data)| {
+                                    (
+                                        case.unwrap(),
+                                        crate::test_db::CaseData {
+                                            metadata: NoCaseMetadata,
+                                            when_read: entry_data,
+                                            this_run: None,
+                                        },
+                                    )
+                                },
+                            )),
+                        )
+                    }),
+            ),
+        )
+    }))
 }
 
 const DEFAULT_METADATA_STR: &str = r#"
@@ -179,19 +291,24 @@ macro_rules! script_test {
     (
         $test_name:ident,
         $(@ $arg_key:ident = $arg_value:expr,)*
+        expected_test_db_out = [$($db_entry_out:expr),*],
         $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?
     ) => {
         script_test!(
             $test_name,
             $(@ $arg_key:ident = $arg_value,)*
-            ExitCode::SUCCESS,
+            test_db_in = [],
+            expected_exit_code = ExitCode::SUCCESS,
+            expected_test_db_out = [$($db_entry_out:expr),*],
             $($in_msg => { $($out_msg,)* };)+
         );
     };
     (
         $test_name:ident,
         $(@ $arg_key:ident = $arg_value:expr,)*
-        $exit_code:expr,
+        test_db_in = [$($db_entry_in:expr),*],
+        expected_exit_code = $exit_code:expr,
+        expected_test_db_out = [$($db_entry_out:expr),*],
         $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?
     ) => {
         #[test]
@@ -201,13 +318,15 @@ macro_rules! script_test {
                 $($arg_key: $arg_value,)*
                 ..default_testing_options()
             };
-            let test_db = TestDb::default();
+            let test_db = test_db_from_entries([$($db_entry_in),*]);
             let mut fixture = Fixture::new(&deps, &options, test_db);
             $(
                 fixture.receive_message($in_msg);
                 fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
             )+
-            fixture.assert_return_value(&format!("Ok({:?})", $exit_code));
+
+            let test_db = test_db_from_entries([$($db_entry_out),*]);
+            fixture.assert_return_value($exit_code, test_db);
         }
     }
 }
@@ -216,25 +335,32 @@ macro_rules! script_test_with_error_simex {
     (
         $test_name:ident,
         $(@ $arg_key:ident = $arg_value:expr,)*
+        expected_test_db_out = [$($db_entry_out:expr),*],
         $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?
     ) => {
         script_test_with_error_simex!(
             $test_name,
             $(@ $arg_key = $arg_value,)*
-            ExitCode::SUCCESS,
+            test_db_in = [],
+            expected_exit_code = ExitCode::SUCCESS,
+            expected_test_db_out = [$($db_entry_out),*],
             $($in_msg => { $($out_msg,)* };)+
         );
     };
     (
         $test_name:ident,
         $(@ $arg_key:ident = $arg_value:expr,)*
-        $exit_code:expr,
+        test_db_in = [$($db_entry_in:expr),*],
+        expected_exit_code = $exit_code:expr,
+        expected_test_db_out = [$($db_entry_out:expr),*],
         $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?
     ) => {
         script_test!(
             $test_name,
             $(@ $arg_key = $arg_value,)*
-            $exit_code,
+            test_db_in = [$($db_entry_in),*],
+            expected_exit_code = $exit_code,
+            expected_test_db_out = [$($db_entry_out),*],
             $($in_msg => { $($out_msg,)* };)+
         );
 
@@ -248,12 +374,12 @@ macro_rules! script_test_with_error_simex {
                         $($arg_key: $arg_value,)*
                         ..default_testing_options()
                     };
-                    let test_db = TestDb::default();
+                    let test_db = test_db_from_entries([$($db_entry_in),*]);
                     let mut fixture = Fixture::new(&deps, &options, test_db);
                     $(
                         if simulation.choose_bool() {
                             fixture.receive_message(FatalError { error: anyhow!("simex error") });
-                            fixture.assert_return_value("Err(simex error)");
+                            fixture.assert_return_value_error("Err(simex error)");
                             continue;
                         }
                         fixture.receive_message($in_msg);
@@ -261,7 +387,7 @@ macro_rules! script_test_with_error_simex {
                     )+
 
                     fixture.receive_message(FatalError { error: anyhow!("simex error") });
-                    fixture.assert_return_value("Err(simex error)");
+                    fixture.assert_return_value_error("Err(simex error)");
                 }
             }
         }
@@ -276,10 +402,12 @@ fn fake_pkg<'a>(name: &str, artifacts: impl IntoIterator<Item = &'a str>) -> Fak
     }
 }
 
-fn fake_artifact(name: &str, pkg: &str) -> FakeTestArtifact {
+fn fake_artifact<'a>(name: &str, pkg: &str) -> FakeTestArtifact {
     FakeTestArtifact {
         name: name.into(),
-        tests: vec!["test_a".into()],
+        // this test file doesn't make use of this field
+        tests: vec![],
+        // this test file doesn't make use of this field
         ignored_tests: vec![],
         path: format!("/{name}_bin").into(),
         package: FakePackageId(pkg.into()),
@@ -335,10 +463,19 @@ fn default_container() -> ContainerRef {
 }
 
 macro_rules! test_output_test_inner {
-    ($macro_name:ident, $name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr) => {
+    (
+        $macro_name:ident,
+        $name:ident,
+        $job_outcome:expr,
+        $job_result:expr,
+        $exit_code:expr,
+        $test_db_entry:expr
+    ) => {
         $macro_name! {
             $name,
-            $exit_code,
+            test_db_in = [],
+            expected_exit_code = $exit_code,
+            expected_test_db_out = [$test_db_entry],
             Start => {
                 GetPackages
             };
@@ -390,21 +527,102 @@ macro_rules! test_output_test_inner {
 }
 
 macro_rules! test_output_test {
-    ($name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr) => {
-        test_output_test_inner!(script_test, $name, $job_outcome, $job_result, $exit_code);
+    ($name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr, $test_db_entry:expr) => {
+        test_output_test_inner!(
+            script_test,
+            $name,
+            $job_outcome,
+            $job_result,
+            $exit_code,
+            $test_db_entry
+        );
     };
 }
 
 macro_rules! test_output_test_with_error_simex {
-    ($name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr) => {
+    ($name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr, $test_db_entry:expr) => {
         test_output_test_inner!(
             script_test_with_error_simex,
             $name,
             $job_outcome,
             $job_result,
-            $exit_code
+            $exit_code,
+            $test_db_entry
         );
     };
+}
+
+macro_rules! test_db_test {
+    (
+        $name:ident,
+        test_db_in = [$($db_entry_in:expr),*],
+        expected_test_db_out = [$($db_entry_out:expr),*],
+        $test_a_job_spec:expr,
+        $test_b_job_spec:expr
+    ) => {
+        script_test! {
+            $name,
+            test_db_in = [$($db_entry_in),*],
+            expected_exit_code = ExitCode::SUCCESS,
+            expected_test_db_out = [$($db_entry_out),*],
+            Start => { GetPackages };
+            Packages {
+                packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+            } => {
+                StartCollection {
+                    color: false,
+                    options: TestOptions,
+                    packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+                },
+                SendUiMsg {
+                    msg: UiMessage::UpdatePendingJobsCount(2)
+                },
+            };
+            ArtifactBuilt {
+                artifact: fake_artifact("foo_test", "foo_pkg"),
+            } => {
+                ListTests {
+                    artifact: fake_artifact("foo_test", "foo_pkg"),
+                }
+            };
+            TestsListed {
+                artifact: fake_artifact("foo_test", "foo_pkg"),
+                listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+                ignored_listing: vec![]
+            } => {
+                AddJob {
+                    job_id: JobId::from(1),
+                    spec: $test_a_job_spec,
+                },
+                AddJob {
+                    job_id: JobId::from(2),
+                    spec: $test_b_job_spec,
+                },
+            };
+            CollectionFinished => {
+                SendUiMsg {
+                    msg: UiMessage::DoneQueuingJobs,
+                }
+            };
+            JobUpdate {
+                job_id: JobId::from(1),
+                result: job_status_complete(0),
+            } => {
+                SendUiMsg {
+                    msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
+                }
+            };
+            JobUpdate {
+                job_id: JobId::from(2),
+                result: job_status_complete(0),
+            } => {
+                SendUiMsg {
+                    msg: ui_job_result("foo_pkg test_b", 2, UiJobStatus::Ok)
+                },
+                StartShutdown
+            };
+        }
+    }
 }
 
 fn job_status_complete(exit_code: u8) -> anyhow::Result<JobStatus> {
@@ -446,6 +664,7 @@ fn ui_job_result(name: &str, job_id: u32, status: UiJobStatus) -> UiMessage {
 
 script_test_with_error_simex! {
     no_packages,
+    expected_test_db_out = [],
     Start => {
         GetPackages
     };
@@ -456,6 +675,7 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     no_artifacts,
+    expected_test_db_out = [],
     Start => {
         GetPackages
     };
@@ -476,6 +696,9 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     no_tests_listed,
+    expected_test_db_out = [
+        TestDbEntry::empty_artifact("foo_pkg", "foo_test")
+    ],
     Start => {
         GetPackages
     };
@@ -532,7 +755,8 @@ test_output_test_with_error_simex! {
         stdout: vec![],
         stderr: vec![],
     },
-    ExitCode::SUCCESS
+    ExitCode::SUCCESS,
+    TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 test_output_test! {
@@ -553,7 +777,8 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
-    ExitCode::from(1)
+    ExitCode::from(1),
+    TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 test_output_test! {
@@ -574,7 +799,8 @@ test_output_test! {
         stdout: vec![],
         stderr: vec!["signal yo".into()],
     },
-    ExitCode::FAILURE
+    ExitCode::FAILURE,
+    TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 test_output_test! {
@@ -594,7 +820,8 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
-    ExitCode::FAILURE
+    ExitCode::FAILURE,
+    TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 test_output_test! {
@@ -608,11 +835,12 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
-    ExitCode::FAILURE
+    ExitCode::FAILURE,
+    TestDbEntry::new("foo_pkg", "foo_test", "test_a")
 }
 
 test_output_test! {
-    single_test_system,
+    single_test_system_error,
     Ok(Err(JobError::System("test error".into()))),
     UiJobResult {
         name: "foo_pkg test_a".into(),
@@ -622,7 +850,8 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
-    ExitCode::FAILURE
+    ExitCode::FAILURE,
+    TestDbEntry::new("foo_pkg", "foo_test", "test_a")
 }
 
 test_output_test! {
@@ -636,7 +865,8 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
-    ExitCode::FAILURE
+    ExitCode::FAILURE,
+    TestDbEntry::new("foo_pkg", "foo_test", "test_a")
 }
 
 test_output_test! {
@@ -657,7 +887,8 @@ test_output_test! {
         stdout: vec!["hello".into(), "stdout".into()],
         stderr: vec!["hello".into(), "stderr".into()],
     },
-    ExitCode::from(1)
+    ExitCode::from(1),
+    TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 test_output_test! {
@@ -677,7 +908,8 @@ test_output_test! {
         stdout: vec!["hello".into(), "stdout".into()],
         stderr: vec!["hello".into(), "stderr".into()],
     },
-    ExitCode::FAILURE
+    ExitCode::FAILURE,
+    TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 test_output_test! {
@@ -698,7 +930,8 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
-    ExitCode::SUCCESS
+    ExitCode::SUCCESS,
+    TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 test_output_test! {
@@ -727,7 +960,8 @@ test_output_test! {
             "hello".into(), "stderr".into(), "job 1: stderr truncated, 12 bytes lost".into()
         ],
     },
-    ExitCode::from(1)
+    ExitCode::from(1),
+    TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 test_output_test! {
@@ -748,7 +982,8 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
-    ExitCode::SUCCESS
+    ExitCode::SUCCESS,
+    TestDbEntry::new("foo_pkg", "foo_test", "test_a")
 }
 
 test_output_test! {
@@ -772,7 +1007,8 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
-    ExitCode::SUCCESS
+    ExitCode::SUCCESS,
+    TestDbEntry::new("foo_pkg", "foo_test", "test_a")
 }
 
 test_output_test! {
@@ -795,7 +1031,8 @@ test_output_test! {
         stdout: vec!["test stdout".into()],
         stderr: vec![],
     },
-    ExitCode::from(1)
+    ExitCode::from(1),
+    TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 test_output_test! {
@@ -819,7 +1056,8 @@ test_output_test! {
         stdout: vec!["test stdout".into(), "job 1: stdout truncated, 12 bytes lost".into()],
         stderr: vec![],
     },
-    ExitCode::from(1)
+    ExitCode::from(1),
+    TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
 
 //                  _ _   _       _        _            _
@@ -831,7 +1069,12 @@ test_output_test! {
 
 script_test_with_error_simex! {
     one_failure_one_success_exit_code,
-    ExitCode::from(1),
+    test_db_in = [],
+    expected_exit_code = ExitCode::from(1),
+    expected_test_db_out = [
+        TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),
+        TestDbEntry::success("foo_pkg", "foo_test", "test_b", nonempty![Duration::from_secs(1)])
+    ],
     Start => {
         GetPackages
     };
@@ -895,7 +1138,10 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     ignored_tests,
-    ExitCode::SUCCESS,
+    expected_test_db_out = [
+        TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),
+        TestDbEntry::new("foo_pkg", "foo_test", "test_b")
+    ],
     Start => {
         GetPackages
     };
@@ -959,7 +1205,10 @@ script_test_with_error_simex! {
             "#
         )
     ).unwrap(),
-    ExitCode::SUCCESS,
+    expected_test_db_out = [
+        TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),
+        TestDbEntry::new("foo_pkg", "foo_test", "test_b")
+    ],
     Start => {
         GetPackages
     };
@@ -1022,6 +1271,10 @@ script_test_with_error_simex! {
 script_test_with_error_simex! {
     filtering_cases,
     @ filter = SimpleFilter::Name("test_a".into()).into(),
+    expected_test_db_out = [
+        TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),
+        TestDbEntry::new("foo_pkg", "foo_test", "test_b")
+    ],
     Start => { GetPackages };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
@@ -1069,6 +1322,9 @@ script_test_with_error_simex! {
 script_test_with_error_simex! {
     filtering_packages,
     @ filter = SimpleFilter::Package("bar_pkg".into()).into(),
+    expected_test_db_out = [
+        TestDbEntry::success("bar_pkg", "bar_test", "test_a", nonempty![Duration::from_secs(1)])
+    ],
     Start => { GetPackages };
     Packages {
         packages: vec![fake_pkg("foo_pkg", ["foo_test"]), fake_pkg("bar_pkg", ["bar_test"])]
@@ -1121,6 +1377,10 @@ script_test_with_error_simex! {
         SimpleFilter::Package("bar_pkg".into()).into(),
         SimpleFilter::Name("test_a".into()).into(),
     ]).into(),
+    expected_test_db_out = [
+        TestDbEntry::success("bar_pkg", "bar_test", "test_a", nonempty![Duration::from_secs(1)]),
+        TestDbEntry::new("bar_pkg", "bar_test", "test_b")
+    ],
     Start => { GetPackages };
     Packages {
         packages: vec![fake_pkg("foo_pkg", ["foo_test"]), fake_pkg("bar_pkg", ["bar_test"])]
@@ -1165,4 +1425,181 @@ script_test_with_error_simex! {
         },
         StartShutdown
     };
+}
+
+//  _            _          _ _
+// | |_ ___  ___| |_     __| | |__
+// | __/ _ \/ __| __|   / _` | '_ \
+// | ||  __/\__ \ |_   | (_| | |_) |
+//  \__\___||___/\__|___\__,_|_.__/
+//                 |_____|
+
+script_test_with_error_simex! {
+    expected_test_count,
+    test_db_in = [
+        TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),
+        TestDbEntry::success("foo_pkg", "foo_test", "test_b", nonempty![Duration::from_secs(1)])
+    ],
+    expected_exit_code = ExitCode::SUCCESS,
+    expected_test_db_out = [
+        TestDbEntry::success(
+            "foo_pkg",
+            "foo_test",
+            "test_a",
+            nonempty![Duration::from_secs(1), Duration::from_secs(1)]
+        ),
+        TestDbEntry::success(
+            "foo_pkg",
+            "foo_test",
+            "test_b",
+            nonempty![Duration::from_secs(1), Duration::from_secs(1)]
+        )
+    ],
+    Start => { GetPackages };
+    Packages {
+        packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+    } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(2)
+        },
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
+    } => {
+        AddJob {
+            job_id: JobId::from(1),
+            spec: JobSpec {
+                estimated_duration: Some(Duration::from_secs(1)),
+                priority: 0,
+                ..test_spec("foo_test", "test_a")
+            }
+        },
+        AddJob {
+            job_id: JobId::from(2),
+            spec: JobSpec {
+                estimated_duration: Some(Duration::from_secs(1)),
+                priority: 0,
+                ..test_spec("foo_test", "test_b")
+            }
+        },
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(2),
+        result: job_status_complete(0),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_b", 2, UiJobStatus::Ok)
+        },
+        StartShutdown
+    };
+}
+
+script_test_with_error_simex! {
+    getting_packages_removes_old_test_db_packages,
+    @ filter = SimpleFilter::Package("non_existent_pkg".into()).into(),
+    test_db_in = [
+        TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),
+        TestDbEntry::success("bar_pkg", "bar_test", "test_a", nonempty![Duration::from_secs(1)])
+    ],
+    expected_exit_code = ExitCode::SUCCESS,
+    expected_test_db_out = [
+        TestDbEntry::success("bar_pkg", "bar_test", "test_a", nonempty![Duration::from_secs(1)])
+    ],
+    Start => { GetPackages };
+    Packages {
+        packages: vec![fake_pkg("bar_pkg", ["bar_test"])]
+    } => {
+        StartShutdown
+    };
+}
+
+test_db_test! {
+    previous_success_with_estimated_duration,
+    test_db_in = [
+        TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(2)]),
+        TestDbEntry::success("foo_pkg", "foo_test", "test_b", nonempty![Duration::from_secs(3)])
+    ],
+    expected_test_db_out = [
+        TestDbEntry::success(
+            "foo_pkg",
+            "foo_test",
+            "test_a",
+            nonempty![Duration::from_secs(2), Duration::from_secs(1)]
+        ),
+        TestDbEntry::success(
+            "foo_pkg",
+            "foo_test",
+            "test_b",
+            nonempty![Duration::from_secs(3), Duration::from_secs(1)]
+        )
+    ],
+    JobSpec {
+        estimated_duration: Some(Duration::from_secs(2)),
+        priority: 0,
+        ..test_spec("foo_test", "test_a")
+    },
+    JobSpec {
+        estimated_duration: Some(Duration::from_secs(3)),
+        priority: 0,
+        ..test_spec("foo_test", "test_b")
+    }
+}
+
+test_db_test! {
+    previous_failure_with_estimated_duration,
+    test_db_in = [
+        TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(2)]),
+        TestDbEntry::success("foo_pkg", "foo_test", "test_b", nonempty![Duration::from_secs(3)])
+    ],
+    expected_test_db_out = [
+        TestDbEntry::success(
+            "foo_pkg",
+            "foo_test",
+            "test_a",
+            nonempty![Duration::from_secs(2), Duration::from_secs(1)]
+        ),
+        TestDbEntry::success(
+            "foo_pkg",
+            "foo_test",
+            "test_b",
+            nonempty![Duration::from_secs(3), Duration::from_secs(1)]
+        )
+    ],
+    JobSpec {
+        estimated_duration: Some(Duration::from_secs(2)),
+        priority: 1,
+        ..test_spec("foo_test", "test_a")
+    },
+    JobSpec {
+        estimated_duration: Some(Duration::from_secs(3)),
+        priority: 0,
+        ..test_spec("foo_test", "test_b")
+    }
 }

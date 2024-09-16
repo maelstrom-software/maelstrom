@@ -1,30 +1,37 @@
 use super::{
     job_output::{build_ignored_ui_job_result, build_ui_job_result_and_exit_code},
-    ArtifactM, CaseMetadataM, Deps, MainAppMessage, MainAppMessageM, PackageIdM, PackageM, TestDbM,
-    TestingOptionsM,
+    ArtifactKeyM, ArtifactM, CaseMetadataM, Deps, MainAppMessage, MainAppMessageM, PackageIdM,
+    PackageM, TestDbM, TestingOptionsM,
 };
 use crate::metadata::TestMetadata;
 use crate::test_db::CaseOutcome;
-use crate::ui::{UiJobId as JobId, UiMessage};
+use crate::ui::{UiJobId as JobId, UiJobStatus, UiMessage};
 use crate::*;
 use maelstrom_base::{ClientJobId, JobOutcomeResult, JobRootOverlay};
 use maelstrom_client::{spec::JobSpec, ContainerSpec, JobStatus};
 use maelstrom_util::{ext::OptionExt as _, process::ExitCode};
 use std::collections::{BTreeMap, HashMap};
-use std::mem;
+
+struct JobInfo<ArtifactKeyT> {
+    case_name: String,
+    package_name: String,
+    artifact_key: ArtifactKeyT,
+    case_str: String,
+}
 
 pub struct MainApp<'deps, DepsT: Deps> {
     deps: &'deps DepsT,
     options: &'deps TestingOptionsM<DepsT>,
     packages: BTreeMap<PackageIdM<DepsT>, PackageM<DepsT>>,
     next_job_id: u32,
-    test_db: TestDbM<DepsT>,
-    jobs: HashMap<JobId, String>,
+    jobs: HashMap<JobId, JobInfo<ArtifactKeyM<DepsT>>>,
     collection_finished: bool,
     pending_listings: u64,
     num_enqueued: u64,
+    expected_job_count: u64,
     fatal_error: Result<()>,
     exit_code: ExitCode,
+    test_db: TestDbM<DepsT>,
 }
 
 impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
@@ -43,6 +50,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             collection_finished: false,
             pending_listings: 0,
             num_enqueued: 0,
+            expected_job_count: 0,
             fatal_error: Ok(()),
             exit_code: ExitCode::SUCCESS,
         }
@@ -59,20 +67,35 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     }
 
     fn receive_packages(&mut self, packages: Vec<PackageM<DepsT>>) {
+        self.test_db
+            .retain_packages_and_artifacts(packages.iter().map(|p| (p.name(), p.artifacts())));
+
         self.packages = packages
             .into_iter()
             .filter(|p| self.options.filter.filter(p, None, None).unwrap_or(true))
             .map(|p| (p.id(), p))
             .collect();
 
-        let packages: Vec<_> = self.packages.values().collect();
-
-        if !packages.is_empty() {
+        if !self.packages.is_empty() {
             let color = false;
+            let packages: Vec<_> = self.packages.values().collect();
             self.deps
                 .start_collection(color, &self.options.collector_options, packages);
         } else {
             self.collection_finished = true;
+        }
+
+        let package_name_map: BTreeMap<_, _> = self
+            .packages
+            .values()
+            .map(|p| (p.name().into(), p.clone()))
+            .collect();
+        self.expected_job_count = self
+            .test_db
+            .count_matching_cases(&package_name_map, &self.options.filter);
+        if self.expected_job_count > 0 {
+            self.deps
+                .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.expected_job_count));
         }
 
         self.check_for_done();
@@ -143,11 +166,19 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
         let job_id = self.vend_job_id();
         self.deps.add_job(job_id, spec);
-        self.jobs.insert(job_id, case_str).assert_is_none();
+        let job_info = JobInfo {
+            case_name: case_name.into(),
+            case_str,
+            package_name: package_name.into(),
+            artifact_key: artifact.to_key(),
+        };
+        self.jobs.insert(job_id, job_info).assert_is_none();
 
         self.num_enqueued += 1;
-        self.deps
-            .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.num_enqueued));
+        if self.num_enqueued > self.expected_job_count {
+            self.deps
+                .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.num_enqueued));
+        }
     }
 
     fn handle_ignored_test(
@@ -161,8 +192,10 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
         let job_id = self.vend_job_id();
         self.num_enqueued += 1;
-        self.deps
-            .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.num_enqueued));
+        if self.num_enqueued > self.expected_job_count {
+            self.deps
+                .send_ui_msg(UiMessage::UpdatePendingJobsCount(self.num_enqueued));
+        }
         let res = build_ignored_ui_job_result(job_id, &case_str);
         self.deps.send_ui_msg(UiMessage::JobFinished(res));
     }
@@ -216,6 +249,13 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         listing: Vec<(String, CaseMetadataM<DepsT>)>,
         ignored_listing: Vec<String>,
     ) {
+        let package = self
+            .packages
+            .get(&artifact.package())
+            .expect("artifact for unknown package");
+        self.test_db
+            .update_artifact_cases(package.name(), artifact.to_key(), listing.clone());
+
         self.pending_listings -= 1;
         for (case_name, case_metadata) in &listing {
             self.maybe_enqueue_test(&artifact, case_name, case_metadata, &ignored_listing);
@@ -234,14 +274,27 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         job_id: JobId,
         result: Result<(ClientJobId, JobOutcomeResult)>,
     ) {
-        let name = self.jobs.remove(&job_id).expect("job finishes only once");
-        let (ui_job_res, exit_code) =
-            build_ui_job_result_and_exit_code::<DepsT::TestCollector>(job_id, &name, result);
-        self.deps.send_ui_msg(UiMessage::JobFinished(ui_job_res));
+        let job_info = self.jobs.remove(&job_id).expect("job finishes only once");
+        let (ui_job_res, exit_code) = build_ui_job_result_and_exit_code::<DepsT::TestCollector>(
+            job_id,
+            &job_info.case_str,
+            result,
+        );
 
         if self.exit_code == ExitCode::SUCCESS {
             self.exit_code = exit_code;
         }
+
+        if let Some(duration) = ui_job_res.duration {
+            self.test_db.update_case(
+                &job_info.package_name,
+                &job_info.artifact_key,
+                &job_info.case_name,
+                !matches!(ui_job_res.status, UiJobStatus::Ok | UiJobStatus::Ignored),
+                duration,
+            );
+        }
+        self.deps.send_ui_msg(UiMessage::JobFinished(ui_job_res));
 
         self.check_for_done();
     }
@@ -264,9 +317,9 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         self.check_for_done();
     }
 
-    pub fn main_return_value(&mut self) -> Result<ExitCode> {
-        mem::replace(&mut self.fatal_error, Ok(()))?;
-        Ok(self.exit_code)
+    pub fn main_return_value(self) -> Result<(ExitCode, TestDbM<DepsT>)> {
+        self.fatal_error?;
+        Ok((self.exit_code, self.test_db))
     }
 
     pub fn receive_message(&mut self, message: MainAppMessageM<DepsT>) {

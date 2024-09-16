@@ -273,9 +273,9 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
 }
 
 fn main_app_channel_reader<DepsT: Deps>(
-    app: &mut MainApp<DepsT>,
+    mut app: MainApp<DepsT>,
     main_app_receiver: Receiver<MainAppMessageM<DepsT>>,
-) -> Result<ExitCode> {
+) -> Result<(ExitCode, TestDbM<DepsT>)> {
     loop {
         let msg = main_app_receiver.recv()?;
         if matches!(msg, MainAppMessage::Shutdown) {
@@ -306,7 +306,7 @@ where
 
     let test_db = deps.test_db_store.load()?;
 
-    let exit_code = std::thread::scope(move |scope| {
+    let main_res = std::thread::scope(move |scope| {
         main_app_sender.send(MainAppMessage::Start).unwrap();
         let deps = MainAppDepsAdapter {
             deps: abs_deps,
@@ -315,11 +315,14 @@ where
             ui: ui_sender,
         };
 
-        let mut app = MainApp::new(&deps, options, test_db);
-        main_app_channel_reader(&mut app, main_app_receiver)
-    })?;
+        let app = MainApp::new(&deps, options, test_db);
+        main_app_channel_reader(app, main_app_receiver)
+    });
 
     ui_handle.join()?;
+
+    let (exit_code, test_db) = main_res?;
+    deps.test_db_store.save(test_db)?;
 
     Ok(exit_code)
 }

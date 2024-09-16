@@ -64,22 +64,22 @@ impl CaseOutcome {
 
 /// Represents all known information about a test case.
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct CaseData<CaseMetadataT> {
+pub(crate) struct CaseData<CaseMetadataT> {
     /// The metadata comes from the test framework. These are things like "tags" or "markers".
-    metadata: CaseMetadataT,
+    pub(crate) metadata: CaseMetadataT,
 
     /// The information about the test case when the db was read. If `None`, it means that the test
     /// case was just introduced, or has never been run.
-    when_read: Option<(CaseOutcome, NonEmpty<Duration>)>,
+    pub(crate) when_read: Option<(CaseOutcome, NonEmpty<Duration>)>,
 
     /// The information about the test case that has been accumulated since the db was read.
-    this_run: Option<(CaseOutcome, NonEmpty<Duration>)>,
+    pub(crate) this_run: Option<(CaseOutcome, NonEmpty<Duration>)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// An artifact represents a test binary (for compiled languages) or a source code file (for
 /// interpreted languages). It is just a container of test cases.
-struct Artifact<CaseMetadataT>(HashMap<String, CaseData<CaseMetadataT>>);
+pub(crate) struct Artifact<CaseMetadataT>(HashMap<String, CaseData<CaseMetadataT>>);
 
 impl<CaseMetadataT: TestCaseMetadata, K: Into<String>> FromIterator<(K, CaseData<CaseMetadataT>)>
     for Artifact<CaseMetadataT>
@@ -94,7 +94,7 @@ impl<CaseMetadataT: TestCaseMetadata, K: Into<String>> FromIterator<(K, CaseData
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A package represents a package or module in the test framework's language. It is just a
 /// container of artifacts.
-struct Package<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>(
+pub(crate) struct Package<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>(
     HashMap<ArtifactKeyT, Artifact<CaseMetadataT>>,
 );
 
@@ -355,13 +355,13 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
  *  FIGLET: on disk
  */
 
-#[derive(Deserialize_repr, Eq, FromPrimitive, PartialEq, Serialize_repr)]
+#[derive(Deserialize_repr, Debug, Eq, FromPrimitive, PartialEq, Serialize_repr)]
 #[repr(u32)]
 enum OnDiskTestDbVersion {
     V3 = 3,
 }
 
-#[derive(Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum OnDiskCaseOutcome {
     #[default]
@@ -391,7 +391,7 @@ impl From<CaseOutcome> for OnDiskCaseOutcome {
 }
 
 #[serde_as]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct OnDiskCaseData<CaseMetadataT: TestCaseMetadata> {
     #[serde_as(as = "Vec<DurationSecondsWithFrac>")]
     timings: Vec<Duration>,
@@ -447,7 +447,7 @@ impl<CaseMetadataT: TestCaseMetadata> From<OnDiskCaseData<CaseMetadataT>>
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 struct OnDiskArtifact<CaseMetadataT: TestCaseMetadata> {
     #[serde(bound(serialize = ""))]
@@ -487,7 +487,7 @@ impl<CaseMetadataT: TestCaseMetadata> From<OnDiskArtifact<CaseMetadataT>>
 }
 
 #[serde_as]
-#[derive(Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 struct OnDiskArtifactKey<ArtifactKeyT: TestArtifactKey> {
     #[serde_as(as = "DisplayFromStr")]
@@ -497,7 +497,7 @@ struct OnDiskArtifactKey<ArtifactKeyT: TestArtifactKey> {
 }
 
 #[serde_as]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 struct OnDiskPackage<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     #[serde(bound(serialize = ""))]
@@ -531,8 +531,8 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct OnDiskTestDb<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct OnDiskTestDb<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata> {
     version: OnDiskTestDbVersion,
     #[serde(flatten)]
     #[serde(bound(serialize = ""))]
