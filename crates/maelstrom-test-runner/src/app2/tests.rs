@@ -284,6 +284,7 @@ fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
         filter: SimpleFilter::All.into(),
         collector_options: TestOptions,
         timeout_override: None,
+        stderr_color: false,
     }
 }
 
@@ -296,7 +297,7 @@ macro_rules! script_test {
     ) => {
         script_test!(
             $test_name,
-            $(@ $arg_key:ident = $arg_value,)*
+            $(@ $arg_key = $arg_value,)*
             test_db_in = [],
             expected_exit_code = ExitCode::SUCCESS,
             expected_test_db_out = [$($db_entry_out:expr),*],
@@ -718,6 +719,36 @@ script_test_with_error_simex! {
     Packages { packages: vec![fake_pkg("foo_pkg", [])] } => {
         StartCollection {
             color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", [])]
+        }
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
+        StartShutdown
+    };
+}
+
+script_test! {
+    stderr_color_passed_to_start_collection,
+    @ stderr_color = true,
+    expected_test_db_out = [],
+    Start => {
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", [])] } => {
+        StartCollection {
+            color: true,
             options: TestOptions,
             packages: vec![fake_pkg("foo_pkg", [])]
         }

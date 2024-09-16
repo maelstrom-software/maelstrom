@@ -55,6 +55,7 @@ struct TestingOptions<TestFilterT, CollectOptionsT> {
     filter: TestFilterT,
     collector_options: CollectOptionsT,
     timeout_override: Option<Option<Timeout>>,
+    stderr_color: bool,
 }
 
 pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
@@ -84,7 +85,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         _list_action: Option<ListAction>,
         _repeat: Repeat,
         _stop_after: Option<StopAfter>,
-        _stderr_color: bool,
+        stderr_color: bool,
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
         collector_options: super::CollectOptionsM<MainAppDepsT>,
@@ -112,6 +113,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
                 filter,
                 collector_options,
                 timeout_override: None,
+                stderr_color,
             },
         })
     }
