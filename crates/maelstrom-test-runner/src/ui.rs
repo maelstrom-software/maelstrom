@@ -87,7 +87,7 @@ impl<'a, PrintCbT, RetT> PrintWidthCb<'a, RetT> for PrintCbT where
 {
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiJobStatus {
     Ok,
     Failure(Option<String>),

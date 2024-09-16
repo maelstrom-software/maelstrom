@@ -5,7 +5,7 @@ use super::{
 };
 use crate::metadata::TestMetadata;
 use crate::test_db::CaseOutcome;
-use crate::ui::{UiJobId as JobId, UiJobStatus, UiMessage};
+use crate::ui::{UiJobId as JobId, UiJobStatus, UiJobSummary, UiMessage};
 use crate::*;
 use maelstrom_base::{ClientJobId, JobOutcomeResult, JobRootOverlay};
 use maelstrom_client::{spec::JobSpec, ContainerSpec, JobStatus};
@@ -19,6 +19,23 @@ struct JobInfo<ArtifactKeyT> {
     case_str: String,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum TestResult {
+    Succeeded,
+    Failed,
+    Ignored,
+}
+
+impl From<UiJobStatus> for TestResult {
+    fn from(s: UiJobStatus) -> Self {
+        match s {
+            UiJobStatus::Ok => Self::Succeeded,
+            UiJobStatus::Failure(_) | UiJobStatus::TimedOut | UiJobStatus::Error(_) => Self::Failed,
+            UiJobStatus::Ignored => Self::Ignored,
+        }
+    }
+}
+
 pub struct MainApp<'deps, DepsT: Deps> {
     deps: &'deps DepsT,
     options: &'deps TestingOptionsM<DepsT>,
@@ -29,6 +46,7 @@ pub struct MainApp<'deps, DepsT: Deps> {
     pending_listings: u64,
     num_enqueued: u64,
     expected_job_count: u64,
+    test_results: Vec<(String, TestResult)>,
     fatal_error: Result<()>,
     exit_code: ExitCode,
     test_db: TestDbM<DepsT>,
@@ -51,6 +69,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             pending_listings: 0,
             num_enqueued: 0,
             expected_job_count: 0,
+            test_results: vec![],
             fatal_error: Ok(()),
             exit_code: ExitCode::SUCCESS,
         }
@@ -60,8 +79,23 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         self.deps.get_packages();
     }
 
+    fn test_listing(&self, result: TestResult) -> Vec<String> {
+        self.test_results
+            .iter()
+            .filter(|(_, r)| r == &result)
+            .map(|(t, _)| t.clone())
+            .collect()
+    }
+
     fn check_for_done(&mut self) {
         if self.jobs.is_empty() && self.pending_listings == 0 && self.collection_finished {
+            self.deps
+                .send_ui_msg(UiMessage::AllJobsFinished(UiJobSummary {
+                    succeeded: self.test_listing(TestResult::Succeeded).len(),
+                    failed: self.test_listing(TestResult::Failed),
+                    ignored: self.test_listing(TestResult::Ignored),
+                    not_run: None,
+                }));
             self.deps.start_shutdown();
         }
     }
@@ -198,6 +232,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         }
         let res = build_ignored_ui_job_result(job_id, &case_str);
         self.deps.send_ui_msg(UiMessage::JobFinished(res));
+        self.test_results.push((case_str, TestResult::Ignored));
     }
 
     fn maybe_enqueue_test(
@@ -285,16 +320,19 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             self.exit_code = exit_code;
         }
 
+        let result = TestResult::from(ui_job_res.status.clone());
+
         if let Some(duration) = ui_job_res.duration {
             self.test_db.update_case(
                 &job_info.package_name,
                 &job_info.artifact_key,
                 &job_info.case_name,
-                !matches!(ui_job_res.status, UiJobStatus::Ok | UiJobStatus::Ignored),
+                matches!(result, TestResult::Failed),
                 duration,
             );
         }
         self.deps.send_ui_msg(UiMessage::JobFinished(ui_job_res));
+        self.test_results.push((job_info.case_str, result));
 
         self.check_for_done();
     }

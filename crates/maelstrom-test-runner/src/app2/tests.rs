@@ -5,7 +5,7 @@ use crate::fake_test_framework::{
 };
 use crate::metadata::{AllMetadata, TestMetadata};
 use crate::test_db::{OnDiskTestDb, TestDb};
-use crate::ui::{UiJobId as JobId, UiJobResult, UiJobStatus, UiMessage};
+use crate::ui::{UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use crate::{NoCaseMetadata, StringArtifactKey};
 use anyhow::anyhow;
 use itertools::Itertools as _;
@@ -468,6 +468,7 @@ macro_rules! test_output_test_inner {
         $name:ident,
         $job_outcome:expr,
         $job_result:expr,
+        $ui_job_summary:expr,
         $exit_code:expr,
         $test_db_entry:expr
     ) => {
@@ -520,6 +521,9 @@ macro_rules! test_output_test_inner {
                 SendUiMsg {
                     msg: UiMessage::JobFinished($job_result)
                 },
+                SendUiMsg {
+                    msg: UiMessage::AllJobsFinished($ui_job_summary)
+                },
                 StartShutdown
             };
         }
@@ -527,12 +531,20 @@ macro_rules! test_output_test_inner {
 }
 
 macro_rules! test_output_test {
-    ($name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr, $test_db_entry:expr) => {
+    (
+        $name:ident,
+        $job_outcome:expr,
+        $job_result:expr,
+        $ui_job_summary:expr,
+        $exit_code:expr,
+        $test_db_entry:expr
+    ) => {
         test_output_test_inner!(
             script_test,
             $name,
             $job_outcome,
             $job_result,
+            $ui_job_summary,
             $exit_code,
             $test_db_entry
         );
@@ -540,12 +552,20 @@ macro_rules! test_output_test {
 }
 
 macro_rules! test_output_test_with_error_simex {
-    ($name:ident, $job_outcome:expr, $job_result:expr, $exit_code:expr, $test_db_entry:expr) => {
+    (
+        $name:ident,
+        $job_outcome:expr,
+        $job_result:expr,
+        $ui_job_summary:expr,
+        $exit_code:expr,
+        $test_db_entry:expr
+    ) => {
         test_output_test_inner!(
             script_test_with_error_simex,
             $name,
             $job_outcome,
             $job_result,
+            $ui_job_summary,
             $exit_code,
             $test_db_entry
         );
@@ -619,6 +639,14 @@ macro_rules! test_db_test {
                 SendUiMsg {
                     msg: ui_job_result("foo_pkg test_b", 2, UiJobStatus::Ok)
                 },
+                SendUiMsg {
+                    msg: UiMessage::AllJobsFinished(UiJobSummary {
+                        succeeded: 2,
+                        failed: vec![],
+                        ignored: vec![],
+                        not_run: None,
+                    })
+                },
                 StartShutdown
             };
         }
@@ -669,6 +697,14 @@ script_test_with_error_simex! {
         GetPackages
     };
     Packages { packages: vec![] } => {
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
         StartShutdown
     }
 }
@@ -689,6 +725,14 @@ script_test_with_error_simex! {
     CollectionFinished => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
         },
         StartShutdown
     };
@@ -726,6 +770,14 @@ script_test_with_error_simex! {
         listing: vec![],
         ignored_listing: vec![]
     } => {
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
         StartShutdown
     };
 }
@@ -755,6 +807,12 @@ test_output_test_with_error_simex! {
         stdout: vec![],
         stderr: vec![],
     },
+    UiJobSummary {
+        succeeded: 1,
+        failed: vec![],
+        ignored: vec![],
+        not_run: None
+    },
     ExitCode::SUCCESS,
     TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
@@ -776,6 +834,12 @@ test_output_test! {
         status: UiJobStatus::Failure(None),
         stdout: vec![],
         stderr: vec![],
+    },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
     },
     ExitCode::from(1),
     TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
@@ -799,6 +863,12 @@ test_output_test! {
         stdout: vec![],
         stderr: vec!["signal yo".into()],
     },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
+    },
     ExitCode::FAILURE,
     TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
@@ -820,6 +890,12 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
+    },
     ExitCode::FAILURE,
     TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
@@ -834,6 +910,12 @@ test_output_test! {
         status: UiJobStatus::Error("execution error: test error".into()),
         stdout: vec![],
         stderr: vec![],
+    },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
     },
     ExitCode::FAILURE,
     TestDbEntry::new("foo_pkg", "foo_test", "test_a")
@@ -850,6 +932,12 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
+    },
     ExitCode::FAILURE,
     TestDbEntry::new("foo_pkg", "foo_test", "test_a")
 }
@@ -864,6 +952,12 @@ test_output_test! {
         status: UiJobStatus::Error("remote error: test error".into()),
         stdout: vec![],
         stderr: vec![],
+    },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
     },
     ExitCode::FAILURE,
     TestDbEntry::new("foo_pkg", "foo_test", "test_a")
@@ -887,6 +981,12 @@ test_output_test! {
         stdout: vec!["hello".into(), "stdout".into()],
         stderr: vec!["hello".into(), "stderr".into()],
     },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
+    },
     ExitCode::from(1),
     TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
@@ -907,6 +1007,12 @@ test_output_test! {
         status: UiJobStatus::TimedOut,
         stdout: vec!["hello".into(), "stdout".into()],
         stderr: vec!["hello".into(), "stderr".into()],
+    },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
     },
     ExitCode::FAILURE,
     TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
@@ -929,6 +1035,12 @@ test_output_test! {
         status: UiJobStatus::Ok,
         stdout: vec![],
         stderr: vec![],
+    },
+    UiJobSummary {
+        succeeded: 1,
+        failed: vec![],
+        ignored: vec![],
+        not_run: None
     },
     ExitCode::SUCCESS,
     TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
@@ -960,6 +1072,12 @@ test_output_test! {
             "hello".into(), "stderr".into(), "job 1: stderr truncated, 12 bytes lost".into()
         ],
     },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
+    },
     ExitCode::from(1),
     TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
 }
@@ -981,6 +1099,12 @@ test_output_test! {
         status: UiJobStatus::Ignored,
         stdout: vec![],
         stderr: vec![],
+    },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec![],
+        ignored: vec!["foo_pkg test_a".into()],
+        not_run: None
     },
     ExitCode::SUCCESS,
     TestDbEntry::new("foo_pkg", "foo_test", "test_a")
@@ -1007,6 +1131,12 @@ test_output_test! {
         stdout: vec![],
         stderr: vec![],
     },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec![],
+        ignored: vec!["foo_pkg test_a".into()],
+        not_run: None
+    },
     ExitCode::SUCCESS,
     TestDbEntry::new("foo_pkg", "foo_test", "test_a")
 }
@@ -1030,6 +1160,12 @@ test_output_test! {
         status: UiJobStatus::Failure(None),
         stdout: vec!["test stdout".into()],
         stderr: vec![],
+    },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
     },
     ExitCode::from(1),
     TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
@@ -1055,6 +1191,12 @@ test_output_test! {
         status: UiJobStatus::Failure(None),
         stdout: vec!["test stdout".into(), "job 1: stdout truncated, 12 bytes lost".into()],
         stderr: vec![],
+    },
+    UiJobSummary {
+        succeeded: 0,
+        failed: vec!["foo_pkg test_a".into()],
+        ignored: vec![],
+        not_run: None
     },
     ExitCode::from(1),
     TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
@@ -1132,6 +1274,14 @@ script_test_with_error_simex! {
         SendUiMsg {
             msg: ui_job_result("foo_pkg test_b", 2, UiJobStatus::Ok),
         },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 1,
+                failed: vec!["foo_pkg test_a".into()],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
         StartShutdown
     };
 }
@@ -1189,6 +1339,14 @@ script_test_with_error_simex! {
     } => {
         SendUiMsg {
             msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 1,
+                failed: vec![],
+                ignored: vec!["foo_pkg test_b".into()],
+                not_run: None,
+            })
         },
         StartShutdown
     };
@@ -1257,6 +1415,14 @@ script_test_with_error_simex! {
         SendUiMsg {
             msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
         },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 1,
+                failed: vec![],
+                ignored: vec!["foo_pkg test_b".into()],
+                not_run: None,
+            })
+        },
         StartShutdown
     };
 }
@@ -1315,6 +1481,14 @@ script_test_with_error_simex! {
         SendUiMsg {
             msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok)
         },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 1,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
         StartShutdown
     };
 }
@@ -1366,6 +1540,14 @@ script_test_with_error_simex! {
     } => {
         SendUiMsg {
             msg: ui_job_result("bar_pkg test_a", 1, UiJobStatus::Ok)
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 1,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
         },
         StartShutdown
     };
@@ -1422,6 +1604,14 @@ script_test_with_error_simex! {
     } => {
         SendUiMsg {
             msg: ui_job_result("bar_pkg test_a", 1, UiJobStatus::Ok)
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 1,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
         },
         StartShutdown
     };
@@ -1517,6 +1707,14 @@ script_test_with_error_simex! {
         SendUiMsg {
             msg: ui_job_result("foo_pkg test_b", 2, UiJobStatus::Ok)
         },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 2,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
         StartShutdown
     };
 }
@@ -1536,6 +1734,14 @@ script_test_with_error_simex! {
     Packages {
         packages: vec![fake_pkg("bar_pkg", ["bar_test"])]
     } => {
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
         StartShutdown
     };
 }
