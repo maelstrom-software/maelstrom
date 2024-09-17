@@ -2686,6 +2686,77 @@ script_test_with_error_simex! {
 }
 
 script_test_with_error_simex! {
+    stop_after_1_one_failure,
+    @ stop_after = Some(StopAfter::try_from(1).unwrap()),
+    test_db_in = [],
+    expected_exit_code = ExitCode::from(1),
+    expected_test_db_out = [
+        TestDbEntry::failure("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
+    ],
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
+    } => {
+        AddJob {
+            job_id: JobId::from(1),
+            spec: test_spec("foo_test", "test_a"),
+        },
+        SendUiMsg {
+            msg: UiMessage::JobEnqueued(UiJobEnqueued {
+                job_id: JobId::from(1),
+                name: "foo_pkg test_a".into()
+            })
+        },
+        SendUiMsg {
+            msg: UiMessage::UpdatePendingJobsCount(1)
+        },
+    };
+    CollectionFinished => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        }
+    };
+    JobUpdate {
+        job_id: JobId::from(1),
+        result: job_status_complete(1),
+    } => {
+        SendUiMsg {
+            msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Failure(None))
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec!["foo_pkg test_a".into()],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
+        StartShutdown
+    };
+}
+
+script_test_with_error_simex! {
     stop_after_1_before_listing_complete,
     @ stop_after = Some(StopAfter::try_from(1).unwrap()),
     test_db_in = [],
