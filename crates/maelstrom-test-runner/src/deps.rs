@@ -15,11 +15,15 @@ use std::{
     sync::Arc,
 };
 
+/// Wait for some asynchronous thing like a process to finish.
 pub trait Wait {
+    /// Block the current thread waiting for whatever thing to finish.
     fn wait(&self) -> Result<()>;
+    /// Kill the asynchronous thing waking up any threads in `wait`.
     fn kill(&self) -> Result<()>;
 }
 
+/// A helper that will call `Wait::kill` when it is dropped.
 pub struct KillOnDrop<WaitT: Wait> {
     wait: Arc<WaitT>,
 }
@@ -59,11 +63,13 @@ impl ClientTrait for maelstrom_client::Client {
     }
 }
 
+/// A handle to an artifact
 pub trait TestArtifactKey:
     fmt::Display + FromStr<Err = anyhow::Error> + Hash + Ord + Eq + Clone + Send + Sync + 'static
 {
 }
 
+/// Metadata associated with a test case
 pub trait TestCaseMetadata:
     Hash + Ord + Eq + Clone + Send + Sync + Serialize + DeserializeOwned + 'static
 {
@@ -92,6 +98,7 @@ impl<'de> Deserialize<'de> for NoCaseMetadata {
     }
 }
 
+/// A handle to an artifact that is just a `String`
 #[cfg(test)]
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StringArtifactKey(String);
@@ -122,22 +129,43 @@ impl FromStr for StringArtifactKey {
 #[cfg(test)]
 impl TestArtifactKey for StringArtifactKey {}
 
+/// A handle to a package.
 pub trait TestPackageId: Clone + Ord + fmt::Debug {}
 
+/// An artifact is a file that contains and can be used to run test cases.
 pub trait TestArtifact: fmt::Debug + Send + Sync + 'static {
+    /// The key for this artifact.
     type ArtifactKey: TestArtifactKey;
+    /// The handle to the package containing this artifact.
     type PackageId: TestPackageId;
+    /// The case metadata this artifact uses.
     type CaseMetadata: TestCaseMetadata;
+
+    /// The key for this artifact.
     fn to_key(&self) -> Self::ArtifactKey;
+
+    /// The path to the artifact in the file-system.
     fn path(&self) -> &Path;
+
+    /// Get the listing of test cases. This can potentially block.
     fn list_tests(&self) -> Result<Vec<(String, Self::CaseMetadata)>>;
+
+    /// Get the listing of ignored test cases. This can potentially block.
     fn list_ignored_tests(&self) -> Result<Vec<String>>;
+
+    /// The handle to the package that contains this artifact.
     fn package(&self) -> Self::PackageId;
+
+    /// Build a command to run the given test cases. It returns a tuple of the program to run and
+    /// vector of arguments to pass to it.
     fn build_command(
         &self,
         case_name: &str,
         case_metadata: &Self::CaseMetadata,
     ) -> (Utf8PathBuf, Vec<String>);
+
+    /// Create string that represents the given test case. This should be used for display
+    /// purposes.
     fn format_case(
         &self,
         package_name: &str,
@@ -146,36 +174,71 @@ pub trait TestArtifact: fmt::Debug + Send + Sync + 'static {
     ) -> String;
 }
 
+/// A package is something that contains artifacts.
 pub trait TestPackage: Clone + fmt::Debug + Send + Sync + 'static {
+    /// A handle to this package.
     type PackageId: TestPackageId;
+    /// The type used for artifacts.
     type ArtifactKey: TestArtifactKey;
+
+    /// The name of the package.
     fn name(&self) -> &str;
+
+    /// The artifacts contained in this package.
     fn artifacts(&self) -> Vec<Self::ArtifactKey>;
+
+    /// The handle to this package.
     fn id(&self) -> Self::PackageId;
 }
 
 pub trait CollectTests {
+    /// This message is displayed in the UI when tests are being enqueued.
     const ENQUEUE_MESSAGE: &'static str;
 
+    /// This type is used to filter packages and test cases.
     type TestFilter: TestFilter<
         Package = Self::Package,
         ArtifactKey = Self::ArtifactKey,
         CaseMetadata = Self::CaseMetadata,
     >;
 
+    /// This type is used to wait for a background build to complete or to kill it.
     type BuildHandle: Wait + Send + Sync;
+
+    /// A handle to a package.
     type PackageId: TestPackageId;
+
+    /// A package contains artifats.
     type Package: TestPackage<PackageId = Self::PackageId, ArtifactKey = Self::ArtifactKey>;
+
+    /// The handle to an artifact.
     type ArtifactKey: TestArtifactKey;
+
+    /// An artifact contains test cases and can run them.
     type Artifact: TestArtifact<
         ArtifactKey = Self::ArtifactKey,
         PackageId = Self::PackageId,
         CaseMetadata = Self::CaseMetadata,
     >;
+
+    /// An iterator of artifacts. Yielding one can block.
     type ArtifactStream: Iterator<Item = Result<Self::Artifact>> + Send;
+
+    /// Metadata associated with a test case.
     type CaseMetadata: TestCaseMetadata;
 
+    /// These options are used in `start`.
     type Options;
+
+    /// Start collecting tests for the given packages. Kick off any building that may need to
+    /// happen in the background.
+    /// The given `color` controls if any build output sent to the UI has color codes. The given
+    /// options is used to configure that collection.
+    ///
+    /// The returned `BuildHandle` gives a way to wait for or get the error for any build
+    /// happening. The given `ArtifactStream` gives a way to get the artifacts as they are built.
+    ///
+    /// This function should not block for any long amount of time.
     fn start(
         &self,
         color: bool,
@@ -184,6 +247,7 @@ pub trait CollectTests {
         ui: &ui::UiSender,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
 
+    /// Get any layers to add to the given artifact.
     fn get_test_layers(
         &self,
         artifact: &Self::Artifact,
@@ -191,21 +255,27 @@ pub trait CollectTests {
         ind: &ui::UiSender,
     ) -> Result<Vec<LayerSpec>>;
 
+    /// Strip any lines out of the given output which comes from the test fixture and would just be
+    /// noise.
     fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
         lines
     }
 
+    /// Look at the given test output lines and determine if the test didn't actually run.
     fn was_test_ignored(_case_str: &str, _lines: &[String]) -> bool {
         false
     }
 
+    /// Get all the packages for the project. This function is allowed to block.
     fn get_packages(&self, ui: &ui::UiSender) -> Result<Vec<Self::Package>>;
 
+    /// Build any test layers that might want to be used later. This function is allowed to block.
     fn build_test_layers(&self, _images: Vec<ImageSpec>, _ui: &ui::UiSender) -> Result<()> {
         Ok(())
     }
 }
 
+/// This filter is something which describes a set of test cases.
 pub trait TestFilter: Sized + FromStr<Err = anyhow::Error> {
     type Package: TestPackage;
     type ArtifactKey: TestArtifactKey;
