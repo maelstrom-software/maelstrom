@@ -2,7 +2,7 @@ use crate::{
     BuildDir, PytestCaseMetadata, PytestConfigValues, PytestPackageId, PytestTestArtifact,
 };
 use anyhow::{anyhow, bail, Result};
-use maelstrom_client::ProjectDir;
+use maelstrom_client::{spec::LayerSpec, ImageSpec, ProjectDir};
 use maelstrom_util::{process::ExitCode, root::Root};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -120,6 +120,7 @@ pub fn pytest_collect_tests(
     pytest_options: &PytestConfigValues,
     project_dir: &Root<ProjectDir>,
     build_dir: &Root<BuildDir>,
+    test_layers: HashMap<ImageSpec, LayerSpec>,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     compile_python(project_dir.as_ref())?;
 
@@ -148,6 +149,7 @@ pub fn pytest_collect_tests(
             ignored_tests: vec![],
             package: PytestPackageId("default".into()),
             pytest_options: pytest_options.clone(),
+            test_layers: test_layers.clone(),
         });
         if case.skip {
             test.ignored_tests.push(case.name.clone());

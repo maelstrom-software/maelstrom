@@ -340,6 +340,10 @@ impl TestArtifact for FakeTestArtifact {
     ) -> String {
         format!("{package_name} {case_name}")
     }
+
+    fn get_test_layers(&self, _metadata: &TestMetadata) -> Vec<LayerSpec> {
+        vec![]
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -426,15 +430,6 @@ impl CollectTests for TestCollector {
 
         let artifacts: Vec<_> = self.tests.artifacts(&self.bin_path, packages);
         Ok((WaitForNothing, artifacts.into_iter()))
-    }
-
-    fn get_test_layers(
-        &self,
-        _artifact: &FakeTestArtifact,
-        _metadata: &TestMetadata,
-        _ind: &ui::UiSender,
-    ) -> Result<Vec<LayerSpec>> {
-        Ok(vec![])
     }
 
     fn remove_fixture_output(case_str: &str, lines: Vec<String>) -> Vec<String> {

@@ -6,7 +6,7 @@ mod pattern;
 
 use anyhow::{anyhow, Result};
 use cargo_metadata::Target as CargoTarget;
-use maelstrom_base::{Timeout, Utf8PathBuf};
+use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     spec::{LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
@@ -224,6 +224,12 @@ struct CargoTestArtifact {
     extra_test_binary_args: Vec<String>,
 }
 
+impl CargoTestArtifact {
+    fn utf8_path(&self) -> &Utf8Path {
+        self.artifact.executable.as_ref().unwrap().as_ref()
+    }
+}
+
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
 struct CargoPackageId(cargo_metadata::PackageId);
 
@@ -243,7 +249,7 @@ impl TestArtifact for CargoTestArtifact {
     }
 
     fn path(&self) -> &Path {
-        self.artifact.executable.as_ref().unwrap().as_ref()
+        self.utf8_path().as_ref()
     }
 
     fn list_tests(&self) -> Result<Vec<(String, NoCaseMetadata)>> {
@@ -286,6 +292,16 @@ impl TestArtifact for CargoTestArtifact {
         s += case_name;
         s
     }
+
+    fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec> {
+        let mut layers = vec![path_layer_for_binary(self.utf8_path())];
+
+        if metadata.include_shared_libraries() {
+            layers.push(so_layer_for_binary(self.utf8_path()));
+        }
+
+        layers
+    }
 }
 
 struct CargoTestArtifactStream {
@@ -308,24 +324,24 @@ impl Iterator for CargoTestArtifactStream {
     }
 }
 
-fn path_layer_for_binary(binary_path: &Path) -> Result<LayerSpec> {
-    Ok(LayerSpec::Paths {
-        paths: vec![binary_path.to_path_buf().try_into()?],
+fn path_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
+    LayerSpec::Paths {
+        paths: vec![binary_path.to_path_buf()],
         prefix_options: PrefixOptions {
-            strip_prefix: Some(binary_path.parent().unwrap().to_path_buf().try_into()?),
+            strip_prefix: Some(binary_path.parent().unwrap().to_path_buf()),
             ..Default::default()
         },
-    })
+    }
 }
 
-fn so_layer_for_binary(binary_path: &Path) -> Result<LayerSpec> {
-    Ok(LayerSpec::SharedLibraryDependencies {
-        binary_paths: vec![binary_path.to_owned().try_into()?],
+fn so_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
+    LayerSpec::SharedLibraryDependencies {
+        binary_paths: vec![binary_path.to_owned()],
         prefix_options: PrefixOptions {
             follow_symlinks: true,
             ..Default::default()
         },
-    })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -385,21 +401,6 @@ impl CollectTests for CargoTestCollector {
                 extra_test_binary_args: options.extra_test_binary_args.clone(),
             },
         ))
-    }
-
-    fn get_test_layers(
-        &self,
-        artifact: &CargoTestArtifact,
-        metadata: &TestMetadata,
-        _ind: &UiSender,
-    ) -> Result<Vec<LayerSpec>> {
-        let mut layers = vec![path_layer_for_binary(artifact.path())?];
-
-        if metadata.include_shared_libraries() {
-            layers.push(so_layer_for_binary(artifact.path())?);
-        }
-
-        Ok(layers)
     }
 
     fn get_packages(&self, _ui: &UiSender) -> Result<Vec<CargoPackage>> {

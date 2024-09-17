@@ -6,7 +6,7 @@ mod pattern;
 
 use anyhow::{Context as _, Result};
 use config::GoTestOptions;
-use maelstrom_base::{Timeout, Utf8PathBuf};
+use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     spec::{LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
@@ -25,7 +25,6 @@ use maelstrom_util::{
     template::TemplateVars,
 };
 use std::path::Path;
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::{fmt, io};
 
@@ -159,17 +158,22 @@ impl GoTestCollector {
 #[derive(Debug)]
 pub(crate) struct GoTestArtifact {
     id: GoImportPath,
-    path: PathBuf,
+    path: Utf8PathBuf,
     options: GoTestOptions,
 }
 
-impl From<go_test::GoTestArtifact> for GoTestArtifact {
-    fn from(a: go_test::GoTestArtifact) -> Self {
-        Self {
+impl TryFrom<go_test::GoTestArtifact> for GoTestArtifact {
+    type Error = anyhow::Error;
+
+    fn try_from(a: go_test::GoTestArtifact) -> Result<Self> {
+        Ok(Self {
             id: GoImportPath(a.package.import_path),
-            path: a.path,
+            path: a
+                .path
+                .try_into()
+                .with_context(|| "path contains non-UTF8 character")?,
             options: a.options,
-        }
+        })
     }
 }
 
@@ -221,7 +225,7 @@ impl TestArtifact for GoTestArtifact {
     }
 
     fn path(&self) -> &Path {
-        &self.path
+        self.path.as_ref()
     }
 
     fn list_tests(&self) -> Result<Vec<(String, NoCaseMetadata)>> {
@@ -268,6 +272,18 @@ impl TestArtifact for GoTestArtifact {
     ) -> String {
         format!("{import_path} {case_name}")
     }
+
+    fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec> {
+        let mut layers = vec![path_layer_for_binary(&self.path)];
+
+        if metadata.include_shared_libraries() {
+            // Go binaries usually are statically linked, but on the off-chance they use some OS
+            // library or something, doesn't hurt to check.
+            layers.push(so_layer_for_binary(&self.path));
+        }
+
+        layers
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -299,7 +315,7 @@ impl Iterator for TestArtifactStream {
     type Item = Result<GoTestArtifact>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|r| r.map(GoTestArtifact::from))
+        self.0.next().map(|r| GoTestArtifact::try_from(r?))
     }
 }
 
@@ -341,24 +357,24 @@ impl GoTestCollector {
     }
 }
 
-fn path_layer_for_binary(binary_path: &Path) -> Result<LayerSpec> {
-    Ok(LayerSpec::Paths {
-        paths: vec![binary_path.to_path_buf().try_into()?],
+fn path_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
+    LayerSpec::Paths {
+        paths: vec![binary_path.to_path_buf()],
         prefix_options: PrefixOptions {
-            strip_prefix: Some(binary_path.parent().unwrap().to_path_buf().try_into()?),
+            strip_prefix: Some(binary_path.parent().unwrap().to_path_buf()),
             ..Default::default()
         },
-    })
+    }
 }
 
-fn so_layer_for_binary(binary_path: &Path) -> Result<LayerSpec> {
-    Ok(LayerSpec::SharedLibraryDependencies {
-        binary_paths: vec![binary_path.to_owned().try_into()?],
+fn so_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
+    LayerSpec::SharedLibraryDependencies {
+        binary_paths: vec![binary_path.to_owned()],
         prefix_options: PrefixOptions {
             follow_symlinks: true,
             ..Default::default()
         },
-    })
+    }
 }
 
 impl CollectTests for GoTestCollector {
@@ -387,23 +403,6 @@ impl CollectTests for GoTestCollector {
         let (wait, stream) =
             go_test::build_and_collect(options, packages, &build_dir, ui.downgrade())?;
         Ok((wait, TestArtifactStream(stream)))
-    }
-
-    fn get_test_layers(
-        &self,
-        artifact: &GoTestArtifact,
-        metadata: &TestMetadata,
-        _ind: &UiSender,
-    ) -> Result<Vec<LayerSpec>> {
-        let mut layers = vec![path_layer_for_binary(artifact.path())?];
-
-        if metadata.include_shared_libraries() {
-            // Go binaries usually are statically linked, but on the off-chance they use some OS
-            // library or something, doesn't hurt to check.
-            layers.push(so_layer_for_binary(artifact.path())?);
-        }
-
-        Ok(layers)
     }
 
     fn get_packages(&self, ui: &UiSender) -> Result<Vec<GoPackage>> {

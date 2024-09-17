@@ -198,7 +198,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     ) {
         let case_str = artifact.format_case(package_name, case_name, case_metadata);
 
-        let test_layers = self.deps.get_test_layers(artifact, &test_metadata);
+        let test_layers = artifact.get_test_layers(&test_metadata);
         let mut layers = test_metadata.layers;
         layers.extend(test_layers);
 

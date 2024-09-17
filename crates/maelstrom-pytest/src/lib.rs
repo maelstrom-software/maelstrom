@@ -325,6 +325,7 @@ pub(crate) struct PytestTestArtifact {
     ignored_tests: Vec<String>,
     package: PytestPackageId,
     pytest_options: PytestConfigValues,
+    test_layers: HashMap<ImageSpec, LayerSpec>,
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
@@ -387,6 +388,13 @@ impl TestArtifact for PytestTestArtifact {
     ) -> String {
         case_metadata.node_id.clone()
     }
+
+    fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec> {
+        match &metadata.image {
+            Some(image) => self.test_layers.get(image).into_iter().cloned().collect(),
+            _ => vec![],
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -433,24 +441,15 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         _packages: Vec<&PytestPackage>,
         _ui: &UiSender,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
-        let (handle, stream) =
-            pytest::pytest_collect_tests(color, options, &self.project_dir, &self.build_dir)?;
+        let test_layers = self.test_layers.lock().unwrap().clone();
+        let (handle, stream) = pytest::pytest_collect_tests(
+            color,
+            options,
+            &self.project_dir,
+            &self.build_dir,
+            test_layers,
+        )?;
         Ok((handle, stream))
-    }
-
-    fn get_test_layers(
-        &self,
-        _artifact: &PytestTestArtifact,
-        metadata: &TestMetadata,
-        _ui: &UiSender,
-    ) -> Result<Vec<LayerSpec>> {
-        match &metadata.image {
-            Some(image) => {
-                let test_layers = self.test_layers.lock().unwrap();
-                Ok(test_layers.get(image).into_iter().cloned().collect())
-            }
-            _ => Ok(vec![]),
-        }
     }
 
     fn build_test_layers(&self, images: Vec<ImageSpec>, ui: &UiSender) -> Result<()> {

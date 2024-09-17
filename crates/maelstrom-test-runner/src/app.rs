@@ -5,15 +5,12 @@ mod main_app;
 mod tests;
 
 use crate::config::{Repeat, StopAfter};
-use crate::metadata::{AllMetadata, TestMetadata};
+use crate::metadata::AllMetadata;
 use crate::test_db::{TestDb, TestDbStore};
 use crate::ui::{Ui, UiJobId as JobId, UiMessage};
 use crate::*;
 use maelstrom_base::Timeout;
-use maelstrom_client::{
-    spec::{JobSpec, LayerSpec},
-    JobStatus, ProjectDir, StateDir,
-};
+use maelstrom_client::{spec::JobSpec, JobStatus, ProjectDir, StateDir};
 use maelstrom_util::{fs::Fs, process::ExitCode, root::Root, sync::Event};
 use main_app::MainApp;
 use std::sync::mpsc::{Receiver, Sender};
@@ -44,11 +41,6 @@ trait Deps {
     fn add_job(&self, job_id: JobId, spec: JobSpec);
     fn list_tests(&self, artifact: ArtifactM<Self>);
     fn start_shutdown(&self);
-    fn get_test_layers(
-        &self,
-        artifact: &ArtifactM<Self>,
-        metadata: &TestMetadata,
-    ) -> Vec<LayerSpec>;
     fn send_ui_msg(&self, msg: UiMessage);
 }
 
@@ -302,17 +294,6 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
 
     fn start_shutdown(&self) {
         let _ = self.main_app_sender.send(MainAppMessage::Shutdown);
-    }
-
-    fn get_test_layers(
-        &self,
-        artifact: &ArtifactM<Self>,
-        metadata: &TestMetadata,
-    ) -> Vec<LayerSpec> {
-        self.deps
-            .test_collector()
-            .get_test_layers(artifact, metadata, &self.ui)
-            .expect("XXX the python pip package creation needs to change")
     }
 
     fn send_ui_msg(&self, msg: UiMessage) {

@@ -4,7 +4,7 @@ use crate::deps::SimpleFilter;
 use crate::fake_test_framework::{
     FakePackageId, FakeTestArtifact, FakeTestFilter, FakeTestPackage, TestCollector, TestOptions,
 };
-use crate::metadata::{AllMetadata, TestMetadata};
+use crate::metadata::AllMetadata;
 use crate::test_db::{OnDiskTestDb, TestDb};
 use crate::ui::{
     UiJobEnqueued, UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,
@@ -93,14 +93,6 @@ impl Deps for TestDeps {
     fn start_shutdown(&self) {
         let mut self_ = self.0.borrow_mut();
         self_.messages.push(TestMessage::StartShutdown);
-    }
-
-    fn get_test_layers(
-        &self,
-        _artifact: &FakeTestArtifact,
-        _metadata: &TestMetadata,
-    ) -> Vec<LayerSpec> {
-        vec![]
     }
 
     fn send_ui_msg(&self, msg: UiMessage) {

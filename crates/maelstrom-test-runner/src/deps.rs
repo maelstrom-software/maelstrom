@@ -172,6 +172,9 @@ pub trait TestArtifact: fmt::Debug + Send + Sync + 'static {
         case_name: &str,
         case_metadata: &Self::CaseMetadata,
     ) -> String;
+
+    /// Get any layers to add to the jobs using this artifact.
+    fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec>;
 }
 
 /// A package is something that contains artifacts.
@@ -246,14 +249,6 @@ pub trait CollectTests {
         packages: Vec<&Self::Package>,
         ui: &ui::UiSender,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
-
-    /// Get any layers to add to the given artifact.
-    fn get_test_layers(
-        &self,
-        artifact: &Self::Artifact,
-        metadata: &TestMetadata,
-        ind: &ui::UiSender,
-    ) -> Result<Vec<LayerSpec>>;
 
     /// Strip any lines out of the given output which comes from the test fixture and would just be
     /// noise.
