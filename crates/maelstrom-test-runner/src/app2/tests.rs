@@ -3312,3 +3312,50 @@ script_test_with_error_simex! {
         StartShutdown
     };
 }
+
+script_test_with_error_simex! {
+    listing_and_repeating,
+    @ listing = true,
+    @ repeat = Repeat::try_from(2).unwrap(),
+    expected_test_db_out = [
+        TestDbEntry::new("foo_pkg", "foo_test", "test_a"),
+        TestDbEntry::new("foo_pkg", "foo_test", "test_b")
+    ],
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    CollectionFinished => {};
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
+    } => {
+        SendUiMsg {
+            msg: UiMessage::List("foo_pkg test_a".into())
+        },
+        SendUiMsg {
+            msg: UiMessage::List("foo_pkg test_b".into())
+        },
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        },
+        StartShutdown
+    };
+}
