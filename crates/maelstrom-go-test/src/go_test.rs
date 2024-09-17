@@ -15,7 +15,7 @@ use std::{
     path::PathBuf,
     process::{Command, ExitStatus, Stdio},
     str,
-    sync::mpsc,
+    sync::{mpsc, Mutex},
     thread,
 };
 
@@ -38,12 +38,18 @@ impl fmt::Display for BuildError {
 }
 
 pub struct WaitHandle {
-    handle: thread::JoinHandle<Result<()>>,
+    handle: Mutex<Option<thread::JoinHandle<Result<()>>>>,
 }
 
 impl WaitHandle {
-    pub fn wait(self) -> Result<()> {
-        self.handle.join().unwrap()
+    pub fn wait(&self) -> Result<()> {
+        let mut locked_handle = self.handle.lock().unwrap();
+        let handle = locked_handle.take().expect("wait only called once");
+        handle.join().unwrap()
+    }
+    pub fn kill(&self) -> Result<()> {
+        // todo
+        Ok(())
     }
 }
 
@@ -211,7 +217,12 @@ pub(crate) fn build_and_collect(
     let paths = packages.into_iter().cloned().collect();
     let (send, recv) = mpsc::channel();
     let handle = thread::spawn(move || multi_go_build(paths, build_dir, options, send, ui));
-    Ok((WaitHandle { handle }, TestArtifactStream { recv }))
+    Ok((
+        WaitHandle {
+            handle: Mutex::new(Some(handle)),
+        },
+        TestArtifactStream { recv },
+    ))
 }
 
 pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<Vec<String>> {

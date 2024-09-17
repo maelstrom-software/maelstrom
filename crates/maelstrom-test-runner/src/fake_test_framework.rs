@@ -265,7 +265,11 @@ impl FakeTests {
 pub struct WaitForNothing;
 
 impl Wait for WaitForNothing {
-    fn wait(self) -> Result<()> {
+    fn wait(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn kill(&self) -> Result<()> {
         Ok(())
     }
 }

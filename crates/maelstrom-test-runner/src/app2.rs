@@ -17,6 +17,7 @@ use maelstrom_client::{
 use maelstrom_util::{fs::Fs, process::ExitCode, root::Root, sync::Event};
 use main_app::MainApp;
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Mutex;
 use std::time::Duration;
 use std_semaphore::Semaphore;
 
@@ -154,11 +155,14 @@ enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'stati
 type MainAppMessageM<DepsT> =
     MainAppMessage<PackageM<DepsT>, ArtifactM<DepsT>, CaseMetadataM<DepsT>>;
 
+type WaitM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::BuildHandle;
+
 struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
     deps: &'deps MainAppDepsT,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     main_app_sender: Sender<MainAppMessageM<Self>>,
     ui: UiSender,
+    collect_killer: Mutex<Option<KillOnDrop<WaitM<Self>>>>,
     semaphore: &'deps Semaphore,
 }
 
@@ -177,6 +181,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
             scope,
             main_app_sender,
             ui,
+            collect_killer: Mutex::new(None),
             semaphore,
         }
     }
@@ -201,6 +206,11 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
             .start(color, options, packages, &self.ui)
         {
             Ok((build_handle, artifact_stream)) => {
+                let build_handle = Arc::new(build_handle);
+                let killer = KillOnDrop::new(build_handle.clone());
+                let existing_killer = self.collect_killer.lock().unwrap().replace(killer);
+                assert!(existing_killer.is_none());
+
                 self.scope.spawn(move || {
                     let _guard = sem.access();
                     for artifact in artifact_stream {

@@ -565,8 +565,12 @@ fn default_test_metadata_parses() {
 }
 
 impl Wait for pytest::WaitHandle {
-    fn wait(self) -> Result<()> {
+    fn wait(&self) -> Result<()> {
         pytest::WaitHandle::wait(self)
+    }
+
+    fn kill(&self) -> Result<()> {
+        pytest::WaitHandle::kill(self)
     }
 }
 

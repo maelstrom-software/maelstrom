@@ -17,7 +17,9 @@ use std::{
     io::{self, BufReader, Read as _},
     iter,
     path::{Path, PathBuf},
-    str, thread,
+    str,
+    sync::Mutex,
+    thread,
 };
 
 #[derive(Debug)]
@@ -40,18 +42,23 @@ impl fmt::Display for CargoBuildError {
 
 pub struct WaitHandle {
     child: Child,
-    stderr_handle: thread::JoinHandle<Result<String>>,
+    stderr_handle: Mutex<Option<thread::JoinHandle<Result<String>>>>,
 }
 
 impl WaitHandle {
-    pub fn wait(mut self) -> Result<()> {
+    pub fn wait(&self) -> Result<()> {
         let exit_code = self.child.wait()?;
         if exit_code == ExitCode::SUCCESS {
             Ok(())
         } else {
-            let stderr = self.stderr_handle.join().unwrap()?;
+            let mut stderr_handle = self.stderr_handle.lock().unwrap();
+            let stderr = stderr_handle.take().unwrap().join().unwrap()?;
             Err(CargoBuildError { stderr, exit_code }.into())
         }
+    }
+
+    pub fn kill(&self) -> Result<()> {
+        self.child.kill()
     }
 }
 
@@ -224,7 +231,7 @@ struct Child {
 }
 
 impl Child {
-    fn wait(&mut self) -> Result<ExitCode> {
+    fn wait(&self) -> Result<ExitCode> {
         Ok(match linux::waitpid(self.pid)? {
             linux::WaitStatus::Exited(code) => code.as_u8(),
             linux::WaitStatus::Signaled(signal) => {
@@ -233,6 +240,11 @@ impl Child {
             }
         }
         .into())
+    }
+
+    fn kill(&self) -> Result<()> {
+        linux::kill(self.pid, linux::Signal::KILL)?;
+        Ok(())
     }
 }
 
@@ -356,7 +368,7 @@ pub fn run_cargo_test(
     Ok((
         WaitHandle {
             child,
-            stderr_handle,
+            stderr_handle: Mutex::new(Some(stderr_handle)),
         },
         GenericTestArtifactStream::new(
             log,

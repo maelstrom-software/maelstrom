@@ -14,7 +14,11 @@ use std::{fmt, io::Read as _, thread};
 pub struct WaitHandle;
 
 impl WaitHandle {
-    pub fn wait(self) -> Result<()> {
+    pub fn wait(&self) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn kill(&self) -> Result<()> {
         Ok(())
     }
 }

@@ -12,10 +12,28 @@ use std::{
     hash::Hash,
     path::Path,
     str::{self, FromStr},
+    sync::Arc,
 };
 
 pub trait Wait {
-    fn wait(self) -> Result<()>;
+    fn wait(&self) -> Result<()>;
+    fn kill(&self) -> Result<()>;
+}
+
+pub struct KillOnDrop<WaitT: Wait> {
+    wait: Arc<WaitT>,
+}
+
+impl<WaitT: Wait> KillOnDrop<WaitT> {
+    pub fn new(wait: Arc<WaitT>) -> Self {
+        Self { wait }
+    }
+}
+
+impl<WaitT: Wait> Drop for KillOnDrop<WaitT> {
+    fn drop(&mut self) {
+        let _ = self.wait.kill();
+    }
 }
 
 pub trait ClientTrait: Sync {

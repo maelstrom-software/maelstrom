@@ -702,8 +702,12 @@ fn default_test_metadata_parses() {
 }
 
 impl Wait for go_test::WaitHandle {
-    fn wait(self) -> Result<()> {
+    fn wait(&self) -> Result<()> {
         go_test::WaitHandle::wait(self)
+    }
+
+    fn kill(&self) -> Result<()> {
+        go_test::WaitHandle::kill(self)
     }
 }
 

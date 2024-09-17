@@ -527,8 +527,12 @@ fn default_test_metadata_parses() {
 }
 
 impl Wait for cargo::WaitHandle {
-    fn wait(self) -> Result<()> {
+    fn wait(&self) -> Result<()> {
         cargo::WaitHandle::wait(self)
+    }
+
+    fn kill(&self) -> Result<()> {
+        cargo::WaitHandle::kill(self)
     }
 }
 
