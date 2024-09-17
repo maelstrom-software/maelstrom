@@ -9,9 +9,6 @@ repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
-[features]
-new-app = []
-
 [dependencies]
 anyhow.workspace = true
 byteorder.workspace = true

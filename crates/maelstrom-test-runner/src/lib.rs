@@ -1,5 +1,4 @@
 mod alternative_mains;
-mod app;
 mod app2;
 pub mod config;
 mod deps;
@@ -10,24 +9,7 @@ pub mod ui;
 #[cfg(test)]
 pub mod fake_test_framework;
 
-#[cfg(not(feature = "new-app"))]
-pub use app::{run_app_with_ui_multithreaded, MainAppCombinedDeps};
-
-#[cfg(not(feature = "new-app"))]
-pub use app2::{
-    run_app_with_ui_multithreaded as run_app_with_ui_multithreaded2,
-    MainAppCombinedDeps as MainAppCombinedDeps2,
-};
-
-#[cfg(feature = "new-app")]
 pub use app2::{run_app_with_ui_multithreaded, MainAppCombinedDeps};
-
-#[cfg(feature = "new-app")]
-pub use app::{
-    run_app_with_ui_multithreaded as run_app_with_ui_multithreaded2,
-    MainAppCombinedDeps as MainAppCombinedDeps2,
-};
-
 pub use deps::*;
 
 use anyhow::Result;
@@ -69,39 +51,17 @@ pub enum ListAction {
     ListTests,
 }
 
-type TestDb<TestCollectorT> = test_db::TestDb<
-    <TestCollectorT as CollectTests>::ArtifactKey,
-    <TestCollectorT as CollectTests>::CaseMetadata,
->;
-
-type CaseIter<CaseMetadataT> = <Vec<(String, CaseMetadataT)> as IntoIterator>::IntoIter;
-
-type ArtifactM<MainAppDepsT> =
-    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::Artifact;
-
 type CaseMetadataM<MainAppDepsT> =
     <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::CaseMetadata;
 
 type ArtifactKeyM<MainAppDepsT> =
     <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::ArtifactKey;
 
-type PackageM<MainAppDepsT> =
-    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::Package;
-
-type PackageIdM<MainAppDepsT> =
-    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::PackageId;
-
 type CollectOptionsM<MainAppDepsT> =
     <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::Options;
 
 type TestFilterM<MainAppDepsT> =
     <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::TestFilter;
-
-type BuildHandleM<MainAppDepsT> =
-    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::BuildHandle;
-
-type ArtifactStreamM<MainAppDepsT> =
-    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::ArtifactStream;
 
 /// This is where cached data goes. If there is build output it is also here.
 pub struct BuildDir;
