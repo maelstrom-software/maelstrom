@@ -37,6 +37,10 @@ to implement containers.
 
 See the [book](https://maelstrom-software.com/doc/book/latest/) for more information.
 
+## Provide Feedback
+
+We want to learn how you want to use Maelstrom! Your feedback helps us prioritize features, expand the languages we support, and improve the overall experience for developers like you. Share your insight with this quick [survey](https://forms.gle/qzB9CcrJ1QhvzsTE7). 
+
 # Getting Started
 
 ## Installing Pre-Built Binaries
