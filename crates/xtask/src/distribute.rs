@@ -254,7 +254,10 @@ fn patch_binary(path: &Path) -> Result<()> {
     patchelf(&["--set-interpreter", interpreter_str], path)?;
     patchelf(&["--remove-rpath"], path)?;
     patchelf(&["--clear-symbol-version", "fmod"], path)?;
+    patchelf(&["--clear-symbol-version", "pidfd_spawnp"], path)?;
+    patchelf(&["--clear-symbol-version", "pidfd_getpid"], path)?;
     remove_glibc_version_from_version_r(path, "GLIBC_2.38")?;
+    remove_glibc_version_from_version_r(path, "GLIBC_2.39")?;
     Ok(())
 }
 
