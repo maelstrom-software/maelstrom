@@ -5,12 +5,9 @@ use maelstrom_base::{
     ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::{JobRunningStatus, JobStatus};
-use maelstrom_util::{ext::OptionExt as _, fs::Fs, sync};
+use maelstrom_util::{ext::OptionExt as _, sync};
 use maelstrom_worker::local_worker;
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, path::PathBuf};
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task::JoinSet,
@@ -20,18 +17,17 @@ pub trait Deps {
     type JobHandle;
     fn job_update(&self, handle: &Self::JobHandle, status: JobStatus);
 
-    // Only in remote broker mode.
+    // Only in remote-broker mode.
     fn send_job_request_to_broker(&self, cjid: ClientJobId, spec: JobSpec);
     fn start_artifact_transfer_to_broker(&self, digest: Sha256Digest, path: PathBuf);
 
-    // Only in standalone mode.
+    // For local jobs, which can happen in standalone mode or remote-broker mode.
     fn send_enqueue_job_to_local_worker(&self, jid: JobId, spec: JobSpec);
     fn send_artifact_fetch_completed_to_local_worker(
         &self,
         digest: Sha256Digest,
-        result: Result<u64>,
+        result: Result<PathBuf>,
     );
-    fn link_artifact_for_local_worker(&self, from: &Path, to: &Path) -> Result<u64>;
     fn shutdown_local_worker(&self, error: Error);
 }
 
@@ -39,14 +35,14 @@ pub enum Message<DepsT: Deps> {
     // These are requests from the client.
     AddArtifact(PathBuf, Sha256Digest),
     RunJob(JobSpec, DepsT::JobHandle),
+    Shutdown(Error),
 
-    // Only in non-standalone mode.
+    // Only in remote-broker mode.
     Broker(BrokerToClient),
 
-    // Only in standalone mode.
+    // For local jobs, which can happen in standalone mode or remote-broker mode.
     LocalWorker(WorkerToBroker),
-    LocalWorkerStartArtifactFetch(Sha256Digest, PathBuf),
-    Shutdown(Error),
+    LocalWorkerStartArtifactFetch(Sha256Digest),
 }
 
 struct JobEntry<HandleT> {
@@ -152,16 +148,13 @@ impl<DepsT: Deps> Router<DepsT> {
                 job.status = Some(status.clone());
                 self.deps.job_update(&job.handle, status.into());
             }
-            Message::LocalWorkerStartArtifactFetch(digest, path) => {
-                self.deps.send_artifact_fetch_completed_to_local_worker(
-                    digest.clone(),
-                    match self.artifacts.get(&digest) {
-                        None => Err(anyhow!("no artifact found for digest {digest}")),
-                        Some(stored_path) => self
-                            .deps
-                            .link_artifact_for_local_worker(stored_path.as_path(), path.as_path()),
-                    },
-                );
+            Message::LocalWorkerStartArtifactFetch(digest) => {
+                let result = match self.artifacts.get(&digest) {
+                    None => Err(anyhow!("no artifact found for digest {digest}")),
+                    Some(path) => Ok(path.clone()),
+                };
+                self.deps
+                    .send_artifact_fetch_completed_to_local_worker(digest, result);
             }
             Message::Shutdown(error) => self.deps.shutdown_local_worker(error),
         }
@@ -172,7 +165,6 @@ pub struct Adapter {
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: artifact_pusher::Sender,
     local_worker_sender: maelstrom_worker::DispatcherSender,
-    fs: Fs,
 }
 
 impl Adapter {
@@ -185,7 +177,6 @@ impl Adapter {
             broker_sender,
             artifact_pusher_sender,
             local_worker_sender,
-            fs: Fs::new(),
         }
     }
 }
@@ -218,18 +209,14 @@ impl Deps for Adapter {
     fn send_artifact_fetch_completed_to_local_worker(
         &self,
         digest: Sha256Digest,
-        result: Result<u64>,
+        result: Result<PathBuf>,
     ) {
         let _ = self
             .local_worker_sender
             .send(local_worker::Message::ArtifactFetchCompleted(
-                digest, result,
+                digest,
+                result.map(|target| local_worker::GotArtifact::Symlink { target }),
             ));
-    }
-
-    fn link_artifact_for_local_worker(&self, from: &Path, to: &Path) -> Result<u64> {
-        self.fs.symlink(from, to)?;
-        Ok(self.fs.metadata(to)?.len())
     }
 
     fn shutdown_local_worker(&self, error: Error) {
@@ -276,14 +263,12 @@ mod tests {
         JobRequestToBroker(ClientJobId, JobSpec),
         StartArtifactTransferToBroker(Sha256Digest, PathBuf),
         EnqueueJobToLocalWorker(JobId, JobSpec),
-        ArtifactFetchCompletedToLocalWorker(Sha256Digest, result::Result<u64, String>),
-        LinkArtifactForLocalWorker(PathBuf, PathBuf),
+        ArtifactFetchCompletedToLocalWorker(Sha256Digest, result::Result<PathBuf, String>),
         ShutdownLocalWorker(String),
     }
 
     struct TestState {
         messages: Vec<TestMessage>,
-        link_artifact_for_local_worker_returns: HashMap<(PathBuf, PathBuf), u64>,
     }
 
     impl Deps for Rc<RefCell<TestState>> {
@@ -316,7 +301,7 @@ mod tests {
         fn send_artifact_fetch_completed_to_local_worker(
             &self,
             digest: Sha256Digest,
-            result: Result<u64>,
+            result: Result<PathBuf>,
         ) {
             self.borrow_mut()
                 .messages
@@ -324,24 +309,6 @@ mod tests {
                     digest,
                     result.map_err(|e| format!("{e}")),
                 ));
-        }
-
-        fn link_artifact_for_local_worker(&self, from: &Path, to: &Path) -> Result<u64> {
-            let mut test_state = self.borrow_mut();
-            test_state
-                .messages
-                .push(TestMessage::LinkArtifactForLocalWorker(
-                    from.into(),
-                    to.into(),
-                ));
-            if let Some(size) = test_state
-                .link_artifact_for_local_worker_returns
-                .remove(&(from.into(), to.into()))
-            {
-                Ok(size)
-            } else {
-                Err(anyhow!("link error"))
-            }
         }
 
         fn shutdown_local_worker(&self, error: Error) {
@@ -357,16 +324,9 @@ mod tests {
     }
 
     impl Fixture {
-        fn new<'a>(
-            standalone: bool,
-            link_artifact_for_local_worker_returns: impl IntoIterator<Item = (&'a str, &'a str, u64)>,
-        ) -> Self {
+        fn new<'a>(standalone: bool) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
                 messages: Vec::default(),
-                link_artifact_for_local_worker_returns: link_artifact_for_local_worker_returns
-                    .into_iter()
-                    .map(|(from, to, result)| ((from.into(), to.into()), result))
-                    .collect(),
             }));
             let router = Router::new(test_state.clone(), standalone);
             Fixture { test_state, router }
@@ -408,53 +368,38 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_unknown_standalone,
-        Fixture::new(true, []),
-        LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
+        Fixture::new(true),
+        LocalWorkerStartArtifactFetch(digest!(1)) => {
             ArtifactFetchCompletedToLocalWorker(
                 digest!(1),
                 Err(string!("no artifact found for digest 0000000000000000000000000000000000000000000000000000000000000001")),
-            ),
-        };
-    }
-
-    script_test! {
-        local_worker_start_artifact_fetch_known_link_error_standalone,
-        Fixture::new(true, []),
-        AddArtifact(path_buf!("bar"), digest!(1)) => {};
-        LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
-            LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
-            ArtifactFetchCompletedToLocalWorker(
-                digest!(1),
-                Err(string!("link error")),
             ),
         };
     }
 
     script_test! {
         local_worker_start_artifact_fetch_known_standalone,
-        Fixture::new(true, [("bar", "foo", 1234)]),
+        Fixture::new(true),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
-        LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
-            LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
-            ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(1234)),
+        LocalWorkerStartArtifactFetch(digest!(1)) => {
+            ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(path_buf!("bar"))),
         };
     }
 
     script_test! {
         local_worker_start_artifact_last_add_artifact_wins_standalone,
-        Fixture::new(true, [("bar", "foo", 1234)]),
+        Fixture::new(true),
         AddArtifact(path_buf!("baz"), digest!(1)) => {};
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
-        LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
-            LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
-            ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(1234)),
+        LocalWorkerStartArtifactFetch(digest!(1)) => {
+            ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(path_buf!("bar"))),
         };
     }
 
     script_test! {
         local_worker_start_artifact_fetch_unknown_clustered,
-        Fixture::new(false, []),
-        LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
+        Fixture::new(false),
+        LocalWorkerStartArtifactFetch(digest!(1)) => {
             ArtifactFetchCompletedToLocalWorker(
                 digest!(1),
                 Err(string!("no artifact found for digest 0000000000000000000000000000000000000000000000000000000000000001")),
@@ -463,43 +408,28 @@ mod tests {
     }
 
     script_test! {
-        local_worker_start_artifact_fetch_known_link_error_clustered,
-        Fixture::new(false, []),
-        AddArtifact(path_buf!("bar"), digest!(1)) => {};
-        LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
-            LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
-            ArtifactFetchCompletedToLocalWorker(
-                digest!(1),
-                Err(string!("link error")),
-            ),
-        };
-    }
-
-    script_test! {
         local_worker_start_artifact_fetch_known_clustered,
-        Fixture::new(false, [("bar", "foo", 1234)]),
+        Fixture::new(false),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
-        LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
-            LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
-            ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(1234)),
+        LocalWorkerStartArtifactFetch(digest!(1)) => {
+            ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(path_buf!("bar"))),
         };
     }
 
     script_test! {
         local_worker_start_artifact_last_add_artifact_wins_clustered,
-        Fixture::new(false, [("bar", "foo", 1234)]),
+        Fixture::new(false),
         AddArtifact(path_buf!("baz"), digest!(1)) => {};
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
-        LocalWorkerStartArtifactFetch(digest!(1), path_buf!("foo")) => {
-            LinkArtifactForLocalWorker(path_buf!("bar"), path_buf!("foo")),
-            ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(1234)),
+        LocalWorkerStartArtifactFetch(digest!(1)) => {
+            ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(path_buf!("bar"))),
         };
     }
 
     #[test]
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn broker_transfer_artifact_standalone() {
-        let mut fixture = Fixture::new(true, []);
+        let mut fixture = Fixture::new(true);
         fixture
             .router
             .receive_message(Broker(TransferArtifact(digest!(1))));
@@ -510,7 +440,7 @@ mod tests {
         expected = "got request for unknown artifact with digest 0000000000000000000000000000000000000000000000000000000000000001"
     )]
     fn broker_transfer_artifact_unknown_clustered() {
-        let mut fixture = Fixture::new(false, []);
+        let mut fixture = Fixture::new(false);
         fixture
             .router
             .receive_message(Broker(TransferArtifact(digest!(1))));
@@ -518,7 +448,7 @@ mod tests {
 
     script_test! {
         broker_transfer_artifact_known_clustered,
-        Fixture::new(false, []),
+        Fixture::new(false),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         Broker(TransferArtifact(digest!(1))) => {
             StartArtifactTransferToBroker(digest!(1), path_buf!("bar")),
@@ -527,7 +457,7 @@ mod tests {
 
     script_test! {
         broker_transfer_artifact_last_add_artifact_wins_clustered,
-        Fixture::new(false, []),
+        Fixture::new(false),
         AddArtifact(path_buf!("baz"), digest!(1)) => {};
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         Broker(TransferArtifact(digest!(1))) => {
@@ -537,32 +467,18 @@ mod tests {
 
     script_test! {
         run_job_standalone,
-        Fixture::new(true, []),
+        Fixture::new(true),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
         RunJob(spec!(1, Tar), cjid!(1)) => {
             EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar)),
-        };
-    }
-
-    script_test! {
-        shutdown,
-        Fixture::new(true, []),
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
-        };
-        RunJob(spec!(1, Tar), cjid!(1)) => {
-            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar)),
-        };
-        Shutdown(anyhow!("test error")) => {
-            ShutdownLocalWorker("test error".into())
         };
     }
 
     script_test! {
         run_job_clustered,
-        Fixture::new(false, []),
+        Fixture::new(false),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
@@ -570,10 +486,9 @@ mod tests {
             JobRequestToBroker(cjid!(1), spec!(1, Tar)),
         };
     }
-
     script_test! {
         run_job_must_be_local_clustered,
-        Fixture::new(false, []),
+        Fixture::new(false),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
@@ -585,7 +500,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "received response for unknown job 1")]
     fn job_response_from_local_worker_unknown_standalone() {
-        let mut fixture = Fixture::new(true, []);
+        let mut fixture = Fixture::new(true);
         // Give it a job just so it doesn't crash subracting the job counts.
         fixture
             .router
@@ -600,7 +515,7 @@ mod tests {
 
     script_test! {
         job_response_from_local_worker_known_standalone,
-        Fixture::new(true, []),
+        Fixture::new(true),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
@@ -612,7 +527,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "received response for unknown job 1")]
     fn job_response_from_local_worker_unknown_clustered() {
-        let mut fixture = Fixture::new(false, []);
+        let mut fixture = Fixture::new(false);
         // Give it a job just so it doesn't crash subracting the job counts.
         fixture
             .router
@@ -627,7 +542,7 @@ mod tests {
 
     script_test! {
         job_response_from_local_worker_known_clustered,
-        Fixture::new(false, []),
+        Fixture::new(false),
         RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar).network(JobNetwork::Local)),
         };
@@ -639,7 +554,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn job_response_from_broker_unknown_standalone() {
-        let mut fixture = Fixture::new(true, []);
+        let mut fixture = Fixture::new(true);
         fixture
             .router
             .receive_message(Broker(BrokerToClient::JobResponse(
@@ -651,7 +566,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn job_response_from_broker_known_standalone() {
-        let mut fixture = Fixture::new(true, []);
+        let mut fixture = Fixture::new(true);
         fixture
             .router
             .receive_message(RunJob(spec!(0, Tar), cjid!(0)));
@@ -666,7 +581,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "received response for unknown job 0")]
     fn job_response_from_broker_unknown_clustered() {
-        let mut fixture = Fixture::new(false, []);
+        let mut fixture = Fixture::new(false);
         fixture
             .router
             .receive_message(Broker(BrokerToClient::JobResponse(
@@ -677,12 +592,40 @@ mod tests {
 
     script_test! {
         job_response_from_broker_known_clustered,
-        Fixture::new(false, []),
+        Fixture::new(false),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
         Broker(BrokerToClient::JobResponse(cjid!(0), Ok(outcome!(0)))) => {
             JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
+        };
+    }
+
+    script_test! {
+        shutdown_standalone,
+        Fixture::new(true),
+        RunJob(spec!(0, Tar), cjid!(0)) => {
+            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
+        };
+        RunJob(spec!(1, Tar), cjid!(1)) => {
+            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar)),
+        };
+        Shutdown(anyhow!("test error")) => {
+            ShutdownLocalWorker("test error".into())
+        };
+    }
+
+    script_test! {
+        shutdown_clustered,
+        Fixture::new(false),
+        RunJob(spec!(0, Tar), cjid!(0)) => {
+            JobRequestToBroker(cjid!(0), spec!(0, Tar)),
+        };
+        RunJob(spec!(1, Tar), cjid!(1)) => {
+            JobRequestToBroker(cjid!(1), spec!(1, Tar)),
+        };
+        Shutdown(anyhow!("test error")) => {
+            ShutdownLocalWorker("test error".into())
         };
     }
 }

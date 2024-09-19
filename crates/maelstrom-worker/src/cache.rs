@@ -12,25 +12,113 @@ use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
     ffi::OsString,
-    fmt,
+    fmt::{self, Debug},
     fs::{self, File},
     io::Write as _,
     iter::IntoIterator,
     mem,
     num::NonZeroU32,
     ops::{Deref, DerefMut},
+    os::unix::fs as unix_fs,
     path::{Path, PathBuf},
     string::ToString,
     thread,
 };
+use tempfile::{NamedTempFile, TempDir, TempPath};
 
 const CACHEDIR_TAG_CONTENTS: [u8; 43] = *b"Signature: 8a477f597d28d172789f06886806bc55";
 
-/// Dependencies that [Cache] has on the file system.
-pub trait Fs {
+/// A type used to represent a temporary file. The assumption is that the implementer may want to
+/// make the type [`Drop`] so that the temporary file is cleaned up if it isn't consumed.
+pub trait FsTempFile: Debug {
+    /// Return the path to the temporary file. Can be used to open the file to write into it.
+    fn path(&self) -> &Path;
+
+    /// Make the file temporary no more, by moving it to `target`. Will panic on file system error
+    /// or if the parent directory of `target` doesn't exist, or if `target` already exists.
+    fn persist(self, target: &Path);
+}
+
+/// A type used to represent a temporary directory. The assumption is that the implementer may want
+/// to make the type [`Drop`] so that the temporary directory is cleaned up if it isn't consumed.
+pub trait FsTempDir: Debug {
+    /// Return the path to the temporary directory. Can be used to create files in the directory
+    /// before it is made persistent.
+    fn path(&self) -> &Path;
+
+    /// Make the directory temporary no more, by moving it to `target`. Will panic on file system
+    /// error or if the parent directory of `target` doesn't exist, or if `target` already exists.
+    fn persist(self, target: &Path);
+}
+
+/// The type of a file, as far as the cache cares.
+#[derive(Clone, Copy)]
+pub enum FileType {
+    Directory,
+    File,
+    Symlink,
+    Other,
+}
+
+impl From<fs::FileType> for FileType {
+    fn from(file_type: fs::FileType) -> Self {
+        if file_type.is_dir() {
+            FileType::Directory
+        } else if file_type.is_file() {
+            FileType::File
+        } else if file_type.is_symlink() {
+            FileType::Symlink
+        } else {
+            FileType::Other
+        }
+    }
+}
+
+/// The file metadata the cache cares about.
+#[derive(Clone, Copy)]
+pub struct FileMetadata {
+    #[allow(dead_code)]
+    type_: FileType,
+    size: u64,
+}
+
+impl FileMetadata {
+    pub fn directory(size: u64) -> Self {
+        Self {
+            type_: FileType::Directory,
+            size,
+        }
+    }
+
+    pub fn file(size: u64) -> Self {
+        Self {
+            type_: FileType::File,
+            size,
+        }
+    }
+
+    pub fn symlink(size: u64) -> Self {
+        Self {
+            type_: FileType::Symlink,
+            size,
+        }
+    }
+}
+
+impl From<fs::Metadata> for FileMetadata {
+    fn from(metadata: fs::Metadata) -> Self {
+        Self {
+            type_: metadata.file_type().into(),
+            size: metadata.len(),
+        }
+    }
+}
+
+/// Dependencies that [`Cache`] has on the file system.
+pub trait Fs: Clone + Debug {
     /// Return a random u64. This is used for creating unique path names in the directory removal
     /// code path.
-    fn rand_u64(&mut self) -> u64;
+    fn rand_u64(&self) -> u64;
 
     /// Return true if a file (or directory, or symlink, etc.) exists with the given path, and
     /// false otherwise. Panic on file system error.
@@ -39,31 +127,84 @@ pub trait Fs {
     /// Rename `source` to `destination`. Panic on file system error. Assume that all intermediate
     /// directories exist for `destination`, and that `source` and `destination` are on the same
     /// file system.
-    fn rename(&mut self, source: &Path, destination: &Path);
+    fn rename(&self, source: &Path, destination: &Path);
 
     /// Remove `path`, and if `path` is a directory, all descendants of `path`. Do this on a
     /// separate thread. Panic on file system error.
-    fn remove_recursively_on_thread(&mut self, path: PathBuf);
+    fn remove_recursively_on_thread(&self, path: PathBuf);
 
     /// Ensure `path` exists and is a directory. If it doesn't exist, recusively ensure its parent exists,
     /// then create it. Panic on file system error or if `path` or any of its ancestors aren't
     /// directories.
-    fn mkdir_recursively(&mut self, path: &Path);
+    fn mkdir_recursively(&self, path: &Path);
 
     /// Return and iterator that will yield all of the children of a directory. Panic on file
     /// system error or if `path` doesn't exist or isn't a directory.
-    fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>>;
+    fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>>;
 
     /// Create a file with given `path` and `contents`. Panic on file system error, including if
     /// the file already exists.
     fn create_file(&self, path: &Path, contents: &[u8]);
+
+    /// Create a symlink at `link` that points to `target`. Panic on file system error.
+    fn symlink(&self, target: &Path, link: &Path);
+
+    /// Get the metadata of the file at `path`. Panic on file system error or if `path` doesn't not
+    /// exist.
+    fn metadata(&self, path: &Path) -> FileMetadata;
+
+    /// The type returned by the [`Self::temp_file`] method. Some implementations may make this
+    /// type [`Drop`] so that the temporary file can be cleaned up when it is closed.
+    type TempFile: FsTempFile;
+
+    /// Create a new temporary file in the directory `parent`. Panic on file system error or if
+    /// `parent` isn't a directory.
+    fn temp_file(&self, parent: &Path) -> Self::TempFile;
+
+    /// The type returned by the [`Self::temp_dir`] method. Some implementations may make this
+    /// type [`Drop`] so that the temporary directory can be cleaned up when it is closed.
+    type TempDir: FsTempDir;
+
+    /// Create a new temporary directory in the directory `parent`. Panic on file system error or
+    /// if `parent` isn't a directory.
+    fn temp_dir(&self, parent: &Path) -> Self::TempDir;
+}
+
+#[derive(Debug)]
+pub struct StdTempFile(TempPath);
+
+impl FsTempFile for StdTempFile {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn persist(self, target: &Path) {
+        self.0.persist(target).unwrap();
+    }
+}
+
+#[derive(Debug)]
+pub struct StdTempDir(TempDir);
+
+impl FsTempDir for StdTempDir {
+    fn path(&self) -> &Path {
+        self.0.path()
+    }
+
+    fn persist(self, target: &Path) {
+        fs::rename(self.0.into_path(), target).unwrap();
+    }
 }
 
 /// The standard implementation of CacheFs that uses [std] and [rand].
+#[derive(Clone, Debug)]
 pub struct StdFs;
 
 impl Fs for StdFs {
-    fn rand_u64(&mut self) -> u64 {
+    type TempFile = StdTempFile;
+    type TempDir = StdTempDir;
+
+    fn rand_u64(&self) -> u64 {
         rand::random()
     }
 
@@ -71,11 +212,11 @@ impl Fs for StdFs {
         path.try_exists().unwrap()
     }
 
-    fn rename(&mut self, source: &Path, destination: &Path) {
+    fn rename(&self, source: &Path, destination: &Path) {
         fs::rename(source, destination).unwrap()
     }
 
-    fn remove_recursively_on_thread(&mut self, path: PathBuf) {
+    fn remove_recursively_on_thread(&self, path: PathBuf) {
         thread::spawn(move || {
             if path.is_dir() {
                 fs::remove_dir_all(path).unwrap()
@@ -85,21 +226,40 @@ impl Fs for StdFs {
         });
     }
 
-    fn mkdir_recursively(&mut self, path: &Path) {
+    fn mkdir_recursively(&self, path: &Path) {
         fs::create_dir_all(path).unwrap();
     }
 
-    fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
-        Box::new(fs::read_dir(path).unwrap().map(|de| de.unwrap().path()))
+    fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>> {
+        Box::new(fs::read_dir(path).unwrap().map(|de| {
+            let de = de.unwrap();
+            (de.path(), de.metadata().unwrap().into())
+        }))
     }
 
     fn create_file(&self, path: &Path, contents: &[u8]) {
         File::create_new(path).unwrap().write_all(contents).unwrap();
     }
+
+    fn symlink(&self, target: &Path, link: &Path) {
+        unix_fs::symlink(target, link).unwrap();
+    }
+
+    fn metadata(&self, path: &Path) -> FileMetadata {
+        fs::symlink_metadata(path).unwrap().into()
+    }
+
+    fn temp_file(&self, parent: &Path) -> Self::TempFile {
+        StdTempFile(NamedTempFile::new_in(parent).unwrap().into_temp_path())
+    }
+
+    fn temp_dir(&self, parent: &Path) -> Self::TempDir {
+        StdTempDir(TempDir::new_in(parent).unwrap())
+    }
 }
 
-/// Type returned from [Cache::get_artifact].
-#[derive(Clone, Debug, PartialEq)]
+/// Type returned from [`Cache::get_artifact`].
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum GetArtifact {
     /// The artifact is in the cache. The caller has been given a reference that must later be
     /// released by calling [`Cache::decrement_ref_count`]. The artifact can be found at the path
@@ -116,6 +276,111 @@ pub enum GetArtifact {
     /// provided by [`Cache::cache_path`], and then either [`Cache::got_artifact_success`] or
     /// [`Cache::got_artifact_failure`] should be called.
     Get,
+}
+
+/// Type passed to [`Cache::got_artifact_success`].
+#[derive(Clone, Debug)]
+pub enum GotArtifact<FsT: Fs> {
+    Symlink { target: PathBuf },
+    File { source: FsT::TempFile },
+    Directory { source: FsT::TempDir, size: u64 },
+}
+
+impl<FsT: Fs> Eq for GotArtifact<FsT>
+where
+    FsT::TempFile: Eq,
+    FsT::TempDir: Eq,
+{
+}
+
+impl<FsT: Fs> Ord for GotArtifact<FsT>
+where
+    FsT::TempFile: Ord,
+    FsT::TempDir: Ord,
+{
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (
+                Self::Symlink {
+                    target: self_target,
+                },
+                Self::Symlink {
+                    target: other_target,
+                },
+            ) => self_target.cmp(other_target),
+            (
+                Self::File {
+                    source: self_source,
+                },
+                Self::File {
+                    source: other_source,
+                },
+            ) => self_source.cmp(other_source),
+            (
+                Self::Directory {
+                    source: self_source,
+                    size: self_size,
+                },
+                Self::Directory {
+                    source: other_source,
+                    size: other_size,
+                },
+            ) => self_source
+                .cmp(other_source)
+                .then(self_size.cmp(other_size)),
+            (Self::Symlink { .. }, _) => Ordering::Less,
+            (Self::File { .. }, Self::Directory { .. }) => Ordering::Less,
+            (Self::File { .. }, Self::Symlink { .. }) => Ordering::Greater,
+            (Self::Directory { .. }, _) => Ordering::Greater,
+        }
+    }
+}
+
+impl<FsT: Fs> PartialEq for GotArtifact<FsT>
+where
+    FsT::TempFile: PartialEq,
+    FsT::TempDir: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Symlink {
+                    target: self_target,
+                },
+                Self::Symlink {
+                    target: other_target,
+                },
+            ) => self_target.eq(other_target),
+            (
+                Self::File {
+                    source: self_source,
+                },
+                Self::File {
+                    source: other_source,
+                },
+            ) => self_source.eq(other_source),
+            (
+                Self::Directory {
+                    source: self_source,
+                    size: self_size,
+                },
+                Self::Directory {
+                    source: other_source,
+                    size: other_size,
+                },
+            ) => self_source.eq(other_source) && self_size.eq(other_size),
+            _ => false,
+        }
+    }
+}
+
+impl<FsT: Fs> PartialOrd for GotArtifact<FsT>
+where
+    GotArtifact<FsT>: Ord,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
@@ -141,7 +406,7 @@ impl fmt::Display for EntryKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Key {
     pub kind: EntryKind,
     pub digest: Sha256Digest,
@@ -254,7 +519,7 @@ impl<FsT: Fs> Cache<FsT> {
         path.push("removing");
         fs.mkdir_recursively(&path);
         for child in fs.read_dir(&path) {
-            fs.remove_recursively_on_thread(child);
+            fs.remove_recursively_on_thread(child.0);
         }
         path.pop();
 
@@ -264,13 +529,17 @@ impl<FsT: Fs> Cache<FsT> {
             &mut fs,
             &root,
             &path,
-            ["removing", "sha256", "CACHEDIR.TAG"],
+            ["CACHEDIR.TAG", "removing", "sha256"],
         );
 
         path.push("CACHEDIR.TAG");
         if !fs.file_exists(&path) {
             fs.create_file(&path, &CACHEDIR_TAG_CONTENTS);
         }
+        path.pop();
+
+        path.push("tmp");
+        fs.mkdir_recursively(&path);
         path.pop();
 
         path.push("sha256");
@@ -361,8 +630,23 @@ impl<FsT: Fs> Cache<FsT> {
         &mut self,
         kind: EntryKind,
         digest: &Sha256Digest,
-        bytes_used: u64,
+        artifact: GotArtifact<FsT>,
     ) -> Vec<JobId> {
+        let path = self.cache_path(kind, digest);
+        let bytes_used = match artifact {
+            GotArtifact::Directory { source, size } => {
+                source.persist(&path);
+                size
+            }
+            GotArtifact::File { source } => {
+                source.persist(&path);
+                self.fs.metadata(&path).size
+            }
+            GotArtifact::Symlink { target } => {
+                self.fs.symlink(&target, &path);
+                self.fs.metadata(&path).size
+            }
+        };
         let key = Key::new(kind, digest.clone());
         let entry = self
             .entries
@@ -428,6 +712,14 @@ impl<FsT: Fs> Cache<FsT> {
         path
     }
 
+    pub fn temp_dir(&self) -> FsT::TempDir {
+        self.fs.temp_dir(&self.root.join("tmp"))
+    }
+
+    pub fn temp_file(&self) -> FsT::TempFile {
+        self.fs.temp_file(&self.root.join("tmp"))
+    }
+
     fn remove_all_from_directory_except<S>(
         fs: &mut impl Fs,
         root: &Path,
@@ -442,10 +734,11 @@ impl<FsT: Fs> Cache<FsT> {
             .collect::<HashSet<_>>();
         for entry in fs.read_dir(dir) {
             if !entry
+                .0
                 .file_name()
                 .is_some_and(|entry_name| except.contains(entry_name))
             {
-                Self::remove_in_background(fs, root, &entry);
+                Self::remove_in_background(fs, root, &entry.0);
             }
         }
     }
@@ -505,7 +798,12 @@ mod tests {
     use itertools::Itertools;
     use maelstrom_test::*;
     use slog::{o, Discard};
-    use std::{cell::RefCell, collections::HashSet, rc::Rc};
+    use std::{
+        cell::{Cell, RefCell},
+        cmp::Ordering,
+        collections::HashSet,
+        rc::Rc,
+    };
     use TestMessage::*;
 
     #[derive(Clone, Debug, PartialEq)]
@@ -516,20 +814,114 @@ mod tests {
         MkdirRecursively(PathBuf),
         ReadDir(PathBuf),
         CreateFile(PathBuf, Box<[u8]>),
+        Symlink(PathBuf, PathBuf),
+        Metadata(PathBuf),
+        TempFile(PathBuf),
+        TempDir(PathBuf),
+        PersistTempFile(PathBuf, PathBuf),
+        PersistTempDir(PathBuf, PathBuf),
     }
 
-    #[derive(Default)]
+    #[derive(Debug)]
+    struct TestTempFile {
+        path: PathBuf,
+        messages: Rc<RefCell<Vec<TestMessage>>>,
+    }
+
+    impl PartialOrd for TestTempFile {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for TestTempFile {
+        fn cmp(&self, other: &Self) -> Ordering {
+            self.path.cmp(&other.path)
+        }
+    }
+
+    impl PartialEq for TestTempFile {
+        fn eq(&self, other: &Self) -> bool {
+            self.path.eq(&other.path)
+        }
+    }
+
+    impl Eq for TestTempFile {}
+
+    impl FsTempFile for TestTempFile {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn persist(self, target: &Path) {
+            self.messages
+                .borrow_mut()
+                .push(PersistTempFile(self.path, target.to_owned()));
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestTempDir {
+        path: PathBuf,
+        messages: Rc<RefCell<Vec<TestMessage>>>,
+    }
+
+    impl PartialOrd for TestTempDir {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for TestTempDir {
+        fn cmp(&self, other: &Self) -> Ordering {
+            self.path.cmp(&other.path)
+        }
+    }
+
+    impl PartialEq for TestTempDir {
+        fn eq(&self, other: &Self) -> bool {
+            self.path.eq(&other.path)
+        }
+    }
+
+    impl Eq for TestTempDir {}
+
+    impl FsTempDir for TestTempDir {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn persist(self, target: &Path) {
+            self.messages
+                .borrow_mut()
+                .push(PersistTempDir(self.path, target.to_owned()));
+        }
+    }
+
+    #[derive(Clone, Default)]
     struct TestFs {
         messages: Rc<RefCell<Vec<TestMessage>>>,
         existing_files: HashSet<PathBuf>,
-        directories: HashMap<PathBuf, Vec<PathBuf>>,
-        last_random_number: u64,
+        directories: HashMap<PathBuf, Vec<(PathBuf, FileMetadata)>>,
+        metadata: HashMap<PathBuf, FileMetadata>,
+        last_random_number: Cell<u64>,
+    }
+
+    impl Debug for TestFs {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+            f.debug_struct("TestFs").finish()
+        }
     }
 
     impl Fs for TestFs {
-        fn rand_u64(&mut self) -> u64 {
-            self.last_random_number += 1;
-            self.last_random_number
+        type TempFile = TestTempFile;
+
+        type TempDir = TestTempDir;
+
+        fn rand_u64(&self) -> u64 {
+            let result = self.last_random_number.get() + 1;
+            self.last_random_number.set(result);
+            result
         }
 
         fn file_exists(&self, path: &Path) -> bool {
@@ -537,25 +929,25 @@ mod tests {
             self.existing_files.contains(path)
         }
 
-        fn rename(&mut self, source: &Path, destination: &Path) {
+        fn rename(&self, source: &Path, destination: &Path) {
             self.messages
                 .borrow_mut()
                 .push(Rename(source.to_owned(), destination.to_owned()));
         }
 
-        fn remove_recursively_on_thread(&mut self, path: PathBuf) {
+        fn remove_recursively_on_thread(&self, path: PathBuf) {
             self.messages
                 .borrow_mut()
                 .push(RemoveRecursively(path.to_owned()));
         }
 
-        fn mkdir_recursively(&mut self, path: &Path) {
+        fn mkdir_recursively(&self, path: &Path) {
             self.messages
                 .borrow_mut()
                 .push(MkdirRecursively(path.to_owned()));
         }
 
-        fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
+        fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>> {
             self.messages.borrow_mut().push(ReadDir(path.to_owned()));
             Box::new(
                 self.directories
@@ -571,6 +963,35 @@ mod tests {
                 path.to_owned(),
                 content.to_vec().into_boxed_slice(),
             ));
+        }
+
+        fn symlink(&self, target: &Path, link: &Path) {
+            self.messages
+                .borrow_mut()
+                .push(Symlink(target.to_owned(), link.to_owned()));
+        }
+
+        fn metadata(&self, path: &Path) -> FileMetadata {
+            self.messages.borrow_mut().push(Metadata(path.to_owned()));
+            *self.metadata.get(path).unwrap()
+        }
+
+        fn temp_file(&self, parent: &Path) -> Self::TempFile {
+            let path = parent.join(format!("{:0>16x}", self.rand_u64()));
+            self.messages.borrow_mut().push(TempFile(path.clone()));
+            TestTempFile {
+                path,
+                messages: self.messages.clone(),
+            }
+        }
+
+        fn temp_dir(&self, parent: &Path) -> Self::TempDir {
+            let path = parent.join(format!("{:0>16x}", self.rand_u64()));
+            self.messages.borrow_mut().push(TempDir(path.clone()));
+            TestTempDir {
+                path,
+                messages: self.messages.clone(),
+            }
         }
     }
 
@@ -601,6 +1022,7 @@ mod tests {
             Fixture { messages, cache }
         }
 
+        #[track_caller]
         fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
             let mut messages = self.messages.borrow_mut();
             for perm in expected.clone().into_iter().permutations(expected.len()) {
@@ -645,16 +1067,74 @@ mod tests {
             self.expect_messages_in_any_order(vec![]);
         }
 
+        #[track_caller]
+        fn got_artifact_success_directory(
+            &mut self,
+            digest: Sha256Digest,
+            source: PathBuf,
+            size: u64,
+            expected: Vec<JobId>,
+            expected_fs_operations: Vec<TestMessage>,
+        ) {
+            let source = TestTempDir {
+                path: source,
+                messages: self.messages.clone(),
+            };
+            self.got_artifact_success(
+                digest,
+                GotArtifact::Directory { source, size },
+                expected,
+                expected_fs_operations,
+            )
+        }
+
+        #[track_caller]
+        fn got_artifact_success_file(
+            &mut self,
+            digest: Sha256Digest,
+            source: PathBuf,
+            expected: Vec<JobId>,
+            expected_fs_operations: Vec<TestMessage>,
+        ) {
+            let source = TestTempFile {
+                path: source,
+                messages: self.messages.clone(),
+            };
+            self.got_artifact_success(
+                digest,
+                GotArtifact::File { source },
+                expected,
+                expected_fs_operations,
+            )
+        }
+
+        #[track_caller]
+        fn got_artifact_success_symlink(
+            &mut self,
+            digest: Sha256Digest,
+            target: PathBuf,
+            expected: Vec<JobId>,
+            expected_fs_operations: Vec<TestMessage>,
+        ) {
+            self.got_artifact_success(
+                digest,
+                GotArtifact::Symlink { target },
+                expected,
+                expected_fs_operations,
+            )
+        }
+
+        #[track_caller]
         fn got_artifact_success(
             &mut self,
             digest: Sha256Digest,
-            bytes_used: u64,
+            artifact: GotArtifact<TestFs>,
             expected: Vec<JobId>,
             expected_fs_operations: Vec<TestMessage>,
         ) {
             let result = self
                 .cache
-                .got_artifact_success(EntryKind::Blob, &digest, bytes_used);
+                .got_artifact_success(EntryKind::Blob, &digest, artifact);
             assert_eq!(result, expected);
             self.expect_messages_in_any_order(expected_fs_operations);
         }
@@ -670,9 +1150,21 @@ mod tests {
             self.expect_messages_in_any_order(expected_fs_operations);
         }
 
-        fn got_artifact_success_ign(&mut self, digest: Sha256Digest, bytes_used: u64) {
+        fn got_artifact_success_directory_ign(&mut self, digest: Sha256Digest, size: u64) {
+            let source = TestTempDir {
+                path: "/foo".into(),
+                messages: self.messages.clone(),
+            };
+            self.got_artifact_success_ign(digest, GotArtifact::Directory { source, size })
+        }
+
+        fn got_artifact_success_ign(
+            &mut self,
+            digest: Sha256Digest,
+            artifact: GotArtifact<TestFs>,
+        ) {
             self.cache
-                .got_artifact_success(EntryKind::Blob, &digest, bytes_used);
+                .got_artifact_success(EntryKind::Blob, &digest, artifact);
             self.clear_messages();
         }
 
@@ -688,19 +1180,141 @@ mod tests {
     }
 
     #[test]
-    fn get_request_for_empty() {
+    fn get_miss_filled_with_directory() {
         let mut fixture = Fixture::new_and_clear_messages(1000);
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success(digest!(42), 100, vec![jid!(1)], vec![]);
+        fixture.got_artifact_success_directory(
+            digest!(42),
+            short_path!("/z/tmp", 1),
+            100,
+            vec![jid!(1)],
+            vec![PersistTempDir(
+                short_path!("/z/tmp", 1),
+                long_path!("/z/sha256/blob", 42),
+            )],
+        );
     }
 
     #[test]
-    fn get_request_for_empty_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
+    fn get_miss_filled_with_file() {
+        let mut test_cache_fs = TestFs::default();
+        test_cache_fs
+            .metadata
+            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::file(100));
+        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
+
+        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(
+            digest!(42),
+            short_path!("/z/tmp", 1),
+            vec![jid!(1)],
+            vec![
+                PersistTempFile(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 42)),
+                Metadata(long_path!("/z/sha256/blob", 42)),
+            ],
+        );
+    }
+
+    #[test]
+    fn get_miss_filled_with_symlink() {
+        let mut test_cache_fs = TestFs::default();
+        test_cache_fs
+            .metadata
+            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::symlink(10));
+        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
+
+        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_symlink(
+            digest!(42),
+            path_buf!("/somewhere"),
+            vec![jid!(1)],
+            vec![
+                Symlink(path_buf!("/somewhere"), long_path!("/z/sha256/blob", 42)),
+                Metadata(long_path!("/z/sha256/blob", 42)),
+            ],
+        );
+    }
+
+    #[test]
+    fn get_miss_filled_with_directory_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
         let mut fixture = Fixture::new_and_clear_messages(1000);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success(digest!(42), 10000, vec![jid!(1)], vec![]);
+        fixture.got_artifact_success_directory(
+            digest!(42),
+            short_path!("/z/tmp", 1),
+            10000,
+            vec![jid!(1)],
+            vec![PersistTempDir(
+                short_path!("/z/tmp", 1),
+                long_path!("/z/sha256/blob", 42),
+            )],
+        );
+
+        fixture.decrement_ref_count(
+            digest!(42),
+            vec![
+                FileExists(short_path!("/z/removing", 1)),
+                Rename(
+                    long_path!("/z/sha256/blob", 42),
+                    short_path!("/z/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/z/removing", 1)),
+            ],
+        );
+    }
+
+    #[test]
+    fn get_miss_filled_with_file_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
+        let mut test_cache_fs = TestFs::default();
+        test_cache_fs
+            .metadata
+            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::file(10000));
+        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
+
+        fixture.get_artifact_ign(digest!(42), jid!(1));
+        fixture.got_artifact_success_file(
+            digest!(42),
+            short_path!("/z/tmp", 1),
+            vec![jid!(1)],
+            vec![
+                PersistTempFile(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 42)),
+                Metadata(long_path!("/z/sha256/blob", 42)),
+            ],
+        );
+
+        fixture.decrement_ref_count(
+            digest!(42),
+            vec![
+                FileExists(short_path!("/z/removing", 1)),
+                Rename(
+                    long_path!("/z/sha256/blob", 42),
+                    short_path!("/z/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/z/removing", 1)),
+            ],
+        );
+    }
+
+    #[test]
+    fn get_miss_filled_with_symlink_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
+        let mut test_cache_fs = TestFs::default();
+        test_cache_fs
+            .metadata
+            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::symlink(10));
+        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1);
+
+        fixture.get_artifact_ign(digest!(42), jid!(1));
+        fixture.got_artifact_success_symlink(
+            digest!(42),
+            path_buf!("/somewhere"),
+            vec![jid!(1)],
+            vec![
+                Symlink(path_buf!("/somewhere"), long_path!("/z/sha256/blob", 42)),
+                Metadata(long_path!("/z/sha256/blob", 42)),
+            ],
+        );
 
         fixture.decrement_ref_count(
             digest!(42),
@@ -720,19 +1334,21 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_messages(10);
 
         fixture.get_artifact_ign(digest!(1), jid!(1));
-        fixture.got_artifact_success_ign(digest!(1), 4);
+        fixture.got_artifact_success_directory_ign(digest!(1), 4);
         fixture.decrement_ref_count(digest!(1), vec![]);
 
         fixture.get_artifact_ign(digest!(2), jid!(2));
-        fixture.got_artifact_success_ign(digest!(2), 4);
+        fixture.got_artifact_success_directory_ign(digest!(2), 4);
         fixture.decrement_ref_count(digest!(2), vec![]);
 
         fixture.get_artifact_ign(digest!(3), jid!(3));
-        fixture.got_artifact_success(
+        fixture.got_artifact_success_directory(
             digest!(3),
+            short_path!("/z/tmp", 1),
             4,
             vec![jid!(3)],
             vec![
+                PersistTempDir(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 3)),
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
                     long_path!("/z/sha256/blob", 1),
@@ -744,11 +1360,13 @@ mod tests {
         fixture.decrement_ref_count(digest!(3), vec![]);
 
         fixture.get_artifact_ign(digest!(4), jid!(4));
-        fixture.got_artifact_success(
+        fixture.got_artifact_success_directory(
             digest!(4),
+            short_path!("/z/tmp", 2),
             4,
             vec![jid!(4)],
             vec![
+                PersistTempDir(short_path!("/z/tmp", 2), long_path!("/z/sha256/blob", 4)),
                 FileExists(short_path!("/z/removing", 2)),
                 Rename(
                     long_path!("/z/sha256/blob", 2),
@@ -765,24 +1383,26 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_messages(10);
 
         fixture.get_artifact_ign(digest!(1), jid!(1));
-        fixture.got_artifact_success_ign(digest!(1), 3);
+        fixture.got_artifact_success_directory_ign(digest!(1), 3);
 
         fixture.get_artifact_ign(digest!(2), jid!(2));
-        fixture.got_artifact_success_ign(digest!(2), 3);
+        fixture.got_artifact_success_directory_ign(digest!(2), 3);
 
         fixture.get_artifact_ign(digest!(3), jid!(3));
-        fixture.got_artifact_success_ign(digest!(3), 3);
+        fixture.got_artifact_success_directory_ign(digest!(3), 3);
 
         fixture.decrement_ref_count(digest!(3), vec![]);
         fixture.decrement_ref_count(digest!(2), vec![]);
         fixture.decrement_ref_count(digest!(1), vec![]);
 
         fixture.get_artifact_ign(digest!(4), jid!(4));
-        fixture.got_artifact_success(
+        fixture.got_artifact_success_directory(
             digest!(4),
+            short_path!("/z/tmp", 1),
             3,
             vec![jid!(4)],
             vec![
+                PersistTempDir(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 4)),
                 FileExists(short_path!("/z/removing", 1)),
                 Rename(
                     long_path!("/z/sha256/blob", 3),
@@ -801,7 +1421,16 @@ mod tests {
         fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Wait);
         fixture.get_artifact(digest!(42), jid!(3), GetArtifact::Wait);
 
-        fixture.got_artifact_success(digest!(42), 100, vec![jid!(1), jid!(2), jid!(3)], vec![]);
+        fixture.got_artifact_success_directory(
+            digest!(42),
+            short_path!("/z/tmp", 1),
+            100,
+            vec![jid!(1), jid!(2), jid!(3)],
+            vec![PersistTempDir(
+                short_path!("/z/tmp", 1),
+                long_path!("/z/sha256/blob", 42),
+            )],
+        );
     }
 
     #[test]
@@ -812,7 +1441,16 @@ mod tests {
         fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Wait);
         fixture.get_artifact(digest!(42), jid!(3), GetArtifact::Wait);
 
-        fixture.got_artifact_success(digest!(42), 10000, vec![jid!(1), jid!(2), jid!(3)], vec![]);
+        fixture.got_artifact_success_directory(
+            digest!(42),
+            short_path!("/z/tmp", 1),
+            10000,
+            vec![jid!(1), jid!(2), jid!(3)],
+            vec![PersistTempDir(
+                short_path!("/z/tmp", 1),
+                long_path!("/z/sha256/blob", 42),
+            )],
+        );
 
         fixture.decrement_ref_count(digest!(42), vec![]);
         fixture.decrement_ref_count(digest!(42), vec![]);
@@ -834,7 +1472,7 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_messages(10);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_ign(digest!(42), 100);
+        fixture.got_artifact_success_directory_ign(digest!(42), 100);
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Success);
 
@@ -857,12 +1495,21 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_messages(100);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_ign(digest!(42), 10);
+        fixture.got_artifact_success_directory_ign(digest!(42), 10);
         fixture.decrement_ref_count_ign(digest!(42));
 
         fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Success);
         fixture.get_artifact(digest!(43), jid!(3), GetArtifact::Get);
-        fixture.got_artifact_success(digest!(43), 100, vec![jid!(3)], vec![]);
+        fixture.got_artifact_success_directory(
+            digest!(43),
+            short_path!("/z/tmp", 1),
+            100,
+            vec![jid!(3)],
+            vec![PersistTempDir(
+                short_path!("/z/tmp", 1),
+                long_path!("/z/sha256/blob", 43),
+            )],
+        );
 
         fixture.decrement_ref_count(
             digest!(42),
@@ -878,7 +1525,7 @@ mod tests {
     }
 
     #[test]
-    fn get_request_for_empty_with_download_and_extract_failure_and_no_files_created() {
+    fn get_request_for_empty_with_get_failure() {
         let mut fixture = Fixture::new_and_clear_messages(1000);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
@@ -1016,6 +1663,7 @@ mod tests {
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
             ),
+            MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
@@ -1039,6 +1687,7 @@ mod tests {
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
             FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
@@ -1053,14 +1702,16 @@ mod tests {
     #[test]
     fn new_restarts_old_removes() {
         let mut test_cache_fs = TestFs::default();
-        test_cache_fs
-            .directories
-            .insert(path_buf!("/z"), vec![path_buf!("/z/removing")]);
+        test_cache_fs.directories.insert(
+            path_buf!("/z"),
+            vec![(path_buf!("/z/removing"), FileMetadata::directory(10))],
+        );
         test_cache_fs.directories.insert(
             path_buf!("/z/removing"),
             vec![
-                short_path!("/z/removing", 10),
-                short_path!("/z/removing", 20),
+                (short_path!("/z/removing", 10), FileMetadata::directory(10)),
+                (short_path!("/z/removing", 20), FileMetadata::file(10)),
+                (short_path!("/z/removing", 30), FileMetadata::symlink(10)),
             ],
         );
         let mut fixture = Fixture::new(test_cache_fs, 1000);
@@ -1069,12 +1720,14 @@ mod tests {
             ReadDir(path_buf!("/z/removing")),
             RemoveRecursively(short_path!("/z/removing", 10)),
             RemoveRecursively(short_path!("/z/removing", 20)),
+            RemoveRecursively(short_path!("/z/removing", 30)),
             ReadDir(path_buf!("/z")),
             FileExists(path_buf!("/z/CACHEDIR.TAG")),
             CreateFile(
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
             ),
+            MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
@@ -1092,11 +1745,11 @@ mod tests {
         test_cache_fs.directories.insert(
             path_buf!("/z"),
             vec![
-                path_buf!("/z/blah"),
-                path_buf!("/z/CACHEDIR.TAG"),
-                path_buf!("/z/sha256"),
-                path_buf!("/z/baz"),
-                path_buf!("/z/removing"),
+                (path_buf!("/z/blah"), FileMetadata::directory(10)),
+                (path_buf!("/z/CACHEDIR.TAG"), FileMetadata::file(43)),
+                (path_buf!("/z/sha256"), FileMetadata::directory(10)),
+                (path_buf!("/z/baz"), FileMetadata::directory(10)),
+                (path_buf!("/z/removing"), FileMetadata::directory(10)),
             ],
         );
         let mut fixture = Fixture::new(test_cache_fs, 1000);
@@ -1115,6 +1768,7 @@ mod tests {
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
             ),
+            MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
@@ -1132,10 +1786,13 @@ mod tests {
         test_cache_fs.directories.insert(
             path_buf!("/z/sha256"),
             vec![
-                path_buf!("/z/sha256/blah"),
-                path_buf!("/z/sha256/blob"),
-                path_buf!("/z/sha256/baz"),
-                path_buf!("/z/sha256/bottom_fs_layer"),
+                (path_buf!("/z/sha256/blah"), FileMetadata::directory(10)),
+                (path_buf!("/z/sha256/blob"), FileMetadata::directory(10)),
+                (path_buf!("/z/sha256/baz"), FileMetadata::directory(10)),
+                (
+                    path_buf!("/z/sha256/bottom_fs_layer"),
+                    FileMetadata::directory(10),
+                ),
             ],
         );
         let mut fixture = Fixture::new(test_cache_fs, 1000);
@@ -1148,6 +1805,7 @@ mod tests {
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
             ),
+            MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(short_path!("/z/removing", 1)),
@@ -1187,6 +1845,7 @@ mod tests {
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
             ),
+            MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),

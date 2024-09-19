@@ -10,7 +10,7 @@ pub mod local_worker;
 pub mod signals;
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use cache::{Cache, CacheDir, StdFs};
+use cache::{Cache, CacheDir, FsTempDir as _, FsTempFile as _, GotArtifact, StdFs, StdTempDir};
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
 use executor::{Executor, MountDir, TmpfsDir};
@@ -150,8 +150,8 @@ impl ManifestDigestCache {
 
 const MANIFEST_DIGEST_CACHE_SIZE: usize = 10_000;
 
-type DispatcherReceiver = UnboundedReceiver<Message>;
-pub type DispatcherSender = UnboundedSender<Message>;
+type DispatcherReceiver = UnboundedReceiver<Message<StdFs>>;
+pub type DispatcherSender = UnboundedSender<Message<StdFs>>;
 type BrokerSocketOutgoingSender = UnboundedSender<WorkerToBroker>;
 type BrokerSocketIncomingReceiver = UnboundedReceiver<BrokerToWorker>;
 
@@ -259,6 +259,8 @@ impl Drop for TimerHandle {
 impl Deps for DispatcherAdapter {
     type JobHandle = EventSender;
 
+    type Fs = StdFs;
+
     fn start_job(&mut self, jid: JobId, spec: JobSpec, layer_fs_path: PathBuf) -> Self::JobHandle {
         let (kill_event_sender, kill_event_receiver) = sync::event();
         if let Err(e) = self.start_job_inner(jid, spec, layer_fs_path, kill_event_receiver) {
@@ -283,7 +285,7 @@ impl Deps for DispatcherAdapter {
     fn build_bottom_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: PathBuf,
+        layer_path: StdTempDir,
         artifact_type: ArtifactType,
         artifact_path: PathBuf,
     ) {
@@ -297,7 +299,7 @@ impl Deps for DispatcherAdapter {
             debug!(log, "building bottom FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_bottom_layer(
                 log.clone(),
-                layer_path.clone(),
+                layer_path.path().to_owned(),
                 blob_dir.as_root(),
                 digest.clone(),
                 artifact_type,
@@ -306,7 +308,13 @@ impl Deps for DispatcherAdapter {
             .await;
             debug!(log, "built bottom FS layer"; "result" => ?result);
             sender
-                .send(Message::BuiltBottomFsLayer(digest, result))
+                .send(Message::BuiltBottomFsLayer(
+                    digest,
+                    result.map(|size| GotArtifact::Directory {
+                        source: layer_path,
+                        size,
+                    }),
+                ))
                 .ok();
         });
     }
@@ -314,7 +322,7 @@ impl Deps for DispatcherAdapter {
     fn build_upper_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: PathBuf,
+        layer_path: StdTempDir,
         lower_layer_path: PathBuf,
         upper_layer_path: PathBuf,
     ) {
@@ -328,14 +336,22 @@ impl Deps for DispatcherAdapter {
             debug!(log, "building upper FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_upper_layer(
                 log.clone(),
-                layer_path.clone(),
+                layer_path.path().to_owned(),
                 blob_dir.as_root(),
                 lower_layer_path,
                 upper_layer_path,
             )
             .await;
             debug!(log, "built upper FS layer"; "result" => ?result);
-            sender.send(Message::BuiltUpperFsLayer(digest, result)).ok();
+            sender
+                .send(Message::BuiltUpperFsLayer(
+                    digest,
+                    result.map(|size| GotArtifact::Directory {
+                        source: layer_path,
+                        size,
+                    }),
+                ))
+                .ok();
         });
     }
 
@@ -345,8 +361,8 @@ impl Deps for DispatcherAdapter {
 }
 
 struct ArtifactFetcher {
-    dispatcher_sender: DispatcherSender,
     broker_addr: BrokerAddr,
+    dispatcher_sender: DispatcherSender,
     log: Logger,
 }
 
@@ -360,20 +376,28 @@ impl ArtifactFetcher {
     }
 }
 
-impl dispatcher::ArtifactFetcher for ArtifactFetcher {
-    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
+impl dispatcher::ArtifactFetcher<StdFs> for ArtifactFetcher {
+    fn start_artifact_fetch(
+        &mut self,
+        cache: &impl dispatcher::Cache<StdFs>,
+        digest: Sha256Digest,
+    ) {
         let sender = self.dispatcher_sender.clone();
         let broker_addr = self.broker_addr;
         let mut log = self.log.new(o!(
             "digest" => digest.to_string(),
             "broker_addr" => broker_addr.inner().to_string()
         ));
+        let temp_file = cache.temp_file();
         debug!(log, "artifact fetcher starting");
         thread::spawn(move || {
-            let result = fetcher::main(&digest, path, broker_addr, &mut log);
+            let result = fetcher::main(&digest, temp_file.path().to_owned(), broker_addr, &mut log);
             debug!(log, "artifact fetcher completed"; "result" => ?result);
             sender
-                .send(Message::ArtifactFetchCompleted(digest, result))
+                .send(Message::ArtifactFetchCompleted(
+                    digest,
+                    result.map(|_| GotArtifact::File { source: temp_file }),
+                ))
                 .ok();
         });
     }
@@ -404,7 +428,10 @@ impl dispatcher::BrokerSender for BrokerSender {
 }
 
 /// Returns error from shutdown message, or delivers message to dispatcher.
-fn handle_dispatcher_message(msg: Message, dispatcher: &mut DefaultDispatcher) -> Result<()> {
+fn handle_dispatcher_message(
+    msg: Message<StdFs>,
+    dispatcher: &mut DefaultDispatcher,
+) -> Result<()> {
     if let Message::Shutdown(error) = msg {
         return Err(error);
     }

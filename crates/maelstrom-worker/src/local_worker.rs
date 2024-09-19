@@ -1,7 +1,7 @@
 pub use crate::{
-    cache::{Cache, CacheDir, GetArtifact, StdFs},
+    cache::{Cache, CacheDir, GetArtifact, GotArtifact, StdFs, StdTempFile},
     check_open_file_limit,
-    dispatcher::{ArtifactFetcher, BrokerSender, Deps, Dispatcher, Message},
+    dispatcher::{ArtifactFetcher, BrokerSender, Cache as CacheTrait, Deps, Dispatcher, Message},
     executor::MountDir,
     executor::TmpfsDir,
     DispatcherAdapter, WorkerCacheDir,

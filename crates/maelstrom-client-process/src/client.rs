@@ -414,10 +414,14 @@ impl Client {
                 // Create an ArtifactFetcher for the local_worker that just forwards requests to
                 // the router.
                 struct ArtifactFetcher(router::Sender);
-                impl local_worker::ArtifactFetcher for ArtifactFetcher {
-                    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
+                impl local_worker::ArtifactFetcher<local_worker::StdFs> for ArtifactFetcher {
+                    fn start_artifact_fetch(
+                        &mut self,
+                        _cache: &impl local_worker::CacheTrait<local_worker::StdFs>,
+                        digest: Sha256Digest,
+                    ) {
                         self.0
-                            .send(router::Message::LocalWorkerStartArtifactFetch(digest, path))
+                            .send(router::Message::LocalWorkerStartArtifactFetch(digest))
                             .ok();
                     }
                 }
