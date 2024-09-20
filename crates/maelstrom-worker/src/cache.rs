@@ -512,47 +512,43 @@ impl<FsT: Fs> Cache<FsT> {
     /// this as a hard upper bound, but that's not how it currently works.
     pub fn new(mut fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: Logger) -> Self {
         let root = root.into_path_buf();
-        let mut path = root.clone();
 
         // Everything in the `removing` subdirectory needs to be removed in the background. Start
         // those threads up.
-        path.push("removing");
-        fs.mkdir_recursively(&path);
-        for child in fs.read_dir(&path) {
+        let removing = root.join("removing");
+        fs.mkdir_recursively(&removing);
+        for child in fs.read_dir(&removing) {
             fs.remove_recursively_on_thread(child.0);
         }
-        path.pop();
 
         // If there are any files or directories in the top-level directory that shouldn't be
-        // there, move them to `removing` and then remove them in the background.
+        // there, move them to `removing` and then remove them in the background. Note that we
+        // don't retain "tmp". We want to empty it out when we start up and create a new one for
+        // this instance.
         Self::remove_all_from_directory_except(
             &mut fs,
             &root,
-            &path,
+            &root,
             ["CACHEDIR.TAG", "removing", "sha256"],
         );
 
-        path.push("CACHEDIR.TAG");
-        if !fs.file_exists(&path) {
-            fs.create_file(&path, &CACHEDIR_TAG_CONTENTS);
+        let cachedir_tag = root.join("CACHEDIR.TAG");
+        if !fs.file_exists(&cachedir_tag) {
+            fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS);
         }
-        path.pop();
 
-        path.push("tmp");
-        fs.mkdir_recursively(&path);
-        path.pop();
+        fs.mkdir_recursively(&root.join("tmp"));
 
-        path.push("sha256");
-        fs.mkdir_recursively(&path);
-        Self::remove_all_from_directory_except(&mut fs, &root, &path, EntryKind::iter());
+        let sha256 = root.join("sha256");
+        fs.mkdir_recursively(&sha256);
+        Self::remove_all_from_directory_except(&mut fs, &root, &sha256, EntryKind::iter());
 
         for kind in EntryKind::iter() {
-            path.push(kind.to_string());
-            if fs.file_exists(&path) {
-                Self::remove_in_background(&mut fs, &root, &path);
+            let kind_dir = sha256.join(kind.to_string());
+            if fs.file_exists(&kind_dir) {
+                Self::remove_in_background(&mut fs, &root, &kind_dir);
             }
-            fs.mkdir_recursively(&path);
-            path.pop();
+            fs.mkdir_recursively(&kind_dir);
         }
 
         Cache {
