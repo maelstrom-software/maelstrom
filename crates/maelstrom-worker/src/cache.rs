@@ -418,25 +418,23 @@ impl Key {
     }
 }
 
-/// An entry for a specific [Sha256Digest] in the [Cache]'s hash table. There is one of these for
-/// every subdirectory in the `sha256` subdirectory of the [Cache]'s root directory.
+/// An entry for a specific [`Key`] in the [`Cache`]'s hash table. There is one of these for every
+/// entry in the per-kind subdirectories of the `sha256` subdirectory of the [`Cache`]'s root
+/// directory.
 enum Entry {
-    /// The artifact is being downloaded, extracted, and having its checksum validated. There is
-    /// probably a subdirectory for this [Sha256Digest], but there might not yet be one, depending
-    /// on how far along the extraction process is.
-    DownloadingAndExtracting(Vec<JobId>),
+    /// The artifact is being gotten by one of the clients.
+    Getting(Vec<JobId>),
 
-    /// The artifact has been successfully downloaded and extracted, and the subdirectory is
-    /// currently being used by at least one job. We reference count this state since there may be
-    /// multiple jobs using the same artifact.
+    /// The artifact has been successfully gotten, and is currently being used by at least one job.
+    /// We reference count this state since there may be multiple jobs using the same artifact.
     InUse {
         bytes_used: u64,
         ref_count: NonZeroU32,
     },
 
-    /// The artifact has been successfully downloaded and extracted, but no jobs are
-    /// currently using it. The `priority` is provided by [Cache] and is used by the [Heap] to
-    /// determine which entry should be removed first when freeing up space.
+    /// The artifact has been successfully gotten, but no jobs are currently using it. The
+    /// `priority` is provided by [`Cache`] and is used by the [`Heap`] to determine which entry
+    /// should be removed first when freeing up space.
     InHeap {
         bytes_used: u64,
         priority: u64,
@@ -444,7 +442,8 @@ enum Entry {
     },
 }
 
-/// An implementation of the "newtype" pattern so that we can implement [HeapDeps] on a [HashMap].
+/// An implementation of the "newtype" pattern so that we can implement [`HeapDeps`] on a
+/// [`HashMap`].
 #[derive(Default)]
 struct Map(HashMap<Key, Entry>);
 
@@ -573,13 +572,13 @@ impl<FsT: Fs> Cache<FsT> {
     ) -> GetArtifact {
         match self.entries.entry(Key::new(kind, digest)) {
             HashEntry::Vacant(entry) => {
-                entry.insert(Entry::DownloadingAndExtracting(vec![jid]));
+                entry.insert(Entry::Getting(vec![jid]));
                 GetArtifact::Get
             }
             HashEntry::Occupied(entry) => {
                 let entry = entry.into_mut();
                 match entry {
-                    Entry::DownloadingAndExtracting(jobs) => {
+                    Entry::Getting(jobs) => {
                         jobs.push(jid);
                         GetArtifact::Wait
                     }
@@ -608,8 +607,7 @@ impl<FsT: Fs> Cache<FsT> {
     /// Notify the cache that an artifact fetch has failed. The returned vector lists the jobs that
     /// are affected and that need to be canceled.
     pub fn got_artifact_failure(&mut self, kind: EntryKind, digest: &Sha256Digest) -> Vec<JobId> {
-        let Some(Entry::DownloadingAndExtracting(jobs)) =
-            self.entries.remove(&Key::new(kind, digest.clone()))
+        let Some(Entry::Getting(jobs)) = self.entries.remove(&Key::new(kind, digest.clone()))
         else {
             panic!("Got got_artifact in unexpected state");
         };
@@ -644,7 +642,7 @@ impl<FsT: Fs> Cache<FsT> {
             .entries
             .get_mut(&key)
             .expect("Got DownloadingAndExtracting in unexpected state");
-        let Entry::DownloadingAndExtracting(jobs) = entry else {
+        let Entry::Getting(jobs) = entry else {
             panic!("Got DownloadingAndExtracting in unexpected state");
         };
         let ref_count = jobs.len().try_into().unwrap();
