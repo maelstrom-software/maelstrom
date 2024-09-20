@@ -24,6 +24,7 @@ use std::{
     string::ToString,
     thread,
 };
+use strum::Display;
 use tempfile::{NamedTempFile, TempDir, TempPath};
 
 const CACHEDIR_TAG_CONTENTS: [u8; 43] = *b"Signature: 8a477f597d28d172789f06886806bc55";
@@ -52,7 +53,7 @@ pub trait FsTempDir: Debug {
 }
 
 /// The type of a file, as far as the cache cares.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Display)]
 pub enum FileType {
     Directory,
     File,
@@ -428,6 +429,7 @@ enum Entry {
     /// The artifact has been successfully gotten, and is currently being used by at least one job.
     /// We reference count this state since there may be multiple jobs using the same artifact.
     InUse {
+        file_type: FileType,
         bytes_used: u64,
         ref_count: NonZeroU32,
     },
@@ -436,6 +438,7 @@ enum Entry {
     /// `priority` is provided by [`Cache`] and is used by the [`Heap`] to determine which entry
     /// should be removed first when freeing up space.
     InHeap {
+        file_type: FileType,
         bytes_used: u64,
         priority: u64,
         heap_index: HeapIndex,
@@ -587,12 +590,14 @@ impl<FsT: Fs> Cache<FsT> {
                         GetArtifact::Success
                     }
                     Entry::InHeap {
+                        file_type,
                         bytes_used,
                         heap_index,
                         ..
                     } => {
                         let heap_index = *heap_index;
                         *entry = Entry::InUse {
+                            file_type: *file_type,
                             ref_count: NonZeroU32::new(1).unwrap(),
                             bytes_used: *bytes_used,
                         };
@@ -623,18 +628,22 @@ impl<FsT: Fs> Cache<FsT> {
         artifact: GotArtifact<FsT>,
     ) -> Vec<JobId> {
         let path = self.cache_path(kind, digest);
-        let bytes_used = match artifact {
+        let (file_type, bytes_used) = match artifact {
             GotArtifact::Directory { source, size } => {
                 source.persist(&path);
-                size
+                (FileType::Directory, size)
             }
             GotArtifact::File { source } => {
                 source.persist(&path);
-                self.fs.metadata(&path).size
+                let metadata = self.fs.metadata(&path);
+                assert!(matches!(metadata.type_, FileType::File));
+                (FileType::File, metadata.size)
             }
             GotArtifact::Symlink { target } => {
                 self.fs.symlink(&target, &path);
-                self.fs.metadata(&path).size
+                let metadata = self.fs.metadata(&path);
+                assert!(matches!(metadata.type_, FileType::Symlink));
+                (FileType::Symlink, metadata.size)
             }
         };
         let key = Key::new(kind, digest.clone());
@@ -649,6 +658,7 @@ impl<FsT: Fs> Cache<FsT> {
         let jobs = mem::take(jobs);
         // Reference count must be > 0 since we don't allow cancellation of gets.
         *entry = Entry::InUse {
+            file_type,
             bytes_used,
             ref_count: NonZeroU32::new(ref_count).unwrap(),
         };
@@ -658,6 +668,7 @@ impl<FsT: Fs> Cache<FsT> {
             "digest" => %digest,
             "artifact_bytes_used" => %ByteSize::b(bytes_used),
             "entries" => %self.entries.len(),
+            "file_type" => %file_type,
             "bytes_used" => %ByteSize::b(self.bytes_used),
             "byte_used_target" => %ByteSize::b(self.bytes_used_target)
         );
@@ -673,6 +684,7 @@ impl<FsT: Fs> Cache<FsT> {
             .get_mut(&key)
             .expect("Got decrement_ref_count in unexpected state");
         let Entry::InUse {
+            file_type,
             bytes_used,
             ref_count,
         } = entry
@@ -683,6 +695,7 @@ impl<FsT: Fs> Cache<FsT> {
             Some(new_ref_count) => *ref_count = new_ref_count,
             None => {
                 *entry = Entry::InHeap {
+                    file_type: *file_type,
                     bytes_used: *bytes_used,
                     priority: self.next_priority,
                     heap_index: HeapIndex::default(),
