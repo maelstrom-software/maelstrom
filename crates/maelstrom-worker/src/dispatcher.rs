@@ -968,6 +968,10 @@ mod tests {
             unimplemented!()
         }
 
+        fn remove(&self, _path: &Path) {
+            unimplemented!()
+        }
+
         fn remove_recursively_on_thread(&self, _path: PathBuf) {
             unimplemented!()
         }

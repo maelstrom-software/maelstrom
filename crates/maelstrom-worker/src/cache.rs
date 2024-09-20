@@ -130,6 +130,10 @@ pub trait Fs: Clone + Debug {
     /// file system.
     fn rename(&self, source: &Path, destination: &Path);
 
+    /// Remove `path`. Panic on file system error. Assume that `path` actually exists and is not a
+    /// directory.
+    fn remove(&self, path: &Path);
+
     /// Remove `path`, and if `path` is a directory, all descendants of `path`. Do this on a
     /// separate thread. Panic on file system error.
     fn remove_recursively_on_thread(&self, path: PathBuf);
@@ -215,6 +219,10 @@ impl Fs for StdFs {
 
     fn rename(&self, source: &Path, destination: &Path) {
         fs::rename(source, destination).unwrap()
+    }
+
+    fn remove(&self, path: &Path) {
+        fs::remove_file(path).unwrap()
     }
 
     fn remove_recursively_on_thread(&self, path: PathBuf) {
@@ -548,7 +556,8 @@ impl<FsT: Fs> Cache<FsT> {
         for kind in EntryKind::iter() {
             let kind_dir = sha256.join(kind.to_string());
             if fs.file_exists(&kind_dir) {
-                Self::remove_in_background(&mut fs, &root, &kind_dir);
+                let metadata = fs.metadata(&kind_dir);
+                Self::remove_in_background(&mut fs, &root, &kind_dir, metadata.type_);
             }
             fs.mkdir_recursively(&kind_dir);
         }
@@ -735,32 +744,31 @@ impl<FsT: Fs> Cache<FsT> {
             .into_iter()
             .map(|e| OsString::from(e.to_string()))
             .collect::<HashSet<_>>();
-        for entry in fs.read_dir(dir) {
-            if !entry
-                .0
+        for (path, metadata) in fs.read_dir(dir) {
+            if !path
                 .file_name()
                 .is_some_and(|entry_name| except.contains(entry_name))
             {
-                Self::remove_in_background(fs, root, &entry.0);
+                Self::remove_in_background(fs, root, &path, metadata.type_);
             }
         }
     }
 
     /// Remove all files and directories rooted in `source` in a separate thread.
-    fn remove_in_background(fs: &mut impl Fs, root: &Path, source: &Path) {
-        let mut target = root.to_owned();
-        target.push("removing");
-        loop {
-            let key = fs.rand_u64();
-            target.push(format!("{key:016x}"));
-            if !fs.file_exists(&target) {
-                break;
-            } else {
-                target.pop();
-            }
+    fn remove_in_background(fs: &mut impl Fs, root: &Path, source: &Path, type_: FileType) {
+        if !matches!(type_, FileType::Directory) {
+            fs.remove(source);
+        } else {
+            let removing = root.join("removing");
+            let target = loop {
+                let target = removing.join(format!("{:016x}", fs.rand_u64()));
+                if !fs.file_exists(&target) {
+                    break target;
+                }
+            };
+            fs.rename(source, &target);
+            fs.remove_recursively_on_thread(target);
         }
-        fs.rename(source, &target);
-        fs.remove_recursively_on_thread(target);
     }
 
     /// Check to see if the cache is over its goal size, and if so, try to remove the least
@@ -770,11 +778,16 @@ impl<FsT: Fs> Cache<FsT> {
             let Some(key) = self.heap.pop(&mut self.entries) else {
                 break;
             };
-            let Some(Entry::InHeap { bytes_used, .. }) = self.entries.remove(&key) else {
+            let Some(Entry::InHeap {
+                file_type,
+                bytes_used,
+                ..
+            }) = self.entries.remove(&key)
+            else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
             let cache_path = self.cache_path(key.kind, &key.digest);
-            Self::remove_in_background(&mut self.fs, &self.root, &cache_path);
+            Self::remove_in_background(&mut self.fs, &self.root, &cache_path, file_type);
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
                 "key" => ?key,
@@ -813,6 +826,7 @@ mod tests {
     enum TestMessage {
         FileExists(PathBuf),
         Rename(PathBuf, PathBuf),
+        Remove(PathBuf),
         RemoveRecursively(PathBuf),
         MkdirRecursively(PathBuf),
         ReadDir(PathBuf),
@@ -936,6 +950,10 @@ mod tests {
             self.messages
                 .borrow_mut()
                 .push(Rename(source.to_owned(), destination.to_owned()));
+        }
+
+        fn remove(&self, path: &Path) {
+            self.messages.borrow_mut().push(Remove(path.to_owned()));
         }
 
         fn remove_recursively_on_thread(&self, path: PathBuf) {
@@ -1282,17 +1300,7 @@ mod tests {
             ],
         );
 
-        fixture.decrement_ref_count(
-            digest!(42),
-            vec![
-                FileExists(short_path!("/z/removing", 1)),
-                Rename(
-                    long_path!("/z/sha256/blob", 42),
-                    short_path!("/z/removing", 1),
-                ),
-                RemoveRecursively(short_path!("/z/removing", 1)),
-            ],
-        );
+        fixture.decrement_ref_count(digest!(42), vec![Remove(long_path!("/z/sha256/blob", 42))]);
     }
 
     #[test]
@@ -1314,17 +1322,7 @@ mod tests {
             ],
         );
 
-        fixture.decrement_ref_count(
-            digest!(42),
-            vec![
-                FileExists(short_path!("/z/removing", 1)),
-                Rename(
-                    long_path!("/z/sha256/blob", 42),
-                    short_path!("/z/removing", 1),
-                ),
-                RemoveRecursively(short_path!("/z/removing", 1)),
-            ],
-        );
+        fixture.decrement_ref_count(digest!(42), vec![Remove(long_path!("/z/sha256/blob", 42))]);
     }
 
     #[test]
@@ -1790,6 +1788,17 @@ mod tests {
         test_cache_fs
             .existing_files
             .insert(path_buf!("/z/sha256/upper_fs_layer"));
+        test_cache_fs
+            .metadata
+            .insert(path_buf!("/z/sha256/blob"), FileMetadata::directory(42));
+        test_cache_fs.metadata.insert(
+            path_buf!("/z/sha256/bottom_fs_layer"),
+            FileMetadata::directory(42),
+        );
+        test_cache_fs.metadata.insert(
+            path_buf!("/z/sha256/upper_fs_layer"),
+            FileMetadata::directory(42),
+        );
         let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
@@ -1804,11 +1813,13 @@ mod tests {
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileExists(path_buf!("/z/sha256/blob")),
+            Metadata(path_buf!("/z/sha256/blob")),
             FileExists(short_path!("/z/removing", 1)),
             Rename(path_buf!("/z/sha256/blob"), short_path!("/z/removing", 1)),
             RemoveRecursively(short_path!("/z/removing", 1)),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
             FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
             FileExists(short_path!("/z/removing", 2)),
             Rename(
                 path_buf!("/z/sha256/bottom_fs_layer"),
@@ -1817,6 +1828,7 @@ mod tests {
             RemoveRecursively(short_path!("/z/removing", 2)),
             MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
             FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
             FileExists(short_path!("/z/removing", 3)),
             Rename(
                 path_buf!("/z/sha256/upper_fs_layer"),
