@@ -272,7 +272,8 @@ impl Client {
 
             let extra = 1 /* rpc connection */ +
                 /* 1 for the manifest, 1 for file we are reading, 1 for directory we are listing */
-                MAX_IN_FLIGHT_LAYER_BUILDS * 3;
+                MAX_IN_FLIGHT_LAYER_BUILDS * 3 +
+                artifact_pusher::MAX_CLIENT_UPLOADS * 2; // 1 for the socket, 1 for the file.
             local_worker::check_open_file_limit(&log, slots, extra as u64)?;
 
             // We recreate all the manifests every time. We delete it here to clean-up unused

@@ -6,10 +6,14 @@ use maelstrom_base::{
 };
 use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::{
     io::{self, AsyncReadExt as _},
     net::TcpStream,
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    sync::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        Semaphore,
+    },
     task::JoinSet,
 };
 
@@ -60,12 +64,15 @@ pub fn channel() -> (Sender, Receiver) {
     mpsc::unbounded_channel()
 }
 
+pub const MAX_CLIENT_UPLOADS: usize = 10;
+
 pub fn start_task(
     join_set: &mut JoinSet<Result<()>>,
     mut receiver: Receiver,
     broker_addr: BrokerAddr,
     upload_tracker: ProgressTracker,
 ) {
+    let sem = Arc::new(Semaphore::new(MAX_CLIENT_UPLOADS));
     join_set.spawn(async move {
         // When this join_set gets destroyed, all outstanding artifact pusher tasks will be
         // canceled. That will happen either when our sender is closed, or when our own task is
@@ -83,8 +90,10 @@ pub fn start_task(
                 res = receiver.recv() => {
                     let Some(msg) = res else { break; };
                     let upload_tracker = upload_tracker.clone();
+                    let sem = sem.clone();
 
                     join_set.spawn(async move {
+                        let _permit = sem.acquire_owned().await.unwrap();
                         push_one_artifact(upload_tracker, broker_addr, msg.path.clone(), msg.digest)
                             .await
                             .with_context(|| format!("pushing artifact {}", msg.path.display()))
