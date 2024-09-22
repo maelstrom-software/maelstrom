@@ -71,12 +71,15 @@ struct Owner {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct Repo {
+    #[expect(dead_code)]
     name: String,
+    #[expect(dead_code)]
     full_name: String,
     owner: Owner,
+    #[expect(dead_code)]
     html_url: String,
+    #[expect(dead_code)]
     description: String,
 }
 
@@ -94,9 +97,7 @@ struct Release {
 struct GithubStats {
     clones: Clones,
     views: Views,
-    #[allow(dead_code)]
     forks: Vec<Repo>,
-    #[allow(dead_code)]
     releases: Vec<Release>,
 }
 

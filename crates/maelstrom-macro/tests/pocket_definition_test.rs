@@ -1,6 +1,6 @@
 use maelstrom_macro::pocket_definition;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[pocket_definition]
 struct FooBar {
     a: u32,
@@ -18,7 +18,7 @@ fn struct_pocketed() {
 
     assert_eq!(
         S,
-        "#[allow(dead_code)] struct FooBar { a : u32, b : String, }"
+        "#[expect(dead_code)] struct FooBar { a : u32, b : String, }"
     );
 }
 
@@ -33,11 +33,11 @@ fn struct_pocketed_with_args() {
 
     assert_eq!(
         S,
-        "#[allow(dead_code)] struct FooBar { a : u32, b : String, }, other_arg"
+        "#[expect(dead_code)] struct FooBar { a : u32, b : String, }, other_arg"
     );
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[pocket_definition]
 enum Baz {
     A(u32),
@@ -52,10 +52,10 @@ fn enum_pocketed() {
         }
     }
     baz_pocket_definition!(as_string);
-    assert_eq!(S, "#[allow(dead_code)] enum Baz { A(u32), B(String), }");
+    assert_eq!(S, "#[expect(dead_code)] enum Baz { A(u32), B(String), }");
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[pocket_definition]
 trait Bin {
     fn a();
@@ -70,5 +70,5 @@ fn trait_pocketed() {
         }
     }
     bin_pocket_definition!(as_string);
-    assert_eq!(S, "#[allow(dead_code)] trait Bin { fn a(); fn b(); }");
+    assert_eq!(S, "#[expect(dead_code)] trait Bin { fn a(); fn b(); }");
 }

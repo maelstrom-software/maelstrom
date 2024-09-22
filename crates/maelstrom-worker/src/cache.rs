@@ -77,7 +77,7 @@ impl From<fs::FileType> for FileType {
 /// The file metadata the cache cares about.
 #[derive(Clone, Copy)]
 pub struct FileMetadata {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     type_: FileType,
     size: u64,
 }
