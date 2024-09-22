@@ -1,21 +1,24 @@
 use crate::{GoImportPath, GoTestOptions};
 use anyhow::{anyhow, Context as _, Result};
+use maelstrom_linux as linux;
 use maelstrom_test_runner::{ui::UiWeakSender, BuildDir};
 use maelstrom_util::{
+    ext::BoolExt as _,
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
 };
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::os::unix::process::ExitStatusExt as _;
 use std::{
     fmt,
     io::{BufRead, BufReader},
     path::Path,
     path::PathBuf,
-    process::{Command, ExitStatus, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     str,
-    sync::{mpsc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     thread,
 };
 
@@ -37,8 +40,49 @@ impl fmt::Display for BuildError {
     }
 }
 
+#[derive(Default)]
+struct MultiProcessKillerState {
+    children: HashSet<linux::Pid>,
+    killing: bool,
+}
+
+#[derive(Default)]
+struct MultiProcessKiller {
+    state: Mutex<MultiProcessKillerState>,
+}
+
+impl MultiProcessKiller {
+    fn add_child(&self, child: &Child) {
+        let pid = linux::Pid::from(child);
+        let mut state = self.state.lock().unwrap();
+        if state.killing {
+            let _ = linux::kill(pid, linux::Signal::KILL);
+        } else {
+            state.children.insert(pid).assert_is_true();
+        }
+    }
+
+    fn remove_child(&self, child: &Child) {
+        let pid = linux::Pid::from(child);
+        let mut state = self.state.lock().unwrap();
+        let _ = state.children.remove(&pid);
+    }
+
+    fn kill(&self) {
+        let mut state = self.state.lock().unwrap();
+        for pid in std::mem::take(&mut state.children) {
+            let _ = linux::kill(pid, linux::Signal::KILL);
+        }
+    }
+
+    fn is_killing(&self) -> bool {
+        self.state.lock().unwrap().killing
+    }
+}
+
 pub struct WaitHandle {
     handle: Mutex<Option<thread::JoinHandle<Result<()>>>>,
+    killer: Arc<MultiProcessKiller>,
 }
 
 impl WaitHandle {
@@ -48,7 +92,7 @@ impl WaitHandle {
         handle.join().unwrap()
     }
     pub fn kill(&self) -> Result<()> {
-        // todo
+        self.killer.kill();
         Ok(())
     }
 }
@@ -102,7 +146,12 @@ fn handle_build_cmd_status(
     }
 }
 
-fn run_build_cmd(cmd: &mut Command, stdout_to_ui: bool, ui: UiWeakSender) -> Result<String> {
+fn run_build_cmd(
+    killer: &MultiProcessKiller,
+    cmd: &mut Command,
+    stdout_to_ui: bool,
+    ui: UiWeakSender,
+) -> Result<String> {
     let mut child = cmd.stderr(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
 
     let stdout = BufReader::new(child.stdout.take().unwrap());
@@ -113,14 +162,20 @@ fn run_build_cmd(cmd: &mut Command, stdout_to_ui: bool, ui: UiWeakSender) -> Res
     let ui_clone = ui.clone();
     let stderr_handle = thread::spawn(move || handle_build_output(ui_clone, true, stderr));
 
+    killer.add_child(&child);
+
     let stdout = stdout_handle.join().unwrap()?;
     let stderr = stderr_handle.join().unwrap()?;
 
     let exit_status = child.wait()?;
+
+    killer.remove_child(&child);
+
     handle_build_cmd_status(exit_status, stdout, stderr)
 }
 
 fn go_build(
+    killer: Arc<MultiProcessKiller>,
     dir: &Path,
     output: &Path,
     options: &GoTestOptions,
@@ -135,7 +190,7 @@ fn go_build(
     if let Some(vet_value) = &options.vet {
         cmd.arg(format!("--vet={vet_value}"));
     }
-    run_build_cmd(&mut cmd, true /* stdout_to_ui */, ui)
+    run_build_cmd(&killer, &mut cmd, true /* stdout_to_ui */, ui)
 }
 
 fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
@@ -154,6 +209,7 @@ pub(crate) struct GoTestArtifact {
 }
 
 fn multi_go_build(
+    killer: Arc<MultiProcessKiller>,
     packages: Vec<GoPackage>,
     build_dir: RootBuf<BuildDir>,
     options: GoTestOptions,
@@ -164,6 +220,10 @@ fn multi_go_build(
 
     let mut handles = vec![];
     for pkg in packages {
+        if killer.is_killing() {
+            break;
+        }
+
         // We put the built binary in a deterministic location so rebuilds overwrite what was there
         // before
         let import_path = GoImportPath(pkg.import_path.clone());
@@ -176,8 +236,15 @@ fn multi_go_build(
         let send_clone = send.clone();
         let ui_clone = ui.clone();
         let options_clone = options.clone();
+        let killer_clone = killer.clone();
         handles.push(thread::spawn(move || -> Result<()> {
-            let res = go_build(&pkg.dir, &binary_path, &options_clone, ui_clone);
+            let res = go_build(
+                killer_clone,
+                &pkg.dir,
+                &binary_path,
+                &options_clone,
+                ui_clone,
+            );
             if is_no_go_files_error(&res) {
                 return Ok(());
             }
@@ -215,11 +282,15 @@ pub(crate) fn build_and_collect(
     let options = options.clone();
     let build_dir = build_dir.to_owned();
     let paths = packages.into_iter().cloned().collect();
+    let killer = Arc::new(MultiProcessKiller::default());
+    let cloned_killer = killer.clone();
     let (send, recv) = mpsc::channel();
-    let handle = thread::spawn(move || multi_go_build(paths, build_dir, options, send, ui));
+    let handle =
+        thread::spawn(move || multi_go_build(cloned_killer, paths, build_dir, options, send, ui));
     Ok((
         WaitHandle {
             handle: Mutex::new(Some(handle)),
+            killer,
         },
         TestArtifactStream { recv },
     ))
@@ -259,6 +330,7 @@ impl GoPackage {
 
 pub(crate) fn go_list(dir: &Path, ui: UiWeakSender) -> Result<Vec<GoPackage>> {
     let stdout = run_build_cmd(
+        &MultiProcessKiller::default(),
         Command::new("go")
             .current_dir(dir)
             .arg("list")

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Test runners send SIGKILL to their build processes when exiting early due to `stop-after`.
+
 ## [0.12.0] - 2024-09-12
 
 ### General
