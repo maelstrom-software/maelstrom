@@ -46,6 +46,7 @@ use std::{
     sync::Arc,
     {path::PathBuf, process, thread, time::Duration},
 };
+use std_semaphore::Semaphore;
 use tokio::{
     io::BufReader,
     net::TcpStream,
@@ -360,10 +361,13 @@ impl Deps for DispatcherAdapter {
     }
 }
 
+const MAX_ARTIFACT_FETCHES: u64 = 10;
+
 struct ArtifactFetcher {
     broker_addr: BrokerAddr,
     dispatcher_sender: DispatcherSender,
     log: Logger,
+    sem: Arc<Semaphore>,
 }
 
 impl ArtifactFetcher {
@@ -372,6 +376,7 @@ impl ArtifactFetcher {
             broker_addr,
             dispatcher_sender,
             log,
+            sem: Arc::new(Semaphore::new(MAX_ARTIFACT_FETCHES as isize)),
         }
     }
 }
@@ -389,8 +394,10 @@ impl dispatcher::ArtifactFetcher<StdFs> for ArtifactFetcher {
             "broker_addr" => broker_addr.inner().to_string()
         ));
         let temp_file = cache.temp_file();
+        let sem = self.sem.clone();
         debug!(log, "artifact fetcher starting");
         thread::spawn(move || {
+            let _permit = sem.access();
             let result = fetcher::main(&digest, temp_file.path().to_owned(), broker_addr, &mut log);
             debug!(log, "artifact fetcher completed"; "result" => ?result);
             sender
@@ -546,7 +553,8 @@ fn open_file_max(slots: Slots) -> u64 {
     let per_slot_estimate: u64 = 6 /* unix socket, FUSE connection, (stdout, stderr) * 2 */ +
         maelstrom_fuse::MAX_INFLIGHT as u64 /* each FUSE request opens a file */;
     existing_open_files
-        + maelstrom_layer_fs::READER_CACHE_SIZE
+        + (maelstrom_layer_fs::READER_CACHE_SIZE * 2) // 1 for socket, 1 for the file
+        + MAX_ARTIFACT_FETCHES
         + per_slot_estimate * u16::from(slots) as u64
         + (MAX_IN_FLIGHT_LAYERS_BUILDS * maelstrom_layer_fs::LAYER_BUILDING_FILE_MAX) as u64
 }

@@ -3538,6 +3538,7 @@ dependencies = [
  "serde",
  "sha2",
  "slog",
+ "std-semaphore",
  "strum 0.25.0",
  "tempfile",
  "tokio",
