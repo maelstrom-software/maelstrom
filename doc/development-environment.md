@@ -11,6 +11,13 @@ If you don't already have it, [install Nix](https://nixos.org/download):
 sh <(curl -L https://nixos.org/nix/install) --daemon
 ```
 
+Enable the `nix-command` and `flakes` feature.
+
+Edit or create `~/.config/nix/nix.conf` and have it contain the following contents:
+```
+experimental-features = nix-command flakes
+```
+
 ## Install Other Critical Software
 
 ### Git
