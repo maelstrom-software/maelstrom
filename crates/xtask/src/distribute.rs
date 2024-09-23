@@ -5,7 +5,7 @@ use elf::parse::ParseError;
 use elf::string_table::StringTable;
 use elf::ElfBytes;
 use std::collections::BTreeSet;
-use std::io::{Seek as _, Write as _};
+use std::io::{Read as _, Seek as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{fmt, mem};
@@ -247,24 +247,21 @@ fn glibc_parsing() {
 }
 
 fn remove_glibc_versions_from_version_r(
-    path: &Path,
+    elf: &ElfBytes<AnyEndian>,
+    file: &mut std::fs::File,
     to_remove: versions::Requirement,
     report: &mut BinaryPatchReport,
 ) -> Result<Vec<u16>> {
-    let file_data = std::fs::read(path)?;
-    let slice = file_data.as_slice();
-    let file = ElfBytes::<AnyEndian>::minimal_parse(slice)?;
-
-    let dynstr = file
+    let dynstr = elf
         .section_header_by_name(".dynstr")?
         .ok_or_else(|| anyhow!(".dynstr section not found"))?;
-    let strtab = file.section_data_as_strtab(&dynstr)?;
+    let strtab = elf.section_data_as_strtab(&dynstr)?;
 
     // decode the .gnu.version_r section
-    let gnu_version_header = file
+    let gnu_version_header = elf
         .section_header_by_name(".gnu.version_r")?
         .ok_or_else(|| anyhow!(".gnu.version_r section not found"))?;
-    let (data, _) = file.section_data(&gnu_version_header)?;
+    let (data, _) = elf.section_data(&gnu_version_header)?;
     let mut entries = decode_version_entries(data)?;
 
     // Remove the version entry we are interested in
@@ -291,7 +288,6 @@ fn remove_glibc_versions_from_version_r(
     encoded.resize(gnu_version_header.sh_size as usize, 0);
 
     // Rewrite that section of the file
-    let mut file = std::fs::OpenOptions::new().write(true).open(path)?;
     file.seek(std::io::SeekFrom::Start(gnu_version_header.sh_offset))?;
     file.write_all(&encoded)?;
 
@@ -299,28 +295,21 @@ fn remove_glibc_versions_from_version_r(
 }
 
 fn remove_symbol_versions(
-    path: &Path,
+    elf: &ElfBytes<AnyEndian>,
+    file: &mut std::fs::File,
     versions_to_remove: Vec<u16>,
     report: &mut BinaryPatchReport,
 ) -> Result<()> {
-    let file_data = std::fs::read(path)?;
-    let slice = file_data.as_slice();
-    let file = ElfBytes::<AnyEndian>::minimal_parse(slice)?;
-
-    let dynstr = file
+    let dynstr = elf
         .section_header_by_name(".dynstr")?
         .ok_or_else(|| anyhow!(".dynstr section not found"))?;
-    let strtab = file.section_data_as_strtab(&dynstr)?;
+    let strtab = elf.section_data_as_strtab(&dynstr)?;
 
-    let dynamic_symbols = file.section_header_by_name(".dynsym").unwrap().unwrap();
-    let symbol_versions = file
-        .section_header_by_name(".gnu.version")
-        .unwrap()
-        .unwrap();
-    let (mut data, _) = file.section_data(&dynamic_symbols).unwrap();
-    let (symbol_version_data, _) = file.section_data(&symbol_versions).unwrap();
+    let dynamic_symbols = elf.section_header_by_name(".dynsym").unwrap().unwrap();
+    let symbol_versions = elf.section_header_by_name(".gnu.version").unwrap().unwrap();
+    let (mut data, _) = elf.section_data(&dynamic_symbols).unwrap();
+    let (symbol_version_data, _) = elf.section_data(&symbol_versions).unwrap();
 
-    let mut file = std::fs::OpenOptions::new().write(true).open(path)?;
     let mut symbol_index = 0;
     while !data.is_empty() {
         let symbol_data = &data[..mem::size_of::<Symbol>()];
@@ -388,9 +377,19 @@ fn patch_binary(path: &Path, report: &mut BinaryPatchReport) -> Result<()> {
     // The highest version of glibc for Ubuntu 22.04 is 2.35
     let req = versions::Requirement::new(">2.35").unwrap();
 
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?;
+    let mut file_data = vec![];
+    file.read_to_end(&mut file_data)?;
+    let elf = ElfBytes::<AnyEndian>::minimal_parse(file_data.as_slice())?;
+
     // Remove any requirement on high versions of glibc
-    let removed_versions = remove_glibc_versions_from_version_r(path, req, report)?;
-    remove_symbol_versions(path, removed_versions, report)?;
+    let removed_versions = remove_glibc_versions_from_version_r(&elf, &mut file, req, report)?;
+    remove_symbol_versions(&elf, &mut file, removed_versions, report)?;
+
+    file.flush()?;
 
     Ok(())
 }
