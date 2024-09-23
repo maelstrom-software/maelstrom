@@ -7239,6 +7239,7 @@ dependencies = [
  "serde_sheets",
  "tempfile",
  "tokio",
+ "versions",
  "zerocopy",
 ]
 
