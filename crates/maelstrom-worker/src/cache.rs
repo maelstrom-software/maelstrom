@@ -1838,4 +1838,182 @@ mod tests {
             MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
+    /*
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum FsEntry {
+        File { size: u64 },
+        Directory { entries: Vec<(String, FsEntry)> },
+        Symlink { target: String },
+    }
+
+    impl FsEntry {
+        fn file(size: u64) -> Self {
+            Self::File { size }
+        }
+
+        fn directory<const N: usize>(entries: [(&str, FsEntry); N]) -> Self {
+            Self::Directory {
+                entries: entries
+                    .into_iter()
+                    .map(|(name, entry)| (name.to_owned(), entry))
+                    .collect(),
+            }
+        }
+
+        fn symlink(target: impl ToString) -> Self {
+            Self::Symlink {
+                target: target.to_string(),
+            }
+        }
+    }
+
+    macro_rules! fs {
+        (@pushdown [] -> [$($expanded:tt)*]) => ([$($expanded)*]);
+        (@pushdown [$name:ident($size:literal) $(,$($tail:tt)*)?] -> [$($expanded:tt),*]) =>
+            (
+                fs!(
+                    @pushdown
+                    [$($($tail)*)?] -> [
+                        $($expanded),*
+                        (stringify!($name), FsEntry::file($size))
+                    ]
+                )
+            );
+        (@pushdown [$name:ident -> $target:literal $(,$($tail:tt)*)?] -> [$($expanded:tt),*]) =>
+            (
+                fs!(
+                    @pushdown
+                    [$($($tail)*)?] -> [
+                        $($expanded),*
+                        (stringify!($name), FsEntry::symlink($target))
+                    ]
+                )
+            );
+        (@pushdown [$name:ident { $($dirents:tt)* } $(,$($tail:tt)*)?] -> [$($expanded:tt),*]) =>
+            (
+                fs!(
+                    @pushdown
+                    [$($($tail)*)?] -> [
+                        $($expanded),*
+                        (stringify!($name), fs!($($dirents)*))
+                    ]
+                )
+            );
+        ($($body:tt)*) => (FsEntry::directory(fs!(@pushdown [$($body)*] -> [])));
+    }
+
+    #[test]
+    fn fs_empty() {
+        assert_eq!(fs! {}, FsEntry::directory([]));
+    }
+
+    #[test]
+    fn fs_one_file_no_comma() {
+        assert_eq!(
+            fs! {
+                foo(42)
+            },
+            FsEntry::directory([("foo", FsEntry::file(42))])
+        );
+    }
+
+    #[test]
+    fn fs_one_file_comma() {
+        assert_eq!(
+            fs! {
+                foo(42),
+            },
+            FsEntry::directory([("foo", FsEntry::file(42))])
+        );
+    }
+
+    #[test]
+    fn fs_one_symlink_no_comma() {
+        assert_eq!(
+            fs! {
+                foo -> "/target"
+            },
+            FsEntry::directory([("foo", FsEntry::symlink("/target"))])
+        );
+    }
+
+    #[test]
+    fn fs_one_symlink_comma() {
+        assert_eq!(
+            fs! {
+                foo -> "/target",
+            },
+            FsEntry::directory([("foo", FsEntry::symlink("/target"))])
+        );
+    }
+
+    #[test]
+    fn fs_one_directory_no_comma() {
+        assert_eq!(
+            fs! {
+                foo {}
+            },
+            FsEntry::directory([("foo", FsEntry::directory([]))])
+        );
+    }
+
+    #[test]
+    fn fs_one_directory_comma() {
+        assert_eq!(
+            fs! {
+                foo {},
+            },
+            FsEntry::directory([("foo", FsEntry::directory([]))])
+        );
+    }
+
+    #[test]
+    fn fs_one_directory_with_no_files() {
+        assert_eq!(
+            fs! {
+                foo {},
+            },
+            FsEntry::directory([("foo", FsEntry::directory([]))])
+        );
+    }
+
+    #[test]
+    fn fs_kitchen_sink() {
+        assert_eq!(
+            fs! {
+                foo(42),
+                bar -> "/target/1",
+                baz {
+                    zero {},
+                    one {
+                        foo(43)
+                    },
+                    two {
+                        foo(44),
+                        bar -> "/target/2"
+                    },
+                }
+            },
+            FsEntry::directory([
+                ("foo", FsEntry::file(42)),
+                ("bar", FsEntry::symlink("/target/1")),
+                (
+                    "baz",
+                    FsEntry::directory([
+                        ("zero", FsEntry::directory([])),
+                        ("one", FsEntry::directory([("foo", FsEntry::file(43))])),
+                        (
+                            "two",
+                            FsEntry::directory([
+                                ("foo", FsEntry::file(44)),
+                                ("bar", FsEntry::symlink("/target/2")),
+                            ])
+                        ),
+                    ])
+                )
+            ])
+        );
+    }
+    */
 }
