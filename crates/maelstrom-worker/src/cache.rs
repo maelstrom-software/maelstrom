@@ -14,7 +14,7 @@ use std::{
     ffi::OsString,
     fmt::{self, Debug, Formatter},
     fs::{self, File},
-    io::Write as _,
+    io::{ErrorKind, Write as _},
     iter::IntoIterator,
     mem,
     num::NonZeroU32,
@@ -120,10 +120,6 @@ pub trait Fs {
     /// code path.
     fn rand_u64(&self) -> u64;
 
-    /// Return true if a file (or directory, or symlink, etc.) exists with the given path, and
-    /// false otherwise. Panic on file system error.
-    fn file_exists(&self, path: &Path) -> bool;
-
     /// Rename `source` to `destination`. Panic on file system error. Assume that all intermediate
     /// directories exist for `destination`, and that `source` and `destination` are on the same
     /// file system.
@@ -153,9 +149,9 @@ pub trait Fs {
     /// Create a symlink at `link` that points to `target`. Panic on file system error.
     fn symlink(&self, target: &Path, link: &Path);
 
-    /// Get the metadata of the file at `path`. Panic on file system error or if `path` doesn't not
-    /// exist.
-    fn metadata(&self, path: &Path) -> FileMetadata;
+    /// Get the metadata of the file at `path`. Panic on file system error. If `path` doesn't
+    /// exist, return None.
+    fn metadata(&self, path: &Path) -> Option<FileMetadata>;
 
     /// The type returned by the [`Self::temp_file`] method. Some implementations may make this
     /// type [`Drop`] so that the temporary file can be cleaned up when it is closed.
@@ -211,10 +207,6 @@ impl Fs for StdFs {
         rand::random()
     }
 
-    fn file_exists(&self, path: &Path) -> bool {
-        path.try_exists().unwrap()
-    }
-
     fn rename(&self, source: &Path, destination: &Path) {
         fs::rename(source, destination).unwrap()
     }
@@ -252,8 +244,14 @@ impl Fs for StdFs {
         unix_fs::symlink(target, link).unwrap();
     }
 
-    fn metadata(&self, path: &Path) -> FileMetadata {
-        fs::symlink_metadata(path).unwrap().into()
+    fn metadata(&self, path: &Path) -> Option<FileMetadata> {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) => Some(metadata.into()),
+            Err(err) if err.kind() == ErrorKind::NotFound => None,
+            Err(err) => {
+                panic!("unexpected error: {err}");
+            }
+        }
     }
 
     fn temp_file(&self, parent: &Path) -> Self::TempFile {
@@ -565,7 +563,7 @@ impl<FsT: Fs> Cache<FsT> {
         );
 
         let cachedir_tag = root.join("CACHEDIR.TAG");
-        if !fs.file_exists(&cachedir_tag) {
+        if fs.metadata(&cachedir_tag).is_none() {
             fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS);
         }
 
@@ -577,8 +575,7 @@ impl<FsT: Fs> Cache<FsT> {
 
         for kind in EntryKind::iter() {
             let kind_dir = sha256.join(kind.to_string());
-            if fs.file_exists(&kind_dir) {
-                let metadata = fs.metadata(&kind_dir);
+            if let Some(metadata) = fs.metadata(&kind_dir) {
                 Self::remove_in_background(&mut fs, &root, &kind_dir, metadata.type_);
             }
             fs.mkdir_recursively(&kind_dir);
@@ -666,13 +663,13 @@ impl<FsT: Fs> Cache<FsT> {
             }
             GotArtifact::File { source } => {
                 source.persist(&path);
-                let metadata = self.fs.metadata(&path);
+                let metadata = self.fs.metadata(&path).unwrap();
                 assert!(matches!(metadata.type_, FileType::File));
                 (FileType::File, metadata.size)
             }
             GotArtifact::Symlink { target } => {
                 self.fs.symlink(&target, &path);
-                let metadata = self.fs.metadata(&path);
+                let metadata = self.fs.metadata(&path).unwrap();
                 assert!(matches!(metadata.type_, FileType::Symlink));
                 (FileType::Symlink, metadata.size)
             }
@@ -784,7 +781,7 @@ impl<FsT: Fs> Cache<FsT> {
             let removing = root.join("removing");
             let target = loop {
                 let target = removing.join(format!("{:016x}", fs.rand_u64()));
-                if !fs.file_exists(&target) {
+                if fs.metadata(&target).is_none() {
                     break target;
                 }
             };
@@ -839,14 +836,12 @@ mod tests {
     use std::{
         cell::{Cell, RefCell},
         cmp::Ordering,
-        collections::HashSet,
         rc::Rc,
     };
     use TestMessage::*;
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
-        FileExists(PathBuf),
         Rename(PathBuf, PathBuf),
         Remove(PathBuf),
         RemoveRecursively(PathBuf),
@@ -940,7 +935,6 @@ mod tests {
     #[derive(Default)]
     struct TestFs {
         messages: Rc<RefCell<Vec<TestMessage>>>,
-        existing_files: HashSet<PathBuf>,
         directories: HashMap<PathBuf, Vec<(PathBuf, FileMetadata)>>,
         metadata: HashMap<PathBuf, FileMetadata>,
         last_random_number: Cell<u64>,
@@ -955,11 +949,6 @@ mod tests {
             let result = self.last_random_number.get() + 1;
             self.last_random_number.set(result);
             result
-        }
-
-        fn file_exists(&self, path: &Path) -> bool {
-            self.messages.borrow_mut().push(FileExists(path.to_owned()));
-            self.existing_files.contains(path)
         }
 
         fn rename(&self, source: &Path, destination: &Path) {
@@ -1008,9 +997,9 @@ mod tests {
                 .push(Symlink(target.to_owned(), link.to_owned()));
         }
 
-        fn metadata(&self, path: &Path) -> FileMetadata {
+        fn metadata(&self, path: &Path) -> Option<FileMetadata> {
             self.messages.borrow_mut().push(Metadata(path.to_owned()));
-            *self.metadata.get(path).unwrap()
+            self.metadata.get(path).copied()
         }
 
         fn temp_file(&self, parent: &Path) -> Self::TempFile {
@@ -1287,7 +1276,7 @@ mod tests {
         fixture.decrement_ref_count(
             digest!(42),
             vec![
-                FileExists(short_path!("/z/removing", 1)),
+                Metadata(short_path!("/z/removing", 1)),
                 Rename(
                     long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
@@ -1361,7 +1350,7 @@ mod tests {
             vec![jid!(3)],
             vec![
                 PersistTempDir(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 3)),
-                FileExists(short_path!("/z/removing", 1)),
+                Metadata(short_path!("/z/removing", 1)),
                 Rename(
                     long_path!("/z/sha256/blob", 1),
                     short_path!("/z/removing", 1),
@@ -1379,7 +1368,7 @@ mod tests {
             vec![jid!(4)],
             vec![
                 PersistTempDir(short_path!("/z/tmp", 2), long_path!("/z/sha256/blob", 4)),
-                FileExists(short_path!("/z/removing", 2)),
+                Metadata(short_path!("/z/removing", 2)),
                 Rename(
                     long_path!("/z/sha256/blob", 2),
                     short_path!("/z/removing", 2),
@@ -1415,7 +1404,7 @@ mod tests {
             vec![jid!(4)],
             vec![
                 PersistTempDir(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 4)),
-                FileExists(short_path!("/z/removing", 1)),
+                Metadata(short_path!("/z/removing", 1)),
                 Rename(
                     long_path!("/z/sha256/blob", 3),
                     short_path!("/z/removing", 1),
@@ -1469,7 +1458,7 @@ mod tests {
         fixture.decrement_ref_count(
             digest!(42),
             vec![
-                FileExists(short_path!("/z/removing", 1)),
+                Metadata(short_path!("/z/removing", 1)),
                 Rename(
                     long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
@@ -1492,7 +1481,7 @@ mod tests {
         fixture.decrement_ref_count(
             digest!(42),
             vec![
-                FileExists(short_path!("/z/removing", 1)),
+                Metadata(short_path!("/z/removing", 1)),
                 Rename(
                     long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
@@ -1526,7 +1515,7 @@ mod tests {
         fixture.decrement_ref_count(
             digest!(42),
             vec![
-                FileExists(short_path!("/z/removing", 1)),
+                Metadata(short_path!("/z/removing", 1)),
                 Rename(
                     long_path!("/z/sha256/blob", 42),
                     short_path!("/z/removing", 1),
@@ -1548,8 +1537,8 @@ mod tests {
     fn preexisting_directories_do_not_affect_get_request() {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
-            .existing_files
-            .insert(long_path!("/z/sha256/blob", 42));
+            .metadata
+            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::directory(1));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
@@ -1582,28 +1571,30 @@ mod tests {
             path_buf!("/z"),
             vec![(path_buf!("/z/tmp"), FileMetadata::directory(10))],
         );
-        test_cache_fs.existing_files.insert(path_buf!("/z/tmp"));
         test_cache_fs
-            .existing_files
-            .insert(short_path!("/z/removing", 1));
+            .metadata
+            .insert(path_buf!("/z/tmp"), FileMetadata::directory(1));
         test_cache_fs
-            .existing_files
-            .insert(short_path!("/z/removing", 2));
+            .metadata
+            .insert(short_path!("/z/removing", 1), FileMetadata::file(42));
         test_cache_fs
-            .existing_files
-            .insert(short_path!("/z/removing", 3));
+            .metadata
+            .insert(short_path!("/z/removing", 2), FileMetadata::file(42));
+        test_cache_fs
+            .metadata
+            .insert(short_path!("/z/removing", 3), FileMetadata::file(42));
         let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
-            FileExists(short_path!("/z/removing", 1)),
-            FileExists(short_path!("/z/removing", 2)),
-            FileExists(short_path!("/z/removing", 3)),
-            FileExists(short_path!("/z/removing", 4)),
+            Metadata(short_path!("/z/removing", 1)),
+            Metadata(short_path!("/z/removing", 2)),
+            Metadata(short_path!("/z/removing", 3)),
+            Metadata(short_path!("/z/removing", 4)),
             Rename(path_buf!("/z/tmp"), short_path!("/z/removing", 4)),
             RemoveRecursively(short_path!("/z/removing", 4)),
-            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            Metadata(path_buf!("/z/CACHEDIR.TAG")),
             CreateFile(
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
@@ -1611,11 +1602,11 @@ mod tests {
             MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
-            FileExists(path_buf!("/z/sha256/blob")),
+            Metadata(path_buf!("/z/sha256/blob")),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
-            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
@@ -1627,7 +1618,7 @@ mod tests {
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
-            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            Metadata(path_buf!("/z/CACHEDIR.TAG")),
             CreateFile(
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
@@ -1635,11 +1626,11 @@ mod tests {
             MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
-            FileExists(path_buf!("/z/sha256/blob")),
+            Metadata(path_buf!("/z/sha256/blob")),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
-            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
@@ -1648,22 +1639,22 @@ mod tests {
     fn new_does_not_write_cachedir_tag_if_it_exists() {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
-            .existing_files
-            .insert(path_buf!("/z/CACHEDIR.TAG"));
+            .metadata
+            .insert(path_buf!("/z/CACHEDIR.TAG"), FileMetadata::file(42));
         let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
-            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            Metadata(path_buf!("/z/CACHEDIR.TAG")),
             MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
-            FileExists(path_buf!("/z/sha256/blob")),
+            Metadata(path_buf!("/z/sha256/blob")),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
-            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
@@ -1691,7 +1682,7 @@ mod tests {
             RemoveRecursively(short_path!("/z/removing", 20)),
             RemoveRecursively(short_path!("/z/removing", 30)),
             ReadDir(path_buf!("/z")),
-            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            Metadata(path_buf!("/z/CACHEDIR.TAG")),
             CreateFile(
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
@@ -1699,11 +1690,11 @@ mod tests {
             MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
-            FileExists(path_buf!("/z/sha256/blob")),
+            Metadata(path_buf!("/z/sha256/blob")),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
-            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
@@ -1726,13 +1717,13 @@ mod tests {
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
-            FileExists(short_path!("/z/removing", 1)),
+            Metadata(short_path!("/z/removing", 1)),
             Rename(path_buf!("/z/blah"), short_path!("/z/removing", 1)),
             RemoveRecursively(short_path!("/z/removing", 1)),
-            FileExists(short_path!("/z/removing", 2)),
+            Metadata(short_path!("/z/removing", 2)),
             Rename(path_buf!("/z/baz"), short_path!("/z/removing", 2)),
             RemoveRecursively(short_path!("/z/removing", 2)),
-            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            Metadata(path_buf!("/z/CACHEDIR.TAG")),
             CreateFile(
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
@@ -1740,11 +1731,11 @@ mod tests {
             MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
-            FileExists(path_buf!("/z/sha256/blob")),
+            Metadata(path_buf!("/z/sha256/blob")),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
-            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
@@ -1769,7 +1760,7 @@ mod tests {
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
-            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            Metadata(path_buf!("/z/CACHEDIR.TAG")),
             CreateFile(
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
@@ -1777,17 +1768,17 @@ mod tests {
             MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
-            FileExists(short_path!("/z/removing", 1)),
+            Metadata(short_path!("/z/removing", 1)),
             Rename(path_buf!("/z/sha256/blah"), short_path!("/z/removing", 1)),
             RemoveRecursively(short_path!("/z/removing", 1)),
-            FileExists(short_path!("/z/removing", 2)),
+            Metadata(short_path!("/z/removing", 2)),
             Rename(path_buf!("/z/sha256/baz"), short_path!("/z/removing", 2)),
             RemoveRecursively(short_path!("/z/removing", 2)),
-            FileExists(path_buf!("/z/sha256/blob")),
+            Metadata(path_buf!("/z/sha256/blob")),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
-            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
+            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
+            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
             MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
@@ -1796,14 +1787,16 @@ mod tests {
     fn new_removes_old_sha256_if_it_exists() {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
-            .existing_files
-            .insert(path_buf!("/z/sha256/blob"));
-        test_cache_fs
-            .existing_files
-            .insert(path_buf!("/z/sha256/bottom_fs_layer"));
-        test_cache_fs
-            .existing_files
-            .insert(path_buf!("/z/sha256/upper_fs_layer"));
+            .metadata
+            .insert(path_buf!("/z/sha256/blob"), FileMetadata::directory(1));
+        test_cache_fs.metadata.insert(
+            path_buf!("/z/sha256/bottom_fs_layer"),
+            FileMetadata::directory(1),
+        );
+        test_cache_fs.metadata.insert(
+            path_buf!("/z/sha256/upper_fs_layer"),
+            FileMetadata::directory(1),
+        );
         test_cache_fs
             .metadata
             .insert(path_buf!("/z/sha256/blob"), FileMetadata::directory(42));
@@ -1820,7 +1813,7 @@ mod tests {
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z")),
-            FileExists(path_buf!("/z/CACHEDIR.TAG")),
+            Metadata(path_buf!("/z/CACHEDIR.TAG")),
             CreateFile(
                 path_buf!("/z/CACHEDIR.TAG"),
                 boxed_u8!(&CACHEDIR_TAG_CONTENTS),
@@ -1828,24 +1821,21 @@ mod tests {
             MkdirRecursively(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
-            FileExists(path_buf!("/z/sha256/blob")),
             Metadata(path_buf!("/z/sha256/blob")),
-            FileExists(short_path!("/z/removing", 1)),
+            Metadata(short_path!("/z/removing", 1)),
             Rename(path_buf!("/z/sha256/blob"), short_path!("/z/removing", 1)),
             RemoveRecursively(short_path!("/z/removing", 1)),
             MkdirRecursively(path_buf!("/z/sha256/blob")),
-            FileExists(path_buf!("/z/sha256/bottom_fs_layer")),
             Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
-            FileExists(short_path!("/z/removing", 2)),
+            Metadata(short_path!("/z/removing", 2)),
             Rename(
                 path_buf!("/z/sha256/bottom_fs_layer"),
                 short_path!("/z/removing", 2),
             ),
             RemoveRecursively(short_path!("/z/removing", 2)),
             MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            FileExists(path_buf!("/z/sha256/upper_fs_layer")),
             Metadata(path_buf!("/z/sha256/upper_fs_layer")),
-            FileExists(short_path!("/z/removing", 3)),
+            Metadata(short_path!("/z/removing", 3)),
             Rename(
                 path_buf!("/z/sha256/upper_fs_layer"),
                 short_path!("/z/removing", 3),

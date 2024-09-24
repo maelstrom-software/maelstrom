@@ -959,10 +959,6 @@ mod tests {
             state.last_random_number
         }
 
-        fn file_exists(&self, _path: &Path) -> bool {
-            unimplemented!()
-        }
-
         fn rename(&self, _source: &Path, _destination: &Path) {
             unimplemented!()
         }
@@ -994,7 +990,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn metadata(&self, _path: &Path) -> cache::FileMetadata {
+        fn metadata(&self, _path: &Path) -> Option<cache::FileMetadata> {
             unimplemented!()
         }
 
