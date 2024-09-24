@@ -390,7 +390,7 @@ impl TestArtifact for PytestTestArtifact {
     }
 
     fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec> {
-        match &metadata.image {
+        match &metadata.container.image {
             Some(image) => self.test_layers.get(image).into_iter().cloned().collect(),
             _ => vec![],
         }

@@ -23,18 +23,98 @@ pub struct AllMetadata<TestFilterT> {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TestMetadata {
-    include_shared_libraries: Option<bool>,
+pub struct TestContainer {
     pub image: Option<ImageSpec>,
     pub network: JobNetwork,
     pub enable_writable_file_system: bool,
     pub working_directory: Option<Utf8PathBuf>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
-    pub timeout: Option<Timeout>,
     pub layers: Vec<LayerSpec>,
     pub environment: Vec<EnvironmentSpec>,
     pub mounts: Vec<JobMount>,
+}
+
+impl TestContainer {
+    fn try_fold(mut self, container: &directive::TestContainer) -> Result<Self> {
+        let mut image = container.image.as_ref().map(|image| ImageSpec {
+            name: image.into(),
+            use_environment: false,
+            use_layers: false,
+            use_working_directory: false,
+        });
+
+        self.network = container.network.unwrap_or(self.network);
+        self.enable_writable_file_system = container
+            .enable_writable_file_system
+            .unwrap_or(self.enable_writable_file_system);
+        self.user = container.user.or(self.user);
+        self.group = container.group.or(self.group);
+
+        match &container.layers {
+            Some(PossiblyImage::Explicit(layers)) => {
+                self.layers = layers.to_vec();
+            }
+            Some(PossiblyImage::Image) => {
+                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
+                image.use_layers = true;
+                self.layers = vec![];
+            }
+            None => {}
+        }
+        self.layers.extend(container.added_layers.iter().cloned());
+
+        self.mounts = container.mounts.as_ref().map_or(self.mounts, |mounts| {
+            mounts.iter().cloned().map(Into::into).collect()
+        });
+        self.mounts
+            .extend(container.added_mounts.iter().cloned().map(Into::into));
+
+        match &container.environment {
+            Some(PossiblyImage::Explicit(environment)) => {
+                self.environment.push(EnvironmentSpec {
+                    vars: environment.clone(),
+                    extend: false,
+                });
+            }
+            Some(PossiblyImage::Image) => {
+                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
+                image.use_environment = true;
+            }
+            None => {}
+        }
+        if !container.added_environment.is_empty() {
+            self.environment.push(EnvironmentSpec {
+                vars: container.added_environment.clone(),
+                extend: true,
+            });
+        }
+
+        match &container.working_directory {
+            Some(PossiblyImage::Explicit(working_directory)) => {
+                self.working_directory = Some(working_directory.clone());
+            }
+            Some(PossiblyImage::Image) => {
+                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
+                image.use_working_directory = true;
+                self.working_directory = None;
+            }
+            None => {}
+        }
+
+        if container.image.is_some() {
+            self.image = image;
+        }
+
+        Ok(self)
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TestMetadata {
+    pub container: TestContainer,
+    include_shared_libraries: Option<bool>,
+    pub timeout: Option<Timeout>,
     pub ignore: bool,
 }
 
@@ -49,96 +129,18 @@ impl TestMetadata {
     pub fn include_shared_libraries(&self) -> bool {
         match self.include_shared_libraries {
             Some(val) => val,
-            None => self.image.is_none(),
+            None => self.container.image.is_none(),
         }
     }
 
     fn try_fold<TestFilterT>(mut self, directive: &TestDirective<TestFilterT>) -> Result<Self> {
-        let mut image = directive.container.image.as_ref().map(|image| ImageSpec {
-            name: image.into(),
-            use_environment: false,
-            use_layers: false,
-            use_working_directory: false,
-        });
+        self.container = self.container.try_fold(&directive.container)?;
 
         self.include_shared_libraries = directive
             .include_shared_libraries
             .or(self.include_shared_libraries);
-        self.network = directive.container.network.unwrap_or(self.network);
-        self.enable_writable_file_system = directive
-            .container
-            .enable_writable_file_system
-            .unwrap_or(self.enable_writable_file_system);
-        self.user = directive.container.user.or(self.user);
-        self.group = directive.container.group.or(self.group);
         self.timeout = directive.timeout.unwrap_or(self.timeout);
         self.ignore = directive.ignore.unwrap_or(self.ignore);
-
-        match &directive.container.layers {
-            Some(PossiblyImage::Explicit(layers)) => {
-                self.layers = layers.to_vec();
-            }
-            Some(PossiblyImage::Image) => {
-                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
-                image.use_layers = true;
-                self.layers = vec![];
-            }
-            None => {}
-        }
-        self.layers
-            .extend(directive.container.added_layers.iter().cloned());
-
-        self.mounts = directive
-            .container
-            .mounts
-            .as_ref()
-            .map_or(self.mounts, |mounts| {
-                mounts.iter().cloned().map(Into::into).collect()
-            });
-        self.mounts.extend(
-            directive
-                .container
-                .added_mounts
-                .iter()
-                .cloned()
-                .map(Into::into),
-        );
-
-        match &directive.container.environment {
-            Some(PossiblyImage::Explicit(environment)) => {
-                self.environment.push(EnvironmentSpec {
-                    vars: environment.clone(),
-                    extend: false,
-                });
-            }
-            Some(PossiblyImage::Image) => {
-                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
-                image.use_environment = true;
-            }
-            None => {}
-        }
-        if !directive.container.added_environment.is_empty() {
-            self.environment.push(EnvironmentSpec {
-                vars: directive.container.added_environment.clone(),
-                extend: true,
-            });
-        }
-
-        match &directive.container.working_directory {
-            Some(PossiblyImage::Explicit(working_directory)) => {
-                self.working_directory = Some(working_directory.clone());
-            }
-            Some(PossiblyImage::Image) => {
-                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
-                image.use_working_directory = true;
-                self.working_directory = None;
-            }
-            None => {}
-        }
-
-        if directive.container.image.is_some() {
-            self.image = image;
-        }
 
         Ok(self)
     }
@@ -463,6 +465,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .network,
             JobNetwork::Loopback,
         );
@@ -473,6 +476,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .network,
             JobNetwork::Local,
         );
@@ -483,6 +487,7 @@ mod tests {
                 ("test3", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .network,
             JobNetwork::Disabled,
         );
@@ -493,6 +498,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .network,
             JobNetwork::Disabled,
         );
@@ -519,6 +525,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .enable_writable_file_system
         );
         assert!(
@@ -528,6 +535,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .enable_writable_file_system
         );
         assert!(
@@ -537,6 +545,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .enable_writable_file_system
         );
     }
@@ -571,6 +580,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .working_directory,
             Some(utf8_path_buf!("/bar"))
         );
@@ -581,6 +591,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image,
             Some(ImageSpec {
                 name: "rust".into(),
@@ -596,6 +607,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .working_directory,
             None,
         );
@@ -606,6 +618,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .working_directory,
             None,
         );
@@ -632,6 +645,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .user,
             Some(UserId::from(202)),
         );
@@ -642,6 +656,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .user,
             Some(UserId::from(101)),
         );
@@ -652,6 +667,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .user,
             None,
         );
@@ -678,6 +694,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .group,
             Some(GroupId::from(202)),
         );
@@ -688,6 +705,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .group,
             Some(GroupId::from(101)),
         );
@@ -698,6 +716,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .group,
             None,
         );
@@ -784,6 +803,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .layers,
             vec![]
         );
@@ -794,6 +814,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image,
             Some(ImageSpec {
                 name: "image1".into(),
@@ -809,6 +830,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .layers,
             vec![tar_layer!("layer3"), tar_layer!("layer4")],
         );
@@ -819,6 +841,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image,
             Some(ImageSpec {
                 name: "image2".into(),
@@ -834,6 +857,7 @@ mod tests {
                 ("test3", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .layers,
             vec![],
         );
@@ -844,6 +868,7 @@ mod tests {
                 ("test3", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image,
             Some(ImageSpec {
                 name: "image3".into(),
@@ -859,6 +884,7 @@ mod tests {
                 ("test4", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .layers,
             vec![],
         );
@@ -869,6 +895,7 @@ mod tests {
                 ("test4", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image,
             Some(ImageSpec {
                 name: "image2".into(),
@@ -884,6 +911,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .layers,
             vec![tar_layer!("layer1"), tar_layer!("layer2")],
         );
@@ -894,6 +922,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image,
             None,
         );
@@ -924,6 +953,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .layers,
             vec![
                 tar_layer!("layer1"),
@@ -941,6 +971,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .layers,
             vec![
                 tar_layer!("layer1"),
@@ -956,6 +987,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .layers,
             vec![tar_layer!("added-layer1"), tar_layer!("added-layer2")],
         );
@@ -1012,6 +1044,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .environment,
             vec![dir1_env.clone(), dir3_env.clone()]
         );
@@ -1022,6 +1055,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image
             .unwrap()
             .use_environment,
@@ -1033,6 +1067,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .environment,
             vec![dir1_env.clone()]
         );
@@ -1043,6 +1078,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image
             .unwrap()
             .use_environment,
@@ -1054,6 +1090,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .environment,
             vec![dir1_env.clone()]
         );
@@ -1132,6 +1169,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .environment,
             vec![
                 dir1_env.clone(),
@@ -1147,6 +1185,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image
             .unwrap()
             .use_environment,
@@ -1158,6 +1197,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .environment,
             vec![
                 dir1_env.clone(),
@@ -1174,6 +1214,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image
             .unwrap()
             .use_environment,
@@ -1185,6 +1226,7 @@ mod tests {
                 ("test3", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .environment,
             vec![
                 dir1_env.clone(),
@@ -1199,6 +1241,7 @@ mod tests {
                 ("test3", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .image
             .unwrap()
             .use_environment,
@@ -1210,6 +1253,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .environment,
             vec![dir1_env.clone(), dir1_added_env.clone(),]
         );
@@ -1241,6 +1285,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![
                 JobMount::Tmp {
@@ -1263,6 +1308,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![JobMount::Proc {
                 mount_point: utf8_path_buf!("/proc")
@@ -1275,6 +1321,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![],
         );
@@ -1326,6 +1373,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![
                 JobMount::Proc {
@@ -1346,6 +1394,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![
                 JobMount::Proc {
@@ -1371,6 +1420,7 @@ mod tests {
                 ("test3", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![JobMount::Tmp {
                 mount_point: utf8_path_buf!("/tmp")
@@ -1383,6 +1433,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![JobMount::Tmp {
                 mount_point: utf8_path_buf!("/tmp")
@@ -1412,6 +1463,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![JobMount::Devices {
                 devices: enum_set! {JobDevice::Zero | JobDevice::Tty}
@@ -1424,6 +1476,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![JobMount::Devices {
                 devices: enum_set! {JobDevice::Null}
@@ -1436,6 +1489,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![],
         );
@@ -1476,6 +1530,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![
                 JobMount::Devices {
@@ -1496,6 +1551,7 @@ mod tests {
                 ("test2", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![
                 JobMount::Devices {
@@ -1516,6 +1572,7 @@ mod tests {
                 ("test3", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![JobMount::Devices {
                 devices: enum_set! {JobDevice::Zero}
@@ -1528,6 +1585,7 @@ mod tests {
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
+            .container
             .mounts,
             vec![JobMount::Devices {
                 devices: enum_set! {JobDevice::Tty}

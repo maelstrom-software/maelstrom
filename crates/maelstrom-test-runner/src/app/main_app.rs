@@ -199,7 +199,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         let case_str = artifact.format_case(package_name, case_name, case_metadata);
 
         let test_layers = artifact.get_test_layers(&test_metadata);
-        let mut layers = test_metadata.layers;
+        let mut layers = test_metadata.container.layers;
         layers.extend(test_layers);
 
         let get_timing_result = self
@@ -213,19 +213,19 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
         let (program, arguments) = artifact.build_command(case_name, case_metadata);
         let container = ContainerSpec {
-            image: test_metadata.image,
-            environment: test_metadata.environment,
+            image: test_metadata.container.image,
+            environment: test_metadata.container.environment,
             layers,
-            mounts: test_metadata.mounts,
-            network: test_metadata.network,
-            root_overlay: if test_metadata.enable_writable_file_system {
+            mounts: test_metadata.container.mounts,
+            network: test_metadata.container.network,
+            root_overlay: if test_metadata.container.enable_writable_file_system {
                 JobRootOverlay::Tmp
             } else {
                 JobRootOverlay::None
             },
-            working_directory: test_metadata.working_directory,
-            user: test_metadata.user,
-            group: test_metadata.group,
+            working_directory: test_metadata.container.working_directory,
+            user: test_metadata.container.user,
+            group: test_metadata.container.group,
         }
         .into();
         let spec = JobSpec {
