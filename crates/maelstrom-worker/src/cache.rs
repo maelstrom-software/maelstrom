@@ -115,7 +115,7 @@ impl From<fs::Metadata> for FileMetadata {
 }
 
 /// Dependencies that [`Cache`] has on the file system.
-pub trait Fs: Clone + Debug {
+pub trait Fs: Debug {
     /// Return a random u64. This is used for creating unique path names in the directory removal
     /// code path.
     fn rand_u64(&self) -> u64;
@@ -201,7 +201,7 @@ impl FsTempDir for StdTempDir {
 }
 
 /// The standard implementation of CacheFs that uses [std] and [rand].
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct StdFs;
 
 impl Fs for StdFs {
@@ -914,7 +914,7 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Default)]
+    #[derive(Default)]
     struct TestFs {
         messages: Rc<RefCell<Vec<TestMessage>>>,
         existing_files: HashSet<PathBuf>,
