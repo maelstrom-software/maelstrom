@@ -1837,7 +1837,6 @@ mod tests {
             MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
         ]);
     }
-    /*
 
     #[derive(Debug, Eq, PartialEq)]
     enum FsEntry {
@@ -1868,38 +1867,37 @@ mod tests {
     }
 
     macro_rules! fs {
-        (@pushdown [] -> [$($expanded:tt)*]) => ([$($expanded)*]);
-        (@pushdown [$name:ident($size:literal) $(,$($tail:tt)*)?] -> [$($expanded:tt),*]) =>
-            (
-                fs!(
-                    @pushdown
-                    [$($($tail)*)?] -> [
-                        $($expanded),*
-                        (stringify!($name), FsEntry::file($size))
-                    ]
-                )
-            );
-        (@pushdown [$name:ident -> $target:literal $(,$($tail:tt)*)?] -> [$($expanded:tt),*]) =>
-            (
-                fs!(
-                    @pushdown
-                    [$($($tail)*)?] -> [
-                        $($expanded),*
-                        (stringify!($name), FsEntry::symlink($target))
-                    ]
-                )
-            );
-        (@pushdown [$name:ident { $($dirents:tt)* } $(,$($tail:tt)*)?] -> [$($expanded:tt),*]) =>
-            (
-                fs!(
-                    @pushdown
-                    [$($($tail)*)?] -> [
-                        $($expanded),*
-                        (stringify!($name), fs!($($dirents)*))
-                    ]
-                )
-            );
-        ($($body:tt)*) => (FsEntry::directory(fs!(@pushdown [$($body)*] -> [])));
+        (@expand [] -> [$($expanded:tt)*]) => {
+            [$($expanded)*]
+        };
+        (@expand [$name:ident($size:literal) $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+            fs!(
+                @expand
+                [$($($tail)*)?] -> [
+                    $($($expanded)+,)?
+                    (stringify!($name), FsEntry::file($size))
+                ]
+            )
+        };
+        (@expand [$name:ident -> $target:literal $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+            fs!(
+                @expand
+                [$($($tail)*)?] -> [
+                    $($($expanded)+,)?
+                    (stringify!($name), FsEntry::symlink($target))
+                ]
+            )
+        };
+        (@expand [$name:ident { $($dirents:tt)* } $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+            fs!(
+                @expand
+                [$($($tail)*)?] -> [
+                    $($($expanded)+,)?
+                    (stringify!($name), fs!($($dirents)*))
+                ]
+            )
+        };
+        ($($body:tt)*) => (FsEntry::directory(fs!(@expand [$($body)*] -> [])));
     }
 
     #[test]
@@ -2014,5 +2012,4 @@ mod tests {
             ])
         );
     }
-    */
 }
