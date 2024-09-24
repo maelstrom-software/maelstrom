@@ -53,7 +53,7 @@ pub trait FsTempDir: Debug {
 }
 
 /// The type of a file, as far as the cache cares.
-#[derive(Clone, Copy, Display)]
+#[derive(Clone, Copy, Debug, Display, PartialEq)]
 pub enum FileType {
     Directory,
     File,
@@ -76,7 +76,7 @@ impl From<fs::FileType> for FileType {
 }
 
 /// The file metadata the cache cares about.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FileMetadata {
     type_: FileType,
     size: u64,
@@ -150,7 +150,8 @@ pub trait Fs {
     fn symlink(&self, target: &Path, link: &Path);
 
     /// Get the metadata of the file at `path`. Panic on file system error. If `path` doesn't
-    /// exist, return None.
+    /// exist, return None. If the last component is a symlink, return the metadata about the
+    /// symlink instead of trying to resolve it.
     fn metadata(&self, path: &Path) -> Option<FileMetadata>;
 
     /// The type returned by the [`Self::temp_file`] method. Some implementations may make this
@@ -831,11 +832,14 @@ impl<FsT: Fs> Cache<FsT> {
 mod tests {
     use super::*;
     use itertools::Itertools;
+    use maelstrom_base::{nonempty, NonEmpty};
     use maelstrom_test::*;
     use slog::{o, Discard};
     use std::{
         cell::{Cell, RefCell},
         cmp::Ordering,
+        ffi::OsStr,
+        path::Component,
         rc::Rc,
     };
     use TestMessage::*;
@@ -2018,5 +2022,247 @@ mod tests {
                 )
             ])
         );
+    }
+
+    struct TestFsState {
+        root: FsEntry,
+        last_random_number: u64,
+    }
+
+    struct TestFs2 {
+        state: Rc<RefCell<TestFsState>>,
+    }
+
+    impl TestFs2 {
+        fn new(root: FsEntry) -> Self {
+            assert!(matches!(&root, FsEntry::Directory { .. }));
+            Self {
+                state: Rc::new(RefCell::new(TestFsState {
+                    root,
+                    last_random_number: 0,
+                })),
+            }
+        }
+
+        fn lookup<'state, 'path>(
+            root: &'state FsEntry,
+            mut stack: NonEmpty<&'state FsEntry>,
+            path: &'path Path,
+        ) -> Option<NonEmpty<&'state FsEntry>> {
+            for component in path.components() {
+                match component {
+                    Component::Prefix(_) => {
+                        unimplemented!("prefix components don't occur in Unix")
+                    }
+                    Component::RootDir => {
+                        stack = nonempty![&root];
+                    }
+                    Component::CurDir => {}
+                    Component::ParentDir => {
+                        stack.pop();
+                    }
+                    Component::Normal(name) => loop {
+                        match stack.last() {
+                            FsEntry::Directory { entries } => {
+                                stack.push(entries.into_iter().find_map(
+                                    |(entry_name, entry)| {
+                                        name.eq(OsStr::new(entry_name)).then_some(entry)
+                                    },
+                                )?);
+                                break;
+                            }
+                            FsEntry::File { .. } => {
+                                return None;
+                            }
+                            FsEntry::Symlink { target } => {
+                                let target = Path::new(target);
+                                stack.pop();
+                                stack = Self::lookup(root, stack, target)?;
+                            }
+                        }
+                    },
+                }
+            }
+            Some(stack)
+        }
+    }
+
+    impl Fs for TestFs2 {
+        type TempFile = TestTempFile;
+
+        type TempDir = TestTempDir;
+
+        fn rand_u64(&self) -> u64 {
+            let mut state = self.state.borrow_mut();
+            state.last_random_number += 1;
+            state.last_random_number
+        }
+
+        fn rename(&self, _source: &Path, _destination: &Path) {
+            unimplemented!()
+            /*
+            self.messages
+                .borrow_mut()
+                .push(Rename(source.to_owned(), destination.to_owned()));
+                */
+        }
+
+        fn remove(&self, _path: &Path) {
+            unimplemented!()
+            /*
+            self.messages.borrow_mut().push(Remove(path.to_owned()));
+            */
+        }
+
+        fn remove_recursively_on_thread(&self, _path: PathBuf) {
+            unimplemented!()
+            /*
+            self.messages
+                .borrow_mut()
+                .push(RemoveRecursively(path.to_owned()));
+                */
+        }
+
+        fn mkdir_recursively(&self, _path: &Path) {
+            unimplemented!()
+            /*
+            self.messages
+                .borrow_mut()
+                .push(MkdirRecursively(path.to_owned()));
+                */
+        }
+
+        fn read_dir(&self, _path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>> {
+            unimplemented!()
+            /*
+            self.messages.borrow_mut().push(ReadDir(path.to_owned()));
+            Box::new(
+                self.directories
+                    .get(path)
+                    .unwrap_or(&vec![])
+                    .clone()
+                    .into_iter(),
+            )
+            */
+        }
+
+        fn create_file(&self, _path: &Path, _content: &[u8]) {
+            unimplemented!()
+            /*
+            self.messages.borrow_mut().push(CreateFile(
+                path.to_owned(),
+                content.to_vec().into_boxed_slice(),
+            ));
+            */
+        }
+
+        fn symlink(&self, _target: &Path, _link: &Path) {
+            unimplemented!()
+            /*
+            self.messages
+                .borrow_mut()
+                .push(Symlink(target.to_owned(), link.to_owned()));
+                */
+        }
+
+        fn metadata(&self, path: &Path) -> Option<FileMetadata> {
+            let root = &self.state.borrow().root;
+            Self::lookup(root, nonempty![root], path).map(|stack| match stack.last() {
+                FsEntry::File { size } => FileMetadata::file(*size),
+                FsEntry::Symlink { target } => {
+                    FileMetadata::symlink(target.len().try_into().unwrap())
+                }
+                FsEntry::Directory { entries } => {
+                    FileMetadata::directory(entries.len().try_into().unwrap())
+                }
+            })
+        }
+
+        fn temp_file(&self, _parent: &Path) -> Self::TempFile {
+            unimplemented!()
+            /*
+            let path = parent.join(format!("{:0>16x}", self.rand_u64()));
+            self.messages.borrow_mut().push(TempFile(path.clone()));
+            TestTempFile {
+                path,
+                messages: self.messages.clone(),
+            }
+            */
+        }
+
+        fn temp_dir(&self, _parent: &Path) -> Self::TempDir {
+            unimplemented!()
+            /*
+            let path = parent.join(format!("{:0>16x}", self.rand_u64()));
+            self.messages.borrow_mut().push(TempDir(path.clone()));
+            TestTempDir {
+                path,
+                messages: self.messages.clone(),
+            }
+            */
+        }
+    }
+
+    #[test]
+    fn test_fs2_rand_u64() {
+        let fs = TestFs2::new(fs! {});
+        assert_eq!(fs.rand_u64(), 1);
+        assert_eq!(fs.rand_u64(), 2);
+        assert_eq!(fs.rand_u64(), 3);
+    }
+
+    #[test]
+    fn test_fs2_metadata_empty() {
+        let fs = TestFs2::new(fs! {});
+        assert_eq!(
+            fs.metadata(Path::new("/")),
+            Some(FileMetadata::directory(0))
+        );
+        assert_eq!(fs.metadata(Path::new("/foo")), None);
+    }
+
+    #[test]
+    fn test_fs2_metadata() {
+        let fs = TestFs2::new(fs! {
+            foo(42),
+            bar {
+                baz -> "/target",
+                root -> "/",
+                a -> "b",
+                b -> "../bar/c",
+                c -> "/bar/d",
+                d -> ".",
+            },
+        });
+        assert_eq!(
+            fs.metadata(Path::new("/")),
+            Some(FileMetadata::directory(2))
+        );
+        assert_eq!(fs.metadata(Path::new("/foo")), Some(FileMetadata::file(42)));
+        assert_eq!(
+            fs.metadata(Path::new("/bar")),
+            Some(FileMetadata::directory(6))
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/bar/baz")),
+            Some(FileMetadata::symlink(7))
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/bar/root/foo")),
+            Some(FileMetadata::file(42))
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/bar/root/bar/a")),
+            Some(FileMetadata::symlink(1))
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/bar/a/baz")),
+            Some(FileMetadata::symlink(7))
+        );
+
+        assert_eq!(fs.metadata(Path::new("/foo2")), None);
+        assert_eq!(fs.metadata(Path::new("/bar/baz/foo")), None);
+        assert_eq!(fs.metadata(Path::new("/bar/baz2")), None);
+        assert_eq!(fs.metadata(Path::new("/bar/baz2/blah")), None);
     }
 }
