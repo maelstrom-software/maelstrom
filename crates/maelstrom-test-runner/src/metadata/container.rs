@@ -12,6 +12,7 @@ use std::{
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]
 pub enum ContainerField {
+    Name,
     Network,
     EnableWritableFileSystem,
     User,
@@ -43,8 +44,15 @@ pub struct TestContainer {
     pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
 }
 
+#[derive(Debug, Default, PartialEq)]
+pub struct NamedTestContainer {
+    pub name: String,
+    pub container: TestContainer,
+}
+
 #[derive(Default)]
 pub struct TestContainerVisitor {
+    name: Option<String>,
     image: Option<String>,
     network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
@@ -65,6 +73,9 @@ impl TestContainerVisitor {
         A: de::MapAccess<'de>,
     {
         match ident {
+            ContainerField::Name => {
+                self.name = Some(map.next_value()?);
+            }
             ContainerField::Network => {
                 self.network = Some(map.next_value()?);
             }
@@ -163,7 +174,7 @@ impl TestContainerVisitor {
         Ok(())
     }
 
-    pub fn into_value(self) -> TestContainer {
+    pub fn into_test_container(self) -> TestContainer {
         TestContainer {
             image: self.image,
             network: self.network,
@@ -179,13 +190,24 @@ impl TestContainerVisitor {
             working_directory: self.working_directory,
         }
     }
+
+    pub fn into_value<E: de::Error>(mut self) -> Result<NamedTestContainer, E> {
+        let name = self
+            .name
+            .take()
+            .ok_or_else(|| E::custom("container missing `name` field"))?;
+        Ok(NamedTestContainer {
+            name,
+            container: self.into_test_container(),
+        })
+    }
 }
 
 impl<'de> de::Visitor<'de> for TestContainerVisitor {
-    type Value = TestContainer;
+    type Value = NamedTestContainer;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "TestContainer")
+        write!(formatter, "NamedTestContainer")
     }
 
     fn visit_map<A>(mut self, mut map: A) -> Result<Self::Value, A::Error>
@@ -196,11 +218,11 @@ impl<'de> de::Visitor<'de> for TestContainerVisitor {
             self.fill_entry(key, &mut map)?;
         }
 
-        Ok(self.into_value())
+        self.into_value()
     }
 }
 
-impl<'de> de::Deserialize<'de> for TestContainer {
+impl<'de> de::Deserialize<'de> for NamedTestContainer {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -222,7 +244,7 @@ mod tests {
     };
     use toml::de::Error as TomlError;
 
-    fn parse_test_container(file: &str) -> Result<TestContainer> {
+    fn parse_named_test_container(file: &str) -> Result<NamedTestContainer> {
         toml::from_str(file).map_err(Error::new)
     }
 
@@ -232,35 +254,65 @@ mod tests {
         assert!(message.starts_with(expected), "message: {message}");
     }
 
-    #[test]
-    fn empty() {
-        assert_eq!(parse_test_container("").unwrap(), TestContainer::default(),);
+    fn container_error_test(toml: &str, error: &str) {
+        assert_toml_error(parse_named_test_container(toml).unwrap_err(), error);
+    }
+
+    fn container_parse_test(toml: &str, expected: NamedTestContainer) {
+        assert_eq!(parse_named_test_container(toml).unwrap(), expected);
     }
 
     #[test]
     fn unknown_field() {
-        assert_toml_error(
-            parse_test_container(
-                r#"
-                unknown = "foo"
-                "#,
-            )
-            .unwrap_err(),
+        container_error_test(
+            r#"
+            unknown = "foo"
+            "#,
             "unknown field `unknown`, expected one of",
         );
     }
 
     #[test]
     fn duplicate_field() {
-        assert_toml_error(
-            parse_test_container(
-                r#"
-                user = "100"
-                user = "100"
-                "#,
-            )
-            .unwrap_err(),
+        container_error_test(
+            r#"
+            user = 100
+            user = 100
+            "#,
             "duplicate key `user`",
+        );
+    }
+
+    #[test]
+    fn missing_name() {
+        container_error_test(
+            r#"
+            user = 100
+            "#,
+            "container missing `name` field",
+        );
+    }
+
+    #[test]
+    fn simple_fields() {
+        container_parse_test(
+            r#"
+            name = "foobar"
+            network = "loopback"
+            enable_writable_file_system = true
+            user = 101
+            group = 202
+            "#,
+            NamedTestContainer {
+                name: "foobar".into(),
+                container: TestContainer {
+                    network: Some(JobNetwork::Loopback),
+                    enable_writable_file_system: Some(true),
+                    user: Some(UserId::from(101)),
+                    group: Some(GroupId::from(202)),
+                    ..Default::default()
+                },
+            },
         );
     }
 }

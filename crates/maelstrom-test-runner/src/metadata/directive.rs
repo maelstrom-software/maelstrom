@@ -142,7 +142,7 @@ where
             self.fill_entry(key, &mut map)?;
         }
 
-        self.value.container = self.container_visitor.into_value();
+        self.value.container = self.container_visitor.into_test_container();
         Ok(self.value)
     }
 }
@@ -162,6 +162,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::container::NamedTestContainer;
     use anyhow::Error;
     use indoc::indoc;
     use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
@@ -176,7 +177,7 @@ mod tests {
         toml::from_str(file).map_err(Error::new)
     }
 
-    fn parse_test_container(file: &str) -> Result<TestContainer> {
+    fn parse_test_container(file: &str) -> Result<NamedTestContainer> {
         toml::from_str(file).map_err(Error::new)
     }
 
@@ -192,7 +193,10 @@ mod tests {
 
     fn directive_or_container_error_test(toml: &str, error: &str) {
         assert_toml_error(parse_test_directive(toml).unwrap_err(), error);
-        assert_toml_error(parse_test_container(toml).unwrap_err(), error);
+
+        let mut toml = toml.to_owned();
+        toml += "\nname = \"test\"";
+        assert_toml_error(parse_test_container(&toml).unwrap_err(), error);
     }
 
     fn directive_parse_test(toml: &str, expected: TestDirective<String>) {
@@ -201,7 +205,13 @@ mod tests {
 
     fn directive_or_container_parse_test(toml: &str, expected: TestDirective<String>) {
         assert_eq!(parse_test_directive(toml).unwrap(), expected);
-        assert_eq!(parse_test_container(toml).unwrap(), expected.container);
+
+        let mut toml = toml.to_owned();
+        toml += "\nname = \"test\"";
+        assert_eq!(
+            parse_test_container(&toml).unwrap().container,
+            expected.container
+        );
     }
 
     #[test]

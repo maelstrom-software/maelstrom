@@ -3,7 +3,7 @@ mod directive;
 
 use crate::TestFilter;
 use anyhow::{anyhow, Context as _, Result};
-use container::TestContainer;
+use container::{NamedTestContainer, TestContainer};
 use directive::TestDirective;
 use maelstrom_base::{GroupId, JobMount, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::{
@@ -23,7 +23,7 @@ pub struct AllMetadata<TestFilterT> {
     #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
     directives: Vec<TestDirective<TestFilterT>>,
     #[serde(default)]
-    containers: Vec<TestContainer>,
+    containers: Vec<NamedTestContainer>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
