@@ -972,7 +972,7 @@ pub fn read_metadata(
     cargo_manifest_options: &ManifestOptions,
 ) -> Result<CargoMetadata> {
     let output = std::process::Command::new("cargo")
-        .args(["metadata", "--format-version=1"])
+        .args(["metadata", "--no-deps", "--format-version=1"])
         .args(cargo_feature_selection_options.iter())
         .args(cargo_manifest_options.iter())
         .output()
