@@ -317,7 +317,7 @@ fn main_app_channel_reader<DepsT: Deps>(
 
 /// Grab introspect data from the client process periodically and send it to the UI. Exit when the
 /// done event has been set.
-fn introspect_loop(done: &Event, client: &impl ClientTrait, ui: UiSender) {
+fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender) {
     loop {
         let Ok(introspect_resp) = client.introspect() else {
             break;

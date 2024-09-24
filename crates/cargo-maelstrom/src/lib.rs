@@ -486,8 +486,6 @@ fn remove_fixture_output_confusing_trailer() {
 }
 
 impl MainAppDeps for DefaultMainAppDeps {
-    type Client = Client;
-
     fn client(&self) -> &Client {
         &self.client
     }

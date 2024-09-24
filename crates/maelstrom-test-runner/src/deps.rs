@@ -1,10 +1,7 @@
 use crate::{metadata::TestMetadata, ui};
 use anyhow::Result;
 use maelstrom_base::Utf8PathBuf;
-use maelstrom_client::{
-    spec::{JobSpec, LayerSpec},
-    ImageSpec, IntrospectResponse, JobStatus,
-};
+use maelstrom_client::{spec::LayerSpec, ImageSpec};
 use maelstrom_util::template::TemplateVars;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
@@ -37,29 +34,6 @@ impl<WaitT: Wait> KillOnDrop<WaitT> {
 impl<WaitT: Wait> Drop for KillOnDrop<WaitT> {
     fn drop(&mut self) {
         let _ = self.wait.kill();
-    }
-}
-
-pub trait ClientTrait: Sync {
-    fn introspect(&self) -> Result<IntrospectResponse>;
-    fn add_job(
-        &self,
-        spec: JobSpec,
-        handler: impl FnMut(Result<JobStatus>) + Send + Sync + Clone + 'static,
-    ) -> Result<()>;
-}
-
-impl ClientTrait for maelstrom_client::Client {
-    fn introspect(&self) -> Result<IntrospectResponse> {
-        maelstrom_client::Client::introspect(self)
-    }
-
-    fn add_job(
-        &self,
-        spec: JobSpec,
-        handler: impl FnMut(Result<JobStatus>) + Send + Sync + Clone + 'static,
-    ) -> Result<()> {
-        maelstrom_client::Client::add_job(self, spec, handler)
     }
 }
 
@@ -431,8 +405,7 @@ impl TestFilter for SimpleFilter {
 }
 
 pub trait MainAppDeps: Sync {
-    type Client: ClientTrait;
-    fn client(&self) -> &Self::Client;
+    fn client(&self) -> &maelstrom_client::Client;
 
     type TestCollector: CollectTests;
     fn test_collector(&self) -> &Self::TestCollector;

@@ -674,8 +674,6 @@ fn remove_fixture_output_example_test() {
 }
 
 impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
-    type Client = Client;
-
     fn client(&self) -> &Client {
         self.client
     }
