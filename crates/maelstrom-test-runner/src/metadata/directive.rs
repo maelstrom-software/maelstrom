@@ -5,28 +5,15 @@ use serde::{de, Deserialize, Deserializer};
 use std::{
     collections::BTreeMap,
     fmt::Display,
-    marker::PhantomData,
     str::{self, FromStr},
 };
 
 #[derive(Debug, PartialEq)]
 pub struct TestDirective<TestFilterT> {
     pub filter: Option<TestFilterT>,
-    // This will be Some if any of the other fields are Some(AllMetadata::Image).
-    pub image: Option<String>,
+    pub container: TestContainer,
     pub include_shared_libraries: Option<bool>,
-    pub network: Option<JobNetwork>,
-    pub enable_writable_file_system: Option<bool>,
-    pub user: Option<UserId>,
-    pub group: Option<GroupId>,
     pub timeout: Option<Option<Timeout>>,
-    pub layers: Option<PossiblyImage<Vec<LayerSpec>>>,
-    pub added_layers: Vec<LayerSpec>,
-    pub mounts: Option<Vec<JobMountForTomlAndJson>>,
-    pub added_mounts: Vec<JobMountForTomlAndJson>,
-    pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
-    pub added_environment: BTreeMap<String, String>,
-    pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
     pub ignore: Option<bool>,
 }
 
@@ -35,20 +22,9 @@ impl<TestFilterT> Default for TestDirective<TestFilterT> {
     fn default() -> Self {
         Self {
             filter: None,
-            image: None,
+            container: Default::default(),
             include_shared_libraries: None,
-            network: None,
-            enable_writable_file_system: None,
-            user: None,
-            group: None,
             timeout: None,
-            layers: None,
-            added_layers: Default::default(),
-            mounts: None,
-            added_mounts: Default::default(),
-            environment: None,
-            added_environment: Default::default(),
-            working_directory: None,
             ignore: None,
         }
     }
@@ -59,11 +35,12 @@ impl<TestFilterT> Default for TestDirective<TestFilterT> {
 enum DirectiveField {
     Filter,
     IncludeSharedLibraries,
+    Timeout,
+    Ignore,
     Network,
     EnableWritableFileSystem,
     User,
     Group,
-    Timeout,
     Mounts,
     AddedMounts,
     Image,
@@ -72,10 +49,95 @@ enum DirectiveField {
     AddedLayers,
     Environment,
     AddedEnvironment,
-    Ignore,
 }
 
-struct DirectiveVisitor<TestFilterT>(PhantomData<TestFilterT>);
+impl DirectiveField {
+    fn into_container_field(self) -> Option<ContainerField> {
+        match self {
+            Self::Filter => None,
+            Self::IncludeSharedLibraries => None,
+            Self::Timeout => None,
+            Self::Ignore => None,
+            Self::Network => Some(ContainerField::Network),
+            Self::EnableWritableFileSystem => Some(ContainerField::EnableWritableFileSystem),
+            Self::User => Some(ContainerField::User),
+            Self::Group => Some(ContainerField::Group),
+            Self::Mounts => Some(ContainerField::Mounts),
+            Self::AddedMounts => Some(ContainerField::AddedMounts),
+            Self::Image => Some(ContainerField::Image),
+            Self::WorkingDirectory => Some(ContainerField::WorkingDirectory),
+            Self::Layers => Some(ContainerField::Layers),
+            Self::AddedLayers => Some(ContainerField::AddedLayers),
+            Self::Environment => Some(ContainerField::Environment),
+            Self::AddedEnvironment => Some(ContainerField::AddedEnvironment),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "snake_case")]
+enum ContainerField {
+    Network,
+    EnableWritableFileSystem,
+    User,
+    Group,
+    Mounts,
+    AddedMounts,
+    Image,
+    WorkingDirectory,
+    Layers,
+    AddedLayers,
+    Environment,
+    AddedEnvironment,
+}
+
+struct DirectiveVisitor<TestFilterT> {
+    value: TestDirective<TestFilterT>,
+    container_visitor: TestContainerVisitor,
+}
+
+impl<TestFilterT> Default for DirectiveVisitor<TestFilterT> {
+    fn default() -> Self {
+        Self {
+            value: Default::default(),
+            container_visitor: Default::default(),
+        }
+    }
+}
+
+impl<TestFilterT: FromStr> DirectiveVisitor<TestFilterT>
+where
+    TestFilterT::Err: Display,
+{
+    fn fill_entry<'de, A>(&mut self, ident: DirectiveField, map: &mut A) -> Result<(), A::Error>
+    where
+        A: de::MapAccess<'de>,
+    {
+        match ident {
+            DirectiveField::Filter => {
+                self.value.filter = Some(
+                    map.next_value::<String>()?
+                        .parse()
+                        .map_err(de::Error::custom)?,
+                );
+            }
+            DirectiveField::IncludeSharedLibraries => {
+                self.value.include_shared_libraries = Some(map.next_value()?);
+            }
+            DirectiveField::Timeout => {
+                self.value.timeout = Some(Timeout::new(map.next_value()?));
+            }
+            DirectiveField::Ignore => {
+                self.value.ignore = Some(map.next_value()?);
+            }
+            c => {
+                self.container_visitor
+                    .fill_entry(c.into_container_field().unwrap(), map)?;
+            }
+        }
+        Ok(())
+    }
+}
 
 impl<'de, TestFilterT: FromStr> de::Visitor<'de> for DirectiveVisitor<TestFilterT>
 where
@@ -87,158 +149,16 @@ where
         write!(formatter, "TestDirective")
     }
 
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    fn visit_map<A>(mut self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: de::MapAccess<'de>,
     {
-        let mut filter = None;
-        let mut include_shared_libraries = None;
-        let mut network = None;
-        let mut enable_writable_file_system = None;
-        let mut user = None;
-        let mut group = None;
-        let mut timeout = None;
-        let mut mounts = None;
-        let mut added_mounts = None;
-        let mut image = None;
-        let mut working_directory = None;
-        let mut layers = None;
-        let mut added_layers = None;
-        let mut environment = None;
-        let mut added_environment = None;
-        let mut ignore = None;
         while let Some(key) = map.next_key()? {
-            match key {
-                DirectiveField::Filter => {
-                    filter = Some(
-                        map.next_value::<String>()?
-                            .parse()
-                            .map_err(de::Error::custom)?,
-                    );
-                }
-                DirectiveField::IncludeSharedLibraries => {
-                    include_shared_libraries = Some(map.next_value()?);
-                }
-                DirectiveField::Network => {
-                    network = Some(map.next_value()?);
-                }
-                DirectiveField::EnableWritableFileSystem => {
-                    enable_writable_file_system = Some(map.next_value()?);
-                }
-                DirectiveField::User => {
-                    user = Some(map.next_value()?);
-                }
-                DirectiveField::Group => {
-                    group = Some(map.next_value()?);
-                }
-                DirectiveField::Timeout => {
-                    timeout = Some(Timeout::new(map.next_value()?));
-                }
-                DirectiveField::Mounts => {
-                    incompatible(
-                        &added_mounts,
-                        "field `mounts` cannot be set after `added_mounts`",
-                    )?;
-                    mounts = Some(map.next_value()?);
-                }
-                DirectiveField::AddedMounts => {
-                    added_mounts = Some(map.next_value()?);
-                }
-                DirectiveField::Image => {
-                    let i = map.next_value::<Image>()?;
-                    image = Some(i.name);
-                    for use_ in i.use_ {
-                        match use_ {
-                            ImageUse::WorkingDirectory => {
-                                incompatible(
-                                    &working_directory,
-                                    "field `image` cannot use `working_directory` if field `working_directory` is also set",
-                                )?;
-                                working_directory = Some(PossiblyImage::Image);
-                            }
-                            ImageUse::Layers => {
-                                incompatible(
-                                    &layers,
-                                    "field `image` cannot use `layers` if field `layers` is also set",
-                                )?;
-                                incompatible(
-                                    &added_layers,
-                                    "field `image` that uses `layers` cannot be set after `added_layers`",
-                                )?;
-                                layers = Some(PossiblyImage::Image);
-                            }
-                            ImageUse::Environment => {
-                                incompatible(
-                                    &environment,
-                                    "field `image` cannot use `environment` if field `environment` is also set",
-                                )?;
-                                incompatible(
-                                    &added_environment,
-                                    "field `image` that uses `environment` cannot be set after `added_environment`",
-                                )?;
-                                environment = Some(PossiblyImage::Image);
-                            }
-                        }
-                    }
-                }
-                DirectiveField::WorkingDirectory => {
-                    incompatible(
-                        &working_directory,
-                        "field `working_directory` cannot be set after `image` field that uses `working_directory`",
-                    )?;
-                    working_directory = Some(PossiblyImage::Explicit(map.next_value()?));
-                }
-                DirectiveField::Layers => {
-                    incompatible(
-                        &layers,
-                        "field `layers` cannot be set after `image` field that uses `layers`",
-                    )?;
-                    incompatible(
-                        &added_layers,
-                        "field `layers` cannot be set after `added_layers`",
-                    )?;
-                    layers = Some(PossiblyImage::Explicit(map.next_value()?));
-                }
-                DirectiveField::AddedLayers => {
-                    added_layers = Some(map.next_value()?);
-                }
-                DirectiveField::Environment => {
-                    incompatible(
-                        &environment,
-                        "field `environment` cannot be set after `image` field that uses `environment`",
-                    )?;
-                    incompatible(
-                        &added_environment,
-                        "field `environment` cannot be set after `added_environment`",
-                    )?;
-                    environment = Some(PossiblyImage::Explicit(map.next_value()?));
-                }
-                DirectiveField::AddedEnvironment => {
-                    added_environment = Some(map.next_value()?);
-                }
-                DirectiveField::Ignore => {
-                    ignore = Some(map.next_value()?);
-                }
-            }
+            self.fill_entry(key, &mut map)?;
         }
-        Ok(TestDirective {
-            filter,
-            include_shared_libraries,
-            network,
-            enable_writable_file_system,
-            user,
-            group,
-            timeout,
-            layers,
-            added_layers: added_layers.unwrap_or_default(),
-            mounts,
-            added_mounts: added_mounts.unwrap_or_default(),
-            image,
-            working_directory,
-            environment,
-            added_environment: added_environment.unwrap_or_default(),
-            ignore,
-        })
+
+        self.value.container = self.container_visitor.into_value();
+        Ok(self.value)
     }
 }
 
@@ -250,7 +170,190 @@ where
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_any(DirectiveVisitor::<TestFilterT>(PhantomData))
+        deserializer.deserialize_any(DirectiveVisitor::<TestFilterT>::default())
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct TestContainer {
+    // This will be Some if any of the other fields are Some(AllMetadata::Image).
+    pub image: Option<String>,
+    pub network: Option<JobNetwork>,
+    pub enable_writable_file_system: Option<bool>,
+    pub user: Option<UserId>,
+    pub group: Option<GroupId>,
+    pub layers: Option<PossiblyImage<Vec<LayerSpec>>>,
+    pub added_layers: Vec<LayerSpec>,
+    pub mounts: Option<Vec<JobMountForTomlAndJson>>,
+    pub added_mounts: Vec<JobMountForTomlAndJson>,
+    pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
+    pub added_environment: BTreeMap<String, String>,
+    pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
+}
+
+#[derive(Default)]
+struct TestContainerVisitor {
+    image: Option<String>,
+    network: Option<JobNetwork>,
+    enable_writable_file_system: Option<bool>,
+    user: Option<UserId>,
+    group: Option<GroupId>,
+    layers: Option<PossiblyImage<Vec<LayerSpec>>>,
+    added_layers: Option<Vec<LayerSpec>>,
+    mounts: Option<Vec<JobMountForTomlAndJson>>,
+    added_mounts: Option<Vec<JobMountForTomlAndJson>>,
+    environment: Option<PossiblyImage<BTreeMap<String, String>>>,
+    added_environment: Option<BTreeMap<String, String>>,
+    working_directory: Option<PossiblyImage<Utf8PathBuf>>,
+}
+
+impl TestContainerVisitor {
+    fn fill_entry<'de, A>(&mut self, ident: ContainerField, map: &mut A) -> Result<(), A::Error>
+    where
+        A: de::MapAccess<'de>,
+    {
+        match ident {
+            ContainerField::Network => {
+                self.network = Some(map.next_value()?);
+            }
+            ContainerField::EnableWritableFileSystem => {
+                self.enable_writable_file_system = Some(map.next_value()?);
+            }
+            ContainerField::User => {
+                self.user = Some(map.next_value()?);
+            }
+            ContainerField::Group => {
+                self.group = Some(map.next_value()?);
+            }
+            ContainerField::Mounts => {
+                incompatible(
+                    &self.added_mounts,
+                    "field `mounts` cannot be set after `added_mounts`",
+                )?;
+                self.mounts = Some(map.next_value()?);
+            }
+            ContainerField::AddedMounts => {
+                self.added_mounts = Some(map.next_value()?);
+            }
+            ContainerField::Image => {
+                let i = map.next_value::<Image>()?;
+                self.image = Some(i.name);
+                for use_ in i.use_ {
+                    match use_ {
+                        ImageUse::WorkingDirectory => {
+                            incompatible(
+                                &self.working_directory,
+                                "field `image` cannot use `working_directory` if field `working_directory` is also set",
+                            )?;
+                            self.working_directory = Some(PossiblyImage::Image);
+                        }
+                        ImageUse::Layers => {
+                            incompatible(
+                                &self.layers,
+                                "field `image` cannot use `layers` if field `layers` is also set",
+                            )?;
+                            incompatible(
+                                &self.added_layers,
+                                "field `image` that uses `layers` cannot be set after `added_layers`",
+                            )?;
+                            self.layers = Some(PossiblyImage::Image);
+                        }
+                        ImageUse::Environment => {
+                            incompatible(
+                                &self.environment,
+                                "field `image` cannot use `environment` if field `environment` is also set",
+                            )?;
+                            incompatible(
+                                &self.added_environment,
+                                "field `image` that uses `environment` cannot be set after `added_environment`",
+                            )?;
+                            self.environment = Some(PossiblyImage::Image);
+                        }
+                    }
+                }
+            }
+            ContainerField::WorkingDirectory => {
+                incompatible(
+                    &self.working_directory,
+                    "field `working_directory` cannot be set after `image` field that uses `working_directory`",
+                )?;
+                self.working_directory = Some(PossiblyImage::Explicit(map.next_value()?));
+            }
+            ContainerField::Layers => {
+                incompatible(
+                    &self.layers,
+                    "field `layers` cannot be set after `image` field that uses `layers`",
+                )?;
+                incompatible(
+                    &self.added_layers,
+                    "field `layers` cannot be set after `added_layers`",
+                )?;
+                self.layers = Some(PossiblyImage::Explicit(map.next_value()?));
+            }
+            ContainerField::AddedLayers => {
+                self.added_layers = Some(map.next_value()?);
+            }
+            ContainerField::Environment => {
+                incompatible(
+                    &self.environment,
+                    "field `environment` cannot be set after `image` field that uses `environment`",
+                )?;
+                incompatible(
+                    &self.added_environment,
+                    "field `environment` cannot be set after `added_environment`",
+                )?;
+                self.environment = Some(PossiblyImage::Explicit(map.next_value()?));
+            }
+            ContainerField::AddedEnvironment => {
+                self.added_environment = Some(map.next_value()?);
+            }
+        }
+        Ok(())
+    }
+
+    fn into_value(self) -> TestContainer {
+        TestContainer {
+            image: self.image,
+            network: self.network,
+            enable_writable_file_system: self.enable_writable_file_system,
+            user: self.user,
+            group: self.group,
+            layers: self.layers,
+            added_layers: self.added_layers.unwrap_or_default(),
+            mounts: self.mounts,
+            added_mounts: self.added_mounts.unwrap_or_default(),
+            environment: self.environment,
+            added_environment: self.added_environment.unwrap_or_default(),
+            working_directory: self.working_directory,
+        }
+    }
+}
+
+impl<'de> de::Visitor<'de> for TestContainerVisitor {
+    type Value = TestContainer;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "TestContainer")
+    }
+
+    fn visit_map<A>(mut self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: de::MapAccess<'de>,
+    {
+        while let Some(key) = map.next_key()? {
+            self.fill_entry(key, &mut map)?;
+        }
+
+        Ok(self.into_value())
+    }
+}
+
+impl<'de> de::Deserialize<'de> for TestContainer {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(TestContainerVisitor::default())
     }
 }
 
@@ -331,11 +434,14 @@ mod tests {
                         .unwrap()
                 ),
                 include_shared_libraries: Some(true),
-                network: Some(JobNetwork::Loopback),
-                enable_writable_file_system: Some(true),
-                user: Some(UserId::from(101)),
-                group: Some(GroupId::from(202)),
                 timeout: Some(Timeout::new(1)),
+                container: TestContainer {
+                    network: Some(JobNetwork::Loopback),
+                    enable_writable_file_system: Some(true),
+                    user: Some(UserId::from(101)),
+                    group: Some(GroupId::from(202)),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -376,26 +482,29 @@ mod tests {
             "#})
             .unwrap(),
             TestDirective {
-                mounts: Some(vec![
-                    JobMountForTomlAndJson::Proc {
-                        mount_point: non_root_utf8_path_buf!("/proc")
-                    },
-                    JobMountForTomlAndJson::Bind {
-                        mount_point: non_root_utf8_path_buf!("/bind"),
-                        local_path: utf8_path_buf!("/local"),
-                        read_only: false,
-                    },
-                    JobMountForTomlAndJson::Bind {
-                        mount_point: non_root_utf8_path_buf!("/bind2"),
-                        local_path: utf8_path_buf!("/local2"),
-                        read_only: true,
-                    },
-                    JobMountForTomlAndJson::Devices {
-                        devices: enum_set!(
-                            JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
-                        ),
-                    },
-                ]),
+                container: TestContainer {
+                    mounts: Some(vec![
+                        JobMountForTomlAndJson::Proc {
+                            mount_point: non_root_utf8_path_buf!("/proc")
+                        },
+                        JobMountForTomlAndJson::Bind {
+                            mount_point: non_root_utf8_path_buf!("/bind"),
+                            local_path: utf8_path_buf!("/local"),
+                            read_only: false,
+                        },
+                        JobMountForTomlAndJson::Bind {
+                            mount_point: non_root_utf8_path_buf!("/bind2"),
+                            local_path: utf8_path_buf!("/local2"),
+                            read_only: true,
+                        },
+                        JobMountForTomlAndJson::Devices {
+                            devices: enum_set!(
+                                JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
+                            ),
+                        },
+                    ]),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -413,19 +522,22 @@ mod tests {
             "#})
             .unwrap(),
             TestDirective {
-                added_mounts: vec![
-                    JobMountForTomlAndJson::Proc { mount_point: non_root_utf8_path_buf!("/proc") },
-                    JobMountForTomlAndJson::Bind {
-                        mount_point: non_root_utf8_path_buf!("/bind"),
-                        local_path: utf8_path_buf!("/local"),
-                        read_only: true,
-                    },
-                    JobMountForTomlAndJson::Devices {
-                        devices: enum_set!(
-                            JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
-                        ),
-                    },
-                ],
+                container: TestContainer {
+                    added_mounts: vec![
+                        JobMountForTomlAndJson::Proc { mount_point: non_root_utf8_path_buf!("/proc") },
+                        JobMountForTomlAndJson::Bind {
+                            mount_point: non_root_utf8_path_buf!("/bind"),
+                            local_path: utf8_path_buf!("/local"),
+                            read_only: true,
+                        },
+                        JobMountForTomlAndJson::Devices {
+                            devices: enum_set!(
+                                JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
+                            ),
+                        },
+                    ],
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -440,12 +552,15 @@ mod tests {
             "#})
             .unwrap(),
             TestDirective {
-                mounts: Some(vec![JobMountForTomlAndJson::Proc {
-                    mount_point: non_root_utf8_path_buf!("/proc"),
-                }]),
-                added_mounts: vec![JobMountForTomlAndJson::Tmp {
-                    mount_point: non_root_utf8_path_buf!("/tmp"),
-                }],
+                container: TestContainer {
+                    mounts: Some(vec![JobMountForTomlAndJson::Proc {
+                        mount_point: non_root_utf8_path_buf!("/proc"),
+                    }]),
+                    added_mounts: vec![JobMountForTomlAndJson::Tmp {
+                        mount_point: non_root_utf8_path_buf!("/tmp"),
+                    }],
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -515,11 +630,14 @@ mod tests {
             "#})
             .unwrap(),
             TestDirective {
-                mounts: Some(vec![JobMountForTomlAndJson::Bind {
-                    mount_point: non_root_utf8_path_buf!("/bind"),
-                    local_path: utf8_path_buf!("/a"),
-                    read_only: false,
-                }]),
+                container: TestContainer {
+                    mounts: Some(vec![JobMountForTomlAndJson::Bind {
+                        mount_point: non_root_utf8_path_buf!("/bind"),
+                        local_path: utf8_path_buf!("/a"),
+                        read_only: false,
+                    }]),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -564,7 +682,10 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                working_directory: Some(PossiblyImage::Explicit("/foo".into())),
+                container: TestContainer {
+                    working_directory: Some(PossiblyImage::Explicit("/foo".into())),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -580,9 +701,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                layers: Some(PossiblyImage::Image),
-                environment: Some(PossiblyImage::Image),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    layers: Some(PossiblyImage::Image),
+                    environment: Some(PossiblyImage::Image),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -598,9 +722,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                layers: Some(PossiblyImage::Image),
-                environment: Some(PossiblyImage::Image),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    layers: Some(PossiblyImage::Image),
+                    environment: Some(PossiblyImage::Image),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -616,9 +743,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Image),
-                layers: Some(PossiblyImage::Image),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    working_directory: Some(PossiblyImage::Image),
+                    layers: Some(PossiblyImage::Image),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -635,9 +765,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Explicit("/foo".into())),
-                layers: Some(PossiblyImage::Image),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    working_directory: Some(PossiblyImage::Explicit("/foo".into())),
+                    layers: Some(PossiblyImage::Image),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -654,9 +787,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Explicit("/foo".into())),
-                layers: Some(PossiblyImage::Image),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    working_directory: Some(PossiblyImage::Explicit("/foo".into())),
+                    layers: Some(PossiblyImage::Image),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -700,7 +836,10 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -716,7 +855,10 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![glob_layer!("foo*.bin")])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![glob_layer!("foo*.bin")])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -728,10 +870,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
-                    "foo*.bin",
-                    strip_prefix = "a"
-                )])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
+                        "foo*.bin",
+                        strip_prefix = "a"
+                    )])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -743,10 +888,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
-                    "foo*.bin",
-                    prepend_prefix = "b"
-                )])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
+                        "foo*.bin",
+                        prepend_prefix = "b"
+                    )])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -758,10 +906,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
-                    "foo*.bin",
-                    canonicalize = true
-                )])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
+                        "foo*.bin",
+                        canonicalize = true
+                    )])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -777,9 +928,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![paths_layer!([
-                    "foo.bin", "bar.bin"
-                ])])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![paths_layer!([
+                        "foo.bin", "bar.bin"
+                    ])])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -791,10 +945,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
-                    ["foo.bin", "bar.bin"],
-                    strip_prefix = "a"
-                )])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
+                        ["foo.bin", "bar.bin"],
+                        strip_prefix = "a"
+                    )])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -806,10 +963,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
-                    ["foo.bin", "bar.bin"],
-                    prepend_prefix = "a"
-                )])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
+                        ["foo.bin", "bar.bin"],
+                        prepend_prefix = "a"
+                    )])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -821,10 +981,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
-                    ["foo.bin", "bar.bin"],
-                    canonicalize = true
-                )])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
+                        ["foo.bin", "bar.bin"],
+                        canonicalize = true
+                    )])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -840,9 +1003,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Stubs {
-                    stubs: vec!["/foo/bar".into(), "/bin/{baz,qux}/".into()]
-                }])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Stubs {
+                        stubs: vec!["/foo/bar".into(), "/bin/{baz,qux}/".into()]
+                    }])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -858,12 +1024,15 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Symlinks {
-                    symlinks: vec![SymlinkSpec {
-                        link: "/hi".into(),
-                        target: "/there".into()
-                    }],
-                }])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Symlinks {
+                        symlinks: vec![SymlinkSpec {
+                            link: "/hi".into(),
+                            target: "/there".into()
+                        }],
+                    }])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -881,10 +1050,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!([
-                    "/bin/bash",
-                    "/bin/sh"
-                ])])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!([
+                        "/bin/bash",
+                        "/bin/sh"
+                    ])])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -898,10 +1070,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
-                    ["/bin/bash", "/bin/sh"],
-                    prepend_prefix = "/usr"
-                )])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
+                        ["/bin/bash", "/bin/sh"],
+                        prepend_prefix = "/usr"
+                    )])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -915,10 +1090,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
-                    ["/bin/bash", "/bin/sh"],
-                    canonicalize = true
-                )])),
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
+                        ["/bin/bash", "/bin/sh"],
+                        canonicalize = true
+                    )])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -934,9 +1112,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Image),
-                layers: Some(PossiblyImage::Image),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    working_directory: Some(PossiblyImage::Image),
+                    layers: Some(PossiblyImage::Image),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -953,9 +1134,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Image),
-                layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    working_directory: Some(PossiblyImage::Image),
+                    layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -972,9 +1156,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Image),
-                layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    working_directory: Some(PossiblyImage::Image),
+                    layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1018,7 +1205,10 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                added_layers: vec![tar_layer!("foo.tar")],
+                container: TestContainer {
+                    added_layers: vec![tar_layer!("foo.tar")],
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1035,8 +1225,11 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
-                added_layers: vec![tar_layer!("bar.tar")],
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                    added_layers: vec![tar_layer!("bar.tar")],
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1053,9 +1246,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                layers: Some(PossiblyImage::Image),
-                added_layers: vec![tar_layer!("foo.tar")],
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    layers: Some(PossiblyImage::Image),
+                    added_layers: vec![tar_layer!("foo.tar")],
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1099,10 +1295,13 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
-                    string!("FOO"),
-                    string!("foo")
-                )]))),
+                container: TestContainer {
+                    environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
+                        string!("FOO"),
+                        string!("foo")
+                    )]))),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1118,9 +1317,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Image),
-                environment: Some(PossiblyImage::Image),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    working_directory: Some(PossiblyImage::Image),
+                    environment: Some(PossiblyImage::Image),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1137,12 +1339,15 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Image),
-                environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
-                    string!("FOO"),
-                    string!("foo")
-                )]))),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    working_directory: Some(PossiblyImage::Image),
+                    environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
+                        string!("FOO"),
+                        string!("foo")
+                    )]))),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1159,12 +1364,15 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Image),
-                environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
-                    string!("FOO"),
-                    string!("foo")
-                )]))),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    working_directory: Some(PossiblyImage::Image),
+                    environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
+                        string!("FOO"),
+                        string!("foo")
+                    )]))),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1208,7 +1416,10 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
+                container: TestContainer {
+                    added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1225,11 +1436,14 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
-                    string!("FOO"),
-                    string!("foo")
-                )]))),
-                added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
+                container: TestContainer {
+                    environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
+                        string!("FOO"),
+                        string!("foo")
+                    )]))),
+                    added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );
@@ -1246,9 +1460,12 @@ mod tests {
             )
             .unwrap(),
             TestDirective {
-                image: Some(string!("rust")),
-                environment: Some(PossiblyImage::Image),
-                added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    environment: Some(PossiblyImage::Image),
+                    added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
+                    ..Default::default()
+                },
                 ..Default::default()
             }
         );

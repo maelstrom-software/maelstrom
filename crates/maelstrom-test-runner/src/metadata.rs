@@ -53,44 +53,28 @@ impl TestMetadata {
         }
     }
 
-    fn try_fold<TestFilterT>(
-        mut self,
-        &TestDirective {
-            filter: _,
-            ref image,
-            include_shared_libraries,
-            network,
-            enable_writable_file_system,
-            user,
-            group,
-            timeout,
-            ref layers,
-            ref added_layers,
-            ref mounts,
-            ref added_mounts,
-            ref environment,
-            ref added_environment,
-            ref working_directory,
-            ignore,
-        }: &TestDirective<TestFilterT>,
-    ) -> Result<Self> {
-        let mut image = image.as_ref().map(|image| ImageSpec {
+    fn try_fold<TestFilterT>(mut self, directive: &TestDirective<TestFilterT>) -> Result<Self> {
+        let mut image = directive.container.image.as_ref().map(|image| ImageSpec {
             name: image.into(),
             use_environment: false,
             use_layers: false,
             use_working_directory: false,
         });
 
-        self.include_shared_libraries = include_shared_libraries.or(self.include_shared_libraries);
-        self.network = network.unwrap_or(self.network);
-        self.enable_writable_file_system =
-            enable_writable_file_system.unwrap_or(self.enable_writable_file_system);
-        self.user = user.or(self.user);
-        self.group = group.or(self.group);
-        self.timeout = timeout.unwrap_or(self.timeout);
-        self.ignore = ignore.unwrap_or(self.ignore);
+        self.include_shared_libraries = directive
+            .include_shared_libraries
+            .or(self.include_shared_libraries);
+        self.network = directive.container.network.unwrap_or(self.network);
+        self.enable_writable_file_system = directive
+            .container
+            .enable_writable_file_system
+            .unwrap_or(self.enable_writable_file_system);
+        self.user = directive.container.user.or(self.user);
+        self.group = directive.container.group.or(self.group);
+        self.timeout = directive.timeout.unwrap_or(self.timeout);
+        self.ignore = directive.ignore.unwrap_or(self.ignore);
 
-        match layers {
+        match &directive.container.layers {
             Some(PossiblyImage::Explicit(layers)) => {
                 self.layers = layers.to_vec();
             }
@@ -101,15 +85,26 @@ impl TestMetadata {
             }
             None => {}
         }
-        self.layers.extend(added_layers.iter().cloned());
+        self.layers
+            .extend(directive.container.added_layers.iter().cloned());
 
-        self.mounts = mounts.as_ref().map_or(self.mounts, |mounts| {
-            mounts.iter().cloned().map(Into::into).collect()
-        });
-        self.mounts
-            .extend(added_mounts.iter().cloned().map(Into::into));
+        self.mounts = directive
+            .container
+            .mounts
+            .as_ref()
+            .map_or(self.mounts, |mounts| {
+                mounts.iter().cloned().map(Into::into).collect()
+            });
+        self.mounts.extend(
+            directive
+                .container
+                .added_mounts
+                .iter()
+                .cloned()
+                .map(Into::into),
+        );
 
-        match environment {
+        match &directive.container.environment {
             Some(PossiblyImage::Explicit(environment)) => {
                 self.environment.push(EnvironmentSpec {
                     vars: environment.clone(),
@@ -122,14 +117,14 @@ impl TestMetadata {
             }
             None => {}
         }
-        if !added_environment.is_empty() {
+        if !directive.container.added_environment.is_empty() {
             self.environment.push(EnvironmentSpec {
-                vars: added_environment.clone(),
+                vars: directive.container.added_environment.clone(),
                 extend: true,
             });
         }
 
-        match working_directory {
+        match &directive.container.working_directory {
             Some(PossiblyImage::Explicit(working_directory)) => {
                 self.working_directory = Some(working_directory.clone());
             }
@@ -141,7 +136,7 @@ impl TestMetadata {
             None => {}
         }
 
-        if image.is_some() {
+        if directive.container.image.is_some() {
             self.image = image;
         }
 
@@ -166,12 +161,12 @@ where
 {
     pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
         for directive in &mut self.directives {
-            if let Some(PossiblyImage::Explicit(layers)) = &mut directive.layers {
+            if let Some(PossiblyImage::Explicit(layers)) = &mut directive.container.layers {
                 for layer in layers {
                     layer.replace_template_vars(vars)?;
                 }
             }
-            for added_layer in &mut directive.added_layers {
+            for added_layer in &mut directive.container.added_layers {
                 added_layer.replace_template_vars(vars)?;
             }
         }
@@ -201,13 +196,16 @@ where
     pub fn get_all_images(&self) -> Vec<ImageSpec> {
         self.directives
             .iter()
-            .filter_map(|d| {
-                d.image.as_ref().map(|name| ImageSpec {
+            .filter_map(|directive| {
+                directive.container.image.as_ref().map(|name| ImageSpec {
                     name: name.into(),
-                    use_environment: matches!(&d.environment, Some(PossiblyImage::Image)),
-                    use_layers: matches!(&d.layers, Some(PossiblyImage::Image)),
+                    use_environment: matches!(
+                        &directive.container.environment,
+                        Some(PossiblyImage::Image)
+                    ),
+                    use_layers: matches!(&directive.container.layers, Some(PossiblyImage::Image)),
                     use_working_directory: matches!(
-                        &d.working_directory,
+                        &directive.container.working_directory,
                         Some(PossiblyImage::Image)
                     ),
                 })
