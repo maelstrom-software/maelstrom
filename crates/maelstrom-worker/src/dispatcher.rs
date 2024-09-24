@@ -826,7 +826,6 @@ mod tests {
 
     use TestMessage::*;
 
-    #[derive(Debug)]
     struct TestState {
         messages: Vec<TestMessage>,
         get_artifact_returns: HashMap<cache::Key, GetArtifact>,

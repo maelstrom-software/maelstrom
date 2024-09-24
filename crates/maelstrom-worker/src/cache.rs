@@ -12,7 +12,7 @@ use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
     ffi::OsString,
-    fmt::{self, Debug},
+    fmt::{self, Debug, Formatter},
     fs::{self, File},
     io::Write as _,
     iter::IntoIterator,
@@ -115,7 +115,7 @@ impl From<fs::Metadata> for FileMetadata {
 }
 
 /// Dependencies that [`Cache`] has on the file system.
-pub trait Fs: Debug {
+pub trait Fs {
     /// Return a random u64. This is used for creating unique path names in the directory removal
     /// code path.
     fn rand_u64(&self) -> u64;
@@ -201,7 +201,6 @@ impl FsTempDir for StdTempDir {
 }
 
 /// The standard implementation of CacheFs that uses [std] and [rand].
-#[derive(Debug)]
 pub struct StdFs;
 
 impl Fs for StdFs {
@@ -287,11 +286,35 @@ pub enum GetArtifact {
 }
 
 /// Type passed to [`Cache::got_artifact_success`].
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum GotArtifact<FsT: Fs> {
     Symlink { target: PathBuf },
     File { source: FsT::TempFile },
     Directory { source: FsT::TempDir, size: u64 },
+}
+
+impl<FsT: Fs> Debug for GotArtifact<FsT>
+where
+    FsT::TempFile: Debug,
+    FsT::TempDir: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Symlink { target } => f
+                .debug_struct("GotArtifact::Symlink")
+                .field("target", target)
+                .finish(),
+            Self::File { source } => f
+                .debug_struct("GotArtifact::File")
+                .field("source", source)
+                .finish(),
+            Self::Directory { source, size } => f
+                .debug_struct("GotArtifact::File")
+                .field("source", source)
+                .field("size", size)
+                .finish(),
+        }
+    }
 }
 
 impl<FsT: Fs> Eq for GotArtifact<FsT>
@@ -921,12 +944,6 @@ mod tests {
         directories: HashMap<PathBuf, Vec<(PathBuf, FileMetadata)>>,
         metadata: HashMap<PathBuf, FileMetadata>,
         last_random_number: Cell<u64>,
-    }
-
-    impl Debug for TestFs {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-            f.debug_struct("TestFs").finish()
-        }
     }
 
     impl Fs for TestFs {
