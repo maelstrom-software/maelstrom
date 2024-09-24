@@ -1,7 +1,9 @@
+mod container;
 mod directive;
 
 use crate::TestFilter;
 use anyhow::{anyhow, Context as _, Result};
+use container::TestContainer;
 use directive::TestDirective;
 use maelstrom_base::{GroupId, JobMount, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::{
@@ -20,10 +22,12 @@ use std::{
 pub struct AllMetadata<TestFilterT> {
     #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
     directives: Vec<TestDirective<TestFilterT>>,
+    #[serde(default)]
+    containers: Vec<TestContainer>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TestContainer {
+pub struct TestMetadataContainer {
     pub image: Option<ImageSpec>,
     pub network: JobNetwork,
     pub enable_writable_file_system: bool,
@@ -35,8 +39,8 @@ pub struct TestContainer {
     pub mounts: Vec<JobMount>,
 }
 
-impl TestContainer {
-    fn try_fold(mut self, container: &directive::TestContainer) -> Result<Self> {
+impl TestMetadataContainer {
+    fn try_fold(mut self, container: &TestContainer) -> Result<Self> {
         let mut image = container.image.as_ref().map(|image| ImageSpec {
             name: image.into(),
             use_environment: false,
@@ -112,7 +116,7 @@ impl TestContainer {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TestMetadata {
-    pub container: TestContainer,
+    pub container: TestMetadataContainer,
     include_shared_libraries: Option<bool>,
     pub timeout: Option<Timeout>,
     pub ignore: bool,
@@ -316,7 +320,8 @@ mod tests {
         assert_eq!(
             res,
             AllMetadata {
-                directives: vec![TestDirective::default()]
+                directives: vec![TestDirective::default()],
+                containers: vec![]
             }
         );
 
@@ -340,7 +345,8 @@ mod tests {
         assert_eq!(
             res,
             AllMetadata {
-                directives: vec![TestDirective::default()]
+                directives: vec![TestDirective::default()],
+                containers: vec![]
             }
         );
         assert_eq!(log_lines.len(), 0, "{log_lines:?}");
@@ -349,9 +355,12 @@ mod tests {
     #[test]
     fn default() {
         assert_eq!(
-            AllMetadata::<SimpleFilter> { directives: vec![] }
-                .get_metadata_for_test(&"mod".into(), &"mod".into(), ("foo", &NoCaseMetadata))
-                .unwrap(),
+            AllMetadata::<SimpleFilter> {
+                directives: vec![],
+                containers: vec![]
+            }
+            .get_metadata_for_test(&"mod".into(), &"mod".into(), ("foo", &NoCaseMetadata))
+            .unwrap(),
             TestMetadata::default(),
         );
     }

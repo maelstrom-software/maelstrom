@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+use super::container::{ContainerField, TestContainer, TestContainerVisitor};
 use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{incompatible, Image, ImageUse, LayerSpec, PossiblyImage};
@@ -72,23 +74,6 @@ impl DirectiveField {
             Self::AddedEnvironment => Some(ContainerField::AddedEnvironment),
         }
     }
-}
-
-#[derive(Deserialize)]
-#[serde(field_identifier, rename_all = "snake_case")]
-enum ContainerField {
-    Network,
-    EnableWritableFileSystem,
-    User,
-    Group,
-    Mounts,
-    AddedMounts,
-    Image,
-    WorkingDirectory,
-    Layers,
-    AddedLayers,
-    Environment,
-    AddedEnvironment,
 }
 
 struct DirectiveVisitor<TestFilterT> {
@@ -174,189 +159,6 @@ where
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
-pub struct TestContainer {
-    // This will be Some if any of the other fields are Some(AllMetadata::Image).
-    pub image: Option<String>,
-    pub network: Option<JobNetwork>,
-    pub enable_writable_file_system: Option<bool>,
-    pub user: Option<UserId>,
-    pub group: Option<GroupId>,
-    pub layers: Option<PossiblyImage<Vec<LayerSpec>>>,
-    pub added_layers: Vec<LayerSpec>,
-    pub mounts: Option<Vec<JobMountForTomlAndJson>>,
-    pub added_mounts: Vec<JobMountForTomlAndJson>,
-    pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
-    pub added_environment: BTreeMap<String, String>,
-    pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
-}
-
-#[derive(Default)]
-struct TestContainerVisitor {
-    image: Option<String>,
-    network: Option<JobNetwork>,
-    enable_writable_file_system: Option<bool>,
-    user: Option<UserId>,
-    group: Option<GroupId>,
-    layers: Option<PossiblyImage<Vec<LayerSpec>>>,
-    added_layers: Option<Vec<LayerSpec>>,
-    mounts: Option<Vec<JobMountForTomlAndJson>>,
-    added_mounts: Option<Vec<JobMountForTomlAndJson>>,
-    environment: Option<PossiblyImage<BTreeMap<String, String>>>,
-    added_environment: Option<BTreeMap<String, String>>,
-    working_directory: Option<PossiblyImage<Utf8PathBuf>>,
-}
-
-impl TestContainerVisitor {
-    fn fill_entry<'de, A>(&mut self, ident: ContainerField, map: &mut A) -> Result<(), A::Error>
-    where
-        A: de::MapAccess<'de>,
-    {
-        match ident {
-            ContainerField::Network => {
-                self.network = Some(map.next_value()?);
-            }
-            ContainerField::EnableWritableFileSystem => {
-                self.enable_writable_file_system = Some(map.next_value()?);
-            }
-            ContainerField::User => {
-                self.user = Some(map.next_value()?);
-            }
-            ContainerField::Group => {
-                self.group = Some(map.next_value()?);
-            }
-            ContainerField::Mounts => {
-                incompatible(
-                    &self.added_mounts,
-                    "field `mounts` cannot be set after `added_mounts`",
-                )?;
-                self.mounts = Some(map.next_value()?);
-            }
-            ContainerField::AddedMounts => {
-                self.added_mounts = Some(map.next_value()?);
-            }
-            ContainerField::Image => {
-                let i = map.next_value::<Image>()?;
-                self.image = Some(i.name);
-                for use_ in i.use_ {
-                    match use_ {
-                        ImageUse::WorkingDirectory => {
-                            incompatible(
-                                &self.working_directory,
-                                "field `image` cannot use `working_directory` if field `working_directory` is also set",
-                            )?;
-                            self.working_directory = Some(PossiblyImage::Image);
-                        }
-                        ImageUse::Layers => {
-                            incompatible(
-                                &self.layers,
-                                "field `image` cannot use `layers` if field `layers` is also set",
-                            )?;
-                            incompatible(
-                                &self.added_layers,
-                                "field `image` that uses `layers` cannot be set after `added_layers`",
-                            )?;
-                            self.layers = Some(PossiblyImage::Image);
-                        }
-                        ImageUse::Environment => {
-                            incompatible(
-                                &self.environment,
-                                "field `image` cannot use `environment` if field `environment` is also set",
-                            )?;
-                            incompatible(
-                                &self.added_environment,
-                                "field `image` that uses `environment` cannot be set after `added_environment`",
-                            )?;
-                            self.environment = Some(PossiblyImage::Image);
-                        }
-                    }
-                }
-            }
-            ContainerField::WorkingDirectory => {
-                incompatible(
-                    &self.working_directory,
-                    "field `working_directory` cannot be set after `image` field that uses `working_directory`",
-                )?;
-                self.working_directory = Some(PossiblyImage::Explicit(map.next_value()?));
-            }
-            ContainerField::Layers => {
-                incompatible(
-                    &self.layers,
-                    "field `layers` cannot be set after `image` field that uses `layers`",
-                )?;
-                incompatible(
-                    &self.added_layers,
-                    "field `layers` cannot be set after `added_layers`",
-                )?;
-                self.layers = Some(PossiblyImage::Explicit(map.next_value()?));
-            }
-            ContainerField::AddedLayers => {
-                self.added_layers = Some(map.next_value()?);
-            }
-            ContainerField::Environment => {
-                incompatible(
-                    &self.environment,
-                    "field `environment` cannot be set after `image` field that uses `environment`",
-                )?;
-                incompatible(
-                    &self.added_environment,
-                    "field `environment` cannot be set after `added_environment`",
-                )?;
-                self.environment = Some(PossiblyImage::Explicit(map.next_value()?));
-            }
-            ContainerField::AddedEnvironment => {
-                self.added_environment = Some(map.next_value()?);
-            }
-        }
-        Ok(())
-    }
-
-    fn into_value(self) -> TestContainer {
-        TestContainer {
-            image: self.image,
-            network: self.network,
-            enable_writable_file_system: self.enable_writable_file_system,
-            user: self.user,
-            group: self.group,
-            layers: self.layers,
-            added_layers: self.added_layers.unwrap_or_default(),
-            mounts: self.mounts,
-            added_mounts: self.added_mounts.unwrap_or_default(),
-            environment: self.environment,
-            added_environment: self.added_environment.unwrap_or_default(),
-            working_directory: self.working_directory,
-        }
-    }
-}
-
-impl<'de> de::Visitor<'de> for TestContainerVisitor {
-    type Value = TestContainer;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "TestContainer")
-    }
-
-    fn visit_map<A>(mut self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: de::MapAccess<'de>,
-    {
-        while let Some(key) = map.next_key()? {
-            self.fill_entry(key, &mut map)?;
-        }
-
-        Ok(self.into_value())
-    }
-}
-
-impl<'de> de::Deserialize<'de> for TestContainer {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(TestContainerVisitor::default())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,10 +176,32 @@ mod tests {
         toml::from_str(file).map_err(Error::new)
     }
 
+    fn parse_test_container(file: &str) -> Result<TestContainer> {
+        toml::from_str(file).map_err(Error::new)
+    }
+
     fn assert_toml_error(err: Error, expected: &str) {
         let err = err.downcast_ref::<TomlError>().unwrap();
         let message = err.message();
         assert!(message.starts_with(expected), "message: {message}");
+    }
+
+    fn directive_error_test(toml: &str, error: &str) {
+        assert_toml_error(parse_test_directive(toml).unwrap_err(), error);
+    }
+
+    fn directive_or_container_error_test(toml: &str, error: &str) {
+        assert_toml_error(parse_test_directive(toml).unwrap_err(), error);
+        assert_toml_error(parse_test_container(toml).unwrap_err(), error);
+    }
+
+    fn directive_parse_test(toml: &str, expected: TestDirective<String>) {
+        assert_eq!(parse_test_directive(toml).unwrap(), expected);
+    }
+
+    fn directive_or_container_parse_test(toml: &str, expected: TestDirective<String>) {
+        assert_eq!(parse_test_directive(toml).unwrap(), expected);
+        assert_eq!(parse_test_container(toml).unwrap(), expected.container);
     }
 
     #[test]
@@ -387,51 +211,42 @@ mod tests {
 
     #[test]
     fn unknown_field() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                unknown = "foo"
-                "#,
-            )
-            .unwrap_err(),
+        directive_error_test(
+            r#"
+            unknown = "foo"
+            "#,
             "unknown field `unknown`, expected one of",
         );
     }
 
     #[test]
     fn duplicate_field() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                filter = "all"
-                filter = "any"
-                "#,
-            )
-            .unwrap_err(),
+        directive_error_test(
+            r#"
+            filter = "all"
+            filter = "any"
+            "#,
             "duplicate key `filter`",
         );
     }
 
     #[test]
     fn simple_fields() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                filter = "package.equals(package1) && test.equals(test1)"
-                include_shared_libraries = true
-                network = "loopback"
-                enable_writable_file_system = true
-                user = 101
-                group = 202
-                timeout = 1
-                "#
-            )
-            .unwrap(),
+        directive_parse_test(
+            r#"
+            filter = "package.equals(package1) && test.equals(test1)"
+            include_shared_libraries = true
+            network = "loopback"
+            enable_writable_file_system = true
+            user = 101
+            group = 202
+            timeout = 1
+            "#,
             TestDirective {
                 filter: Some(
                     "package.equals(package1) && test.equals(test1)"
                         .parse()
-                        .unwrap()
+                        .unwrap(),
                 ),
                 include_shared_libraries: Some(true),
                 timeout: Some(Timeout::new(1)),
@@ -443,49 +258,45 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn zero_timeout() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                filter = "package.equals(package1) && test.equals(test1)"
-                timeout = 0
-                "#
-            )
-            .unwrap(),
+        directive_parse_test(
+            r#"
+            filter = "package.equals(package1) && test.equals(test1)"
+            timeout = 0
+            "#,
             TestDirective {
                 filter: Some(
                     "package.equals(package1) && test.equals(test1)"
                         .parse()
-                        .unwrap()
+                        .unwrap(),
                 ),
                 timeout: Some(None),
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn mounts() {
-        assert_eq!(
-            parse_test_directive(indoc! {r#"
+        directive_or_container_parse_test(
+            indoc! {r#"
                 mounts = [
                     { type = "proc", mount_point = "/proc" },
                     { type = "bind", mount_point = "/bind", local_path = "/local" },
                     { type = "bind", mount_point = "/bind2", local_path = "/local2", read_only = true },
                     { type = "devices", devices = ["null", "zero"] },
                 ]
-            "#})
-            .unwrap(),
+            "#},
             TestDirective {
                 container: TestContainer {
                     mounts: Some(vec![
                         JobMountForTomlAndJson::Proc {
-                            mount_point: non_root_utf8_path_buf!("/proc")
+                            mount_point: non_root_utf8_path_buf!("/proc"),
                         },
                         JobMountForTomlAndJson::Bind {
                             mount_point: non_root_utf8_path_buf!("/bind"),
@@ -506,25 +317,26 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn added_mounts() {
-        assert_eq!(
-            parse_test_directive(indoc! {r#"
+        directive_or_container_parse_test(
+            indoc! {r#"
                 added_mounts = [
                     { type = "proc", mount_point = "/proc" },
                     { type = "bind", mount_point = "/bind", local_path = "/local", read_only = true },
                     { type = "devices", devices = ["null", "zero"] },
                 ]
-            "#})
-            .unwrap(),
+            "#},
             TestDirective {
                 container: TestContainer {
                     added_mounts: vec![
-                        JobMountForTomlAndJson::Proc { mount_point: non_root_utf8_path_buf!("/proc") },
+                        JobMountForTomlAndJson::Proc {
+                            mount_point: non_root_utf8_path_buf!("/proc"),
+                        },
                         JobMountForTomlAndJson::Bind {
                             mount_point: non_root_utf8_path_buf!("/bind"),
                             local_path: utf8_path_buf!("/local"),
@@ -539,18 +351,17 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn mounts_before_added_mounts() {
-        assert_eq!(
-            parse_test_directive(indoc! {r#"
+        directive_or_container_parse_test(
+            indoc! {r#"
                 mounts = [ { type = "proc", mount_point = "/proc" } ]
                 added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
-            "#})
-            .unwrap(),
+            "#},
             TestDirective {
                 container: TestContainer {
                     mounts: Some(vec![JobMountForTomlAndJson::Proc {
@@ -562,73 +373,67 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn mounts_after_added_mounts() {
-        assert_toml_error(
-            parse_test_directive(indoc! {r#"
+        directive_or_container_error_test(
+            indoc! {r#"
                 added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
                 mounts = [ { type = "proc", mount_point = "/proc" } ]
-            "#})
-            .unwrap_err(),
+            "#},
             "field `mounts` cannot be set after `added_mounts`",
         );
     }
 
     #[test]
     fn unknown_field_in_simple_mount() {
-        assert_toml_error(
-            parse_test_directive(indoc! {r#"
+        directive_or_container_error_test(
+            indoc! {r#"
                 mounts = [ { type = "proc", mount_point = "/proc", unknown = "true" } ]
-            "#})
-            .unwrap_err(),
+            "#},
             "unknown field `unknown`, expected",
         );
     }
 
     #[test]
     fn unknown_field_in_bind_mount() {
-        assert_toml_error(
-            parse_test_directive(indoc! {r#"
+        directive_or_container_error_test(
+            indoc! {r#"
                 mounts = [ { type = "bind", mount_point = "/bind", local_path = "/a", unknown = "true" } ]
-            "#})
-            .unwrap_err(),
+            "#},
             "unknown field `unknown`, expected",
         );
     }
 
     #[test]
     fn missing_field_in_simple_mount() {
-        assert_toml_error(
-            parse_test_directive(indoc! {r#"
+        directive_or_container_error_test(
+            indoc! {r#"
                 mounts = [ { type = "proc" } ]
-            "#})
-            .unwrap_err(),
+            "#},
             "missing field `mount_point`",
         );
     }
 
     #[test]
     fn missing_field_in_bind_mount() {
-        assert_toml_error(
-            parse_test_directive(indoc! {r#"
+        directive_or_container_error_test(
+            indoc! {r#"
                 mounts = [ { type = "bind", mount_point = "/bind" } ]
-            "#})
-            .unwrap_err(),
+            "#},
             "missing field `local_path`",
         );
     }
 
     #[test]
     fn missing_flags_field_in_bind_mount_is_okay() {
-        assert_eq!(
-            parse_test_directive(indoc! {r#"
+        directive_or_container_parse_test(
+            indoc! {r#"
                 mounts = [ { type = "bind", mount_point = "/bind", local_path = "/a" } ]
-            "#})
-            .unwrap(),
+            "#},
             TestDirective {
                 container: TestContainer {
                     mounts: Some(vec![JobMountForTomlAndJson::Bind {
@@ -639,7 +444,7 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
@@ -656,50 +461,45 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("a path of \"/\" not allowed"));
+            assert!(parse_test_container(&format!("mounts = [ {mount} ]"))
+                .unwrap_err()
+                .to_string()
+                .contains("a path of \"/\" not allowed"));
         }
     }
 
     #[test]
     fn unknown_devices_type() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                mounts = [{ type = "devices",  devices = ["unknown"] }]
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            mounts = [{ type = "devices",  devices = ["unknown"] }]
+            "#,
             "unknown variant `unknown`, expected one of",
         );
     }
 
     #[test]
     fn working_directory() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                working_directory = "/foo"
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            working_directory = "/foo"
+            "#,
             TestDirective {
                 container: TestContainer {
                     working_directory: Some(PossiblyImage::Explicit("/foo".into())),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn image_with_no_use() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = { name = "rust" }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = { name = "rust" }
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -708,19 +508,16 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn image_as_string() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = "rust"
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = "rust"
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -729,19 +526,16 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn image_with_working_directory() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["layers", "working_directory"] }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = { name = "rust", use = ["layers", "working_directory"] }
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -750,20 +544,17 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn working_directory_after_image_without_working_directory() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["layers"] }
-                working_directory = "/foo"
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = { name = "rust", use = ["layers"] }
+            working_directory = "/foo"
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -772,20 +563,17 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn image_without_working_directory_after_working_directory() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                working_directory = "/foo"
-                image = { name = "rust", use = ["layers"] }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            working_directory = "/foo"
+            image = { name = "rust", use = ["layers"] }
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -794,81 +582,66 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn working_directory_after_image_with_working_directory() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["layers", "working_directory"] }
-                working_directory = "/foo"
-                "#
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            image = { name = "rust", use = ["layers", "working_directory"] }
+            working_directory = "/foo"
+            "#,
             "field `working_directory` cannot be set after `image` field that uses `working_directory`"
         );
     }
 
     #[test]
     fn image_with_working_directory_after_working_directory() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                working_directory = "/foo"
-                image = { name = "rust", use = ["layers", "working_directory"] }
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            working_directory = "/foo"
+            image = { name = "rust", use = ["layers", "working_directory"] }
+            "#,
             "field `image` cannot use `working_directory` if field `working_directory` is also set",
         );
     }
 
     #[test]
     fn layers_tar() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ tar = "foo.tar" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ tar = "foo.tar" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn layers_glob() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ glob = "foo*.bin" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ glob = "foo*.bin" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![glob_layer!("foo*.bin")])),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ glob = "foo*.bin", strip_prefix = "a" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ glob = "foo*.bin", strip_prefix = "a" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
@@ -878,15 +651,12 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ glob = "foo*.bin", prepend_prefix = "b" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ glob = "foo*.bin", prepend_prefix = "b" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
@@ -896,15 +666,12 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ glob = "foo*.bin", canonicalize = true }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ glob = "foo*.bin", canonicalize = true }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
@@ -914,19 +681,16 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn layers_paths() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ paths = ["foo.bin", "bar.bin"] }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ paths = ["foo.bin", "bar.bin"] }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![paths_layer!([
@@ -935,15 +699,12 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ paths = ["foo.bin", "bar.bin"], strip_prefix = "a" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ paths = ["foo.bin", "bar.bin"], strip_prefix = "a" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
@@ -953,15 +714,12 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ paths = ["foo.bin", "bar.bin"], prepend_prefix = "a" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ paths = ["foo.bin", "bar.bin"], prepend_prefix = "a" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
@@ -971,15 +729,12 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ paths = ["foo.bin", "bar.bin"], canonicalize = true }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ paths = ["foo.bin", "bar.bin"], canonicalize = true }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
@@ -989,66 +744,57 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn layers_stubs() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ stubs = ["/foo/bar", "/bin/{baz,qux}/"] }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ stubs = ["/foo/bar", "/bin/{baz,qux}/"] }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Stubs {
-                        stubs: vec!["/foo/bar".into(), "/bin/{baz,qux}/".into()]
+                        stubs: vec!["/foo/bar".into(), "/bin/{baz,qux}/".into()],
                     }])),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn layers_symlinks() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ symlinks = [{ link = "/hi", target = "/there" }] }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ symlinks = [{ link = "/hi", target = "/there" }] }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![LayerSpec::Symlinks {
                         symlinks: vec![SymlinkSpec {
                             link: "/hi".into(),
-                            target: "/there".into()
+                            target: "/there".into(),
                         }],
                     }])),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn layers_shared_library_dependencies() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [
-                    { shared-library-dependencies = ["/bin/bash", "/bin/sh"] }
-                ]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [
+                { shared-library-dependencies = ["/bin/bash", "/bin/sh"] }
+            ]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!([
@@ -1058,17 +804,14 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [
-                    { shared-library-dependencies = ["/bin/bash", "/bin/sh"], prepend_prefix = "/usr" }
-                ]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [
+                { shared-library-dependencies = ["/bin/bash", "/bin/sh"], prepend_prefix = "/usr" }
+            ]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
@@ -1078,17 +821,14 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [
-                    { shared-library-dependencies = ["/bin/bash", "/bin/sh"], canonicalize = true }
-                ]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [
+                { shared-library-dependencies = ["/bin/bash", "/bin/sh"], canonicalize = true }
+            ]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
@@ -1098,19 +838,16 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn image_with_layers() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["layers", "working_directory"] }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = { name = "rust", use = ["layers", "working_directory"] }
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -1119,20 +856,17 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn layers_after_image_without_layers() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["working_directory"] }
-                layers = [{ tar = "foo.tar" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = { name = "rust", use = ["working_directory"] }
+            layers = [{ tar = "foo.tar" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -1141,20 +875,17 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn image_without_layers_after_layers() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ tar = "foo.tar" }]
-                image = { name = "rust", use = ["working_directory"] }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ tar = "foo.tar" }]
+            image = { name = "rust", use = ["working_directory"] }
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -1163,67 +894,55 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn layers_after_image_with_layers() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["layers", "working_directory"] }
-                layers = [{ tar = "foo.tar" }]
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            image = { name = "rust", use = ["layers", "working_directory"] }
+            layers = [{ tar = "foo.tar" }]
+            "#,
             "field `layers` cannot be set after `image` field that uses `layers`",
         )
     }
 
     #[test]
     fn image_with_layers_after_layers() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                layers = [{ tar = "foo.tar" }]
-                image = { name = "rust", use = ["layers", "working_directory"] }
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            layers = [{ tar = "foo.tar" }]
+            image = { name = "rust", use = ["layers", "working_directory"] }
+            "#,
             "field `image` cannot use `layers` if field `layers` is also set",
         )
     }
 
     #[test]
     fn added_layers() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                added_layers = [{ tar = "foo.tar" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            added_layers = [{ tar = "foo.tar" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     added_layers: vec![tar_layer!("foo.tar")],
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn added_layers_after_layers() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                layers = [{ tar = "foo.tar" }]
-                added_layers = [{ tar = "bar.tar" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            layers = [{ tar = "foo.tar" }]
+            added_layers = [{ tar = "bar.tar" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
@@ -1231,20 +950,17 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn added_layers_after_image_with_layers() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["layers"] }
-                added_layers = [{ tar = "foo.tar" }]
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = { name = "rust", use = ["layers"] }
+            added_layers = [{ tar = "foo.tar" }]
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -1253,69 +969,57 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn layers_after_added_layers() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                added_layers = [{ tar = "bar.tar" }]
-                layers = [{ tar = "foo.tar" }]
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            added_layers = [{ tar = "bar.tar" }]
+            layers = [{ tar = "foo.tar" }]
+            "#,
             "field `layers` cannot be set after `added_layers`",
         );
     }
 
     #[test]
     fn image_with_layers_after_added_layers() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                added_layers = [{ tar = "bar.tar" }]
-                image = { name = "rust", use = ["layers"] }
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            added_layers = [{ tar = "bar.tar" }]
+            image = { name = "rust", use = ["layers"] }
+            "#,
             "field `image` that uses `layers` cannot be set after `added_layers`",
         );
     }
 
     #[test]
     fn environment() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                environment = { FOO = "foo" }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            environment = { FOO = "foo" }
+            "#,
             TestDirective {
                 container: TestContainer {
                     environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
                         string!("FOO"),
-                        string!("foo")
+                        string!("foo"),
                     )]))),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn image_with_environment() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["environment", "working_directory"] }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = { name = "rust", use = ["environment", "working_directory"] }
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -1324,141 +1028,120 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn environment_after_image_without_environment() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["working_directory"] }
-                environment = { FOO = "foo" }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = { name = "rust", use = ["working_directory"] }
+            environment = { FOO = "foo" }
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
                     working_directory: Some(PossiblyImage::Image),
                     environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
                         string!("FOO"),
-                        string!("foo")
+                        string!("foo"),
                     )]))),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn image_without_environment_after_environment() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                environment = { FOO = "foo" }
-                image = { name = "rust", use = ["working_directory"] }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            environment = { FOO = "foo" }
+            image = { name = "rust", use = ["working_directory"] }
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
                     working_directory: Some(PossiblyImage::Image),
                     environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
                         string!("FOO"),
-                        string!("foo")
+                        string!("foo"),
                     )]))),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn environment_after_image_with_environment() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["environment", "working_directory"] }
-                environment = { FOO = "foo" }
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            image = { name = "rust", use = ["environment", "working_directory"] }
+            environment = { FOO = "foo" }
+            "#,
             "field `environment` cannot be set after `image` field that uses `environment`",
         )
     }
 
     #[test]
     fn image_with_environment_after_environment() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                environment = { FOO = "foo" }
-                image = { name = "rust", use = ["environment", "working_directory"] }
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            environment = { FOO = "foo" }
+            image = { name = "rust", use = ["environment", "working_directory"] }
+            "#,
             "field `image` cannot use `environment` if field `environment` is also set",
         )
     }
 
     #[test]
     fn added_environment() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                added_environment = { BAR = "bar" }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            added_environment = { BAR = "bar" }
+            "#,
             TestDirective {
                 container: TestContainer {
                     added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn added_environment_after_environment() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                environment = { FOO = "foo" }
-                added_environment = { BAR = "bar" }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            environment = { FOO = "foo" }
+            added_environment = { BAR = "bar" }
+            "#,
             TestDirective {
                 container: TestContainer {
                     environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
                         string!("FOO"),
-                        string!("foo")
+                        string!("foo"),
                     )]))),
                     added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn added_environment_after_image_with_environment() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                image = { name = "rust", use = ["environment"] }
-                added_environment = { BAR = "bar" }
-                "#
-            )
-            .unwrap(),
+        directive_or_container_parse_test(
+            r#"
+            image = { name = "rust", use = ["environment"] }
+            added_environment = { BAR = "bar" }
+            "#,
             TestDirective {
                 container: TestContainer {
                     image: Some(string!("rust")),
@@ -1467,34 +1150,28 @@ mod tests {
                     ..Default::default()
                 },
                 ..Default::default()
-            }
+            },
         );
     }
 
     #[test]
     fn environment_after_added_environment() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                added_environment = { BAR = "bar" }
-                environment = { FOO = "foo" }
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            added_environment = { BAR = "bar" }
+            environment = { FOO = "foo" }
+            "#,
             "field `environment` cannot be set after `added_environment`",
         );
     }
 
     #[test]
     fn image_with_environment_after_added_environment() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                added_environment = { BAR = "bar" }
-                image = { name = "rust", use = ["environment"] }
-                "#,
-            )
-            .unwrap_err(),
+        directive_or_container_error_test(
+            r#"
+            added_environment = { BAR = "bar" }
+            image = { name = "rust", use = ["environment"] }
+            "#,
             "field `image` that uses `environment` cannot be set after `added_environment`",
         );
     }
