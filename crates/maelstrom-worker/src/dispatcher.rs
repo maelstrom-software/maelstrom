@@ -989,7 +989,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn create_file(&self, _path: &Path, _content: &[u8]) -> Result<(), TestFsError> {
+        fn create_file(&self, _path: &Path, _contents: &[u8]) -> Result<(), TestFsError> {
             unimplemented!()
         }
 

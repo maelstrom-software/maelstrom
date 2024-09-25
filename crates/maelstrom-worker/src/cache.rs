@@ -1002,10 +1002,10 @@ mod tests {
             )
         }
 
-        fn create_file(&self, path: &Path, content: &[u8]) -> Result<(), TestFsError> {
+        fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), TestFsError> {
             self.messages.borrow_mut().push(CreateFile(
                 path.to_owned(),
-                content.to_vec().into_boxed_slice(),
+                contents.to_vec().into_boxed_slice(),
             ));
             Ok(())
         }
@@ -2248,14 +2248,25 @@ mod tests {
             */
         }
 
-        fn create_file(&self, _path: &Path, _content: &[u8]) -> Result<(), TestFsError> {
-            unimplemented!()
-            /*
-            self.messages.borrow_mut().push(CreateFile(
-                path.to_owned(),
-                content.to_vec().into_boxed_slice(),
+        fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), TestFsError> {
+            let mut state = self.state.borrow_mut();
+            let parent_index_path =
+                match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
+                    LookupIndexPath::NotFound => Err(TestFsError::NoEnt),
+                    LookupIndexPath::Found(_, _) => Err(TestFsError::Exists),
+                    LookupIndexPath::FoundParent(_, index_path) => Ok(index_path),
+                }?;
+            let FsEntry::Directory {
+                entries: parent_entries,
+            } = Self::resolve_index_path_mut(&mut state.root, parent_index_path)
+            else {
+                panic!("parent not a directory");
+            };
+            parent_entries.push((
+                path.file_name().unwrap().to_str().unwrap().to_owned(),
+                FsEntry::file(contents.len().try_into().unwrap()),
             ));
-            */
+            Ok(())
         }
 
         fn symlink(&self, target: &Path, link: &Path) -> Result<(), TestFsError> {
@@ -2382,6 +2393,53 @@ mod tests {
         assert_eq!(fs.metadata(Path::new("/bar/baz/foo")), Ok(None));
         assert_eq!(fs.metadata(Path::new("/bar/baz2")), Ok(None));
         assert_eq!(fs.metadata(Path::new("/bar/baz2/blah")), Ok(None));
+    }
+
+    #[test]
+    fn test_fs2_create_file() {
+        let fs = TestFs2::new(fs! {
+            foo(42),
+            bar {
+                baz -> "/target",
+                root -> "/",
+                a -> "b",
+                b -> "../bar/c",
+                c -> "/bar/d",
+                d -> ".",
+            },
+        });
+
+        assert_eq!(fs.create_file(Path::new("/new_file"), b"contents"), Ok(()));
+        assert_eq!(
+            fs.metadata(Path::new("/new_file")),
+            Ok(Some(FileMetadata::file(8)))
+        );
+
+        assert_eq!(
+            fs.create_file(Path::new("/bar/root/bar/a/new_file"), b"contents-2"),
+            Ok(())
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/bar/new_file")),
+            Ok(Some(FileMetadata::file(10)))
+        );
+
+        assert_eq!(
+            fs.create_file(Path::new("/new_file"), b"contents-3"),
+            Err(TestFsError::Exists)
+        );
+        assert_eq!(
+            fs.create_file(Path::new("/foo"), b"contents-3"),
+            Err(TestFsError::Exists)
+        );
+        assert_eq!(
+            fs.create_file(Path::new("/blah/new_file"), b"contents-3"),
+            Err(TestFsError::NoEnt)
+        );
+        assert_eq!(
+            fs.create_file(Path::new("/foo/new_file"), b"contents-3"),
+            Err(TestFsError::NoEnt)
+        );
     }
 
     #[test]
