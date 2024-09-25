@@ -147,7 +147,7 @@ pub trait Fs {
     fn read_dir(
         &self,
         path: &Path,
-    ) -> Result<impl Iterator<Item = Result<(PathBuf, FileMetadata), Self::Error>>, Self::Error>;
+    ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), Self::Error>>, Self::Error>;
 
     /// Create a file with given `path` and `contents`. Panic on file system error, including if
     /// the file already exists.
@@ -241,11 +241,11 @@ impl Fs for StdFs {
     fn read_dir(
         &self,
         path: &Path,
-    ) -> io::Result<impl Iterator<Item = io::Result<(PathBuf, FileMetadata)>>> {
+    ) -> io::Result<impl Iterator<Item = io::Result<(OsString, FileMetadata)>>> {
         fs::read_dir(path).map(|dirents| {
             dirents.map(|dirent| -> io::Result<_> {
                 let dirent = dirent?;
-                Ok((dirent.path(), dirent.metadata()?.into()))
+                Ok((dirent.file_name(), dirent.metadata()?.into()))
             })
         })
     }
@@ -560,7 +560,7 @@ impl<FsT: Fs> Cache<FsT> {
         let removing = root.join("removing");
         fs.mkdir_recursively(&removing).unwrap();
         for child in fs.read_dir(&removing).unwrap() {
-            fs.remove_recursively_on_thread(child.unwrap().0);
+            fs.remove_recursively_on_thread(removing.join(child.unwrap().0));
         }
 
         // If there are any files or directories in the top-level directory that shouldn't be
@@ -776,12 +776,9 @@ impl<FsT: Fs> Cache<FsT> {
             .into_iter()
             .map(|e| OsString::from(e.to_string()))
             .collect::<HashSet<_>>();
-        for (path, metadata) in fs.read_dir(dir).unwrap().map(|de| de.unwrap()) {
-            if !path
-                .file_name()
-                .is_some_and(|entry_name| except.contains(entry_name))
-            {
-                Self::remove_in_background(fs, root, &path, metadata.type_);
+        for (entry_name, metadata) in fs.read_dir(dir).unwrap().map(|de| de.unwrap()) {
+            if !except.contains(&entry_name) {
+                Self::remove_in_background(fs, root, &dir.join(entry_name), metadata.type_);
             }
         }
     }
@@ -1005,7 +1002,7 @@ mod tests {
         fn read_dir(
             &self,
             path: &Path,
-        ) -> Result<impl Iterator<Item = Result<(PathBuf, FileMetadata), TestFsError>>, TestFsError>
+        ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), TestFsError>>, TestFsError>
         {
             self.messages.borrow_mut().push(ReadDir(path.to_owned()));
             Ok(self
@@ -1014,7 +1011,7 @@ mod tests {
                 .unwrap_or(&vec![])
                 .clone()
                 .into_iter()
-                .map(Result::Ok))
+                .map(|(path, metadata)| Ok((path.file_name().unwrap().to_owned(), metadata))))
         }
 
         fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), TestFsError> {
@@ -2286,7 +2283,7 @@ mod tests {
         fn read_dir(
             &self,
             _path: &Path,
-        ) -> Result<impl Iterator<Item = Result<(PathBuf, FileMetadata), TestFsError>>, TestFsError>
+        ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), TestFsError>>, TestFsError>
         {
             Ok([].into_iter())
             /*

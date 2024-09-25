@@ -797,7 +797,7 @@ mod tests {
     use anyhow::anyhow;
     use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;
-    use std::{cell::RefCell, error, rc::Rc, time::Duration};
+    use std::{cell::RefCell, error, ffi::OsString, rc::Rc, time::Duration};
     use strum::Display;
     use BrokerToWorker::*;
 
@@ -986,7 +986,7 @@ mod tests {
             &self,
             _path: &Path,
         ) -> Result<
-            impl Iterator<Item = Result<(PathBuf, cache::FileMetadata), TestFsError>>,
+            impl Iterator<Item = Result<(OsString, cache::FileMetadata), TestFsError>>,
             TestFsError,
         > {
             Ok([].into_iter())
