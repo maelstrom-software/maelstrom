@@ -978,7 +978,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn mkdir_recursively(&self, _path: &Path) {
+        fn mkdir_recursively(&self, _path: &Path) -> Result<(), TestFsError> {
             unimplemented!()
         }
 
@@ -989,11 +989,11 @@ mod tests {
             unimplemented!()
         }
 
-        fn create_file(&self, _path: &Path, _content: &[u8]) {
+        fn create_file(&self, _path: &Path, _content: &[u8]) -> Result<(), TestFsError> {
             unimplemented!()
         }
 
-        fn symlink(&self, _target: &Path, _link: &Path) {
+        fn symlink(&self, _target: &Path, _link: &Path) -> Result<(), TestFsError> {
             unimplemented!()
         }
 

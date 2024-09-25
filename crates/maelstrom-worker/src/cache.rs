@@ -140,7 +140,7 @@ pub trait Fs {
     /// Ensure `path` exists and is a directory. If it doesn't exist, recusively ensure its parent exists,
     /// then create it. Panic on file system error or if `path` or any of its ancestors aren't
     /// directories.
-    fn mkdir_recursively(&self, path: &Path);
+    fn mkdir_recursively(&self, path: &Path) -> Result<(), Self::Error>;
 
     /// Return and iterator that will yield all of the children of a directory. Panic on file
     /// system error or if `path` doesn't exist or isn't a directory.
@@ -148,10 +148,10 @@ pub trait Fs {
 
     /// Create a file with given `path` and `contents`. Panic on file system error, including if
     /// the file already exists.
-    fn create_file(&self, path: &Path, contents: &[u8]);
+    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Self::Error>;
 
     /// Create a symlink at `link` that points to `target`. Panic on file system error.
-    fn symlink(&self, target: &Path, link: &Path);
+    fn symlink(&self, target: &Path, link: &Path) -> Result<(), Self::Error>;
 
     /// Get the metadata of the file at `path`. Panic on file system error. If `path` doesn't
     /// exist, return None. If the last component is a symlink, return the metadata about the
@@ -231,8 +231,8 @@ impl Fs for StdFs {
         });
     }
 
-    fn mkdir_recursively(&self, path: &Path) {
-        fs::create_dir_all(path).unwrap();
+    fn mkdir_recursively(&self, path: &Path) -> io::Result<()> {
+        fs::create_dir_all(path)
     }
 
     fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>> {
@@ -242,12 +242,12 @@ impl Fs for StdFs {
         }))
     }
 
-    fn create_file(&self, path: &Path, contents: &[u8]) {
-        File::create_new(path).unwrap().write_all(contents).unwrap();
+    fn create_file(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        File::create_new(path)?.write_all(contents)
     }
 
-    fn symlink(&self, target: &Path, link: &Path) {
-        unix_fs::symlink(target, link).unwrap();
+    fn symlink(&self, target: &Path, link: &Path) -> io::Result<()> {
+        unix_fs::symlink(target, link)
     }
 
     fn metadata(&self, path: &Path) -> io::Result<Option<FileMetadata>> {
@@ -550,7 +550,7 @@ impl<FsT: Fs> Cache<FsT> {
         // Everything in the `removing` subdirectory needs to be removed in the background. Start
         // those threads up.
         let removing = root.join("removing");
-        fs.mkdir_recursively(&removing);
+        fs.mkdir_recursively(&removing).unwrap();
         for child in fs.read_dir(&removing) {
             fs.remove_recursively_on_thread(child.0);
         }
@@ -568,13 +568,14 @@ impl<FsT: Fs> Cache<FsT> {
 
         let cachedir_tag = root.join("CACHEDIR.TAG");
         if fs.metadata(&cachedir_tag).unwrap().is_none() {
-            fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS);
+            fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS)
+                .unwrap();
         }
 
-        fs.mkdir_recursively(&root.join("tmp"));
+        fs.mkdir_recursively(&root.join("tmp")).unwrap();
 
         let sha256 = root.join("sha256");
-        fs.mkdir_recursively(&sha256);
+        fs.mkdir_recursively(&sha256).unwrap();
         Self::remove_all_from_directory_except(&mut fs, &root, &sha256, EntryKind::iter());
 
         for kind in EntryKind::iter() {
@@ -582,7 +583,7 @@ impl<FsT: Fs> Cache<FsT> {
             if let Some(metadata) = fs.metadata(&kind_dir).unwrap() {
                 Self::remove_in_background(&mut fs, &root, &kind_dir, metadata.type_);
             }
-            fs.mkdir_recursively(&kind_dir);
+            fs.mkdir_recursively(&kind_dir).unwrap();
         }
 
         Cache {
@@ -672,7 +673,7 @@ impl<FsT: Fs> Cache<FsT> {
                 (FileType::File, metadata.size)
             }
             GotArtifact::Symlink { target } => {
-                self.fs.symlink(&target, &path);
+                self.fs.symlink(&target, &path).unwrap();
                 let metadata = self.fs.metadata(&path).unwrap().unwrap();
                 assert!(matches!(metadata.type_, FileType::Symlink));
                 (FileType::Symlink, metadata.size)
@@ -980,10 +981,11 @@ mod tests {
                 .push(RemoveRecursively(path.to_owned()));
         }
 
-        fn mkdir_recursively(&self, path: &Path) {
+        fn mkdir_recursively(&self, path: &Path) -> Result<(), TestFsError> {
             self.messages
                 .borrow_mut()
                 .push(MkdirRecursively(path.to_owned()));
+            Ok(())
         }
 
         fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>> {
@@ -997,17 +999,19 @@ mod tests {
             )
         }
 
-        fn create_file(&self, path: &Path, content: &[u8]) {
+        fn create_file(&self, path: &Path, content: &[u8]) -> Result<(), TestFsError> {
             self.messages.borrow_mut().push(CreateFile(
                 path.to_owned(),
                 content.to_vec().into_boxed_slice(),
             ));
+            Ok(())
         }
 
-        fn symlink(&self, target: &Path, link: &Path) {
+        fn symlink(&self, target: &Path, link: &Path) -> Result<(), TestFsError> {
             self.messages
                 .borrow_mut()
                 .push(Symlink(target.to_owned(), link.to_owned()));
+            Ok(())
         }
 
         fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, TestFsError> {
@@ -2202,7 +2206,7 @@ mod tests {
                 */
         }
 
-        fn mkdir_recursively(&self, _path: &Path) {
+        fn mkdir_recursively(&self, _path: &Path) -> Result<(), TestFsError> {
             unimplemented!()
             /*
             self.messages
@@ -2225,7 +2229,7 @@ mod tests {
             */
         }
 
-        fn create_file(&self, _path: &Path, _content: &[u8]) {
+        fn create_file(&self, _path: &Path, _content: &[u8]) -> Result<(), TestFsError> {
             unimplemented!()
             /*
             self.messages.borrow_mut().push(CreateFile(
@@ -2235,7 +2239,7 @@ mod tests {
             */
         }
 
-        fn symlink(&self, _target: &Path, _link: &Path) {
+        fn symlink(&self, _target: &Path, _link: &Path) -> Result<(), TestFsError> {
             unimplemented!()
             /*
             self.messages
