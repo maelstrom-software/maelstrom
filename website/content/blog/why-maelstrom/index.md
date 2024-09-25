@@ -127,7 +127,7 @@ project's tests working with Maelstrom.
 ### Advantages Once Set Up
 
 Once a developer starts using Maelstrom, there are a lot of things they can do.
-Ideally, they will have access to a cluster of test runner: the bigger the
+Ideally, they will have access to a cluster of test runners: the bigger the
 better. This cluster should be shared by all developers on the project, and
 probably also with CI.
 
