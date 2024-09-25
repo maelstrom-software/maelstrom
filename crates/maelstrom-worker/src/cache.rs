@@ -949,8 +949,9 @@ mod tests {
 
     #[derive(Debug, Display, PartialEq)]
     enum TestFsError {
-        NoEnt,
         Exists,
+        NoEnt,
+        NotDir,
     }
 
     impl error::Error for TestFsError {}
@@ -2052,17 +2053,23 @@ mod tests {
     }
 
     enum LookupIndexPath<'state> {
-        /// The path resolved to an actual file or directory. The returned path will resolve to the
-        /// entity.
+        /// The path resolved to an actual entry. This contains the entry and the path to it.
         Found(&'state FsEntry, Vec<usize>),
 
-        /// There was no entity at the given path, but the parent directory exists. The returned
-        /// path will resolve to the parent directory.
+        /// There was entry at the given path, but the parent directory exists. This contains the
+        /// parent entry (which is guaranteed to be a directory) and the path to it.
         #[expect(dead_code)]
         FoundParent(&'state FsEntry, Vec<usize>),
 
-        /// There was no entity at the given path, nor does its parent directory exist.
+        /// There was no entry at the given path, nor does its parent directory exist. However, all
+        /// ancestors that do exist are directories.
         NotFound,
+
+        /// A symlink in the path didn't resolve.
+        DanglingSymlink,
+
+        /// An ancestor in the path was a file.
+        FileAncestor,
     }
 
     impl TestFs2 {
@@ -2090,10 +2097,10 @@ mod tests {
             cur
         }
 
-        fn resolve_index_path_mut(
+        fn resolve_index_path_mut_as_directory(
             root: &mut FsEntry,
             index_path: impl IntoIterator<Item = usize>,
-        ) -> &mut FsEntry {
+        ) -> &mut Vec<(String, FsEntry)> {
             let mut cur = root;
             for index in index_path {
                 let FsEntry::Directory { entries } = cur else {
@@ -2101,7 +2108,10 @@ mod tests {
                 };
                 cur = &mut entries[index].1;
             }
-            cur
+            let FsEntry::Directory { entries } = cur else {
+                panic!("entry not a directory");
+            };
+            entries
         }
 
         fn pop_index_path(root: &FsEntry, mut index_path: Vec<usize>) -> (&FsEntry, Vec<usize>) {
@@ -2146,27 +2156,35 @@ mod tests {
                                         break;
                                     }
                                     None => {
-                                        return if last_component {
-                                            LookupIndexPath::FoundParent(cur, index_path)
+                                        if last_component {
+                                            return LookupIndexPath::FoundParent(cur, index_path);
                                         } else {
-                                            LookupIndexPath::NotFound
-                                        };
+                                            return LookupIndexPath::NotFound;
+                                        }
                                     }
                                 }
                             }
                             FsEntry::File { .. } => {
-                                return LookupIndexPath::NotFound;
+                                return LookupIndexPath::FileAncestor;
                             }
                             FsEntry::Symlink { target } => {
-                                let target = Path::new(target);
                                 (cur, index_path) = Self::pop_index_path(root, index_path);
-                                let result =
-                                    Self::lookup_index_path(root, cur, index_path, &target);
-                                if let LookupIndexPath::Found(new_cur, new_index_path) = result {
-                                    cur = new_cur;
-                                    index_path = new_index_path;
-                                } else {
-                                    return LookupIndexPath::NotFound;
+                                match Self::lookup_index_path(
+                                    root,
+                                    cur,
+                                    index_path,
+                                    Path::new(target),
+                                ) {
+                                    LookupIndexPath::Found(new_cur, new_index_path) => {
+                                        cur = new_cur;
+                                        index_path = new_index_path;
+                                    }
+                                    LookupIndexPath::FileAncestor => {
+                                        return LookupIndexPath::FileAncestor;
+                                    }
+                                    _ => {
+                                        return LookupIndexPath::DanglingSymlink;
+                                    }
                                 }
                             }
                         }
@@ -2225,13 +2243,30 @@ mod tests {
                 */
         }
 
-        fn mkdir_recursively(&self, _path: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-            /*
-            self.messages
-                .borrow_mut()
-                .push(MkdirRecursively(path.to_owned()));
-                */
+        fn mkdir_recursively(&self, path: &Path) -> Result<(), TestFsError> {
+            let mut state = self.state.borrow_mut();
+            match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
+                LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
+                LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
+                LookupIndexPath::Found(FsEntry::Directory { .. }, _) => Ok(()),
+                LookupIndexPath::Found(_, _) => Err(TestFsError::Exists),
+                LookupIndexPath::FoundParent(_, parent_index_path) => {
+                    let parent_entries = Self::resolve_index_path_mut_as_directory(
+                        &mut state.root,
+                        parent_index_path,
+                    );
+                    parent_entries.push((
+                        path.file_name().unwrap().to_str().unwrap().to_owned(),
+                        FsEntry::directory([]),
+                    ));
+                    Ok(())
+                }
+                LookupIndexPath::NotFound => {
+                    drop(state);
+                    self.mkdir_recursively(path.parent().unwrap())?;
+                    self.mkdir_recursively(path)
+                }
+            }
         }
 
         fn read_dir(&self, _path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>> {
@@ -2252,16 +2287,14 @@ mod tests {
             let mut state = self.state.borrow_mut();
             let parent_index_path =
                 match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
+                    LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
+                    LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
                     LookupIndexPath::NotFound => Err(TestFsError::NoEnt),
                     LookupIndexPath::Found(_, _) => Err(TestFsError::Exists),
                     LookupIndexPath::FoundParent(_, index_path) => Ok(index_path),
                 }?;
-            let FsEntry::Directory {
-                entries: parent_entries,
-            } = Self::resolve_index_path_mut(&mut state.root, parent_index_path)
-            else {
-                panic!("parent not a directory");
-            };
+            let parent_entries =
+                Self::resolve_index_path_mut_as_directory(&mut state.root, parent_index_path);
             parent_entries.push((
                 path.file_name().unwrap().to_str().unwrap().to_owned(),
                 FsEntry::file(contents.len().try_into().unwrap()),
@@ -2273,16 +2306,14 @@ mod tests {
             let mut state = self.state.borrow_mut();
             let parent_index_path =
                 match Self::lookup_index_path(&state.root, &state.root, vec![], target) {
+                    LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
+                    LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
                     LookupIndexPath::NotFound => Err(TestFsError::NoEnt),
                     LookupIndexPath::Found(_, _) => Err(TestFsError::Exists),
                     LookupIndexPath::FoundParent(_, index_path) => Ok(index_path),
                 }?;
-            let FsEntry::Directory {
-                entries: parent_entries,
-            } = Self::resolve_index_path_mut(&mut state.root, parent_index_path)
-            else {
-                panic!("parent not a directory");
-            };
+            let parent_entries =
+                Self::resolve_index_path_mut_as_directory(&mut state.root, parent_index_path);
             parent_entries.push((
                 target.file_name().unwrap().to_str().unwrap().to_owned(),
                 FsEntry::symlink(link.to_str().unwrap()),
@@ -2438,6 +2469,10 @@ mod tests {
         );
         assert_eq!(
             fs.create_file(Path::new("/foo/new_file"), b"contents-3"),
+            Err(TestFsError::NotDir)
+        );
+        assert_eq!(
+            fs.create_file(Path::new("/bar/baz/new_file"), b"contents-3"),
             Err(TestFsError::NoEnt)
         );
     }
@@ -2491,6 +2526,75 @@ mod tests {
         );
         assert_eq!(
             fs.symlink(Path::new("/foo/new_symlink"), Path::new("new-target-3")),
+            Err(TestFsError::NotDir)
+        );
+        assert_eq!(
+            fs.symlink(Path::new("/bar/baz/new_symlink"), Path::new("new-target-3")),
+            Err(TestFsError::NoEnt)
+        );
+    }
+
+    #[test]
+    fn test_fs2_mkdir_recursively() {
+        let fs = TestFs2::new(fs! {
+            foo(42),
+            bar {
+                baz -> "/target",
+                root -> "/",
+                a -> "b",
+                b -> "../bar/c",
+                c -> "/bar/d",
+                d -> ".",
+            },
+        });
+
+        assert_eq!(fs.mkdir_recursively(Path::new("/")), Ok(()));
+        assert_eq!(fs.mkdir_recursively(Path::new("/bar")), Ok(()));
+
+        assert_eq!(
+            fs.mkdir_recursively(Path::new("/new/directory/and/subdirectory")),
+            Ok(())
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/new")),
+            Ok(Some(FileMetadata::directory(1)))
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/new/directory")),
+            Ok(Some(FileMetadata::directory(1)))
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/new/directory/and")),
+            Ok(Some(FileMetadata::directory(1)))
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/new/directory/and/subdirectory")),
+            Ok(Some(FileMetadata::directory(0)))
+        );
+
+        assert_eq!(
+            fs.mkdir_recursively(Path::new("/bar/root/bar/a/new/directory")),
+            Ok(())
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/bar/new")),
+            Ok(Some(FileMetadata::directory(1)))
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/bar/new/directory")),
+            Ok(Some(FileMetadata::directory(0)))
+        );
+
+        assert_eq!(
+            fs.mkdir_recursively(Path::new("/foo")),
+            Err(TestFsError::Exists)
+        );
+        assert_eq!(
+            fs.mkdir_recursively(Path::new("/foo/baz")),
+            Err(TestFsError::NotDir)
+        );
+        assert_eq!(
+            fs.mkdir_recursively(Path::new("/bar/baz/new/directory")),
             Err(TestFsError::NoEnt)
         );
     }
