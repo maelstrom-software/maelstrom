@@ -131,7 +131,7 @@ pub trait Fs {
 
     /// Remove `path`. Panic on file system error. Assume that `path` actually exists and is not a
     /// directory.
-    fn remove(&self, path: &Path);
+    fn remove(&self, path: &Path) -> Result<(), Self::Error>;
 
     /// Remove `path`, and if `path` is a directory, all descendants of `path`. Do this on a
     /// separate thread. Panic on file system error.
@@ -217,8 +217,8 @@ impl Fs for StdFs {
         fs::rename(source, destination).unwrap()
     }
 
-    fn remove(&self, path: &Path) {
-        fs::remove_file(path).unwrap()
+    fn remove(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
     }
 
     fn remove_recursively_on_thread(&self, path: PathBuf) {
@@ -781,7 +781,7 @@ impl<FsT: Fs> Cache<FsT> {
     /// Remove all files and directories rooted in `source` in a separate thread.
     fn remove_in_background(fs: &mut impl Fs, root: &Path, source: &Path, type_: FileType) {
         if !matches!(type_, FileType::Directory) {
-            fs.remove(source);
+            fs.remove(source).unwrap();
         } else {
             let removing = root.join("removing");
             let target = loop {
@@ -950,6 +950,7 @@ mod tests {
     #[derive(Debug, Display, PartialEq)]
     enum TestFsError {
         Exists,
+        IsDir,
         NoEnt,
         NotDir,
     }
@@ -975,8 +976,9 @@ mod tests {
                 .push(Rename(source.to_owned(), destination.to_owned()));
         }
 
-        fn remove(&self, path: &Path) {
+        fn remove(&self, path: &Path) -> Result<(), TestFsError> {
             self.messages.borrow_mut().push(Remove(path.to_owned()));
+            Ok(())
         }
 
         fn remove_recursively_on_thread(&self, path: PathBuf) {
@@ -2217,11 +2219,21 @@ mod tests {
                 */
         }
 
-        fn remove(&self, _path: &Path) {
-            unimplemented!()
-            /*
-            self.messages.borrow_mut().push(Remove(path.to_owned()));
-            */
+        fn remove(&self, path: &Path) -> Result<(), TestFsError> {
+            let mut state = self.state.borrow_mut();
+            match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
+                LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
+                LookupIndexPath::DanglingSymlink
+                | LookupIndexPath::NotFound
+                | LookupIndexPath::FoundParent(_, _) => Err(TestFsError::NoEnt),
+                LookupIndexPath::Found(FsEntry::Directory { .. }, _) => Err(TestFsError::IsDir),
+                LookupIndexPath::Found(_, mut index_path) => {
+                    let index = index_path.pop().unwrap();
+                    Self::resolve_index_path_mut_as_directory(&mut state.root, index_path)
+                        .remove(index);
+                    Ok(())
+                }
+            }
         }
 
         fn remove_recursively_on_thread(&self, _path: PathBuf) {
@@ -2595,5 +2607,41 @@ mod tests {
             fs.mkdir_recursively(Path::new("/bar/baz/new/directory")),
             Err(TestFsError::NoEnt)
         );
+    }
+
+    #[test]
+    fn test_fs2_remove() {
+        let fs = TestFs2::new(fs! {
+            foo(42),
+            bar {
+                baz -> "/target",
+                root -> "/",
+                a -> "b",
+                b -> "../bar/c",
+                c -> "/bar/d",
+                d -> ".",
+            },
+        });
+
+        assert_eq!(fs.remove(Path::new("/")), Err(TestFsError::IsDir));
+        assert_eq!(fs.remove(Path::new("/bar")), Err(TestFsError::IsDir));
+        assert_eq!(fs.remove(Path::new("/foo/baz")), Err(TestFsError::NotDir));
+        assert_eq!(
+            fs.remove(Path::new("/bar/baz/blah")),
+            Err(TestFsError::NoEnt)
+        );
+
+        assert_eq!(fs.remove(Path::new("/bar/baz")), Ok(()));
+        assert_eq!(fs.metadata(Path::new("/bar/baz")), Ok(None));
+
+        assert_eq!(fs.remove(Path::new("/bar/a")), Ok(()));
+        assert_eq!(fs.metadata(Path::new("/bar/a")), Ok(None));
+        assert_eq!(
+            fs.metadata(Path::new("/bar/b")),
+            Ok(Some(FileMetadata::symlink(8)))
+        );
+
+        assert_eq!(fs.remove(Path::new("/foo")), Ok(()));
+        assert_eq!(fs.metadata(Path::new("/foo")), Ok(None));
     }
 }

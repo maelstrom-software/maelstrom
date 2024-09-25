@@ -970,7 +970,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn remove(&self, _path: &Path) {
+        fn remove(&self, _path: &Path) -> Result<(), TestFsError> {
             unimplemented!()
         }
 
