@@ -982,11 +982,8 @@ mod tests {
             unimplemented!()
         }
 
-        fn read_dir(
-            &self,
-            _path: &Path,
-        ) -> Box<dyn Iterator<Item = (PathBuf, cache::FileMetadata)>> {
-            unimplemented!()
+        fn read_dir(&self, _path: &Path) -> impl Iterator<Item = (PathBuf, cache::FileMetadata)> {
+            [].into_iter()
         }
 
         fn create_file(&self, _path: &Path, _contents: &[u8]) -> Result<(), TestFsError> {

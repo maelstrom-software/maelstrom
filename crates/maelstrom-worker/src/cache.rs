@@ -144,7 +144,7 @@ pub trait Fs {
 
     /// Return and iterator that will yield all of the children of a directory. Panic on file
     /// system error or if `path` doesn't exist or isn't a directory.
-    fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>>;
+    fn read_dir(&self, path: &Path) -> impl Iterator<Item = (PathBuf, FileMetadata)>;
 
     /// Create a file with given `path` and `contents`. Panic on file system error, including if
     /// the file already exists.
@@ -235,11 +235,11 @@ impl Fs for StdFs {
         fs::create_dir_all(path)
     }
 
-    fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>> {
-        Box::new(fs::read_dir(path).unwrap().map(|de| {
+    fn read_dir(&self, path: &Path) -> impl Iterator<Item = (PathBuf, FileMetadata)> {
+        fs::read_dir(path).unwrap().map(|de| {
             let de = de.unwrap();
             (de.path(), de.metadata().unwrap().into())
-        }))
+        })
     }
 
     fn create_file(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
@@ -544,7 +544,7 @@ impl<FsT: Fs> Cache<FsT> {
     /// `bytes_used_target` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(mut fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: Logger) -> Self {
+    pub fn new(fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: Logger) -> Self {
         let root = root.into_path_buf();
 
         // Everything in the `removing` subdirectory needs to be removed in the background. Start
@@ -560,7 +560,7 @@ impl<FsT: Fs> Cache<FsT> {
         // don't retain "tmp". We want to empty it out when we start up and create a new one for
         // this instance.
         Self::remove_all_from_directory_except(
-            &mut fs,
+            &fs,
             &root,
             &root,
             ["CACHEDIR.TAG", "removing", "sha256"],
@@ -576,12 +576,12 @@ impl<FsT: Fs> Cache<FsT> {
 
         let sha256 = root.join("sha256");
         fs.mkdir_recursively(&sha256).unwrap();
-        Self::remove_all_from_directory_except(&mut fs, &root, &sha256, EntryKind::iter());
+        Self::remove_all_from_directory_except(&fs, &root, &sha256, EntryKind::iter());
 
         for kind in EntryKind::iter() {
             let kind_dir = sha256.join(kind.to_string());
             if let Some(metadata) = fs.metadata(&kind_dir).unwrap() {
-                Self::remove_in_background(&mut fs, &root, &kind_dir, metadata.type_);
+                Self::remove_in_background(&fs, &root, &kind_dir, metadata.type_);
             }
             fs.mkdir_recursively(&kind_dir).unwrap();
         }
@@ -757,7 +757,7 @@ impl<FsT: Fs> Cache<FsT> {
     }
 
     fn remove_all_from_directory_except<S>(
-        fs: &mut impl Fs,
+        fs: &impl Fs,
         root: &Path,
         dir: &Path,
         except: impl IntoIterator<Item = S>,
@@ -779,7 +779,7 @@ impl<FsT: Fs> Cache<FsT> {
     }
 
     /// Remove all files and directories rooted in `source` in a separate thread.
-    fn remove_in_background(fs: &mut impl Fs, root: &Path, source: &Path, type_: FileType) {
+    fn remove_in_background(fs: &impl Fs, root: &Path, source: &Path, type_: FileType) {
         if !matches!(type_, FileType::Directory) {
             fs.remove(source).unwrap();
         } else {
@@ -811,7 +811,7 @@ impl<FsT: Fs> Cache<FsT> {
                 panic!("Entry popped off of heap was in unexpected state");
             };
             let cache_path = self.cache_path(key.kind, &key.digest);
-            Self::remove_in_background(&mut self.fs, &self.root, &cache_path, file_type);
+            Self::remove_in_background(&self.fs, &self.root, &cache_path, file_type);
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
                 "key" => ?key,
@@ -994,15 +994,13 @@ mod tests {
             Ok(())
         }
 
-        fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>> {
+        fn read_dir(&self, path: &Path) -> impl Iterator<Item = (PathBuf, FileMetadata)> {
             self.messages.borrow_mut().push(ReadDir(path.to_owned()));
-            Box::new(
-                self.directories
-                    .get(path)
-                    .unwrap_or(&vec![])
-                    .clone()
-                    .into_iter(),
-            )
+            self.directories
+                .get(path)
+                .unwrap_or(&vec![])
+                .clone()
+                .into_iter()
         }
 
         fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), TestFsError> {
@@ -2271,8 +2269,8 @@ mod tests {
             }
         }
 
-        fn read_dir(&self, _path: &Path) -> Box<dyn Iterator<Item = (PathBuf, FileMetadata)>> {
-            unimplemented!()
+        fn read_dir(&self, _path: &Path) -> impl Iterator<Item = (PathBuf, FileMetadata)> {
+            [].into_iter()
             /*
             self.messages.borrow_mut().push(ReadDir(path.to_owned()));
             Box::new(
