@@ -130,7 +130,7 @@ cargo build --release
 
 The upload the artifacts to GitHub:
 ```bash
-cargo xtask distribute "v$VERSION"
+cargo xtask distribute publish "v$VERSION"
 ```
 
 Repeat this step on all supported architectures. Make sure you are at the release revision.
@@ -228,7 +228,7 @@ gh auth status
 
 Now push the just-built artifact:
 ```bash
-cargo xtask distribute "v$VERSION"
+cargo xtask distribute publish "v$VERSION"
 ```
 
 Then stop the instance.

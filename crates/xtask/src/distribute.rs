@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use elf::endian::AnyEndian;
 use elf::parse::ParseError;
 use elf::string_table::StringTable;
@@ -394,14 +394,35 @@ fn patch_binary(path: &Path, report: &mut BinaryPatchReport) -> Result<()> {
     Ok(())
 }
 
-/// Package and upload artifacts to github.
 #[derive(Debug, Parser)]
 pub struct CliArgs {
+    #[clap(subcommand)]
+    command: CliCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum CliCommand {
+    Publish(PublishCliArgs),
+    Install(InstallCliArgs),
+}
+
+/// Package and upload artifacts to github.
+#[derive(Debug, Parser)]
+pub struct PublishCliArgs {
     /// Version to add artifacts to
     version: String,
     /// Just print the upload command instead of actually uploading
     #[clap(long)]
     dry_run: bool,
+}
+
+/// Install a program to a local path
+#[derive(Debug, Parser)]
+pub struct InstallCliArgs {
+    /// The name of the artifact to install
+    artifact_name: String,
+    /// Where to install the artifact
+    destination: PathBuf,
 }
 
 const ARTIFACT_NAMES: [&str; 7] = [
@@ -507,7 +528,7 @@ fn get_target_triple() -> Result<String> {
     bail!("failed to find \"host\" in rustc -vV output");
 }
 
-pub fn main(args: CliArgs) -> Result<()> {
+fn publish(args: PublishCliArgs) -> Result<()> {
     let tag = args.version;
     let temp_dir = tempfile::tempdir()?;
     let binary_paths = get_binary_paths()?;
@@ -524,4 +545,35 @@ pub fn main(args: CliArgs) -> Result<()> {
     let packaged = package_artifacts(&temp_dir, &target_triple, &binary_paths)?;
     upload(&packaged, &tag, args.dry_run)?;
     Ok(())
+}
+
+fn install(args: InstallCliArgs) -> Result<()> {
+    if !ARTIFACT_NAMES.contains(&args.artifact_name.as_str()) {
+        bail!("unknown program '{}'", args.artifact_name);
+    }
+
+    let binary_path = PathBuf::from("target/release").join(&args.artifact_name);
+    if !binary_path.exists() {
+        bail!("{} does not exist", binary_path.display());
+    }
+
+    let mut dest = args.destination;
+    if dest.is_dir() {
+        dest.push(&args.artifact_name);
+    }
+
+    let mut report = BinaryPatchReport::default();
+    std::fs::copy(binary_path, &dest)?;
+    patch_binary(&dest, &mut report)?;
+    println!("{report}");
+
+    println!("installed {} to {}", args.artifact_name, dest.display());
+    Ok(())
+}
+
+pub fn main(args: CliArgs) -> Result<()> {
+    match args.command {
+        CliCommand::Publish(args) => publish(args),
+        CliCommand::Install(args) => install(args),
+    }
 }
