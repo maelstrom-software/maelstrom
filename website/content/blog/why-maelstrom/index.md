@@ -164,5 +164,5 @@ that is not the case. It's still great to have tests always run the same way,
 whether in CI or locally. And it's still great to be able to run tests
 everywhere. In fact, we imagine a lot of developers will start with Maelstrom
 without a generally-available cluster, then maybe move to having a cluster just
-for CI, and then progress eventually to having a shared project for the entire
+for CI, and then progress eventually to having a shared cluster for the entire
 project.
