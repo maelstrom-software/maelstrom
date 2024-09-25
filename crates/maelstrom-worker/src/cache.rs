@@ -144,7 +144,10 @@ pub trait Fs {
 
     /// Return and iterator that will yield all of the children of a directory. Panic on file
     /// system error or if `path` doesn't exist or isn't a directory.
-    fn read_dir(&self, path: &Path) -> impl Iterator<Item = (PathBuf, FileMetadata)>;
+    fn read_dir(
+        &self,
+        path: &Path,
+    ) -> Result<impl Iterator<Item = Result<(PathBuf, FileMetadata), Self::Error>>, Self::Error>;
 
     /// Create a file with given `path` and `contents`. Panic on file system error, including if
     /// the file already exists.
@@ -235,10 +238,15 @@ impl Fs for StdFs {
         fs::create_dir_all(path)
     }
 
-    fn read_dir(&self, path: &Path) -> impl Iterator<Item = (PathBuf, FileMetadata)> {
-        fs::read_dir(path).unwrap().map(|de| {
-            let de = de.unwrap();
-            (de.path(), de.metadata().unwrap().into())
+    fn read_dir(
+        &self,
+        path: &Path,
+    ) -> io::Result<impl Iterator<Item = io::Result<(PathBuf, FileMetadata)>>> {
+        fs::read_dir(path).map(|dirents| {
+            dirents.map(|dirent| -> io::Result<_> {
+                let dirent = dirent?;
+                Ok((dirent.path(), dirent.metadata()?.into()))
+            })
         })
     }
 
@@ -551,8 +559,8 @@ impl<FsT: Fs> Cache<FsT> {
         // those threads up.
         let removing = root.join("removing");
         fs.mkdir_recursively(&removing).unwrap();
-        for child in fs.read_dir(&removing) {
-            fs.remove_recursively_on_thread(child.0);
+        for child in fs.read_dir(&removing).unwrap() {
+            fs.remove_recursively_on_thread(child.unwrap().0);
         }
 
         // If there are any files or directories in the top-level directory that shouldn't be
@@ -768,7 +776,7 @@ impl<FsT: Fs> Cache<FsT> {
             .into_iter()
             .map(|e| OsString::from(e.to_string()))
             .collect::<HashSet<_>>();
-        for (path, metadata) in fs.read_dir(dir) {
+        for (path, metadata) in fs.read_dir(dir).unwrap().map(|de| de.unwrap()) {
             if !path
                 .file_name()
                 .is_some_and(|entry_name| except.contains(entry_name))
@@ -994,13 +1002,19 @@ mod tests {
             Ok(())
         }
 
-        fn read_dir(&self, path: &Path) -> impl Iterator<Item = (PathBuf, FileMetadata)> {
+        fn read_dir(
+            &self,
+            path: &Path,
+        ) -> Result<impl Iterator<Item = Result<(PathBuf, FileMetadata), TestFsError>>, TestFsError>
+        {
             self.messages.borrow_mut().push(ReadDir(path.to_owned()));
-            self.directories
+            Ok(self
+                .directories
                 .get(path)
                 .unwrap_or(&vec![])
                 .clone()
                 .into_iter()
+                .map(Result::Ok))
         }
 
         fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), TestFsError> {
@@ -2269,8 +2283,12 @@ mod tests {
             }
         }
 
-        fn read_dir(&self, _path: &Path) -> impl Iterator<Item = (PathBuf, FileMetadata)> {
-            [].into_iter()
+        fn read_dir(
+            &self,
+            _path: &Path,
+        ) -> Result<impl Iterator<Item = Result<(PathBuf, FileMetadata), TestFsError>>, TestFsError>
+        {
+            Ok([].into_iter())
             /*
             self.messages.borrow_mut().push(ReadDir(path.to_owned()));
             Box::new(

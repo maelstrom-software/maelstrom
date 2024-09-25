@@ -982,8 +982,14 @@ mod tests {
             unimplemented!()
         }
 
-        fn read_dir(&self, _path: &Path) -> impl Iterator<Item = (PathBuf, cache::FileMetadata)> {
-            [].into_iter()
+        fn read_dir(
+            &self,
+            _path: &Path,
+        ) -> Result<
+            impl Iterator<Item = Result<(PathBuf, cache::FileMetadata), TestFsError>>,
+            TestFsError,
+        > {
+            Ok([].into_iter())
         }
 
         fn create_file(&self, _path: &Path, _contents: &[u8]) -> Result<(), TestFsError> {
