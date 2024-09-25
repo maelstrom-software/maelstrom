@@ -948,7 +948,10 @@ mod tests {
     }
 
     #[derive(Debug, Display, PartialEq)]
-    enum TestFsError {}
+    enum TestFsError {
+        NoEnt,
+        Exists,
+    }
 
     impl error::Error for TestFsError {}
 
@@ -2037,11 +2040,13 @@ mod tests {
         );
     }
 
+    #[derive(Debug)]
     struct TestFsState {
         root: FsEntry,
         last_random_number: u64,
     }
 
+    #[derive(Debug)]
     struct TestFs2 {
         state: Rc<RefCell<TestFsState>>,
     }
@@ -2081,6 +2086,20 @@ mod tests {
                     panic!("intermediate path entry not a directory");
                 };
                 cur = &entries[index].1;
+            }
+            cur
+        }
+
+        fn resolve_index_path_mut(
+            root: &mut FsEntry,
+            index_path: impl IntoIterator<Item = usize>,
+        ) -> &mut FsEntry {
+            let mut cur = root;
+            for index in index_path {
+                let FsEntry::Directory { entries } = cur else {
+                    panic!("intermediate path entry not a directory");
+                };
+                cur = &mut entries[index].1;
             }
             cur
         }
@@ -2239,13 +2258,25 @@ mod tests {
             */
         }
 
-        fn symlink(&self, _target: &Path, _link: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-            /*
-            self.messages
-                .borrow_mut()
-                .push(Symlink(target.to_owned(), link.to_owned()));
-                */
+        fn symlink(&self, target: &Path, link: &Path) -> Result<(), TestFsError> {
+            let mut state = self.state.borrow_mut();
+            let parent_index_path =
+                match Self::lookup_index_path(&state.root, &state.root, vec![], target) {
+                    LookupIndexPath::NotFound => Err(TestFsError::NoEnt),
+                    LookupIndexPath::Found(_, _) => Err(TestFsError::Exists),
+                    LookupIndexPath::FoundParent(_, index_path) => Ok(index_path),
+                }?;
+            let FsEntry::Directory {
+                entries: parent_entries,
+            } = Self::resolve_index_path_mut(&mut state.root, parent_index_path)
+            else {
+                panic!("parent not a directory");
+            };
+            parent_entries.push((
+                target.file_name().unwrap().to_str().unwrap().to_owned(),
+                FsEntry::symlink(link.to_str().unwrap()),
+            ));
+            Ok(())
         }
 
         fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, TestFsError> {
@@ -2351,5 +2382,58 @@ mod tests {
         assert_eq!(fs.metadata(Path::new("/bar/baz/foo")), Ok(None));
         assert_eq!(fs.metadata(Path::new("/bar/baz2")), Ok(None));
         assert_eq!(fs.metadata(Path::new("/bar/baz2/blah")), Ok(None));
+    }
+
+    #[test]
+    fn test_fs2_symlink() {
+        let fs = TestFs2::new(fs! {
+            foo(42),
+            bar {
+                baz -> "/target",
+                root -> "/",
+                a -> "b",
+                b -> "../bar/c",
+                c -> "/bar/d",
+                d -> ".",
+            },
+        });
+
+        assert_eq!(
+            fs.symlink(Path::new("/new_symlink"), Path::new("new-target")),
+            Ok(())
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/new_symlink")),
+            Ok(Some(FileMetadata::symlink(10)))
+        );
+
+        assert_eq!(
+            fs.symlink(
+                Path::new("/bar/root/bar/a/new_symlink"),
+                Path::new("new-target-2")
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            fs.metadata(Path::new("/bar/new_symlink")),
+            Ok(Some(FileMetadata::symlink(12)))
+        );
+
+        assert_eq!(
+            fs.symlink(Path::new("/new_symlink"), Path::new("new-target-3")),
+            Err(TestFsError::Exists)
+        );
+        assert_eq!(
+            fs.symlink(Path::new("/foo"), Path::new("new-target-3")),
+            Err(TestFsError::Exists)
+        );
+        assert_eq!(
+            fs.symlink(Path::new("/blah/new_symlink"), Path::new("new-target-3")),
+            Err(TestFsError::NoEnt)
+        );
+        assert_eq!(
+            fs.symlink(Path::new("/foo/new_symlink"), Path::new("new-target-3")),
+            Err(TestFsError::NoEnt)
+        );
     }
 }
