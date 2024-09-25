@@ -6,7 +6,7 @@ use cargo_metadata::{
 use maelstrom_base::WindowSize;
 use maelstrom_linux as linux;
 use maelstrom_macro::Config;
-use maelstrom_test_runner::ui::UiWeakSender;
+use maelstrom_test_runner::ui::{UiMessage, UiWeakSender};
 use maelstrom_util::{process::ExitCode, tty::open_pseudoterminal};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -314,7 +314,7 @@ fn handle_cargo_tty_inner(tty: linux::OwnedFd, ui: UiWeakSender) -> Result<Strin
         let read_data = &buf[0..num_read];
         stderr_string += &String::from_utf8_lossy(read_data);
         if let Some(ui) = ui.upgrade() {
-            ui.build_output_chunk(read_data);
+            ui.send(UiMessage::BuildOutputChunk(read_data.into()));
         } else {
             break;
         }
@@ -326,7 +326,7 @@ fn handle_cargo_tty_inner(tty: linux::OwnedFd, ui: UiWeakSender) -> Result<Strin
 fn handle_cargo_tty(tty: linux::OwnedFd, ui: UiWeakSender) -> Result<String> {
     let res = handle_cargo_tty_inner(tty, ui.clone());
     if let Some(ui) = ui.upgrade() {
-        ui.done_building();
+        ui.send(UiMessage::DoneBuilding);
     }
     res
 }

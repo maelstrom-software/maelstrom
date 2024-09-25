@@ -1,6 +1,9 @@
 use crate::{pattern, CacheDir, GoPackage, GoTestCollector, ProjectDir};
 use anyhow::Result;
-use maelstrom_test_runner::{ui::UiSender, CollectTests as _, TestPackage as _};
+use maelstrom_test_runner::{
+    ui::{UiMessage, UiSender},
+    CollectTests as _, TestPackage as _,
+};
 use maelstrom_util::{process::ExitCode, root::Root};
 
 /// Returns `true` if the given `GoPackage` matches the given pattern
@@ -21,14 +24,14 @@ pub fn list_packages(
     include: &[String],
     exclude: &[String],
 ) -> Result<ExitCode> {
-    ui.update_enqueue_status("listing packages...");
+    ui.send(UiMessage::UpdateEnqueueStatus("listing packages...".into()));
 
     let collector = GoTestCollector::new(project_dir, cache_dir);
     let packages = collector.get_packages(&ui)?;
     let filter = pattern::compile_filter(include, exclude)?;
     for package in packages {
         if filter_package(&package, &filter) {
-            ui.list(package.name().into());
+            ui.send(UiMessage::List(package.name().into()));
         }
     }
     Ok(ExitCode::SUCCESS)

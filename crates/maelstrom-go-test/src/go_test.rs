@@ -1,7 +1,10 @@
 use crate::{GoImportPath, GoTestOptions};
 use anyhow::{anyhow, Context as _, Result};
 use maelstrom_linux as linux;
-use maelstrom_test_runner::{ui::UiWeakSender, BuildDir};
+use maelstrom_test_runner::{
+    ui::{UiMessage, UiWeakSender},
+    BuildDir,
+};
 use maelstrom_util::{
     ext::BoolExt as _,
     fs::Fs,
@@ -117,7 +120,7 @@ fn handle_build_output(ui: UiWeakSender, send_to_ui: bool, r: impl BufRead) -> R
         output_s += "\n";
         if send_to_ui {
             if let Some(ui) = ui.upgrade() {
-                ui.build_output_line(line);
+                ui.send(UiMessage::BuildOutputLine(line));
             } else {
                 break;
             }
@@ -263,7 +266,7 @@ fn multi_go_build(
 
     let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
     if let Some(ui) = ui.upgrade() {
-        ui.done_building();
+        ui.send(UiMessage::DoneBuilding);
     }
 
     for res in results {

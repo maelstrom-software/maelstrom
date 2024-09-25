@@ -15,9 +15,11 @@ use maelstrom_client::{
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
-    metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
-    CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps, TestArtifact,
-    TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait,
+    metadata::TestMetadata,
+    run_app_with_ui_multithreaded,
+    ui::{Ui, UiMessage, UiSender},
+    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
+    TestArtifact, TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -171,7 +173,7 @@ impl<'client> PytestTestCollector<'client> {
         &self,
         image_spec: ImageSpec,
         ref_: &DockerReference,
-        ind: &UiSender,
+        ui: &UiSender,
     ) -> Result<Utf8PathBuf> {
         let fs = Fs::new();
 
@@ -193,7 +195,9 @@ impl<'client> PytestTestCollector<'client> {
             return Ok(upper.try_into()?);
         }
 
-        ind.update_enqueue_status("installing pip packages");
+        ui.send(UiMessage::UpdateEnqueueStatus(
+            "installing pip packages".into(),
+        ));
 
         // Delete the work dir in case we have leaked it
         let work = packages_path.join("work");

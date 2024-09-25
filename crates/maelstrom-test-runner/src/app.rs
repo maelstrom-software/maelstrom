@@ -297,7 +297,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
     }
 
     fn send_ui_msg(&self, msg: UiMessage) {
-        self.ui.send_raw(msg);
+        self.ui.send(msg);
     }
 }
 
@@ -322,7 +322,7 @@ fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender
         let Ok(introspect_resp) = client.introspect() else {
             break;
         };
-        ui.update_introspect_state(introspect_resp);
+        ui.send(UiMessage::UpdateIntrospectState(introspect_resp));
 
         if !done.wait_timeout(Duration::from_millis(500)).timed_out() {
             break;
