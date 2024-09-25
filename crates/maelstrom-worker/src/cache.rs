@@ -2193,16 +2193,6 @@ mod tests {
             }
             LookupIndexPath::Found(cur, index_path)
         }
-
-        fn lookup<'state, 'path>(
-            root: &'state FsEntry,
-            path: &'path Path,
-        ) -> Option<&'state FsEntry> {
-            match Self::lookup_index_path(root, root, vec![], path) {
-                LookupIndexPath::Found(entry, _) => Some(entry),
-                _ => None,
-            }
-        }
     }
 
     impl Fs for TestFs2 {
@@ -2322,17 +2312,21 @@ mod tests {
         }
 
         fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, TestFsError> {
-            Ok(
-                Self::lookup(&self.state.borrow().root, path).map(|entry| match entry {
-                    FsEntry::File { size } => FileMetadata::file(*size),
-                    FsEntry::Symlink { target } => {
-                        FileMetadata::symlink(target.len().try_into().unwrap())
-                    }
-                    FsEntry::Directory { entries } => {
-                        FileMetadata::directory(entries.len().try_into().unwrap())
-                    }
-                }),
-            )
+            let state = self.state.borrow();
+            match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
+                LookupIndexPath::Found(FsEntry::File { size }, _) => {
+                    Ok(Some(FileMetadata::file(*size)))
+                }
+                LookupIndexPath::Found(FsEntry::Symlink { target }, _) => Ok(Some(
+                    FileMetadata::symlink(target.len().try_into().unwrap()),
+                )),
+                LookupIndexPath::Found(FsEntry::Directory { entries }, _) => Ok(Some(
+                    FileMetadata::directory(entries.len().try_into().unwrap()),
+                )),
+                LookupIndexPath::NotFound | LookupIndexPath::FoundParent(_, _) => Ok(None),
+                LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
+                LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
+            }
         }
 
         fn temp_file(&self, _parent: &Path) -> Self::TempFile {
@@ -2421,9 +2415,13 @@ mod tests {
         );
 
         assert_eq!(fs.metadata(Path::new("/foo2")), Ok(None));
-        assert_eq!(fs.metadata(Path::new("/bar/baz/foo")), Ok(None));
+        assert_eq!(
+            fs.metadata(Path::new("/bar/baz/foo")),
+            Err(TestFsError::NoEnt)
+        );
         assert_eq!(fs.metadata(Path::new("/bar/baz2")), Ok(None));
         assert_eq!(fs.metadata(Path::new("/bar/baz2/blah")), Ok(None));
+        assert_eq!(fs.metadata(Path::new("/foo/bar")), Err(TestFsError::NotDir));
     }
 
     #[test]
