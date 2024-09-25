@@ -832,7 +832,6 @@ impl<FsT: Fs> Cache<FsT> {
 mod tests {
     use super::*;
     use itertools::Itertools;
-    use maelstrom_base::{nonempty, NonEmpty};
     use maelstrom_test::*;
     use slog::{o, Discard};
     use std::{
@@ -2033,6 +2032,20 @@ mod tests {
         state: Rc<RefCell<TestFsState>>,
     }
 
+    enum LookupIndexPath<'state> {
+        /// The path resolved to an actual file or directory. The returned path will resolve to the
+        /// entity.
+        Found(&'state FsEntry, Vec<usize>),
+
+        /// There was no entity at the given path, but the parent directory exists. The returned
+        /// path will resolve to the parent directory.
+        #[expect(dead_code)]
+        FoundParent(&'state FsEntry, Vec<usize>),
+
+        /// There was no entity at the given path, nor does its parent directory exist.
+        NotFound,
+    }
+
     impl TestFs2 {
         fn new(root: FsEntry) -> Self {
             assert!(matches!(&root, FsEntry::Directory { .. }));
@@ -2044,46 +2057,100 @@ mod tests {
             }
         }
 
-        fn lookup<'state, 'path>(
+        fn resolve_index_path(
+            root: &FsEntry,
+            index_path: impl IntoIterator<Item = usize>,
+        ) -> &FsEntry {
+            let mut cur = root;
+            for index in index_path {
+                let FsEntry::Directory { entries } = cur else {
+                    panic!("intermediate path entry not a directory");
+                };
+                cur = &entries[index].1;
+            }
+            cur
+        }
+
+        fn pop_index_path(root: &FsEntry, mut index_path: Vec<usize>) -> (&FsEntry, Vec<usize>) {
+            index_path.pop();
+            (
+                Self::resolve_index_path(root, index_path.iter().copied()),
+                index_path,
+            )
+        }
+
+        fn lookup_index_path<'state, 'path>(
             root: &'state FsEntry,
-            mut stack: NonEmpty<&'state FsEntry>,
+            mut cur: &'state FsEntry,
+            mut index_path: Vec<usize>,
             path: &'path Path,
-        ) -> Option<NonEmpty<&'state FsEntry>> {
-            for component in path.components() {
+        ) -> LookupIndexPath<'state> {
+            let num_path_components = path.components().count();
+            for (component_index, component) in path.components().enumerate() {
+                let last_component = component_index + 1 == num_path_components;
                 match component {
                     Component::Prefix(_) => {
                         unimplemented!("prefix components don't occur in Unix")
                     }
                     Component::RootDir => {
-                        stack = nonempty![&root];
+                        cur = root;
+                        index_path = vec![];
                     }
                     Component::CurDir => {}
                     Component::ParentDir => {
-                        stack.pop();
+                        (cur, index_path) = Self::pop_index_path(root, index_path);
                     }
                     Component::Normal(name) => loop {
-                        match stack.last() {
+                        match cur {
                             FsEntry::Directory { entries } => {
-                                stack.push(entries.into_iter().find_map(
-                                    |(entry_name, entry)| {
-                                        name.eq(OsStr::new(entry_name)).then_some(entry)
-                                    },
-                                )?);
-                                break;
+                                let entry_index = entries
+                                    .into_iter()
+                                    .position(|(entry_name, _)| name.eq(OsStr::new(&entry_name)));
+                                match entry_index {
+                                    Some(entry_index) => {
+                                        cur = &entries[entry_index].1;
+                                        index_path.push(entry_index);
+                                        break;
+                                    }
+                                    None => {
+                                        return if last_component {
+                                            LookupIndexPath::FoundParent(cur, index_path)
+                                        } else {
+                                            LookupIndexPath::NotFound
+                                        };
+                                    }
+                                }
                             }
                             FsEntry::File { .. } => {
-                                return None;
+                                return LookupIndexPath::NotFound;
                             }
                             FsEntry::Symlink { target } => {
                                 let target = Path::new(target);
-                                stack.pop();
-                                stack = Self::lookup(root, stack, target)?;
+                                (cur, index_path) = Self::pop_index_path(root, index_path);
+                                let result =
+                                    Self::lookup_index_path(root, cur, index_path, &target);
+                                if let LookupIndexPath::Found(new_cur, new_index_path) = result {
+                                    cur = new_cur;
+                                    index_path = new_index_path;
+                                } else {
+                                    return LookupIndexPath::NotFound;
+                                }
                             }
                         }
                     },
                 }
             }
-            Some(stack)
+            LookupIndexPath::Found(cur, index_path)
+        }
+
+        fn lookup<'state, 'path>(
+            root: &'state FsEntry,
+            path: &'path Path,
+        ) -> Option<&'state FsEntry> {
+            match Self::lookup_index_path(root, root, vec![], path) {
+                LookupIndexPath::Found(entry, _) => Some(entry),
+                _ => None,
+            }
         }
     }
 
@@ -2166,8 +2233,7 @@ mod tests {
         }
 
         fn metadata(&self, path: &Path) -> Option<FileMetadata> {
-            let root = &self.state.borrow().root;
-            Self::lookup(root, nonempty![root], path).map(|stack| match stack.last() {
+            Self::lookup(&self.state.borrow().root, path).map(|entry| match entry {
                 FsEntry::File { size } => FileMetadata::file(*size),
                 FsEntry::Symlink { target } => {
                     FileMetadata::symlink(target.len().try_into().unwrap())
