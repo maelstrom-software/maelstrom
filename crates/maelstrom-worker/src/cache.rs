@@ -11,10 +11,11 @@ use slog::{debug, Logger};
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
+    error,
     ffi::OsString,
     fmt::{self, Debug, Formatter},
     fs::{self, File},
-    io::{ErrorKind, Write as _},
+    io::{self, ErrorKind, Write as _},
     iter::IntoIterator,
     mem,
     num::NonZeroU32,
@@ -116,6 +117,9 @@ impl From<fs::Metadata> for FileMetadata {
 
 /// Dependencies that [`Cache`] has on the file system.
 pub trait Fs {
+    /// Error type for methods.
+    type Error: error::Error;
+
     /// Return a random u64. This is used for creating unique path names in the directory removal
     /// code path.
     fn rand_u64(&self) -> u64;
@@ -152,7 +156,7 @@ pub trait Fs {
     /// Get the metadata of the file at `path`. Panic on file system error. If `path` doesn't
     /// exist, return None. If the last component is a symlink, return the metadata about the
     /// symlink instead of trying to resolve it.
-    fn metadata(&self, path: &Path) -> Option<FileMetadata>;
+    fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, Self::Error>;
 
     /// The type returned by the [`Self::temp_file`] method. Some implementations may make this
     /// type [`Drop`] so that the temporary file can be cleaned up when it is closed.
@@ -201,6 +205,7 @@ impl FsTempDir for StdTempDir {
 pub struct StdFs;
 
 impl Fs for StdFs {
+    type Error = io::Error;
     type TempFile = StdTempFile;
     type TempDir = StdTempDir;
 
@@ -245,13 +250,11 @@ impl Fs for StdFs {
         unix_fs::symlink(target, link).unwrap();
     }
 
-    fn metadata(&self, path: &Path) -> Option<FileMetadata> {
+    fn metadata(&self, path: &Path) -> io::Result<Option<FileMetadata>> {
         match fs::symlink_metadata(path) {
-            Ok(metadata) => Some(metadata.into()),
-            Err(err) if err.kind() == ErrorKind::NotFound => None,
-            Err(err) => {
-                panic!("unexpected error: {err}");
-            }
+            Ok(metadata) => Ok(Some(metadata.into())),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err),
         }
     }
 
@@ -564,7 +567,7 @@ impl<FsT: Fs> Cache<FsT> {
         );
 
         let cachedir_tag = root.join("CACHEDIR.TAG");
-        if fs.metadata(&cachedir_tag).is_none() {
+        if fs.metadata(&cachedir_tag).unwrap().is_none() {
             fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS);
         }
 
@@ -576,7 +579,7 @@ impl<FsT: Fs> Cache<FsT> {
 
         for kind in EntryKind::iter() {
             let kind_dir = sha256.join(kind.to_string());
-            if let Some(metadata) = fs.metadata(&kind_dir) {
+            if let Some(metadata) = fs.metadata(&kind_dir).unwrap() {
                 Self::remove_in_background(&mut fs, &root, &kind_dir, metadata.type_);
             }
             fs.mkdir_recursively(&kind_dir);
@@ -664,13 +667,13 @@ impl<FsT: Fs> Cache<FsT> {
             }
             GotArtifact::File { source } => {
                 source.persist(&path);
-                let metadata = self.fs.metadata(&path).unwrap();
+                let metadata = self.fs.metadata(&path).unwrap().unwrap();
                 assert!(matches!(metadata.type_, FileType::File));
                 (FileType::File, metadata.size)
             }
             GotArtifact::Symlink { target } => {
                 self.fs.symlink(&target, &path);
-                let metadata = self.fs.metadata(&path).unwrap();
+                let metadata = self.fs.metadata(&path).unwrap().unwrap();
                 assert!(matches!(metadata.type_, FileType::Symlink));
                 (FileType::Symlink, metadata.size)
             }
@@ -782,7 +785,7 @@ impl<FsT: Fs> Cache<FsT> {
             let removing = root.join("removing");
             let target = loop {
                 let target = removing.join(format!("{:016x}", fs.rand_u64()));
-                if fs.metadata(&target).is_none() {
+                if fs.metadata(&target).unwrap().is_none() {
                     break target;
                 }
             };
@@ -943,7 +946,14 @@ mod tests {
         last_random_number: Cell<u64>,
     }
 
+    #[derive(Debug, Display, PartialEq)]
+    enum TestFsError {}
+
+    impl error::Error for TestFsError {}
+
     impl Fs for TestFs {
+        type Error = TestFsError;
+
         type TempFile = TestTempFile;
 
         type TempDir = TestTempDir;
@@ -1000,9 +1010,9 @@ mod tests {
                 .push(Symlink(target.to_owned(), link.to_owned()));
         }
 
-        fn metadata(&self, path: &Path) -> Option<FileMetadata> {
+        fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, TestFsError> {
             self.messages.borrow_mut().push(Metadata(path.to_owned()));
-            self.metadata.get(path).copied()
+            Ok(self.metadata.get(path).copied())
         }
 
         fn temp_file(&self, parent: &Path) -> Self::TempFile {
@@ -2155,6 +2165,8 @@ mod tests {
     }
 
     impl Fs for TestFs2 {
+        type Error = TestFsError;
+
         type TempFile = TestTempFile;
 
         type TempDir = TestTempDir;
@@ -2232,16 +2244,18 @@ mod tests {
                 */
         }
 
-        fn metadata(&self, path: &Path) -> Option<FileMetadata> {
-            Self::lookup(&self.state.borrow().root, path).map(|entry| match entry {
-                FsEntry::File { size } => FileMetadata::file(*size),
-                FsEntry::Symlink { target } => {
-                    FileMetadata::symlink(target.len().try_into().unwrap())
-                }
-                FsEntry::Directory { entries } => {
-                    FileMetadata::directory(entries.len().try_into().unwrap())
-                }
-            })
+        fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, TestFsError> {
+            Ok(
+                Self::lookup(&self.state.borrow().root, path).map(|entry| match entry {
+                    FsEntry::File { size } => FileMetadata::file(*size),
+                    FsEntry::Symlink { target } => {
+                        FileMetadata::symlink(target.len().try_into().unwrap())
+                    }
+                    FsEntry::Directory { entries } => {
+                        FileMetadata::directory(entries.len().try_into().unwrap())
+                    }
+                }),
+            )
         }
 
         fn temp_file(&self, _parent: &Path) -> Self::TempFile {
@@ -2282,9 +2296,9 @@ mod tests {
         let fs = TestFs2::new(fs! {});
         assert_eq!(
             fs.metadata(Path::new("/")),
-            Some(FileMetadata::directory(0))
+            Ok(Some(FileMetadata::directory(0)))
         );
-        assert_eq!(fs.metadata(Path::new("/foo")), None);
+        assert_eq!(fs.metadata(Path::new("/foo")), Ok(None));
     }
 
     #[test]
@@ -2302,33 +2316,36 @@ mod tests {
         });
         assert_eq!(
             fs.metadata(Path::new("/")),
-            Some(FileMetadata::directory(2))
+            Ok(Some(FileMetadata::directory(2)))
         );
-        assert_eq!(fs.metadata(Path::new("/foo")), Some(FileMetadata::file(42)));
+        assert_eq!(
+            fs.metadata(Path::new("/foo")),
+            Ok(Some(FileMetadata::file(42)))
+        );
         assert_eq!(
             fs.metadata(Path::new("/bar")),
-            Some(FileMetadata::directory(6))
+            Ok(Some(FileMetadata::directory(6)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/baz")),
-            Some(FileMetadata::symlink(7))
+            Ok(Some(FileMetadata::symlink(7)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/root/foo")),
-            Some(FileMetadata::file(42))
+            Ok(Some(FileMetadata::file(42)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/root/bar/a")),
-            Some(FileMetadata::symlink(1))
+            Ok(Some(FileMetadata::symlink(1)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/a/baz")),
-            Some(FileMetadata::symlink(7))
+            Ok(Some(FileMetadata::symlink(7)))
         );
 
-        assert_eq!(fs.metadata(Path::new("/foo2")), None);
-        assert_eq!(fs.metadata(Path::new("/bar/baz/foo")), None);
-        assert_eq!(fs.metadata(Path::new("/bar/baz2")), None);
-        assert_eq!(fs.metadata(Path::new("/bar/baz2/blah")), None);
+        assert_eq!(fs.metadata(Path::new("/foo2")), Ok(None));
+        assert_eq!(fs.metadata(Path::new("/bar/baz/foo")), Ok(None));
+        assert_eq!(fs.metadata(Path::new("/bar/baz2")), Ok(None));
+        assert_eq!(fs.metadata(Path::new("/bar/baz2/blah")), Ok(None));
     }
 }

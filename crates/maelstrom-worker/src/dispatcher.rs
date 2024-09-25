@@ -797,7 +797,8 @@ mod tests {
     use anyhow::anyhow;
     use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;
-    use std::{cell::RefCell, rc::Rc, time::Duration};
+    use std::{cell::RefCell, error, rc::Rc, time::Duration};
+    use strum::Display;
     use BrokerToWorker::*;
 
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -949,7 +950,13 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Display)]
+    enum TestFsError {}
+
+    impl error::Error for TestFsError {}
+
     impl cache::Fs for Rc<RefCell<TestState>> {
+        type Error = TestFsError;
         type TempFile = TestTempFile;
         type TempDir = TestTempDir;
 
@@ -990,7 +997,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn metadata(&self, _path: &Path) -> Option<cache::FileMetadata> {
+        fn metadata(&self, _path: &Path) -> Result<Option<cache::FileMetadata>, TestFsError> {
             unimplemented!()
         }
 
