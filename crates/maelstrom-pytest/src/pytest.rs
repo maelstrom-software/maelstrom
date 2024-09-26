@@ -3,37 +3,35 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use maelstrom_client::{spec::LayerSpec, ImageSpec, ProjectDir};
+use maelstrom_test_runner::WaitStatus;
 use maelstrom_util::{process::ExitCode, root::Root};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::{fmt, io::Read as _, thread};
+use std::{io::Read as _, sync::Mutex, thread};
 
-pub struct WaitHandle;
+pub struct WaitHandle(Mutex<Option<WaitStatus>>);
 
 impl WaitHandle {
-    pub fn wait(&self) -> Result<()> {
-        Ok(())
+    fn new(wait_status: WaitStatus) -> Self {
+        Self(Mutex::new(Some(wait_status)))
+    }
+
+    fn success() -> Self {
+        Self::new(WaitStatus {
+            exit_code: ExitCode::SUCCESS,
+            output: "".into(),
+        })
+    }
+
+    pub fn wait(&self) -> Result<WaitStatus> {
+        Ok(self.0.lock().unwrap().take().unwrap())
     }
 
     pub fn kill(&self) -> Result<()> {
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct PytestCollectError {
-    pub stderr: String,
-    pub exit_code: ExitCode,
-}
-
-impl std::error::Error for PytestCollectError {}
-
-impl fmt::Display for PytestCollectError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.stderr.fmt(f)
     }
 }
 
@@ -65,7 +63,7 @@ fn compile_python(path: &Path) -> Result<()> {
     }
 }
 
-fn run_python(script: &str, cwd: &Path, args: Vec<String>) -> Result<String> {
+fn run_python(script: &str, cwd: &Path, args: Vec<String>) -> Result<WaitStatus> {
     let mut cmd = Command::new("/usr/bin/env");
     cmd.args(["python", "-c", script])
         .args(args)
@@ -93,16 +91,18 @@ fn run_python(script: &str, cwd: &Path, args: Vec<String>) -> Result<String> {
 
     let exit_status = child.wait()?;
     if exit_status.success() {
-        Ok(stdout)
+        Ok(WaitStatus {
+            exit_code: ExitCode::SUCCESS,
+            output: stdout,
+        })
     } else {
         let exit_code = exit_status
             .code()
             .unwrap_or_else(|| 128 + exit_status.signal().unwrap());
-        Err(PytestCollectError {
-            stderr,
+        Ok(WaitStatus {
+            output: stderr,
             exit_code: ExitCode::from(exit_code as u8),
-        }
-        .into())
+        })
     }
 }
 
@@ -137,7 +137,14 @@ pub fn pytest_collect_tests(
     }
     args.extend(pytest_options.extra_pytest_args.clone());
     args.extend(pytest_options.extra_pytest_collect_args.clone());
-    let output = run_python(include_str!("py/collect_tests.py"), project_dir, args)?;
+    let wait_status = run_python(include_str!("py/collect_tests.py"), project_dir, args)?;
+    if wait_status.exit_code != ExitCode::SUCCESS {
+        return Ok((
+            WaitHandle::new(wait_status),
+            TestArtifactStream(HashMap::new().into_values()),
+        ));
+    }
+    let output = wait_status.output;
     let mut tests = HashMap::new();
     for line in output.split('\n').filter(|l| !l.is_empty()) {
         let case: PytestCase = serde_json::from_str(line)?;
@@ -163,5 +170,8 @@ pub fn pytest_collect_tests(
         ));
     }
 
-    Ok((WaitHandle, TestArtifactStream(tests.into_values())))
+    Ok((
+        WaitHandle::success(),
+        TestArtifactStream(tests.into_values()),
+    ))
 }

@@ -20,6 +20,7 @@ use maelstrom_test_runner::{
     ui::{Ui, UiMessage, UiSender},
     BuildDir, CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
     TestArtifact, TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait,
+    WaitStatus,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -566,26 +567,13 @@ fn default_test_metadata_parses() {
 }
 
 impl Wait for pytest::WaitHandle {
-    fn wait(&self) -> Result<()> {
+    fn wait(&self) -> Result<WaitStatus> {
         pytest::WaitHandle::wait(self)
     }
 
     fn kill(&self) -> Result<()> {
         pytest::WaitHandle::kill(self)
     }
-}
-
-fn maybe_print_collect_error(
-    stderr: &mut impl io::Write,
-    res: Result<ExitCode>,
-) -> Result<ExitCode> {
-    if let Err(e) = &res {
-        if let Some(e) = e.downcast_ref::<pytest::PytestCollectError>() {
-            io::copy(&mut e.stderr.as_bytes(), stderr)?;
-            return Ok(e.exit_code);
-        }
-    }
-    res
 }
 
 fn find_artifacts(path: &Path) -> Result<Vec<PytestArtifactKey>> {
@@ -630,7 +618,7 @@ pub fn main_with_stderr_and_project_dir(
     logger: Logger,
     stderr_is_tty: bool,
     ui: impl Ui,
-    mut stderr: impl io::Write,
+    _stderr: impl io::Write,
     project_dir: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
     let logging_output = LoggingOutput::default();
@@ -674,11 +662,10 @@ pub fn main_with_stderr_and_project_dir(
         log,
     )?;
 
-    let res = run_app_with_ui_multithreaded(
+    run_app_with_ui_multithreaded(
         deps,
         logging_output,
         config.parent.timeout.map(Timeout::new),
         ui,
-    );
-    maybe_print_collect_error(&mut stderr, res)
+    )
 }

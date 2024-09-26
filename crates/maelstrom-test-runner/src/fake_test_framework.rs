@@ -3,7 +3,7 @@ use crate::{
     test_db::{TestDb, TestDbStore, TestDbStoreDeps},
     ui::{self},
     BuildDir, CollectTests, NoCaseMetadata, SimpleFilter, StringArtifactKey, StringPackage,
-    TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,
+    TestArtifact, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use anyhow::Result;
 use derive_more::From;
@@ -12,7 +12,7 @@ use maelstrom_base::{
     Utf8PathBuf,
 };
 use maelstrom_client::spec::{JobSpec, LayerSpec};
-use maelstrom_util::{fs::Fs, root::RootBuf};
+use maelstrom_util::{fs::Fs, process::ExitCode, root::RootBuf};
 use pretty_assertions::assert_eq;
 use std::{
     cell::RefCell,
@@ -265,8 +265,11 @@ impl FakeTests {
 pub struct WaitForNothing;
 
 impl Wait for WaitForNothing {
-    fn wait(&self) -> Result<()> {
-        Ok(())
+    fn wait(&self) -> Result<WaitStatus> {
+        Ok(WaitStatus {
+            exit_code: ExitCode::SUCCESS,
+            output: "".into(),
+        })
     }
 
     fn kill(&self) -> Result<()> {

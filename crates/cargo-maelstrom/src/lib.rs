@@ -15,7 +15,7 @@ use maelstrom_client::{
 use maelstrom_test_runner::{
     metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
     CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps, NoCaseMetadata,
-    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait,
+    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -526,23 +526,13 @@ fn default_test_metadata_parses() {
 }
 
 impl Wait for cargo::WaitHandle {
-    fn wait(&self) -> Result<()> {
+    fn wait(&self) -> Result<WaitStatus> {
         cargo::WaitHandle::wait(self)
     }
 
     fn kill(&self) -> Result<()> {
         cargo::WaitHandle::kill(self)
     }
-}
-
-fn maybe_print_build_error(res: Result<ExitCode>) -> Result<ExitCode> {
-    if let Err(e) = &res {
-        if let Some(e) = e.downcast_ref::<cargo::CargoBuildError>() {
-            eprintln!("{}", &e.stderr);
-            return Ok(e.exit_code);
-        }
-    }
-    res
 }
 
 pub fn get_project_dir(config: &config::Config) -> Result<Utf8PathBuf> {
@@ -640,12 +630,11 @@ pub fn main(
             log,
         )?;
 
-        let res = run_app_with_ui_multithreaded(
+        run_app_with_ui_multithreaded(
             deps,
             logging_output,
             config.parent.timeout.map(Timeout::new),
             ui,
-        );
-        maybe_print_build_error(res)
+        )
     }
 }

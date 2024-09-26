@@ -15,7 +15,7 @@ use maelstrom_client::{
 use maelstrom_test_runner::{
     metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
     CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps, NoCaseMetadata,
-    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait,
+    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -699,23 +699,13 @@ fn default_test_metadata_parses() {
 }
 
 impl Wait for go_test::WaitHandle {
-    fn wait(&self) -> Result<()> {
+    fn wait(&self) -> Result<WaitStatus> {
         go_test::WaitHandle::wait(self)
     }
 
     fn kill(&self) -> Result<()> {
         go_test::WaitHandle::kill(self)
     }
-}
-
-fn maybe_print_build_error(stderr: &mut impl io::Write, res: Result<ExitCode>) -> Result<ExitCode> {
-    if let Err(e) = &res {
-        if let Some(e) = e.downcast_ref::<go_test::BuildError>() {
-            io::copy(&mut e.stderr.as_bytes(), stderr)?;
-            return Ok(e.exit_code);
-        }
-    }
-    res
 }
 
 pub fn main(
@@ -751,7 +741,7 @@ pub fn main_with_stderr_and_project_dir(
     logger: Logger,
     stderr_is_tty: bool,
     ui: impl Ui,
-    mut stderr: impl io::Write,
+    _stderr: impl io::Write,
     project_dir: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
     let hidden_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-go-test");
@@ -811,12 +801,11 @@ pub fn main_with_stderr_and_project_dir(
             log,
         )?;
 
-        let res = run_app_with_ui_multithreaded(
+        run_app_with_ui_multithreaded(
             deps,
             logging_output,
             config.parent.timeout.map(Timeout::new),
             ui,
-        );
-        maybe_print_build_error(&mut stderr, res)
+        )
     }
 }

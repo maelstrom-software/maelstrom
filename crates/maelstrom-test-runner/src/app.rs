@@ -221,10 +221,13 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
                             }
                         }
                     }
-                    if let Err(error) = build_handle.wait() {
-                        let _ = sender.send(MainAppMessage::FatalError { error });
-                    } else {
-                        let _ = sender.send(MainAppMessage::CollectionFinished);
+                    match build_handle.wait() {
+                        Ok(_wait_status) => {
+                            let _ = sender.send(MainAppMessage::CollectionFinished);
+                        }
+                        Err(error) => {
+                            let _ = sender.send(MainAppMessage::FatalError { error });
+                        }
                     }
                 });
             }

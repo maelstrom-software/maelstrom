@@ -2,7 +2,7 @@ use crate::{metadata::TestMetadata, ui};
 use anyhow::Result;
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_client::{spec::LayerSpec, ImageSpec};
-use maelstrom_util::template::TemplateVars;
+use maelstrom_util::{process::ExitCode, template::TemplateVars};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fmt,
@@ -12,10 +12,17 @@ use std::{
     sync::Arc,
 };
 
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct WaitStatus {
+    pub exit_code: ExitCode,
+    pub output: String,
+}
+
 /// Wait for some asynchronous thing like a process to finish.
 pub trait Wait {
     /// Block the current thread waiting for whatever thing to finish.
-    fn wait(&self) -> Result<()>;
+    fn wait(&self) -> Result<WaitStatus>;
+
     /// Kill the asynchronous thing waking up any threads in `wait`.
     fn kill(&self) -> Result<()>;
 }

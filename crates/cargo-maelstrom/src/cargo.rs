@@ -6,14 +6,16 @@ use cargo_metadata::{
 use maelstrom_base::WindowSize;
 use maelstrom_linux as linux;
 use maelstrom_macro::Config;
-use maelstrom_test_runner::ui::{UiMessage, UiWeakSender};
+use maelstrom_test_runner::{
+    ui::{UiMessage, UiWeakSender},
+    WaitStatus,
+};
 use maelstrom_util::{process::ExitCode, tty::open_pseudoterminal};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::{
     ffi::{CString, OsString},
-    fmt,
     io::{self, BufReader, Read as _},
     iter,
     path::{Path, PathBuf},
@@ -22,39 +24,19 @@ use std::{
     thread,
 };
 
-#[derive(Debug)]
-pub struct CargoBuildError {
-    pub stderr: String,
-    pub exit_code: ExitCode,
-}
-
-impl std::error::Error for CargoBuildError {}
-
-impl fmt::Display for CargoBuildError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "cargo exited with {:?}\nstderr:\n{}",
-            self.exit_code, self.stderr
-        )
-    }
-}
-
 pub struct WaitHandle {
     child: Child,
     stderr_handle: Mutex<Option<thread::JoinHandle<Result<String>>>>,
 }
 
 impl WaitHandle {
-    pub fn wait(&self) -> Result<()> {
+    pub fn wait(&self) -> Result<WaitStatus> {
         let exit_code = self.child.wait()?;
-        if exit_code == ExitCode::SUCCESS {
-            Ok(())
-        } else {
-            let mut stderr_handle = self.stderr_handle.lock().unwrap();
-            let stderr = stderr_handle.take().unwrap().join().unwrap()?;
-            Err(CargoBuildError { stderr, exit_code }.into())
-        }
+        let mut stderr_handle = self.stderr_handle.lock().unwrap();
+        Ok(WaitStatus {
+            exit_code,
+            output: stderr_handle.take().unwrap().join().unwrap()?,
+        })
     }
 
     pub fn kill(&self) -> Result<()> {

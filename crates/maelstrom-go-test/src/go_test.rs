@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context as _, Result};
 use maelstrom_linux as linux;
 use maelstrom_test_runner::{
     ui::{UiMessage, UiWeakSender},
-    BuildDir,
+    BuildDir, WaitStatus,
 };
 use maelstrom_util::{
     ext::BoolExt as _,
@@ -89,10 +89,25 @@ pub struct WaitHandle {
 }
 
 impl WaitHandle {
-    pub fn wait(&self) -> Result<()> {
+    pub fn wait(&self) -> Result<WaitStatus> {
         let mut locked_handle = self.handle.lock().unwrap();
         let handle = locked_handle.take().expect("wait only called once");
-        handle.join().unwrap()
+
+        let join_res = handle.join().unwrap();
+        if let Err(e) = &join_res {
+            if let Some(e) = e.downcast_ref::<BuildError>() {
+                return Ok(WaitStatus {
+                    exit_code: e.exit_code,
+                    output: e.stderr.clone(),
+                });
+            }
+        }
+        join_res?;
+
+        Ok(WaitStatus {
+            exit_code: ExitCode::SUCCESS,
+            output: "".into(),
+        })
     }
     pub fn kill(&self) -> Result<()> {
         self.killer.kill();
