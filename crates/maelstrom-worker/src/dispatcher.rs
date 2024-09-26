@@ -974,7 +974,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn remove_recursively_on_thread(&self, _path: PathBuf) {
+        fn rmdir_recursively_on_thread(&self, _path: PathBuf) -> Result<(), TestFsError> {
             unimplemented!()
         }
 

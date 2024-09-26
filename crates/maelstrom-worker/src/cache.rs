@@ -133,9 +133,11 @@ pub trait Fs {
     /// directory.
     fn remove(&self, path: &Path) -> Result<(), Self::Error>;
 
-    /// Remove `path`, and if `path` is a directory, all descendants of `path`. Do this on a
-    /// separate thread. Panic on file system error.
-    fn remove_recursively_on_thread(&self, path: PathBuf);
+    /// Remove `path` and all its descendants. `path` must exist, and it must be a directory. The
+    /// function will return an error immediately if `path` doesn't exist, can't be resolved, or
+    /// doesn't point to a directory. Otherwise, the removal will happen in the background on
+    /// another thread. If an error occurs there, the calling function won't be notified.
+    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Self::Error>;
 
     /// Ensure `path` exists and is a directory. If it doesn't exist, recusively ensure its parent exists,
     /// then create it. Panic on file system error or if `path` or any of its ancestors aren't
@@ -224,14 +226,16 @@ impl Fs for StdFs {
         fs::remove_file(path)
     }
 
-    fn remove_recursively_on_thread(&self, path: PathBuf) {
-        thread::spawn(move || {
-            if path.is_dir() {
-                fs::remove_dir_all(path).unwrap()
-            } else {
-                fs::remove_file(path).unwrap();
-            }
-        });
+    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> io::Result<()> {
+        if !fs::metadata(&path)?.is_dir() {
+            // We want ErrorKind::NotADirectory, but it's currently unstable.
+            Err(io::Error::from(ErrorKind::InvalidInput))
+        } else {
+            thread::spawn(move || {
+                let _ = fs::remove_dir_all(path);
+            });
+            Ok(())
+        }
     }
 
     fn mkdir_recursively(&self, path: &Path) -> io::Result<()> {
@@ -559,8 +563,14 @@ impl<FsT: Fs> Cache<FsT> {
         // those threads up.
         let removing = root.join("removing");
         fs.mkdir_recursively(&removing).unwrap();
-        for child in fs.read_dir(&removing).unwrap() {
-            fs.remove_recursively_on_thread(removing.join(child.unwrap().0));
+        for dirent in fs.read_dir(&removing).unwrap() {
+            let (name, metadata) = dirent.unwrap();
+            let path = removing.join(name);
+            if metadata.type_ == FileType::Directory {
+                fs.rmdir_recursively_on_thread(path).unwrap();
+            } else {
+                fs.remove(&path).unwrap();
+            }
         }
 
         // If there are any files or directories in the top-level directory that shouldn't be
@@ -785,9 +795,7 @@ impl<FsT: Fs> Cache<FsT> {
 
     /// Remove all files and directories rooted in `source` in a separate thread.
     fn remove_in_background(fs: &impl Fs, root: &Path, source: &Path, type_: FileType) {
-        if !matches!(type_, FileType::Directory) {
-            fs.remove(source).unwrap();
-        } else {
+        if type_ == FileType::Directory {
             let removing = root.join("removing");
             let target = loop {
                 let target = removing.join(format!("{:016x}", fs.rand_u64()));
@@ -796,7 +804,9 @@ impl<FsT: Fs> Cache<FsT> {
                 }
             };
             fs.rename(source, &target);
-            fs.remove_recursively_on_thread(target);
+            fs.rmdir_recursively_on_thread(target).unwrap();
+        } else {
+            fs.remove(source).unwrap();
         }
     }
 
@@ -986,10 +996,11 @@ mod tests {
             Ok(())
         }
 
-        fn remove_recursively_on_thread(&self, path: PathBuf) {
+        fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), TestFsError> {
             self.messages
                 .borrow_mut()
                 .push(RemoveRecursively(path.to_owned()));
+            Ok(())
         }
 
         fn mkdir_recursively(&self, path: &Path) -> Result<(), TestFsError> {
@@ -1098,6 +1109,7 @@ mod tests {
             );
         }
 
+        #[track_caller]
         fn expect_messages_in_specific_order(&mut self, expected: Vec<TestMessage>) {
             assert!(
                 *self.messages.borrow() == expected,
@@ -1114,12 +1126,14 @@ mod tests {
             self.messages.borrow_mut().clear();
         }
 
+        #[track_caller]
         fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId, expected: GetArtifact) {
             let result = self.cache.get_artifact(EntryKind::Blob, digest, jid);
             assert_eq!(result, expected);
             self.expect_messages_in_any_order(vec![]);
         }
 
+        #[track_caller]
         fn get_artifact_ign(&mut self, digest: Sha256Digest, jid: JobId) {
             self.cache.get_artifact(EntryKind::Blob, digest, jid);
             self.expect_messages_in_any_order(vec![]);
@@ -1197,12 +1211,14 @@ mod tests {
             self.expect_messages_in_any_order(expected_fs_operations);
         }
 
+        #[track_caller]
         fn got_artifact_failure(&mut self, digest: Sha256Digest, expected: Vec<JobId>) {
             let result = self.cache.got_artifact_failure(EntryKind::Blob, &digest);
             assert_eq!(result, expected);
             self.expect_messages_in_any_order(vec![]);
         }
 
+        #[track_caller]
         fn got_artifact_success_directory_ign(&mut self, digest: Sha256Digest, size: u64) {
             let source = TestTempDir {
                 path: "/foo".into(),
@@ -1211,6 +1227,7 @@ mod tests {
             self.got_artifact_success_ign(digest, GotArtifact::Directory { source, size })
         }
 
+        #[track_caller]
         fn got_artifact_success_ign(
             &mut self,
             digest: Sha256Digest,
@@ -1221,11 +1238,13 @@ mod tests {
             self.clear_messages();
         }
 
+        #[track_caller]
         fn decrement_ref_count(&mut self, digest: Sha256Digest, expected: Vec<TestMessage>) {
             self.cache.decrement_ref_count(EntryKind::Blob, &digest);
             self.expect_messages_in_any_order(expected);
         }
 
+        #[track_caller]
         fn decrement_ref_count_ign(&mut self, digest: Sha256Digest) {
             self.cache.decrement_ref_count(EntryKind::Blob, &digest);
             self.clear_messages();
@@ -1711,8 +1730,8 @@ mod tests {
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
             RemoveRecursively(short_path!("/z/removing", 10)),
-            RemoveRecursively(short_path!("/z/removing", 20)),
-            RemoveRecursively(short_path!("/z/removing", 30)),
+            Remove(short_path!("/z/removing", 20)),
+            Remove(short_path!("/z/removing", 30)),
             ReadDir(path_buf!("/z")),
             Metadata(path_buf!("/z/CACHEDIR.TAG")),
             CreateFile(
@@ -2257,7 +2276,7 @@ mod tests {
             }
         }
 
-        fn remove_recursively_on_thread(&self, _path: PathBuf) {
+        fn rmdir_recursively_on_thread(&self, _path: PathBuf) -> Result<(), TestFsError> {
             unimplemented!()
             /*
             self.messages
