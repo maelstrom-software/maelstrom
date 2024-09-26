@@ -127,7 +127,7 @@ pub trait Fs {
     /// Rename `source` to `destination`. Panic on file system error. Assume that all intermediate
     /// directories exist for `destination`, and that `source` and `destination` are on the same
     /// file system.
-    fn rename(&self, source: &Path, destination: &Path);
+    fn rename(&self, source: &Path, destination: &Path) -> Result<(), Self::Error>;
 
     /// Remove `path`. Panic on file system error. Assume that `path` actually exists and is not a
     /// directory.
@@ -218,8 +218,8 @@ impl Fs for StdFs {
         rand::random()
     }
 
-    fn rename(&self, source: &Path, destination: &Path) {
-        fs::rename(source, destination).unwrap()
+    fn rename(&self, source: &Path, destination: &Path) -> io::Result<()> {
+        fs::rename(source, destination)
     }
 
     fn remove(&self, path: &Path) -> io::Result<()> {
@@ -803,7 +803,7 @@ impl<FsT: Fs> Cache<FsT> {
                     break target;
                 }
             };
-            fs.rename(source, &target);
+            fs.rename(source, &target).unwrap();
             fs.rmdir_recursively_on_thread(target).unwrap();
         } else {
             fs.remove(source).unwrap();
@@ -985,10 +985,11 @@ mod tests {
             result
         }
 
-        fn rename(&self, source: &Path, destination: &Path) {
+        fn rename(&self, source: &Path, destination: &Path) -> Result<(), TestFsError> {
             self.messages
                 .borrow_mut()
                 .push(Rename(source.to_owned(), destination.to_owned()));
+            Ok(())
         }
 
         fn remove(&self, path: &Path) -> Result<(), TestFsError> {
@@ -2250,7 +2251,7 @@ mod tests {
             state.last_random_number
         }
 
-        fn rename(&self, _source: &Path, _destination: &Path) {
+        fn rename(&self, _source: &Path, _destination: &Path) -> Result<(), TestFsError> {
             unimplemented!()
             /*
             self.messages

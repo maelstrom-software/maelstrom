@@ -966,7 +966,7 @@ mod tests {
             state.last_random_number
         }
 
-        fn rename(&self, _source: &Path, _destination: &Path) {
+        fn rename(&self, _source: &Path, _destination: &Path) -> Result<(), TestFsError> {
             unimplemented!()
         }
 
