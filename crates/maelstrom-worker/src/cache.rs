@@ -1903,6 +1903,18 @@ mod tests {
                 target: target.to_string(),
             }
         }
+
+        fn metadata(&self) -> FileMetadata {
+            match self {
+                FsEntry::File { size } => FileMetadata::file(*size),
+                FsEntry::Symlink { target } => {
+                    FileMetadata::symlink(target.len().try_into().unwrap())
+                }
+                FsEntry::Directory { entries } => {
+                    FileMetadata::directory(entries.len().try_into().unwrap())
+                }
+            }
+        }
     }
 
     macro_rules! fs {
@@ -2282,20 +2294,23 @@ mod tests {
 
         fn read_dir(
             &self,
-            _path: &Path,
+            path: &Path,
         ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), TestFsError>>, TestFsError>
         {
-            Ok([].into_iter())
-            /*
-            self.messages.borrow_mut().push(ReadDir(path.to_owned()));
-            Box::new(
-                self.directories
-                    .get(path)
-                    .unwrap_or(&vec![])
-                    .clone()
-                    .into_iter(),
-            )
-            */
+            let state = self.state.borrow();
+            match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
+                LookupIndexPath::Found(FsEntry::Directory { entries }, _) => Ok(entries
+                    .iter()
+                    .map(|(name, entry)| Ok((OsStr::new(name).to_owned(), entry.metadata())))
+                    .collect_vec()
+                    .into_iter()),
+                LookupIndexPath::Found(_, _) | LookupIndexPath::FileAncestor => {
+                    Err(TestFsError::NotDir)
+                }
+                LookupIndexPath::NotFound
+                | LookupIndexPath::FoundParent(_, _)
+                | LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
+            }
         }
 
         fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), TestFsError> {
@@ -2339,15 +2354,7 @@ mod tests {
         fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, TestFsError> {
             let state = self.state.borrow();
             match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-                LookupIndexPath::Found(FsEntry::File { size }, _) => {
-                    Ok(Some(FileMetadata::file(*size)))
-                }
-                LookupIndexPath::Found(FsEntry::Symlink { target }, _) => Ok(Some(
-                    FileMetadata::symlink(target.len().try_into().unwrap()),
-                )),
-                LookupIndexPath::Found(FsEntry::Directory { entries }, _) => Ok(Some(
-                    FileMetadata::directory(entries.len().try_into().unwrap()),
-                )),
+                LookupIndexPath::Found(entry, _) => Ok(Some(entry.metadata())),
                 LookupIndexPath::NotFound | LookupIndexPath::FoundParent(_, _) => Ok(None),
                 LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
                 LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
@@ -2656,5 +2663,70 @@ mod tests {
 
         assert_eq!(fs.remove(Path::new("/foo")), Ok(()));
         assert_eq!(fs.metadata(Path::new("/foo")), Ok(None));
+    }
+
+    #[test]
+    fn test_fs2_read_dir() {
+        let fs = TestFs2::new(fs! {
+            foo(42),
+            bar {
+                baz -> "/target",
+                root -> "/",
+                subdir {},
+            },
+        });
+        assert_eq!(
+            fs.read_dir(Path::new("/"))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect_vec(),
+            vec![
+                ("foo".into(), FileMetadata::file(42)),
+                ("bar".into(), FileMetadata::directory(3)),
+            ],
+        );
+        assert_eq!(
+            fs.read_dir(Path::new("/bar"))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect_vec(),
+            vec![
+                ("baz".into(), FileMetadata::symlink(7)),
+                ("root".into(), FileMetadata::symlink(1)),
+                ("subdir".into(), FileMetadata::directory(0)),
+            ],
+        );
+        assert_eq!(
+            fs.read_dir(Path::new("/bar/root/bar/subdir"))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect_vec(),
+            vec![],
+        );
+
+        assert!(matches!(
+            fs.read_dir(Path::new("/foo")),
+            Err(TestFsError::NotDir)
+        ));
+        assert!(matches!(
+            fs.read_dir(Path::new("/foo/foo")),
+            Err(TestFsError::NotDir)
+        ));
+        assert!(matches!(
+            fs.read_dir(Path::new("/bar/baz")),
+            Err(TestFsError::NotDir)
+        ));
+        assert!(matches!(
+            fs.read_dir(Path::new("/bar/baz/foo")),
+            Err(TestFsError::NoEnt)
+        ));
+        assert!(matches!(
+            fs.read_dir(Path::new("/blah")),
+            Err(TestFsError::NoEnt)
+        ));
+        assert!(matches!(
+            fs.read_dir(Path::new("/blah/blah")),
+            Err(TestFsError::NoEnt)
+        ));
     }
 }
