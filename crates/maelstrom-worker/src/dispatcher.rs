@@ -36,7 +36,7 @@ pub trait Deps {
     /// safe to drop this handle after the job has completed.
     type JobHandle;
 
-    type Fs: cache::Fs;
+    type Fs: cache::fs::Fs;
 
     /// Start a new job. The dispatcher expects a [`Message::JobCompleted`] message when the job
     /// completes.
@@ -56,7 +56,7 @@ pub trait Deps {
     fn build_bottom_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: <Self::Fs as cache::Fs>::TempDir,
+        layer_path: <Self::Fs as cache::fs::Fs>::TempDir,
         artifact_type: ArtifactType,
         artifact_path: PathBuf,
     );
@@ -65,7 +65,7 @@ pub trait Deps {
     fn build_upper_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: <Self::Fs as cache::Fs>::TempDir,
+        layer_path: <Self::Fs as cache::fs::Fs>::TempDir,
         lower_layer_path: PathBuf,
         upper_layer_path: PathBuf,
     );
@@ -76,7 +76,7 @@ pub trait Deps {
 
 /// The artifact fetcher is split out of [`Deps`] for convenience. The rest of [`Deps`] can stay
 /// the same for "real" and local workers, but the artifact fetching is different
-pub trait ArtifactFetcher<FsT: cache::Fs> {
+pub trait ArtifactFetcher<FsT: cache::fs::Fs> {
     /// Start a thread that will download an artifact from the broker.
     fn start_artifact_fetch(&mut self, cache: &impl Cache<FsT>, digest: Sha256Digest);
 }
@@ -95,7 +95,7 @@ pub trait BrokerSender {
 
 /// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
 /// public interface. We have this so we can isolate [`Dispatcher`] when testing.
-pub trait Cache<FsT: cache::Fs> {
+pub trait Cache<FsT: cache::fs::Fs> {
     fn get_artifact(
         &mut self,
         kind: cache::EntryKind,
@@ -117,7 +117,7 @@ pub trait Cache<FsT: cache::Fs> {
 }
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
-impl Cache<cache::StdFs> for cache::Cache<cache::StdFs> {
+impl Cache<cache::fs::StdFs> for cache::Cache<cache::fs::StdFs> {
     fn get_artifact(
         &mut self,
         kind: cache::EntryKind,
@@ -139,7 +139,7 @@ impl Cache<cache::StdFs> for cache::Cache<cache::StdFs> {
         &mut self,
         kind: cache::EntryKind,
         digest: &Sha256Digest,
-        artifact: GotArtifact<cache::StdFs>,
+        artifact: GotArtifact<cache::fs::StdFs>,
     ) -> Vec<JobId> {
         self.got_artifact_success(kind, digest, artifact)
     }
@@ -152,11 +152,11 @@ impl Cache<cache::StdFs> for cache::Cache<cache::StdFs> {
         self.cache_path(kind, digest)
     }
 
-    fn temp_file(&self) -> cache::StdTempFile {
+    fn temp_file(&self) -> cache::fs::StdTempFile {
         self.temp_file()
     }
 
-    fn temp_dir(&self) -> cache::StdTempDir {
+    fn temp_dir(&self) -> cache::fs::StdTempDir {
         self.temp_dir()
     }
 }
@@ -164,7 +164,7 @@ impl Cache<cache::StdFs> for cache::Cache<cache::StdFs> {
 /// An input message for the dispatcher. These come from the broker, an executor, or an artifact
 /// fetcher.
 #[derive(Debug)]
-pub enum Message<FsT: cache::Fs> {
+pub enum Message<FsT: cache::fs::Fs> {
     Broker(BrokerToWorker),
     JobCompleted(JobId, JobResult<JobCompleted, String>),
     JobTimer(JobId),
@@ -793,7 +793,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use crate::cache::{EntryKind::*, FsTempDir, FsTempFile};
+    use crate::cache::{fs::FsTempDir, fs::FsTempFile, EntryKind::*};
     use anyhow::anyhow;
     use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;
@@ -955,7 +955,7 @@ mod tests {
 
     impl error::Error for TestFsError {}
 
-    impl cache::Fs for Rc<RefCell<TestState>> {
+    impl cache::fs::Fs for Rc<RefCell<TestState>> {
         type Error = TestFsError;
         type TempFile = TestTempFile;
         type TempDir = TestTempDir;
@@ -986,7 +986,7 @@ mod tests {
             &self,
             _path: &Path,
         ) -> Result<
-            impl Iterator<Item = Result<(OsString, cache::FileMetadata), TestFsError>>,
+            impl Iterator<Item = Result<(OsString, cache::fs::FileMetadata), TestFsError>>,
             TestFsError,
         > {
             Ok([].into_iter())
@@ -1000,7 +1000,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn metadata(&self, _path: &Path) -> Result<Option<cache::FileMetadata>, TestFsError> {
+        fn metadata(&self, _path: &Path) -> Result<Option<cache::fs::FileMetadata>, TestFsError> {
             unimplemented!()
         }
 

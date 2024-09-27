@@ -10,7 +10,10 @@ pub mod local_worker;
 pub mod signals;
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use cache::{Cache, CacheDir, FsTempDir as _, FsTempFile as _, GotArtifact, StdFs, StdTempDir};
+use cache::{
+    fs::FsTempDir as _, fs::FsTempFile as _, fs::StdFs, fs::StdTempDir, Cache, CacheDir,
+    GotArtifact,
+};
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
 use executor::{Executor, MountDir, TmpfsDir};
