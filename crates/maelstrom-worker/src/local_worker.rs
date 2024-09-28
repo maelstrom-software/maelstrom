@@ -1,5 +1,8 @@
 pub use crate::{
-    cache::{fs::StdFs, fs::StdTempFile, Cache, CacheDir, GetArtifact, GotArtifact},
+    cache::{
+        fs::std::{StdFs, StdTempFile},
+        Cache, CacheDir, GetArtifact, GotArtifact,
+    },
     check_open_file_limit,
     dispatcher::{ArtifactFetcher, BrokerSender, Cache as CacheTrait, Deps, Dispatcher, Message},
     executor::MountDir,

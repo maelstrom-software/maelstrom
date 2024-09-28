@@ -11,8 +11,11 @@ pub mod signals;
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use cache::{
-    fs::FsTempDir as _, fs::FsTempFile as _, fs::StdFs, fs::StdTempDir, Cache, CacheDir,
-    GotArtifact,
+    fs::{
+        std::{StdFs, StdTempDir},
+        FsTempDir as _, FsTempFile as _,
+    },
+    Cache, CacheDir, GotArtifact,
 };
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};

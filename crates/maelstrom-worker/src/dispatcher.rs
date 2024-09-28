@@ -117,7 +117,7 @@ pub trait Cache<FsT: cache::fs::Fs> {
 }
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
-impl Cache<cache::fs::StdFs> for cache::Cache<cache::fs::StdFs> {
+impl Cache<cache::fs::std::StdFs> for cache::Cache<cache::fs::std::StdFs> {
     fn get_artifact(
         &mut self,
         kind: cache::EntryKind,
@@ -139,7 +139,7 @@ impl Cache<cache::fs::StdFs> for cache::Cache<cache::fs::StdFs> {
         &mut self,
         kind: cache::EntryKind,
         digest: &Sha256Digest,
-        artifact: GotArtifact<cache::fs::StdFs>,
+        artifact: GotArtifact<cache::fs::std::StdFs>,
     ) -> Vec<JobId> {
         self.got_artifact_success(kind, digest, artifact)
     }
@@ -152,11 +152,11 @@ impl Cache<cache::fs::StdFs> for cache::Cache<cache::fs::StdFs> {
         self.cache_path(kind, digest)
     }
 
-    fn temp_file(&self) -> cache::fs::StdTempFile {
+    fn temp_file(&self) -> cache::fs::std::StdTempFile {
         self.temp_file()
     }
 
-    fn temp_dir(&self) -> cache::fs::StdTempDir {
+    fn temp_dir(&self) -> cache::fs::std::StdTempDir {
         self.temp_dir()
     }
 }
