@@ -413,7 +413,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         }
     }
 
-    fn receive_collection_finished(&mut self) {
+    fn receive_collection_finished(&mut self, _wait_status: WaitStatus) {
         self.collection_finished = true;
         if self.pending_listings == 0 {
             self.deps.send_ui_msg(UiMessage::DoneQueuingJobs);
@@ -439,7 +439,9 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             } => self.receive_tests_listed(artifact, listing, ignored_listing),
             MainAppMessage::FatalError { error } => self.receive_fatal_error(error),
             MainAppMessage::JobUpdate { job_id, result } => self.receive_job_update(job_id, result),
-            MainAppMessage::CollectionFinished => self.receive_collection_finished(),
+            MainAppMessage::CollectionFinished { wait_status } => {
+                self.receive_collection_finished(wait_status)
+            }
             MainAppMessage::Shutdown => unimplemented!(),
         }
     }

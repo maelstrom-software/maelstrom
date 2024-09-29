@@ -140,7 +140,9 @@ enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'stati
         job_id: JobId,
         result: Result<JobStatus>,
     },
-    CollectionFinished,
+    CollectionFinished {
+        wait_status: WaitStatus,
+    },
     Shutdown,
 }
 
@@ -222,8 +224,8 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
                         }
                     }
                     match build_handle.wait() {
-                        Ok(_wait_status) => {
-                            let _ = sender.send(MainAppMessage::CollectionFinished);
+                        Ok(wait_status) => {
+                            let _ = sender.send(MainAppMessage::CollectionFinished { wait_status });
                         }
                         Err(error) => {
                             let _ = sender.send(MainAppMessage::FatalError { error });

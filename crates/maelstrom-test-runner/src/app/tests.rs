@@ -9,7 +9,7 @@ use crate::test_db::{OnDiskTestDb, TestDb};
 use crate::ui::{
     UiJobEnqueued, UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,
 };
-use crate::{NoCaseMetadata, NotRunEstimate, StringArtifactKey};
+use crate::{NoCaseMetadata, NotRunEstimate, StringArtifactKey, WaitStatus};
 use anyhow::anyhow;
 use itertools::Itertools as _;
 use maelstrom_base::{
@@ -516,7 +516,7 @@ macro_rules! test_output_test_inner {
                     msg: UiMessage::UpdatePendingJobsCount(1)
                 }
             };
-            CollectionFinished => {
+            CollectionFinished { wait_status: wait_success() } => {
                 SendUiMsg {
                     msg: UiMessage::DoneQueuingJobs,
                 }
@@ -645,7 +645,7 @@ macro_rules! test_db_test {
                     })
                 },
             };
-            CollectionFinished => {
+            CollectionFinished { wait_status: wait_success() } => {
                 SendUiMsg {
                     msg: UiMessage::DoneQueuingJobs,
                 }
@@ -715,6 +715,13 @@ fn ui_job_result(name: &str, job_id: u32, status: UiJobStatus) -> UiMessage {
     })
 }
 
+fn wait_success() -> WaitStatus {
+    WaitStatus {
+        exit_code: ExitCode::SUCCESS,
+        output: "".into(),
+    }
+}
+
 //  _            _
 // | |_ ___  ___| |_ ___
 // | __/ _ \/ __| __/ __|
@@ -765,7 +772,7 @@ script_test_with_error_simex! {
             packages: vec![fake_pkg("foo_pkg", [])]
         }
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         },
@@ -798,7 +805,7 @@ script_test! {
             packages: vec![fake_pkg("foo_pkg", [])]
         }
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         },
@@ -844,7 +851,7 @@ script_test_with_error_simex! {
         listing: vec![],
         ignored_listing: vec![]
     } => {};
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         },
@@ -885,7 +892,7 @@ script_test_with_error_simex! {
             artifact: fake_artifact("foo_test", "foo_pkg"),
         }
     };
-    CollectionFinished => {};
+    CollectionFinished { wait_status: wait_success() } => {};
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
         listing: vec![],
@@ -1393,7 +1400,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(2)
         }
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -1453,7 +1460,7 @@ script_test_with_error_simex! {
             artifact: fake_artifact("foo_test", "foo_pkg"),
         }
     };
-    CollectionFinished => {};
+    CollectionFinished { wait_status: wait_success() } => {};
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
         listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
@@ -1567,7 +1574,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(2)
         }
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -1651,7 +1658,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(2)
         }
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -1728,7 +1735,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(1)
         },
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -1799,7 +1806,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(1)
         },
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -1874,7 +1881,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(1)
         },
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -1985,7 +1992,7 @@ script_test_with_error_simex! {
             })
         },
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -2178,7 +2185,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(2)
         },
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -2337,7 +2344,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(4)
         }
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -2451,7 +2458,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(2)
         },
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -2553,7 +2560,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(3)
         }
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -2653,7 +2660,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(2)
         },
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -2724,7 +2731,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(1)
         },
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -3166,7 +3173,7 @@ script_test_with_error_simex! {
             msg: UiMessage::UpdatePendingJobsCount(2)
         },
     };
-    CollectionFinished => {
+    CollectionFinished { wait_status: wait_success() } => {
         SendUiMsg {
             msg: UiMessage::DoneQueuingJobs,
         }
@@ -3228,7 +3235,7 @@ script_test_with_error_simex! {
             artifact: fake_artifact("foo_test", "foo_pkg"),
         }
     };
-    CollectionFinished => {};
+    CollectionFinished { wait_status: wait_success() } => {};
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
         listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
@@ -3274,7 +3281,7 @@ script_test_with_error_simex! {
             artifact: fake_artifact("foo_test", "foo_pkg"),
         }
     };
-    CollectionFinished => {};
+    CollectionFinished { wait_status: wait_success() } => {};
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
         listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
@@ -3319,7 +3326,7 @@ script_test_with_error_simex! {
             artifact: fake_artifact("foo_test", "foo_pkg"),
         }
     };
-    CollectionFinished => {};
+    CollectionFinished { wait_status: wait_success() } => {};
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
         listing: vec![],
@@ -3360,7 +3367,7 @@ script_test_with_error_simex! {
             artifact: fake_artifact("foo_test", "foo_pkg"),
         }
     };
-    CollectionFinished => {};
+    CollectionFinished { wait_status: wait_success() } => {};
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
         listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
@@ -3404,7 +3411,7 @@ script_test_with_error_simex! {
             artifact: fake_artifact("foo_test", "foo_pkg"),
         }
     };
-    CollectionFinished => {};
+    CollectionFinished { wait_status: wait_success() } => {};
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
         listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
