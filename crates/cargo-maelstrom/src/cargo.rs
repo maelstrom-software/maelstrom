@@ -24,6 +24,22 @@ use std::{
     thread,
 };
 
+fn filter_build_output(output: String) -> String {
+    std::fs::write("/tmp/o.txt", output.as_bytes()).unwrap();
+    let lines: Vec<_> = output
+        .split('\n')
+        .filter(|l| {
+            !(l.starts_with("[1m[32m   Compiling")
+                || l.starts_with("   Compiling")
+                || l.starts_with("[1m[36m    Building")
+                || l.starts_with("    Building")
+                || l.starts_with("[1m[32m    Finished")
+                || l.starts_with("    Finished"))
+        })
+        .collect();
+    lines.join("\n")
+}
+
 pub struct WaitHandle {
     child: Child,
     stderr_handle: Mutex<Option<thread::JoinHandle<Result<String>>>>,
@@ -35,7 +51,7 @@ impl WaitHandle {
         let mut stderr_handle = self.stderr_handle.lock().unwrap();
         Ok(WaitStatus {
             exit_code,
-            output: stderr_handle.take().unwrap().join().unwrap()?,
+            output: filter_build_output(stderr_handle.take().unwrap().join().unwrap()?),
         })
     }
 
