@@ -63,14 +63,25 @@ where
     TermT: Terminal,
 {
     fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {
+        let mut collection_output = String::new();
         while let Ok(msg) = recv.recv() {
             match msg {
                 UiMessage::JobFinished(_) => self.job_finished(),
                 UiMessage::UpdatePendingJobsCount(count) => self.update_pending_jobs_count(count),
                 UiMessage::AllJobsFinished(summary) => self.finished(summary)?,
+                UiMessage::CollectionOutput(output) => {
+                    collection_output += &output;
+                }
                 _ => continue,
             }
         }
+
+        if let Some(bar) = &mut self.progress_bar {
+            bar.finish_and_clear();
+        }
+        self.term.write_str(&collection_output)?;
+        self.term.flush()?;
+
         Ok(())
     }
 }
