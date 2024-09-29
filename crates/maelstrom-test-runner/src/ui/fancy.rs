@@ -24,7 +24,7 @@ use ratatui::{
 };
 use slog::Drain as _;
 use std::cell::RefCell;
-use std::io::{self, stdout};
+use std::io::{self, stdout, Write as _};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr as _;
@@ -323,6 +323,7 @@ pub struct FancyUi {
     enqueue_status: Option<String>,
     throbber_state: throbber_widgets_tui::ThrobberState,
     remote_progress: Vec<RemoteProgress>,
+    collection_output: String,
 }
 
 impl FancyUi {
@@ -345,6 +346,7 @@ impl FancyUi {
             enqueue_status: Some("starting...".into()),
             throbber_state: Default::default(),
             remote_progress: vec![],
+            collection_output: String::new(),
         })
     }
 }
@@ -437,7 +439,9 @@ impl Ui for FancyUi {
                     UiMessage::AllJobsFinished(summary) => {
                         self.all_done = Some(summary);
                     }
-                    UiMessage::CollectionOutput(_output) => {}
+                    UiMessage::CollectionOutput(output) => {
+                        self.collection_output += &output;
+                    }
                 },
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -465,6 +469,10 @@ impl Ui for FancyUi {
         self.jobs = Default::default();
 
         terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
+
+        drop(terminal);
+
+        stdout().write_all(self.collection_output.as_bytes())?;
 
         Ok(())
     }
