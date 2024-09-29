@@ -51,6 +51,7 @@ fn maybe_install_pytest() {
 fn do_maelstrom_pytest_test(
     source_contents: &str,
     extra_options: ExtraCommandLineOptions,
+    terminal_size: (u16, u16),
 ) -> (String, String, ExitCode) {
     maybe_install_pytest();
 
@@ -111,7 +112,7 @@ fn do_maelstrom_pytest_test(
         },
         pytest_options: Default::default(),
     };
-    let term = InMemoryTerm::new(50, 50);
+    let term = InMemoryTerm::new(terminal_size.0, terminal_size.1);
 
     let logger = Logger::GivenLogger(log.clone());
 
@@ -140,8 +141,10 @@ fn do_maelstrom_pytest_test(
 fn do_maelstrom_pytest_test_success(
     source_contents: &str,
     extra_options: ExtraCommandLineOptions,
+    terminal_size: (u16, u16),
 ) -> String {
-    let (contents, stderr, exit_code) = do_maelstrom_pytest_test(source_contents, extra_options);
+    let (contents, stderr, exit_code) =
+        do_maelstrom_pytest_test(source_contents, extra_options, terminal_size);
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert_eq!(stderr, "");
     contents
@@ -161,6 +164,7 @@ fn test_simple_success() {
             },
             list: false,
         },
+        (50, 50),
     );
     assert!(
         contents.contains("test_foo.py::test_noop.................OK"),
@@ -192,6 +196,7 @@ fn test_simple_failure() {
             },
             list: false,
         },
+        (50, 50),
     );
     assert_eq!(stderr, "");
     assert_eq!(exit_code, ExitCode::from(1));
@@ -224,7 +229,7 @@ fn test_simple_failure() {
 
 #[test]
 fn test_collection_failure() {
-    let (contents, stderr, exit_code) = do_maelstrom_pytest_test(
+    let (contents, _, exit_code) = do_maelstrom_pytest_test(
         &indoc::indoc! {"
             raise Exception('import error')
         "},
@@ -235,12 +240,12 @@ fn test_collection_failure() {
             },
             list: false,
         },
+        (100, 100),
     );
-    assert_eq!(contents, "");
     assert_ne!(exit_code, ExitCode::SUCCESS);
 
     assert!(
-        stderr.contains(indoc::indoc! {"
+        contents.contains(indoc::indoc! {"
             ==================================== ERRORS ====================================
             _________________________ ERROR collecting test_foo.py _________________________
             test_foo.py:1: in <module>
@@ -250,7 +255,7 @@ fn test_collection_failure() {
             ERROR test_foo.py - Exception: import error
             !!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
         "}),
-        "{stderr}"
+        "{contents}"
     );
 }
 
@@ -271,6 +276,7 @@ fn test_listing_all() {
             },
             list: true,
         },
+        (50, 50),
     );
 
     assert_eq!(
@@ -300,6 +306,7 @@ fn test_listing_node_id() {
             },
             list: true,
         },
+        (50, 50),
     );
 
     assert_eq!(
@@ -331,6 +338,7 @@ fn test_listing_marker() {
             },
             list: true,
         },
+        (50, 50),
     );
 
     assert_eq!(
@@ -367,6 +375,7 @@ fn test_ignore() {
             },
             list: false,
         },
+        (50, 50),
     );
 
     assert!(
