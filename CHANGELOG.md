@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Test runners send SIGKILL to their build processes when exiting early due to `stop-after`.
 - cargo-maelstrom passes `--no-deps` to `cargo metadata` command.
+- cargo-maelstrom now displays warnings after the test summary.
 
 ## [0.12.0] - 2024-09-12
 
