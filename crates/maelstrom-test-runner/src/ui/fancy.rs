@@ -315,7 +315,7 @@ impl Widget for PrintAbove {
 pub struct FancyUi {
     jobs: JobStatuses,
     expected_total_jobs: u64,
-    all_done: Option<UiJobSummary>,
+    summary: Option<UiJobSummary>,
     producing_build_output: bool,
 
     build_output: vt100::Parser,
@@ -324,6 +324,7 @@ pub struct FancyUi {
     throbber_state: throbber_widgets_tui::ThrobberState,
     remote_progress: Vec<RemoteProgress>,
     collection_output: String,
+    all_done: bool,
 }
 
 impl FancyUi {
@@ -338,7 +339,7 @@ impl FancyUi {
         Ok(Self {
             jobs: JobStatuses::default(),
             expected_total_jobs: 0,
-            all_done: None,
+            summary: None,
             producing_build_output: false,
 
             build_output: vt100::Parser::new(3, u16::MAX, 0),
@@ -347,6 +348,7 @@ impl FancyUi {
             throbber_state: Default::default(),
             remote_progress: vec![],
             collection_output: String::new(),
+            all_done: false,
         })
     }
 }
@@ -437,7 +439,7 @@ impl Ui for FancyUi {
                         self.enqueue_status = None;
                     }
                     UiMessage::AllJobsFinished(summary) => {
-                        self.all_done = Some(summary);
+                        self.summary = Some(summary);
                     }
                     UiMessage::CollectionOutput(output) => {
                         self.collection_output += &output;
@@ -449,7 +451,7 @@ impl Ui for FancyUi {
         }
 
         // Spit out the summary
-        if self.all_done.is_some() {
+        if self.summary.is_some() {
             self.render_summary();
         }
 
@@ -463,16 +465,19 @@ impl Ui for FancyUi {
         }
 
         // Clear away some of the temporal UI elements before we update the screen one last time.
-        self.producing_build_output = false;
-        self.enqueue_status = None;
-        self.remote_progress.clear();
-        self.jobs = Default::default();
-
+        self.all_done = true;
         terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
 
-        drop(terminal);
+        if !self.collection_output.is_empty() {
+            terminal.insert_before(1, move |buf| {
+                Line::from("Collection Output")
+                    .centered()
+                    .render(buf.area, buf)
+            })?;
 
-        stdout().write_all(self.collection_output.as_bytes())?;
+            disable_raw_mode()?;
+            stdout().write_all(self.collection_output.as_bytes())?;
+        }
 
         Ok(())
     }
@@ -595,7 +600,7 @@ impl FancyUi {
         self.print_above
             .push(Line::from("Test Summary").centered().into());
 
-        let summary = self.all_done.as_ref().unwrap();
+        let summary = self.summary.as_ref().unwrap();
         let num_failed = summary.failed.len();
         let num_ignored = summary.ignored.len();
         let num_succeeded = summary.succeeded;
@@ -699,7 +704,7 @@ impl Widget for &mut FancyUi {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut sections = vec![];
 
-        if self.all_done.is_none() {
+        if !self.all_done {
             sections.push((
                 Constraint::Fill(1),
                 FancyUi::render_running_tests as SectionFnPtr,
