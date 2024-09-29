@@ -259,6 +259,7 @@ fn run_simple_ui<ProgressIndicatorT>(
 where
     ProgressIndicatorT: ProgressIndicator,
 {
+    let mut collection_output = String::new();
     let mut jobs = JobStatuses::default();
     let mut last_tick = Instant::now();
     loop {
@@ -303,11 +304,18 @@ where
                 UiMessage::DoneQueuingJobs => prog.done_queuing_jobs(),
                 UiMessage::DoneBuilding => {}
                 UiMessage::AllJobsFinished(summary) => all_jobs_finished(prog, summary)?,
-                UiMessage::CollectionOutput(_output) => {}
+                UiMessage::CollectionOutput(output) => {
+                    collection_output += &output;
+                }
             },
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
         }
     }
+
+    for line in collection_output.split('\n') {
+        prog.println(line.into());
+    }
+
     Ok(())
 }
