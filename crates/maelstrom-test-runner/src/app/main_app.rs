@@ -413,10 +413,15 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         }
     }
 
-    fn receive_collection_finished(&mut self, _wait_status: WaitStatus) {
+    fn receive_collection_finished(&mut self, wait_status: WaitStatus) {
         self.collection_finished = true;
         if self.pending_listings == 0 {
             self.deps.send_ui_msg(UiMessage::DoneQueuingJobs);
+        }
+
+        if !wait_status.output.is_empty() {
+            self.deps
+                .send_ui_msg(UiMessage::CollectionOutput(wait_status.output));
         }
 
         self.check_for_done();

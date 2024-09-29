@@ -722,6 +722,13 @@ fn wait_success() -> WaitStatus {
     }
 }
 
+fn wait_failure() -> WaitStatus {
+    WaitStatus {
+        exit_code: ExitCode::FAILURE,
+        output: "build error".into(),
+    }
+}
+
 //  _            _
 // | |_ ___  ___| |_ ___
 // | __/ _ \/ __| __/ __|
@@ -893,6 +900,56 @@ script_test_with_error_simex! {
         }
     };
     CollectionFinished { wait_status: wait_success() } => {};
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![],
+        ignored_listing: vec![]
+    } => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec![],
+                ignored: vec![],
+                not_run: None,
+            })
+        },
+        StartShutdown
+    };
+}
+
+script_test_with_error_simex! {
+    collection_error,
+    expected_test_db_out = [
+        TestDbEntry::empty_artifact("foo_pkg", "foo_test")
+    ],
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    CollectionFinished { wait_status: wait_failure() } => {
+        SendUiMsg {
+            msg: UiMessage::CollectionOutput("build error".into())
+        }
+    };
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
         listing: vec![],

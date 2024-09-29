@@ -437,6 +437,7 @@ impl Ui for FancyUi {
                     UiMessage::AllJobsFinished(summary) => {
                         self.all_done = Some(summary);
                     }
+                    UiMessage::CollectionOutput(_output) => {}
                 },
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => break,

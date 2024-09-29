@@ -229,6 +229,9 @@ pub enum UiMessage {
     BuildOutputLine(String),
     /// Send a chunk of TTY data as build output. This is parsed by a vt100 parser.
     BuildOutputChunk(Vec<u8>),
+    /// The test collection had some kind of error or warning and we want to display output related
+    /// to it.
+    CollectionOutput(String),
     /// Display a slog log messages.
     SlogRecord(LogRecord),
     /// When being used for listing tests, display a line of listing output.

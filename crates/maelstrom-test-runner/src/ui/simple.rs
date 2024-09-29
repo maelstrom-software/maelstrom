@@ -303,6 +303,7 @@ where
                 UiMessage::DoneQueuingJobs => prog.done_queuing_jobs(),
                 UiMessage::DoneBuilding => {}
                 UiMessage::AllJobsFinished(summary) => all_jobs_finished(prog, summary)?,
+                UiMessage::CollectionOutput(_output) => {}
             },
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
