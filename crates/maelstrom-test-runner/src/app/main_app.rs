@@ -424,6 +424,12 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
                 .send_ui_msg(UiMessage::CollectionOutput(wait_status.output));
         }
 
+        if wait_status.exit_code != ExitCode::SUCCESS {
+            self.exit_code = wait_status.exit_code;
+            self.deps.start_shutdown();
+            return;
+        }
+
         self.check_for_done();
     }
 

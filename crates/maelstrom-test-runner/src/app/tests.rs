@@ -922,9 +922,9 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     collection_error,
-    expected_test_db_out = [
-        TestDbEntry::empty_artifact("foo_pkg", "foo_test")
-    ],
+    test_db_in = [],
+    expected_exit_code = ExitCode::FAILURE,
+    expected_test_db_out = [],
     Start => {
         SendUiMsg {
             msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
@@ -948,7 +948,43 @@ script_test_with_error_simex! {
     CollectionFinished { wait_status: wait_failure() } => {
         SendUiMsg {
             msg: UiMessage::CollectionOutput("build error".into())
+        },
+        StartShutdown
+    };
+}
+
+script_test_with_error_simex! {
+    collection_warning,
+    expected_test_db_out = [
+        TestDbEntry::empty_artifact("foo_pkg", "foo_test")
+    ],
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    CollectionFinished { wait_status: WaitStatus {
+        output: "build warning".into(),
+        ..wait_success()
+    } } => {
+        SendUiMsg {
+            msg: UiMessage::CollectionOutput("build warning".into())
+        },
     };
     TestsListed {
         artifact: fake_artifact("foo_test", "foo_pkg"),
