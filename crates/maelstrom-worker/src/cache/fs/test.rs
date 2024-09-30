@@ -81,6 +81,14 @@ impl ComponentPath {
     fn iter(&self) -> impl Iterator<Item = &'_ String> {
         self.0.iter()
     }
+
+    fn is_descendant_of(&self, potential_ancestor: &ComponentPath) -> bool {
+        self.iter()
+            .zip(potential_ancestor)
+            .take_while(|(l, r)| *l == *r)
+            .count()
+            == potential_ancestor.len()
+    }
 }
 
 impl IntoIterator for ComponentPath {
@@ -361,18 +369,6 @@ impl Fs {
     pub fn assert_tree(&self, expected: Entry) {
         assert_eq!(self.state.borrow().root, expected);
     }
-
-    fn is_descendant_of(
-        potential_descendant_component_path: &ComponentPath,
-        potential_ancestor_component_path: &ComponentPath,
-    ) -> bool {
-        potential_descendant_component_path
-            .iter()
-            .zip(potential_ancestor_component_path)
-            .take_while(|(l, r)| *l == *r)
-            .count()
-            == potential_ancestor_component_path.len()
-    }
 }
 
 impl super::Fs for Fs {
@@ -415,7 +411,7 @@ impl super::Fs for Fs {
             }
             LookupComponentPath::FoundParent(_, dest_parent_component_path) => {
                 if source_entry.is_directory()
-                    && Self::is_descendant_of(&dest_parent_component_path, &source_component_path)
+                    && dest_parent_component_path.is_descendant_of(&source_component_path)
                 {
                     // We can't move a directory into one of its descendants, including itself.
                     return Err(Error::Inval);
@@ -435,10 +431,7 @@ impl super::Fs for Fs {
                             // Linux behavior, but it doesn't really matter as we don't
                             // imagine ever seeing this in our cache code.
                             return Ok(());
-                        } else if Self::is_descendant_of(
-                            &dest_component_path,
-                            &source_component_path,
-                        ) {
+                        } else if dest_component_path.is_descendant_of(&source_component_path) {
                             // We can't move a directory into one of its descendants.
                             return Err(Error::Inval);
                         }
