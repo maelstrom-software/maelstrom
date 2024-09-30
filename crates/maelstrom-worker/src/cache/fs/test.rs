@@ -53,18 +53,18 @@ impl super::FsTempDir for TempDir {
 }
 
 #[derive(Default, PartialEq)]
-struct ComponentPath(Vec<usize>);
+struct ComponentPath(Vec<String>);
 
 impl ComponentPath {
     fn clear(&mut self) {
         *self = Default::default()
     }
 
-    fn push(&mut self, component: usize) {
+    fn push(&mut self, component: String) {
         self.0.push(component);
     }
 
-    fn pop(&mut self) -> Option<usize> {
+    fn pop(&mut self) -> Option<String> {
         self.0.pop()
     }
 
@@ -76,26 +76,22 @@ impl ComponentPath {
         self.0.is_empty()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &'_ usize> {
+    fn iter(&self) -> impl Iterator<Item = &'_ String> {
         self.0.iter()
-    }
-
-    fn iter_mut(&mut self) -> impl Iterator<Item = &'_ mut usize> {
-        self.0.iter_mut()
     }
 }
 
 impl IntoIterator for ComponentPath {
-    type Item = usize;
-    type IntoIter = std::vec::IntoIter<usize>;
+    type Item = String;
+    type IntoIter = std::vec::IntoIter<String>;
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
 
 impl<'a> IntoIterator for &'a ComponentPath {
-    type Item = &'a usize;
-    type IntoIter = std::slice::Iter<'a, usize>;
+    type Item = &'a String;
+    type IntoIter = std::slice::Iter<'a, String>;
     fn into_iter(self) -> Self::IntoIter {
         (&self.0).into_iter()
     }
@@ -173,13 +169,13 @@ impl Entry {
                 Component::Normal(name) => loop {
                     match cur {
                         Entry::Directory { entries } => {
-                            let entry_component = entries
-                                .into_iter()
-                                .position(|(entry_name, _)| name.eq(OsStr::new(&entry_name)));
-                            match entry_component {
-                                Some(entry_component) => {
-                                    cur = &entries[entry_component].1;
-                                    component_path.push(entry_component);
+                            match entries
+                                .iter()
+                                .find(|(entry_name, _)| name.eq(OsStr::new(&entry_name)))
+                            {
+                                Some((name, entry)) => {
+                                    cur = entry;
+                                    component_path.push(name.to_owned());
                                     break;
                                 }
                                 None => {
@@ -235,7 +231,10 @@ impl Entry {
             let Entry::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
-            cur = &entries[*component].1;
+            cur = entries
+                .iter()
+                .find_map(|(name, entry)| (name == component).then_some(entry))
+                .unwrap();
         }
         cur
     }
@@ -249,7 +248,10 @@ impl Entry {
             let Entry::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
-            cur = &mut entries[*component].1;
+            cur = entries
+                .into_iter()
+                .find_map(|(name, entry)| (name == component).then_some(entry))
+                .unwrap();
         }
         let Entry::Directory { entries } = cur else {
             panic!("entry not a directory");
@@ -267,44 +269,25 @@ impl Entry {
             .push((name.to_str().unwrap().to_owned(), entry));
     }
 
-    fn adjust_one_component_path_for_removal_of_other(
-        to_keep: &mut ComponentPath,
-        to_remove: &ComponentPath,
-    ) {
-        let to_remove_len = to_remove.len();
-        for (i, (to_keep_component, to_remove_component)) in
-            to_keep.iter_mut().zip(to_remove.iter()).enumerate()
-        {
-            if i + 1 == to_remove_len {
-                if *to_remove_component < *to_keep_component {
-                    *to_keep_component -= 1;
-                }
-                return;
-            } else if *to_keep_component != *to_remove_component {
-                return;
-            }
-        }
-    }
-
-    fn remove_leaf_from_component_path(
-        &mut self,
-        component_path: &ComponentPath,
-        to_keep_component_path: &mut ComponentPath,
-    ) -> Entry {
+    fn remove_leaf_from_component_path(&mut self, component_path: &ComponentPath) -> Entry {
         assert!(!component_path.is_empty());
-        Self::adjust_one_component_path_for_removal_of_other(
-            to_keep_component_path,
-            component_path,
-        );
         let mut cur = self;
         for component in component_path.iter().with_position() {
             let Entry::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
             if let Position::Last(component) | Position::Only(component) = component {
-                return entries.remove(*component).1;
+                let index = entries
+                    .iter()
+                    .position(|(name, _)| name == component)
+                    .unwrap();
+                return entries.remove(index).1;
             } else {
-                cur = &mut entries[*component.into_inner()].1;
+                let component = component.into_inner();
+                cur = entries
+                    .iter_mut()
+                    .find_map(|(name, entry)| (name == component).then_some(entry))
+                    .unwrap();
             }
         }
         unreachable!();
@@ -421,7 +404,7 @@ impl super::Fs for Fs {
     fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
 
-        let (source_entry, mut source_component_path) =
+        let (source_entry, source_component_path) =
             match state.root.lookup_component_path(source_path) {
                 LookupComponentPath::FileAncestor => {
                     return Err(Error::NotDir);
@@ -436,7 +419,7 @@ impl super::Fs for Fs {
                 }
             };
 
-        let mut dest_parent_component_path = match state.root.lookup_component_path(dest_path) {
+        let dest_parent_component_path = match state.root.lookup_component_path(dest_path) {
             LookupComponentPath::FileAncestor => {
                 return Err(Error::NotDir);
             }
@@ -487,19 +470,17 @@ impl super::Fs for Fs {
                 // Remove the destination directory and proceed as if it wasn't there to begin
                 // with. We may have to adjust the source_component_path to account for the
                 // removal of the destination.
-                state.root.remove_leaf_from_component_path(
-                    &dest_component_path,
-                    &mut source_component_path,
-                );
+                state
+                    .root
+                    .remove_leaf_from_component_path(&dest_component_path);
                 dest_component_path.pop();
                 dest_component_path
             }
         };
 
-        let source_entry = state.root.remove_leaf_from_component_path(
-            &source_component_path,
-            &mut dest_parent_component_path,
-        );
+        let source_entry = state
+            .root
+            .remove_leaf_from_component_path(&source_component_path);
         state.root.append_entry_to_directory(
             &dest_parent_component_path,
             dest_path.file_name().unwrap(),
@@ -522,7 +503,7 @@ impl super::Fs for Fs {
                 state
                     .root
                     .resolve_component_path_mut_as_directory(&component_path)
-                    .remove(component);
+                    .retain(|(name, _)| name != &component);
                 Ok(())
             }
         }
