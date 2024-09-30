@@ -2,11 +2,13 @@ use super::FileMetadata;
 use itertools::{Itertools, Position};
 use std::{
     cell::RefCell,
+    collections::HashMap,
     error,
     ffi::{OsStr, OsString},
     fmt::Debug,
     path::{Component, Path, PathBuf},
     rc::Rc,
+    slice, vec,
 };
 use strum::Display;
 
@@ -83,7 +85,7 @@ impl ComponentPath {
 
 impl IntoIterator for ComponentPath {
     type Item = String;
-    type IntoIter = std::vec::IntoIter<String>;
+    type IntoIter = vec::IntoIter<String>;
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
@@ -91,7 +93,7 @@ impl IntoIterator for ComponentPath {
 
 impl<'a> IntoIterator for &'a ComponentPath {
     type Item = &'a String;
-    type IntoIter = std::slice::Iter<'a, String>;
+    type IntoIter = slice::Iter<'a, String>;
     fn into_iter(self) -> Self::IntoIter {
         (&self.0).into_iter()
     }
@@ -100,7 +102,7 @@ impl<'a> IntoIterator for &'a ComponentPath {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Entry {
     File { size: u64 },
-    Directory { entries: Vec<(String, Entry)> },
+    Directory { entries: HashMap<String, Entry> },
     Symlink { target: String },
 }
 
@@ -169,11 +171,9 @@ impl Entry {
                 Component::Normal(name) => loop {
                     match cur {
                         Entry::Directory { entries } => {
-                            match entries
-                                .iter()
-                                .find(|(entry_name, _)| name.eq(OsStr::new(&entry_name)))
-                            {
-                                Some((name, entry)) => {
+                            let name = name.to_str().unwrap();
+                            match entries.get(name) {
+                                Some(entry) => {
                                     cur = entry;
                                     component_path.push(name.to_owned());
                                     break;
@@ -231,10 +231,7 @@ impl Entry {
             let Entry::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
-            cur = entries
-                .iter()
-                .find_map(|(name, entry)| (name == component).then_some(entry))
-                .unwrap();
+            cur = entries.get(component).unwrap();
         }
         cur
     }
@@ -242,16 +239,13 @@ impl Entry {
     fn resolve_component_path_mut_as_directory(
         &mut self,
         component_path: &ComponentPath,
-    ) -> &mut Vec<(String, Entry)> {
+    ) -> &mut HashMap<String, Entry> {
         let mut cur = self;
         for component in component_path {
             let Entry::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
-            cur = entries
-                .into_iter()
-                .find_map(|(name, entry)| (name == component).then_some(entry))
-                .unwrap();
+            cur = entries.get_mut(component).unwrap();
         }
         let Entry::Directory { entries } = cur else {
             panic!("entry not a directory");
@@ -266,7 +260,7 @@ impl Entry {
         entry: Entry,
     ) {
         self.resolve_component_path_mut_as_directory(directory_component_path)
-            .push((name.to_str().unwrap().to_owned(), entry));
+            .insert(name.to_str().unwrap().to_owned(), entry);
     }
 
     fn remove_leaf_from_component_path(&mut self, component_path: &ComponentPath) -> Entry {
@@ -277,17 +271,9 @@ impl Entry {
                 panic!("intermediate path entry not a directory");
             };
             if let Position::Last(component) | Position::Only(component) = component {
-                let index = entries
-                    .iter()
-                    .position(|(name, _)| name == component)
-                    .unwrap();
-                return entries.remove(index).1;
+                return entries.remove(component).unwrap();
             } else {
-                let component = component.into_inner();
-                cur = entries
-                    .iter_mut()
-                    .find_map(|(name, entry)| (name == component).then_some(entry))
-                    .unwrap();
+                cur = entries.get_mut(component.into_inner()).unwrap();
             }
         }
         unreachable!();
@@ -503,7 +489,7 @@ impl super::Fs for Fs {
                 state
                     .root
                     .resolve_component_path_mut_as_directory(&component_path)
-                    .retain(|(name, _)| name != &component);
+                    .remove(&component);
                 Ok(())
             }
         }
@@ -548,7 +534,7 @@ impl super::Fs for Fs {
         match self.state.borrow().root.lookup_component_path(path) {
             LookupComponentPath::Found(Entry::Directory { entries }, _) => Ok(entries
                 .iter()
-                .map(|(name, entry)| Ok((OsStr::new(name).to_owned(), entry.metadata())))
+                .map(|(name, entry)| Ok((name.into(), entry.metadata())))
                 .collect_vec()
                 .into_iter()),
             LookupComponentPath::Found(_, _) | LookupComponentPath::FileAncestor => {
@@ -632,7 +618,6 @@ impl super::Fs for Fs {
 mod tests {
     use super::super::Fs as _;
     use super::*;
-    use itertools::Itertools;
 
     #[test]
     fn fs_empty() {
@@ -1031,29 +1016,29 @@ mod tests {
             fs.read_dir(Path::new("/"))
                 .unwrap()
                 .map(Result::unwrap)
-                .collect_vec(),
-            vec![
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
                 ("foo".into(), FileMetadata::file(42)),
                 ("bar".into(), FileMetadata::directory(3)),
-            ],
+            ]),
         );
         assert_eq!(
             fs.read_dir(Path::new("/bar"))
                 .unwrap()
                 .map(Result::unwrap)
-                .collect_vec(),
-            vec![
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
                 ("baz".into(), FileMetadata::symlink(7)),
                 ("root".into(), FileMetadata::symlink(1)),
                 ("subdir".into(), FileMetadata::directory(0)),
-            ],
+            ]),
         );
         assert_eq!(
             fs.read_dir(Path::new("/bar/root/bar/subdir"))
                 .unwrap()
                 .map(Result::unwrap)
-                .collect_vec(),
-            vec![],
+                .collect::<HashMap<_, _>>(),
+            HashMap::default(),
         );
 
         assert!(matches!(fs.read_dir(Path::new("/foo")), Err(Error::NotDir)));
