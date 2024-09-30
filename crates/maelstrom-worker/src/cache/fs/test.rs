@@ -2,7 +2,6 @@ use super::FileMetadata;
 use itertools::Itertools;
 use std::{
     cell::RefCell,
-    cmp::Ordering,
     error,
     ffi::{OsStr, OsString},
     fmt::Debug,
@@ -28,26 +27,6 @@ struct TempFile {
     path: PathBuf,
 }
 
-impl PartialOrd for TempFile {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for TempFile {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.path.cmp(&other.path)
-    }
-}
-
-impl PartialEq for TempFile {
-    fn eq(&self, other: &Self) -> bool {
-        self.path.eq(&other.path)
-    }
-}
-
-impl Eq for TempFile {}
-
 impl super::FsTempFile for TempFile {
     fn path(&self) -> &Path {
         &self.path
@@ -62,26 +41,6 @@ impl super::FsTempFile for TempFile {
 struct TempDir {
     path: PathBuf,
 }
-
-impl PartialOrd for TempDir {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for TempDir {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.path.cmp(&other.path)
-    }
-}
-
-impl PartialEq for TempDir {
-    fn eq(&self, other: &Self) -> bool {
-        self.path.eq(&other.path)
-    }
-}
-
-impl Eq for TempDir {}
 
 impl super::FsTempDir for TempDir {
     fn path(&self) -> &Path {
