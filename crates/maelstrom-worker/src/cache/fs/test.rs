@@ -13,6 +13,8 @@ use std::{
 };
 use strum::Display;
 
+/// The potential errors that can happen in a file-system operation. These are modelled off of
+/// errnos.
 #[derive(Debug, Display, PartialEq)]
 pub enum Error {
     Exists,
@@ -55,6 +57,15 @@ impl super::FsTempDir for TempDir {
     }
 }
 
+/// A component path represents a path to an [`Entry`] that can be reached only through
+/// directories. No symlinks are allowed. Put another way, this is the canonical path to an entry
+/// in a file-system tree. Every entry in the component path, except for the last, must correspond
+/// to a directory.
+///
+/// The motivation for using this struct is to keep the Rust code safe in modifying operations. We
+/// will generally resolve a [`Path`] into a [`ComponentPath`] at the beginning of an operation,
+/// and then operate using the [`ComponentPath`] for the rest of the operation. The assumption is
+/// that one we've got it, we can always resolve a [`ComponentPath`] into an [`Entry`].
 #[derive(Default, PartialEq)]
 struct ComponentPath(Vec<String>);
 
@@ -79,6 +90,8 @@ impl ComponentPath {
         self.0.iter()
     }
 
+    /// Return true iff `potential_ancestor` is an actual ancestor of this component path. What
+    /// that means in practice is that `potential_ancestor` is a prefix of this component path.
     fn is_descendant_of(&self, potential_ancestor: &ComponentPath) -> bool {
         self.iter()
             .zip(potential_ancestor)
@@ -104,6 +117,8 @@ impl<'a> IntoIterator for &'a ComponentPath {
     }
 }
 
+/// A file-system entry. There's no notion of hard links or things like sockets, devices, etc. in
+/// this test file system.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Entry {
     File { size: u64 },
@@ -112,10 +127,12 @@ pub enum Entry {
 }
 
 impl Entry {
+    /// Create a new [`Entry::File`] of the given `size`.
     pub fn file(size: u64) -> Self {
         Self::File { size }
     }
 
+    /// Create a new [`Entry::Directory`] with the given `entries`.
     pub fn directory<const N: usize>(entries: [(&str, Self); N]) -> Self {
         Self::Directory {
             entries: entries
@@ -125,12 +142,14 @@ impl Entry {
         }
     }
 
+    /// Create a new [`Entry::Symlink`] that points to `target`.
     pub fn symlink(target: impl ToString) -> Self {
         Self::Symlink {
             target: target.to_string(),
         }
     }
 
+    /// Return the [`FileMetadata`] for an [`Entry`].
     fn metadata(&self) -> FileMetadata {
         match self {
             Self::File { size } => FileMetadata::file(*size),
@@ -141,6 +160,7 @@ impl Entry {
         }
     }
 
+    /// Return true iff [`Entry`] is a directory.
     fn is_directory(&self) -> bool {
         matches!(self, Self::Directory { .. })
     }
@@ -161,6 +181,7 @@ impl Entry {
         entries
     }
 
+    /// Treating `self` as the root of the file system, attempt to resolve `path`.
     fn lookup_component_path<'state, 'path>(
         &'state self,
         path: &'path Path,
@@ -240,12 +261,16 @@ impl Entry {
         LookupComponentPath::Found(cur, component_path)
     }
 
+    /// Treating `self` as the root of the file system, pop one component off of `component_path`.
+    /// If `component_path` is empty, this will be a no-op. Return the [`Entry`] now pointed to by
+    /// `component_path`.
     fn pop_component_path(&self, component_path: &mut ComponentPath) -> &Self {
         component_path.pop();
         self.resolve_component_path(&component_path)
     }
 
-    /// Resolve `path` starting at this entry.
+    /// Treating `self` as the root of the file system, resolve `component_path` to its
+    /// corresponding [`Entry`].
     fn resolve_component_path(&self, component_path: &ComponentPath) -> &Self {
         let mut cur = self;
         for component in component_path {
@@ -254,6 +279,8 @@ impl Entry {
         cur
     }
 
+    /// Treating `self` as the root of the file system, resolve `component_path` to its
+    /// corresponding [`Entry`], an return that entry as a mutable reference.
     fn resolve_component_path_mut(&mut self, component_path: &ComponentPath) -> &mut Self {
         let mut cur = self;
         for component in component_path {
@@ -262,6 +289,9 @@ impl Entry {
         cur
     }
 
+    /// Treating `self` as the root of the file system, resolve `directory_component_path` to its
+    /// corresponding directory [`Entry`], then insert `entry` into the directory. The path
+    /// component `name` must not already be in the directory.
     fn append_entry_to_directory(
         &mut self,
         directory_component_path: &ComponentPath,
@@ -274,6 +304,9 @@ impl Entry {
             .assert_is_none();
     }
 
+    /// Treating `self` as the root of the file system, resolve `component_path` to its
+    /// corresponding directory [`Entry`], then remove that entry from its parent and return the
+    /// entry. `component_path` must not be empty: you can't remove the root from its parent.
     fn remove_component_path(&mut self, component_path: &ComponentPath) -> Self {
         assert!(!component_path.is_empty());
         let mut cur = self;
