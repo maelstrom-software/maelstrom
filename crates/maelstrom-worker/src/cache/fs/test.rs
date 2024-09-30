@@ -1,5 +1,5 @@
 use super::FileMetadata;
-use itertools::Itertools;
+use itertools::{Itertools, Position};
 use std::{
     cell::RefCell,
     error,
@@ -155,9 +155,9 @@ impl Entry {
         mut component_path: ComponentPath,
         path: &'path Path,
     ) -> LookupComponentPath<'state> {
-        let num_path_components = path.components().count();
-        for (component_index, component) in path.components().enumerate() {
-            let last_component = component_index + 1 == num_path_components;
+        for component in path.components().with_position() {
+            let is_last_component = matches!(component, Position::Last(_) | Position::Only(_));
+            let component = component.into_inner();
             match component {
                 Component::Prefix(_) => {
                     unimplemented!("prefix components don't occur in Unix")
@@ -183,7 +183,7 @@ impl Entry {
                                     break;
                                 }
                                 None => {
-                                    if last_component {
+                                    if is_last_component {
                                         return LookupComponentPath::FoundParent(
                                             cur,
                                             component_path,
@@ -297,15 +297,14 @@ impl Entry {
             component_path,
         );
         let mut cur = self;
-        let component_path_len = component_path.len();
-        for (i, component) in component_path.into_iter().enumerate() {
+        for component in component_path.iter().with_position() {
             let Entry::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
-            if i + 1 == component_path_len {
+            if let Position::Last(component) | Position::Only(component) = component {
                 return entries.remove(*component).1;
             } else {
-                cur = &mut entries[*component].1;
+                cur = &mut entries[*component.into_inner()].1;
             }
         }
         unreachable!();
