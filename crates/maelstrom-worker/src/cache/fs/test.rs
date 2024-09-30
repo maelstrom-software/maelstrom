@@ -13,7 +13,7 @@ use std::{
 use strum::Display;
 
 #[derive(Debug, Display, PartialEq)]
-enum Error {
+pub enum Error {
     Exists,
     IsDir,
     Inval,
@@ -25,7 +25,7 @@ enum Error {
 impl error::Error for Error {}
 
 #[derive(Debug)]
-struct TempFile {
+pub struct TempFile {
     path: PathBuf,
 }
 
@@ -40,7 +40,7 @@ impl super::FsTempFile for TempFile {
 }
 
 #[derive(Debug)]
-struct TempDir {
+pub struct TempDir {
     path: PathBuf,
 }
 
@@ -100,18 +100,18 @@ impl<'a> IntoIterator for &'a ComponentPath {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum Entry {
+pub enum Entry {
     File { size: u64 },
     Directory { entries: HashMap<String, Entry> },
     Symlink { target: String },
 }
 
 impl Entry {
-    fn file(size: u64) -> Self {
+    pub fn file(size: u64) -> Self {
         Self::File { size }
     }
 
-    fn directory<const N: usize>(entries: [(&str, Entry); N]) -> Self {
+    pub fn directory<const N: usize>(entries: [(&str, Entry); N]) -> Self {
         Self::Directory {
             entries: entries
                 .into_iter()
@@ -120,7 +120,7 @@ impl Entry {
         }
     }
 
-    fn symlink(target: impl ToString) -> Self {
+    pub fn symlink(target: impl ToString) -> Self {
         Self::Symlink {
             target: target.to_string(),
         }
@@ -280,39 +280,40 @@ impl Entry {
     }
 }
 
+#[macro_export]
 macro_rules! fs {
-        (@expand [] -> [$($expanded:tt)*]) => {
-            [$($expanded)*]
-        };
-        (@expand [$name:ident($size:literal) $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
-            fs!(
-                @expand
-                [$($($tail)*)?] -> [
-                    $($($expanded)+,)?
-                    (stringify!($name), Entry::file($size))
-                ]
-            )
-        };
-        (@expand [$name:ident -> $target:literal $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
-            fs!(
-                @expand
-                [$($($tail)*)?] -> [
-                    $($($expanded)+,)?
-                    (stringify!($name), Entry::symlink($target))
-                ]
-            )
-        };
-        (@expand [$name:ident { $($dirents:tt)* } $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
-            fs!(
-                @expand
-                [$($($tail)*)?] -> [
-                    $($($expanded)+,)?
-                    (stringify!($name), fs!($($dirents)*))
-                ]
-            )
-        };
-        ($($body:tt)*) => (Entry::directory(fs!(@expand [$($body)*] -> [])));
-    }
+    (@expand [] -> [$($expanded:tt)*]) => {
+        [$($expanded)*]
+    };
+    (@expand [$name:ident($size:literal) $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+        fs!(
+            @expand
+            [$($($tail)*)?] -> [
+                $($($expanded)+,)?
+                (stringify!($name), $crate::cache::fs::test::Entry::file($size))
+            ]
+        )
+    };
+    (@expand [$name:ident -> $target:literal $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+        fs!(
+            @expand
+            [$($($tail)*)?] -> [
+                $($($expanded)+,)?
+                (stringify!($name), $crate::cache::fs::test::Entry::symlink($target))
+            ]
+        )
+    };
+    (@expand [$name:ident { $($dirents:tt)* } $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+        fs!(
+            @expand
+            [$($($tail)*)?] -> [
+                $($($expanded)+,)?
+                (stringify!($name), fs!($($dirents)*))
+            ]
+        )
+    };
+    ($($body:tt)*) => ($crate::cache::fs::test::Entry::directory(fs!(@expand [$($body)*] -> [])));
+}
 
 #[derive(Debug)]
 struct State {
@@ -321,7 +322,7 @@ struct State {
 }
 
 #[derive(Debug)]
-struct Fs {
+pub struct Fs {
     state: Rc<RefCell<State>>,
 }
 
@@ -346,7 +347,7 @@ enum LookupComponentPath<'state> {
 }
 
 impl Fs {
-    fn new(root: Entry) -> Self {
+    pub fn new(root: Entry) -> Self {
         assert!(root.is_directory());
         Self {
             state: Rc::new(RefCell::new(State {
@@ -357,7 +358,7 @@ impl Fs {
     }
 
     #[track_caller]
-    fn assert_tree(&self, expected: Entry) {
+    pub fn assert_tree(&self, expected: Entry) {
         assert_eq!(self.state.borrow().root, expected);
     }
 
