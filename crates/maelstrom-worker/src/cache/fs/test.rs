@@ -52,6 +52,55 @@ impl super::FsTempDir for TempDir {
     }
 }
 
+#[derive(Default, PartialEq)]
+struct ComponentPath(Vec<usize>);
+
+impl ComponentPath {
+    fn clear(&mut self) {
+        *self = Default::default()
+    }
+
+    fn push(&mut self, component: usize) {
+        self.0.push(component);
+    }
+
+    fn pop(&mut self) -> Option<usize> {
+        self.0.pop()
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &'_ usize> {
+        self.0.iter()
+    }
+
+    fn iter_mut(&mut self) -> impl Iterator<Item = &'_ mut usize> {
+        self.0.iter_mut()
+    }
+}
+
+impl IntoIterator for ComponentPath {
+    type Item = usize;
+    type IntoIter = std::vec::IntoIter<usize>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a ComponentPath {
+    type Item = &'a usize;
+    type IntoIter = std::slice::Iter<'a, usize>;
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.0).into_iter()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Entry {
     File { size: u64 },
@@ -91,6 +140,175 @@ impl Entry {
 
     fn is_directory(&self) -> bool {
         matches!(self, Self::Directory { .. })
+    }
+
+    fn lookup_component_path<'state, 'path>(
+        &'state self,
+        path: &'path Path,
+    ) -> LookupComponentPath<'state> {
+        self.lookup_component_path_helper(self, Default::default(), path)
+    }
+
+    fn lookup_component_path_helper<'state, 'path>(
+        &'state self,
+        mut cur: &'state Entry,
+        mut component_path: ComponentPath,
+        path: &'path Path,
+    ) -> LookupComponentPath<'state> {
+        let num_path_components = path.components().count();
+        for (component_index, component) in path.components().enumerate() {
+            let last_component = component_index + 1 == num_path_components;
+            match component {
+                Component::Prefix(_) => {
+                    unimplemented!("prefix components don't occur in Unix")
+                }
+                Component::RootDir => {
+                    cur = self;
+                    component_path.clear();
+                }
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    (cur, component_path) = Self::pop_component_path(self, component_path);
+                }
+                Component::Normal(name) => loop {
+                    match cur {
+                        Entry::Directory { entries } => {
+                            let entry_component = entries
+                                .into_iter()
+                                .position(|(entry_name, _)| name.eq(OsStr::new(&entry_name)));
+                            match entry_component {
+                                Some(entry_component) => {
+                                    cur = &entries[entry_component].1;
+                                    component_path.push(entry_component);
+                                    break;
+                                }
+                                None => {
+                                    if last_component {
+                                        return LookupComponentPath::FoundParent(
+                                            cur,
+                                            component_path,
+                                        );
+                                    } else {
+                                        return LookupComponentPath::NotFound;
+                                    }
+                                }
+                            }
+                        }
+                        Entry::File { .. } => {
+                            return LookupComponentPath::FileAncestor;
+                        }
+                        Entry::Symlink { target } => {
+                            (cur, component_path) = Self::pop_component_path(self, component_path);
+                            match self.lookup_component_path_helper(
+                                cur,
+                                component_path,
+                                Path::new(target),
+                            ) {
+                                LookupComponentPath::Found(new_cur, new_component_path) => {
+                                    cur = new_cur;
+                                    component_path = new_component_path;
+                                }
+                                LookupComponentPath::FileAncestor => {
+                                    return LookupComponentPath::FileAncestor;
+                                }
+                                _ => {
+                                    return LookupComponentPath::DanglingSymlink;
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+        LookupComponentPath::Found(cur, component_path)
+    }
+
+    fn pop_component_path(&self, mut component_path: ComponentPath) -> (&Entry, ComponentPath) {
+        component_path.pop();
+        (self.resolve_component_path(&component_path), component_path)
+    }
+
+    /// Resolve `path` starting at this entry.
+    fn resolve_component_path(&self, component_path: &ComponentPath) -> &Entry {
+        let mut cur = self;
+        for component in component_path {
+            let Entry::Directory { entries } = cur else {
+                panic!("intermediate path entry not a directory");
+            };
+            cur = &entries[*component].1;
+        }
+        cur
+    }
+
+    fn resolve_component_path_mut_as_directory(
+        &mut self,
+        component_path: &ComponentPath,
+    ) -> &mut Vec<(String, Entry)> {
+        let mut cur = self;
+        for component in component_path {
+            let Entry::Directory { entries } = cur else {
+                panic!("intermediate path entry not a directory");
+            };
+            cur = &mut entries[*component].1;
+        }
+        let Entry::Directory { entries } = cur else {
+            panic!("entry not a directory");
+        };
+        entries
+    }
+
+    fn append_entry_to_directory(
+        &mut self,
+        directory_component_path: &ComponentPath,
+        name: &OsStr,
+        entry: Entry,
+    ) {
+        self.resolve_component_path_mut_as_directory(directory_component_path)
+            .push((name.to_str().unwrap().to_owned(), entry));
+    }
+
+    fn adjust_one_component_path_for_removal_of_other(
+        to_keep: &mut ComponentPath,
+        to_remove: &ComponentPath,
+    ) {
+        let to_remove_len = to_remove.len();
+        for (i, (to_keep_component, to_remove_component)) in
+            to_keep.iter_mut().zip(to_remove.iter()).enumerate()
+        {
+            if i + 1 == to_remove_len {
+                if *to_remove_component < *to_keep_component {
+                    *to_keep_component -= 1;
+                }
+                return;
+            } else if *to_keep_component != *to_remove_component {
+                return;
+            }
+        }
+    }
+
+    fn remove_leaf_from_component_path(
+        &mut self,
+        component_path: &ComponentPath,
+        to_keep_component_path: &mut ComponentPath,
+    ) -> Entry {
+        assert!(!component_path.is_empty());
+        Self::adjust_one_component_path_for_removal_of_other(
+            to_keep_component_path,
+            component_path,
+        );
+        let mut cur = self;
+        let component_path_len = component_path.len();
+        for (i, component) in component_path.into_iter().enumerate() {
+            let Entry::Directory { entries } = cur else {
+                panic!("intermediate path entry not a directory");
+            };
+            if i + 1 == component_path_len {
+                return entries.remove(*component).1;
+            } else {
+                cur = &mut entries[*component].1;
+            }
+        }
+        unreachable!();
     }
 }
 
@@ -139,14 +357,14 @@ struct Fs {
     state: Rc<RefCell<State>>,
 }
 
-enum LookupIndexPath<'state> {
+enum LookupComponentPath<'state> {
     /// The path resolved to an actual entry. This contains the entry and the path to it.
-    Found(&'state Entry, Vec<usize>),
+    Found(&'state Entry, ComponentPath),
 
     /// There was entry at the given path, but the parent directory exists. This contains the
     /// parent entry (which is guaranteed to be a directory) and the path to it.
     #[expect(dead_code)]
-    FoundParent(&'state Entry, Vec<usize>),
+    FoundParent(&'state Entry, ComponentPath),
 
     /// There was no entry at the given path, nor does its parent directory exist. However, all
     /// ancestors that do exist are directories.
@@ -175,172 +393,16 @@ impl Fs {
         assert_eq!(self.state.borrow().root, expected);
     }
 
-    fn resolve_index_path(root: &Entry, index_path: impl IntoIterator<Item = usize>) -> &Entry {
-        let mut cur = root;
-        for index in index_path {
-            let Entry::Directory { entries } = cur else {
-                panic!("intermediate path entry not a directory");
-            };
-            cur = &entries[index].1;
-        }
-        cur
-    }
-
-    fn resolve_index_path_mut_as_directory(
-        root: &mut Entry,
-        index_path: impl IntoIterator<Item = usize>,
-    ) -> &mut Vec<(String, Entry)> {
-        let mut cur = root;
-        for index in index_path {
-            let Entry::Directory { entries } = cur else {
-                panic!("intermediate path entry not a directory");
-            };
-            cur = &mut entries[index].1;
-        }
-        let Entry::Directory { entries } = cur else {
-            panic!("entry not a directory");
-        };
-        entries
-    }
-
-    fn append_entry_to_directory(
-        root: &mut Entry,
-        directory_index_path: impl IntoIterator<Item = usize>,
-        name: &OsStr,
-        entry: Entry,
-    ) {
-        let directory_entries =
-            Self::resolve_index_path_mut_as_directory(root, directory_index_path);
-        directory_entries.push((name.to_str().unwrap().to_owned(), entry));
-    }
-
-    fn adjust_one_index_path_for_removal_of_other(
-        to_keep: &mut Vec<usize>,
-        to_remove: &Vec<usize>,
-    ) {
-        let to_remove_len = to_remove.len();
-        for (i, (to_keep_index, to_remove_index)) in
-            to_keep.iter_mut().zip(to_remove.iter()).enumerate()
-        {
-            if i + 1 == to_remove_len {
-                if *to_remove_index < *to_keep_index {
-                    *to_keep_index -= 1;
-                }
-                return;
-            } else if *to_keep_index != *to_remove_index {
-                return;
-            }
-        }
-    }
-
-    fn remove_leaf_from_index_path(
-        root: &mut Entry,
-        index_path: &Vec<usize>,
-        to_keep_index_path: &mut Vec<usize>,
-    ) -> Entry {
-        assert!(!index_path.is_empty());
-        Self::adjust_one_index_path_for_removal_of_other(to_keep_index_path, index_path);
-        let mut cur = root;
-        let index_path_len = index_path.len();
-        for (i, index) in index_path.into_iter().enumerate() {
-            let Entry::Directory { entries } = cur else {
-                panic!("intermediate path entry not a directory");
-            };
-            if i + 1 == index_path_len {
-                return entries.remove(*index).1;
-            } else {
-                cur = &mut entries[*index].1;
-            }
-        }
-        unreachable!();
-    }
-
-    fn pop_index_path(root: &Entry, mut index_path: Vec<usize>) -> (&Entry, Vec<usize>) {
-        index_path.pop();
-        (
-            Self::resolve_index_path(root, index_path.iter().copied()),
-            index_path,
-        )
-    }
-
     fn is_descendant_of(
-        potential_descendant_index_path: &Vec<usize>,
-        potential_ancestor_index_path: &Vec<usize>,
+        potential_descendant_component_path: &ComponentPath,
+        potential_ancestor_component_path: &ComponentPath,
     ) -> bool {
-        potential_descendant_index_path
+        potential_descendant_component_path
             .iter()
-            .zip(potential_ancestor_index_path.iter())
+            .zip(potential_ancestor_component_path)
             .take_while(|(l, r)| *l == *r)
             .count()
-            == potential_ancestor_index_path.len()
-    }
-
-    fn lookup_index_path<'state, 'path>(
-        root: &'state Entry,
-        mut cur: &'state Entry,
-        mut index_path: Vec<usize>,
-        path: &'path Path,
-    ) -> LookupIndexPath<'state> {
-        let num_path_components = path.components().count();
-        for (component_index, component) in path.components().enumerate() {
-            let last_component = component_index + 1 == num_path_components;
-            match component {
-                Component::Prefix(_) => {
-                    unimplemented!("prefix components don't occur in Unix")
-                }
-                Component::RootDir => {
-                    cur = root;
-                    index_path = vec![];
-                }
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    (cur, index_path) = Self::pop_index_path(root, index_path);
-                }
-                Component::Normal(name) => loop {
-                    match cur {
-                        Entry::Directory { entries } => {
-                            let entry_index = entries
-                                .into_iter()
-                                .position(|(entry_name, _)| name.eq(OsStr::new(&entry_name)));
-                            match entry_index {
-                                Some(entry_index) => {
-                                    cur = &entries[entry_index].1;
-                                    index_path.push(entry_index);
-                                    break;
-                                }
-                                None => {
-                                    if last_component {
-                                        return LookupIndexPath::FoundParent(cur, index_path);
-                                    } else {
-                                        return LookupIndexPath::NotFound;
-                                    }
-                                }
-                            }
-                        }
-                        Entry::File { .. } => {
-                            return LookupIndexPath::FileAncestor;
-                        }
-                        Entry::Symlink { target } => {
-                            (cur, index_path) = Self::pop_index_path(root, index_path);
-                            match Self::lookup_index_path(root, cur, index_path, Path::new(target))
-                            {
-                                LookupIndexPath::Found(new_cur, new_index_path) => {
-                                    cur = new_cur;
-                                    index_path = new_index_path;
-                                }
-                                LookupIndexPath::FileAncestor => {
-                                    return LookupIndexPath::FileAncestor;
-                                }
-                                _ => {
-                                    return LookupIndexPath::DanglingSymlink;
-                                }
-                            }
-                        }
-                    }
-                },
-            }
-        }
-        LookupIndexPath::Found(cur, index_path)
+            == potential_ancestor_component_path.len()
     }
 }
 
@@ -360,88 +422,87 @@ impl super::Fs for Fs {
     fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
 
-        let (source_entry, mut source_index_path) =
-            match Self::lookup_index_path(&state.root, &state.root, vec![], source_path) {
-                LookupIndexPath::FileAncestor => {
+        let (source_entry, mut source_component_path) =
+            match state.root.lookup_component_path(source_path) {
+                LookupComponentPath::FileAncestor => {
                     return Err(Error::NotDir);
                 }
-                LookupIndexPath::DanglingSymlink
-                | LookupIndexPath::NotFound
-                | LookupIndexPath::FoundParent(_, _) => {
+                LookupComponentPath::DanglingSymlink
+                | LookupComponentPath::NotFound
+                | LookupComponentPath::FoundParent(_, _) => {
                     return Err(Error::NoEnt);
                 }
-                LookupIndexPath::Found(source_entry, source_index_path) => {
-                    (source_entry, source_index_path)
+                LookupComponentPath::Found(source_entry, source_component_path) => {
+                    (source_entry, source_component_path)
                 }
             };
 
-        let mut dest_parent_index_path =
-            match Self::lookup_index_path(&state.root, &state.root, vec![], dest_path) {
-                LookupIndexPath::FileAncestor => {
-                    return Err(Error::NotDir);
+        let mut dest_parent_component_path = match state.root.lookup_component_path(dest_path) {
+            LookupComponentPath::FileAncestor => {
+                return Err(Error::NotDir);
+            }
+            LookupComponentPath::DanglingSymlink | LookupComponentPath::NotFound => {
+                return Err(Error::NoEnt);
+            }
+            LookupComponentPath::FoundParent(_, dest_parent_component_path) => {
+                if source_entry.is_directory()
+                    && Self::is_descendant_of(&dest_parent_component_path, &source_component_path)
+                {
+                    // We can't move a directory into one of its descendants, including itself.
+                    return Err(Error::Inval);
+                } else {
+                    dest_parent_component_path
                 }
-                LookupIndexPath::DanglingSymlink | LookupIndexPath::NotFound => {
-                    return Err(Error::NoEnt);
-                }
-                LookupIndexPath::FoundParent(_, dest_parent_index_path) => {
-                    if source_entry.is_directory()
-                        && Self::is_descendant_of(&dest_parent_index_path, &source_index_path)
-                    {
-                        // We can't move a directory into one of its descendants, including itself.
-                        return Err(Error::Inval);
-                    } else {
-                        dest_parent_index_path
-                    }
-                }
-                LookupIndexPath::Found(dest_entry, mut dest_index_path) => {
-                    if source_entry.is_directory() {
-                        if let Entry::Directory { entries } = dest_entry {
-                            if !entries.is_empty() {
-                                // A directory can't be moved on top of a non-empty directory.
-                                return Err(Error::NotEmpty);
-                            } else if source_index_path == dest_index_path {
-                                // This is a weird edge case, but we allow it. We're moving an
-                                // empty directory on top of itself. It's unknown if this matches
-                                // Linux behavior, but it doesn't really matter as we don't
-                                // imagine ever seeing this in our cache code.
-                                return Ok(());
-                            } else if Self::is_descendant_of(&dest_index_path, &source_index_path) {
-                                // We can't move a directory into one of its descendants.
-                                return Err(Error::Inval);
-                            }
-                        } else {
-                            // A directory can't be moved on top of a non-directory.
-                            return Err(Error::NotDir);
+            }
+            LookupComponentPath::Found(dest_entry, mut dest_component_path) => {
+                if source_entry.is_directory() {
+                    if let Entry::Directory { entries } = dest_entry {
+                        if !entries.is_empty() {
+                            // A directory can't be moved on top of a non-empty directory.
+                            return Err(Error::NotEmpty);
+                        } else if source_component_path == dest_component_path {
+                            // This is a weird edge case, but we allow it. We're moving an
+                            // empty directory on top of itself. It's unknown if this matches
+                            // Linux behavior, but it doesn't really matter as we don't
+                            // imagine ever seeing this in our cache code.
+                            return Ok(());
+                        } else if Self::is_descendant_of(
+                            &dest_component_path,
+                            &source_component_path,
+                        ) {
+                            // We can't move a directory into one of its descendants.
+                            return Err(Error::Inval);
                         }
-                    } else if dest_entry.is_directory() {
-                        // A non-directory can't be moved on top of a directory.
-                        return Err(Error::IsDir);
-                    } else if source_index_path == dest_index_path {
-                        // Moving something onto itself is an accepted edge case.
-                        return Ok(());
+                    } else {
+                        // A directory can't be moved on top of a non-directory.
+                        return Err(Error::NotDir);
                     }
-
-                    // Remove the destination directory and proceed as if it wasn't there to begin
-                    // with. We may have to adjust the source_index_path to account for the
-                    // removal of the destination.
-                    Self::remove_leaf_from_index_path(
-                        &mut state.root,
-                        &dest_index_path,
-                        &mut source_index_path,
-                    );
-                    dest_index_path.pop();
-                    dest_index_path
+                } else if dest_entry.is_directory() {
+                    // A non-directory can't be moved on top of a directory.
+                    return Err(Error::IsDir);
+                } else if source_component_path == dest_component_path {
+                    // Moving something onto itself is an accepted edge case.
+                    return Ok(());
                 }
-            };
 
-        let source_entry = Self::remove_leaf_from_index_path(
-            &mut state.root,
-            &source_index_path,
-            &mut dest_parent_index_path,
+                // Remove the destination directory and proceed as if it wasn't there to begin
+                // with. We may have to adjust the source_component_path to account for the
+                // removal of the destination.
+                state.root.remove_leaf_from_component_path(
+                    &dest_component_path,
+                    &mut source_component_path,
+                );
+                dest_component_path.pop();
+                dest_component_path
+            }
+        };
+
+        let source_entry = state.root.remove_leaf_from_component_path(
+            &source_component_path,
+            &mut dest_parent_component_path,
         );
-        Self::append_entry_to_directory(
-            &mut state.root,
-            dest_parent_index_path,
+        state.root.append_entry_to_directory(
+            &dest_parent_component_path,
             dest_path.file_name().unwrap(),
             source_entry,
         );
@@ -451,16 +512,18 @@ impl super::Fs for Fs {
 
     fn remove(&self, path: &Path) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
-        match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-            LookupIndexPath::FileAncestor => Err(Error::NotDir),
-            LookupIndexPath::DanglingSymlink
-            | LookupIndexPath::NotFound
-            | LookupIndexPath::FoundParent(_, _) => Err(Error::NoEnt),
-            LookupIndexPath::Found(Entry::Directory { .. }, _) => Err(Error::IsDir),
-            LookupIndexPath::Found(_, mut index_path) => {
-                let index = index_path.pop().unwrap();
-                Self::resolve_index_path_mut_as_directory(&mut state.root, index_path)
-                    .remove(index);
+        match state.root.lookup_component_path(path) {
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::DanglingSymlink
+            | LookupComponentPath::NotFound
+            | LookupComponentPath::FoundParent(_, _) => Err(Error::NoEnt),
+            LookupComponentPath::Found(Entry::Directory { .. }, _) => Err(Error::IsDir),
+            LookupComponentPath::Found(_, mut component_path) => {
+                let component = component_path.pop().unwrap();
+                state
+                    .root
+                    .resolve_component_path_mut_as_directory(&component_path)
+                    .remove(component);
                 Ok(())
             }
         }
@@ -477,21 +540,20 @@ impl super::Fs for Fs {
 
     fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
-        match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-            LookupIndexPath::FileAncestor => Err(Error::NotDir),
-            LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupIndexPath::Found(Entry::Directory { .. }, _) => Ok(()),
-            LookupIndexPath::Found(_, _) => Err(Error::Exists),
-            LookupIndexPath::FoundParent(_, parent_index_path) => {
-                Self::append_entry_to_directory(
-                    &mut state.root,
-                    parent_index_path,
+        match state.root.lookup_component_path(path) {
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::Found(Entry::Directory { .. }, _) => Ok(()),
+            LookupComponentPath::Found(_, _) => Err(Error::Exists),
+            LookupComponentPath::FoundParent(_, parent_component_path) => {
+                state.root.append_entry_to_directory(
+                    &parent_component_path,
                     path.file_name().unwrap(),
                     Entry::directory([]),
                 );
                 Ok(())
             }
-            LookupIndexPath::NotFound => {
+            LookupComponentPath::NotFound => {
                 drop(state);
                 self.mkdir_recursively(path.parent().unwrap())?;
                 self.mkdir_recursively(path)
@@ -503,33 +565,32 @@ impl super::Fs for Fs {
         &self,
         path: &Path,
     ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), Error>>, Error> {
-        let state = self.state.borrow();
-        match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-            LookupIndexPath::Found(Entry::Directory { entries }, _) => Ok(entries
+        match self.state.borrow().root.lookup_component_path(path) {
+            LookupComponentPath::Found(Entry::Directory { entries }, _) => Ok(entries
                 .iter()
                 .map(|(name, entry)| Ok((OsStr::new(name).to_owned(), entry.metadata())))
                 .collect_vec()
                 .into_iter()),
-            LookupIndexPath::Found(_, _) | LookupIndexPath::FileAncestor => Err(Error::NotDir),
-            LookupIndexPath::NotFound
-            | LookupIndexPath::FoundParent(_, _)
-            | LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::Found(_, _) | LookupComponentPath::FileAncestor => {
+                Err(Error::NotDir)
+            }
+            LookupComponentPath::NotFound
+            | LookupComponentPath::FoundParent(_, _)
+            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
         }
     }
 
     fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
-        let parent_index_path =
-            match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-                LookupIndexPath::FileAncestor => Err(Error::NotDir),
-                LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
-                LookupIndexPath::NotFound => Err(Error::NoEnt),
-                LookupIndexPath::Found(_, _) => Err(Error::Exists),
-                LookupIndexPath::FoundParent(_, index_path) => Ok(index_path),
-            }?;
-        Self::append_entry_to_directory(
-            &mut state.root,
-            parent_index_path,
+        let parent_component_path = match state.root.lookup_component_path(path) {
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::NotFound => Err(Error::NoEnt),
+            LookupComponentPath::Found(_, _) => Err(Error::Exists),
+            LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
+        }?;
+        state.root.append_entry_to_directory(
+            &parent_component_path,
             path.file_name().unwrap(),
             Entry::file(contents.len().try_into().unwrap()),
         );
@@ -538,17 +599,15 @@ impl super::Fs for Fs {
 
     fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
-        let parent_index_path =
-            match Self::lookup_index_path(&state.root, &state.root, vec![], target) {
-                LookupIndexPath::FileAncestor => Err(Error::NotDir),
-                LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
-                LookupIndexPath::NotFound => Err(Error::NoEnt),
-                LookupIndexPath::Found(_, _) => Err(Error::Exists),
-                LookupIndexPath::FoundParent(_, index_path) => Ok(index_path),
-            }?;
-        Self::append_entry_to_directory(
-            &mut state.root,
-            parent_index_path,
+        let parent_component_path = match state.root.lookup_component_path(target) {
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::NotFound => Err(Error::NoEnt),
+            LookupComponentPath::Found(_, _) => Err(Error::Exists),
+            LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
+        }?;
+        state.root.append_entry_to_directory(
+            &parent_component_path,
             target.file_name().unwrap(),
             Entry::symlink(link.to_str().unwrap()),
         );
@@ -556,12 +615,11 @@ impl super::Fs for Fs {
     }
 
     fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, Error> {
-        let state = self.state.borrow();
-        match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-            LookupIndexPath::Found(entry, _) => Ok(Some(entry.metadata())),
-            LookupIndexPath::NotFound | LookupIndexPath::FoundParent(_, _) => Ok(None),
-            LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupIndexPath::FileAncestor => Err(Error::NotDir),
+        match self.state.borrow().root.lookup_component_path(path) {
+            LookupComponentPath::Found(entry, _) => Ok(Some(entry.metadata())),
+            LookupComponentPath::NotFound | LookupComponentPath::FoundParent(_, _) => Ok(None),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
         }
     }
 
