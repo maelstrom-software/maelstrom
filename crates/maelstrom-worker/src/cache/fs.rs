@@ -13,7 +13,7 @@ use strum::Display;
 
 /// A type used to represent a temporary file. The assumption is that the implementer may want to
 /// make the type [`Drop`] so that the temporary file is cleaned up if it isn't consumed.
-pub trait FsTempFile: Debug {
+pub trait TempFile: Debug {
     /// Return the path to the temporary file. Can be used to open the file to write into it.
     fn path(&self) -> &Path;
 
@@ -24,7 +24,7 @@ pub trait FsTempFile: Debug {
 
 /// A type used to represent a temporary directory. The assumption is that the implementer may want
 /// to make the type [`Drop`] so that the temporary directory is cleaned up if it isn't consumed.
-pub trait FsTempDir: Debug {
+pub trait TempDir: Debug {
     /// Return the path to the temporary directory. Can be used to create files in the directory
     /// before it is made persistent.
     fn path(&self) -> &Path;
@@ -59,12 +59,12 @@ impl From<fs::FileType> for FileType {
 
 /// The file metadata the cache cares about.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FileMetadata {
+pub struct Metadata {
     pub type_: FileType,
     pub size: u64,
 }
 
-impl FileMetadata {
+impl Metadata {
     pub fn directory(size: u64) -> Self {
         Self {
             type_: FileType::Directory,
@@ -87,7 +87,7 @@ impl FileMetadata {
     }
 }
 
-impl From<fs::Metadata> for FileMetadata {
+impl From<fs::Metadata> for Metadata {
     fn from(metadata: fs::Metadata) -> Self {
         Self {
             type_: metadata.file_type().into(),
@@ -130,7 +130,7 @@ pub trait Fs {
     fn read_dir(
         &self,
         path: &Path,
-    ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), Self::Error>>, Self::Error>;
+    ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Self::Error>>, Self::Error>;
 
     /// Create a file with given `path` and `contents`. Panic on file system error, including if
     /// the file already exists.
@@ -142,11 +142,11 @@ pub trait Fs {
     /// Get the metadata of the file at `path`. Panic on file system error. If `path` doesn't
     /// exist, return None. If the last component is a symlink, return the metadata about the
     /// symlink instead of trying to resolve it.
-    fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, Self::Error>;
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Self::Error>;
 
     /// The type returned by the [`Self::temp_file`] method. Some implementations may make this
     /// type [`Drop`] so that the temporary file can be cleaned up when it is closed.
-    type TempFile: FsTempFile;
+    type TempFile: TempFile;
 
     /// Create a new temporary file in the directory `parent`. Panic on file system error or if
     /// `parent` isn't a directory.
@@ -154,7 +154,7 @@ pub trait Fs {
 
     /// The type returned by the [`Self::temp_dir`] method. Some implementations may make this
     /// type [`Drop`] so that the temporary directory can be cleaned up when it is closed.
-    type TempDir: FsTempDir;
+    type TempDir: TempDir;
 
     /// Create a new temporary directory in the directory `parent`. Panic on file system error or
     /// if `parent` isn't a directory.

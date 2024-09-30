@@ -1,4 +1,4 @@
-use super::FileMetadata;
+use super::Metadata;
 use std::{
     ffi::OsString,
     fmt::Debug,
@@ -13,7 +13,7 @@ use tempfile::{self, NamedTempFile};
 #[derive(Debug)]
 pub struct TempFile(tempfile::TempPath);
 
-impl super::FsTempFile for TempFile {
+impl super::TempFile for TempFile {
     fn path(&self) -> &Path {
         &self.0
     }
@@ -26,7 +26,7 @@ impl super::FsTempFile for TempFile {
 #[derive(Debug)]
 pub struct TempDir(tempfile::TempDir);
 
-impl super::FsTempDir for TempDir {
+impl super::TempDir for TempDir {
     fn path(&self) -> &Path {
         self.0.path()
     }
@@ -75,7 +75,7 @@ impl super::Fs for Fs {
     fn read_dir(
         &self,
         path: &Path,
-    ) -> io::Result<impl Iterator<Item = io::Result<(OsString, FileMetadata)>>> {
+    ) -> io::Result<impl Iterator<Item = io::Result<(OsString, Metadata)>>> {
         fs::read_dir(path).map(|dirents| {
             dirents.map(|dirent| -> io::Result<_> {
                 let dirent = dirent?;
@@ -92,7 +92,7 @@ impl super::Fs for Fs {
         unix_fs::symlink(target, link)
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<Option<FileMetadata>> {
+    fn metadata(&self, path: &Path) -> io::Result<Option<Metadata>> {
         match fs::symlink_metadata(path) {
             Ok(metadata) => Ok(Some(metadata.into())),
             Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),

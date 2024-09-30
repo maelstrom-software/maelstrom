@@ -793,7 +793,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use crate::cache::{fs::FsTempDir, fs::FsTempFile, EntryKind::*};
+    use crate::cache::{fs::TempDir, fs::TempFile, EntryKind::*};
     use anyhow::anyhow;
     use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;
@@ -927,7 +927,7 @@ mod tests {
     #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
     struct TestTempFile(PathBuf);
 
-    impl FsTempFile for TestTempFile {
+    impl TempFile for TestTempFile {
         fn path(&self) -> &Path {
             &self.0
         }
@@ -940,7 +940,7 @@ mod tests {
     #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
     struct TestTempDir(PathBuf);
 
-    impl FsTempDir for TestTempDir {
+    impl TempDir for TestTempDir {
         fn path(&self) -> &Path {
             &self.0
         }
@@ -986,7 +986,7 @@ mod tests {
             &self,
             _path: &Path,
         ) -> Result<
-            impl Iterator<Item = Result<(OsString, cache::fs::FileMetadata), TestFsError>>,
+            impl Iterator<Item = Result<(OsString, cache::fs::Metadata), TestFsError>>,
             TestFsError,
         > {
             Ok([].into_iter())
@@ -1000,7 +1000,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn metadata(&self, _path: &Path) -> Result<Option<cache::fs::FileMetadata>, TestFsError> {
+        fn metadata(&self, _path: &Path) -> Result<Option<cache::fs::Metadata>, TestFsError> {
             unimplemented!()
         }
 

@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Context as _, Result};
 use cache::{
     fs::{
         std::{Fs as StdFs, TempDir},
-        FsTempDir as _, FsTempFile as _,
+        TempDir as _, TempFile as _,
     },
     Cache, CacheDir, GotArtifact,
 };

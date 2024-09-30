@@ -3,7 +3,7 @@
 pub mod fs;
 
 use bytesize::ByteSize;
-use fs::{FileType, Fs, FsTempDir as _, FsTempFile as _};
+use fs::{FileType, Fs, TempDir as _, TempFile as _};
 use maelstrom_base::{JobId, Sha256Digest};
 use maelstrom_util::{
     config::common::CacheSize,
@@ -597,7 +597,7 @@ impl<FsT: Fs> Cache<FsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fs::{FileMetadata, FsTempDir, FsTempFile};
+    use fs::{Metadata, TempDir, TempFile};
     use itertools::Itertools;
     use maelstrom_test::*;
     use slog::{o, Discard};
@@ -652,7 +652,7 @@ mod tests {
 
     impl Eq for TestTempFile {}
 
-    impl FsTempFile for TestTempFile {
+    impl TempFile for TestTempFile {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -690,7 +690,7 @@ mod tests {
 
     impl Eq for TestTempDir {}
 
-    impl FsTempDir for TestTempDir {
+    impl TempDir for TestTempDir {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -705,8 +705,8 @@ mod tests {
     #[derive(Default)]
     struct TestFs {
         messages: Rc<RefCell<Vec<TestMessage>>>,
-        directories: HashMap<PathBuf, Vec<(PathBuf, FileMetadata)>>,
-        metadata: HashMap<PathBuf, FileMetadata>,
+        directories: HashMap<PathBuf, Vec<(PathBuf, Metadata)>>,
+        metadata: HashMap<PathBuf, Metadata>,
         last_random_number: Cell<u64>,
     }
 
@@ -757,7 +757,7 @@ mod tests {
         fn read_dir(
             &self,
             path: &Path,
-        ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), TestFsError>>, TestFsError>
+        ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), TestFsError>>, TestFsError>
         {
             self.messages.borrow_mut().push(ReadDir(path.to_owned()));
             Ok(self
@@ -784,7 +784,7 @@ mod tests {
             Ok(())
         }
 
-        fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, TestFsError> {
+        fn metadata(&self, path: &Path) -> Result<Option<Metadata>, TestFsError> {
             self.messages.borrow_mut().push(Metadata(path.to_owned()));
             Ok(self.metadata.get(path).copied())
         }
@@ -1017,7 +1017,7 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .metadata
-            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::file(100));
+            .insert(long_path!("/z/sha256/blob", 42), Metadata::file(100));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
@@ -1037,7 +1037,7 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .metadata
-            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::symlink(10));
+            .insert(long_path!("/z/sha256/blob", 42), Metadata::symlink(10));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
@@ -1086,7 +1086,7 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .metadata
-            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::file(10000));
+            .insert(long_path!("/z/sha256/blob", 42), Metadata::file(10000));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
@@ -1108,7 +1108,7 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .metadata
-            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::symlink(10));
+            .insert(long_path!("/z/sha256/blob", 42), Metadata::symlink(10));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
@@ -1333,7 +1333,7 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .metadata
-            .insert(long_path!("/z/sha256/blob", 42), FileMetadata::directory(1));
+            .insert(long_path!("/z/sha256/blob", 42), Metadata::directory(1));
         let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
@@ -1364,20 +1364,20 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs.directories.insert(
             path_buf!("/z"),
-            vec![(path_buf!("/z/tmp"), FileMetadata::directory(10))],
+            vec![(path_buf!("/z/tmp"), Metadata::directory(10))],
         );
         test_cache_fs
             .metadata
-            .insert(path_buf!("/z/tmp"), FileMetadata::directory(1));
+            .insert(path_buf!("/z/tmp"), Metadata::directory(1));
         test_cache_fs
             .metadata
-            .insert(short_path!("/z/removing", 1), FileMetadata::file(42));
+            .insert(short_path!("/z/removing", 1), Metadata::file(42));
         test_cache_fs
             .metadata
-            .insert(short_path!("/z/removing", 2), FileMetadata::file(42));
+            .insert(short_path!("/z/removing", 2), Metadata::file(42));
         test_cache_fs
             .metadata
-            .insert(short_path!("/z/removing", 3), FileMetadata::file(42));
+            .insert(short_path!("/z/removing", 3), Metadata::file(42));
         let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
@@ -1435,7 +1435,7 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .metadata
-            .insert(path_buf!("/z/CACHEDIR.TAG"), FileMetadata::file(42));
+            .insert(path_buf!("/z/CACHEDIR.TAG"), Metadata::file(42));
         let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
@@ -1459,14 +1459,14 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs.directories.insert(
             path_buf!("/z"),
-            vec![(path_buf!("/z/removing"), FileMetadata::directory(10))],
+            vec![(path_buf!("/z/removing"), Metadata::directory(10))],
         );
         test_cache_fs.directories.insert(
             path_buf!("/z/removing"),
             vec![
-                (short_path!("/z/removing", 10), FileMetadata::directory(10)),
-                (short_path!("/z/removing", 20), FileMetadata::file(10)),
-                (short_path!("/z/removing", 30), FileMetadata::symlink(10)),
+                (short_path!("/z/removing", 10), Metadata::directory(10)),
+                (short_path!("/z/removing", 20), Metadata::file(10)),
+                (short_path!("/z/removing", 30), Metadata::symlink(10)),
             ],
         );
         let mut fixture = Fixture::new(test_cache_fs, 1000);
@@ -1500,11 +1500,11 @@ mod tests {
         test_cache_fs.directories.insert(
             path_buf!("/z"),
             vec![
-                (path_buf!("/z/blah"), FileMetadata::directory(10)),
-                (path_buf!("/z/CACHEDIR.TAG"), FileMetadata::file(43)),
-                (path_buf!("/z/sha256"), FileMetadata::directory(10)),
-                (path_buf!("/z/baz"), FileMetadata::directory(10)),
-                (path_buf!("/z/removing"), FileMetadata::directory(10)),
+                (path_buf!("/z/blah"), Metadata::directory(10)),
+                (path_buf!("/z/CACHEDIR.TAG"), Metadata::file(43)),
+                (path_buf!("/z/sha256"), Metadata::directory(10)),
+                (path_buf!("/z/baz"), Metadata::directory(10)),
+                (path_buf!("/z/removing"), Metadata::directory(10)),
             ],
         );
         let mut fixture = Fixture::new(test_cache_fs, 1000);
@@ -1541,12 +1541,12 @@ mod tests {
         test_cache_fs.directories.insert(
             path_buf!("/z/sha256"),
             vec![
-                (path_buf!("/z/sha256/blah"), FileMetadata::directory(10)),
-                (path_buf!("/z/sha256/blob"), FileMetadata::directory(10)),
-                (path_buf!("/z/sha256/baz"), FileMetadata::directory(10)),
+                (path_buf!("/z/sha256/blah"), Metadata::directory(10)),
+                (path_buf!("/z/sha256/blob"), Metadata::directory(10)),
+                (path_buf!("/z/sha256/baz"), Metadata::directory(10)),
                 (
                     path_buf!("/z/sha256/bottom_fs_layer"),
-                    FileMetadata::directory(10),
+                    Metadata::directory(10),
                 ),
             ],
         );
@@ -1583,25 +1583,25 @@ mod tests {
         let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .metadata
-            .insert(path_buf!("/z/sha256/blob"), FileMetadata::directory(1));
+            .insert(path_buf!("/z/sha256/blob"), Metadata::directory(1));
         test_cache_fs.metadata.insert(
             path_buf!("/z/sha256/bottom_fs_layer"),
-            FileMetadata::directory(1),
+            Metadata::directory(1),
         );
         test_cache_fs.metadata.insert(
             path_buf!("/z/sha256/upper_fs_layer"),
-            FileMetadata::directory(1),
+            Metadata::directory(1),
         );
         test_cache_fs
             .metadata
-            .insert(path_buf!("/z/sha256/blob"), FileMetadata::directory(42));
+            .insert(path_buf!("/z/sha256/blob"), Metadata::directory(42));
         test_cache_fs.metadata.insert(
             path_buf!("/z/sha256/bottom_fs_layer"),
-            FileMetadata::directory(42),
+            Metadata::directory(42),
         );
         test_cache_fs.metadata.insert(
             path_buf!("/z/sha256/upper_fs_layer"),
-            FileMetadata::directory(42),
+            Metadata::directory(42),
         );
         let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![

@@ -1,4 +1,4 @@
-use super::FileMetadata;
+use super::Metadata;
 use itertools::{Itertools, Position};
 use maelstrom_util::ext::OptionExt as _;
 use std::{
@@ -32,7 +32,7 @@ pub struct TempFile {
     path: PathBuf,
 }
 
-impl super::FsTempFile for TempFile {
+impl super::TempFile for TempFile {
     fn path(&self) -> &Path {
         &self.path
     }
@@ -47,7 +47,7 @@ pub struct TempDir {
     path: PathBuf,
 }
 
-impl super::FsTempDir for TempDir {
+impl super::TempDir for TempDir {
     fn path(&self) -> &Path {
         &self.path
     }
@@ -150,13 +150,11 @@ impl Entry {
     }
 
     /// Return the [`FileMetadata`] for an [`Entry`].
-    fn metadata(&self) -> FileMetadata {
+    fn metadata(&self) -> Metadata {
         match self {
-            Self::File { size } => FileMetadata::file(*size),
-            Self::Symlink { target } => FileMetadata::symlink(target.len().try_into().unwrap()),
-            Self::Directory { entries } => {
-                FileMetadata::directory(entries.len().try_into().unwrap())
-            }
+            Self::File { size } => Metadata::file(*size),
+            Self::Symlink { target } => Metadata::symlink(target.len().try_into().unwrap()),
+            Self::Directory { entries } => Metadata::directory(entries.len().try_into().unwrap()),
         }
     }
 
@@ -578,7 +576,7 @@ impl super::Fs for Fs {
     fn read_dir(
         &self,
         path: &Path,
-    ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), Error>>, Error> {
+    ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
         match self.state.borrow().root.lookup_component_path(path) {
             LookupComponentPath::Found(Entry::Directory { entries }, _) => Ok(entries
                 .iter()
@@ -628,7 +626,7 @@ impl super::Fs for Fs {
         Ok(())
     }
 
-    fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, Error> {
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
         match self.state.borrow().root.lookup_component_path(path) {
             LookupComponentPath::Found(entry, _) => Ok(Some(entry.metadata())),
             LookupComponentPath::NotFound | LookupComponentPath::FoundParent(_, _) => Ok(None),
@@ -793,7 +791,7 @@ mod tests {
         let fs = Fs::new(fs! {});
         assert_eq!(
             fs.metadata(Path::new("/")),
-            Ok(Some(FileMetadata::directory(0)))
+            Ok(Some(Metadata::directory(0)))
         );
         assert_eq!(fs.metadata(Path::new("/foo")), Ok(None));
     }
@@ -813,31 +811,28 @@ mod tests {
         });
         assert_eq!(
             fs.metadata(Path::new("/")),
-            Ok(Some(FileMetadata::directory(2)))
+            Ok(Some(Metadata::directory(2)))
         );
-        assert_eq!(
-            fs.metadata(Path::new("/foo")),
-            Ok(Some(FileMetadata::file(42)))
-        );
+        assert_eq!(fs.metadata(Path::new("/foo")), Ok(Some(Metadata::file(42))));
         assert_eq!(
             fs.metadata(Path::new("/bar")),
-            Ok(Some(FileMetadata::directory(6)))
+            Ok(Some(Metadata::directory(6)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/baz")),
-            Ok(Some(FileMetadata::symlink(7)))
+            Ok(Some(Metadata::symlink(7)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/root/foo")),
-            Ok(Some(FileMetadata::file(42)))
+            Ok(Some(Metadata::file(42)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/root/bar/a")),
-            Ok(Some(FileMetadata::symlink(1)))
+            Ok(Some(Metadata::symlink(1)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/a/baz")),
-            Ok(Some(FileMetadata::symlink(7)))
+            Ok(Some(Metadata::symlink(7)))
         );
 
         assert_eq!(fs.metadata(Path::new("/foo2")), Ok(None));
@@ -864,7 +859,7 @@ mod tests {
         assert_eq!(fs.create_file(Path::new("/new_file"), b"contents"), Ok(()));
         assert_eq!(
             fs.metadata(Path::new("/new_file")),
-            Ok(Some(FileMetadata::file(8)))
+            Ok(Some(Metadata::file(8)))
         );
 
         assert_eq!(
@@ -873,7 +868,7 @@ mod tests {
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/new_file")),
-            Ok(Some(FileMetadata::file(10)))
+            Ok(Some(Metadata::file(10)))
         );
 
         assert_eq!(
@@ -918,7 +913,7 @@ mod tests {
         );
         assert_eq!(
             fs.metadata(Path::new("/new_symlink")),
-            Ok(Some(FileMetadata::symlink(10)))
+            Ok(Some(Metadata::symlink(10)))
         );
 
         assert_eq!(
@@ -930,7 +925,7 @@ mod tests {
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/new_symlink")),
-            Ok(Some(FileMetadata::symlink(12)))
+            Ok(Some(Metadata::symlink(12)))
         );
 
         assert_eq!(
@@ -978,19 +973,19 @@ mod tests {
         );
         assert_eq!(
             fs.metadata(Path::new("/new")),
-            Ok(Some(FileMetadata::directory(1)))
+            Ok(Some(Metadata::directory(1)))
         );
         assert_eq!(
             fs.metadata(Path::new("/new/directory")),
-            Ok(Some(FileMetadata::directory(1)))
+            Ok(Some(Metadata::directory(1)))
         );
         assert_eq!(
             fs.metadata(Path::new("/new/directory/and")),
-            Ok(Some(FileMetadata::directory(1)))
+            Ok(Some(Metadata::directory(1)))
         );
         assert_eq!(
             fs.metadata(Path::new("/new/directory/and/subdirectory")),
-            Ok(Some(FileMetadata::directory(0)))
+            Ok(Some(Metadata::directory(0)))
         );
 
         assert_eq!(
@@ -999,11 +994,11 @@ mod tests {
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/new")),
-            Ok(Some(FileMetadata::directory(1)))
+            Ok(Some(Metadata::directory(1)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/new/directory")),
-            Ok(Some(FileMetadata::directory(0)))
+            Ok(Some(Metadata::directory(0)))
         );
 
         assert_eq!(fs.mkdir_recursively(Path::new("/foo")), Err(Error::Exists));
@@ -1043,7 +1038,7 @@ mod tests {
         assert_eq!(fs.metadata(Path::new("/bar/a")), Ok(None));
         assert_eq!(
             fs.metadata(Path::new("/bar/b")),
-            Ok(Some(FileMetadata::symlink(8)))
+            Ok(Some(Metadata::symlink(8)))
         );
 
         assert_eq!(fs.remove(Path::new("/foo")), Ok(()));
@@ -1066,8 +1061,8 @@ mod tests {
                 .map(Result::unwrap)
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
-                ("foo".into(), FileMetadata::file(42)),
-                ("bar".into(), FileMetadata::directory(3)),
+                ("foo".into(), Metadata::file(42)),
+                ("bar".into(), Metadata::directory(3)),
             ]),
         );
         assert_eq!(
@@ -1076,9 +1071,9 @@ mod tests {
                 .map(Result::unwrap)
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
-                ("baz".into(), FileMetadata::symlink(7)),
-                ("root".into(), FileMetadata::symlink(1)),
-                ("subdir".into(), FileMetadata::directory(0)),
+                ("baz".into(), Metadata::symlink(7)),
+                ("root".into(), Metadata::symlink(1)),
+                ("subdir".into(), Metadata::directory(0)),
             ]),
         );
         assert_eq!(
