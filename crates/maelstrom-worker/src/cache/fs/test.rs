@@ -189,6 +189,9 @@ impl Entry {
         self.lookup_component_path_helper(self, Default::default(), path)
     }
 
+    /// Treating `self` as the root of the file system, resolve `path`. `cur` indicates the
+    /// directory the resolution should be done relative to, while `component_path` represents the
+    /// component path to `cur`.
     fn lookup_component_path_helper<'state, 'path>(
         &'state self,
         mut cur: &'state Self,
@@ -210,55 +213,72 @@ impl Entry {
                 Component::ParentDir => {
                     cur = self.pop_component_path(&mut component_path);
                 }
-                Component::Normal(name) => loop {
-                    match cur {
-                        Self::Directory { entries } => {
-                            let name = name.to_str().unwrap();
-                            match entries.get(name) {
-                                Some(entry) => {
-                                    cur = entry;
-                                    component_path.push(name.to_owned());
-                                    break;
-                                }
-                                None => {
-                                    if is_last_component {
-                                        return LookupComponentPath::FoundParent(
-                                            cur,
-                                            component_path,
-                                        );
-                                    } else {
-                                        return LookupComponentPath::NotFound;
-                                    }
+                Component::Normal(name) => match self.expand_to_directory(cur, component_path) {
+                    LookupComponentPath::Found(new_cur, new_component_path) => {
+                        cur = new_cur;
+                        component_path = new_component_path;
+                        let name = name.to_str().unwrap();
+                        match cur.directory_entries().get(name) {
+                            Some(entry) => {
+                                cur = entry;
+                                component_path.push(name.to_owned());
+                            }
+                            None => {
+                                if is_last_component {
+                                    return LookupComponentPath::FoundParent(cur, component_path);
+                                } else {
+                                    return LookupComponentPath::NotFound;
                                 }
                             }
                         }
-                        Self::File { .. } => {
-                            return LookupComponentPath::FileAncestor;
-                        }
-                        Self::Symlink { target } => {
-                            cur = self.pop_component_path(&mut component_path);
-                            match self.lookup_component_path_helper(
-                                cur,
-                                component_path,
-                                Path::new(target),
-                            ) {
-                                LookupComponentPath::Found(new_cur, new_component_path) => {
-                                    cur = new_cur;
-                                    component_path = new_component_path;
-                                }
-                                LookupComponentPath::FileAncestor => {
-                                    return LookupComponentPath::FileAncestor;
-                                }
-                                _ => {
-                                    return LookupComponentPath::DanglingSymlink;
-                                }
-                            }
-                        }
+                    }
+                    LookupComponentPath::FoundParent(_, _) => {
+                        unreachable!();
+                    }
+                    result @ _ => {
+                        return result;
                     }
                 },
             }
         }
         LookupComponentPath::Found(cur, component_path)
+    }
+
+    /// Treating `self` as the root of the file system, resolve `cur` and `component` into a
+    /// directory by recursively resolving any symlinks encountered.
+    fn expand_to_directory<'state>(
+        &'state self,
+        mut cur: &'state Self,
+        mut component_path: ComponentPath,
+    ) -> LookupComponentPath<'state> {
+        loop {
+            match cur {
+                Self::Directory { .. } => {
+                    return LookupComponentPath::Found(cur, component_path);
+                }
+                Self::File { .. } => {
+                    return LookupComponentPath::FileAncestor;
+                }
+                Self::Symlink { target } => {
+                    match self.lookup_component_path_helper(
+                        self.pop_component_path(&mut component_path),
+                        component_path,
+                        Path::new(target),
+                    ) {
+                        LookupComponentPath::Found(new_cur, new_component_path) => {
+                            cur = new_cur;
+                            component_path = new_component_path;
+                        }
+                        LookupComponentPath::FileAncestor => {
+                            return LookupComponentPath::FileAncestor;
+                        }
+                        _ => {
+                            return LookupComponentPath::DanglingSymlink;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Treating `self` as the root of the file system, pop one component off of `component_path`.
