@@ -327,18 +327,24 @@ impl Entry {
     /// Treating `self` as the root of the file system, resolve `component_path` to its
     /// corresponding directory [`Entry`], then remove that entry from its parent and return the
     /// entry. `component_path` must not be empty: you can't remove the root from its parent.
-    fn remove_component_path(&mut self, component_path: &ComponentPath) -> Self {
+    fn remove_component_path(
+        &mut self,
+        mut component_path: ComponentPath,
+    ) -> (Self, ComponentPath) {
         assert!(!component_path.is_empty());
         let mut cur = self;
+        let mut entry = None;
         for component in component_path.iter().with_position() {
             let entries = cur.directory_entries_mut();
             if let Position::Last(component) | Position::Only(component) = component {
-                return entries.remove(component).unwrap();
+                entry = Some(entries.remove(component).unwrap());
+                break;
             } else {
                 cur = entries.get_mut(component.into_inner()).unwrap();
             }
         }
-        unreachable!();
+        component_path.pop();
+        (entry.unwrap(), component_path)
     }
 }
 
@@ -473,7 +479,7 @@ impl super::Fs for Fs {
                     dest_parent_component_path
                 }
             }
-            LookupComponentPath::Found(dest_entry, mut dest_component_path) => {
+            LookupComponentPath::Found(dest_entry, dest_component_path) => {
                 if source_entry.is_directory() {
                     if let Entry::Directory { entries } = dest_entry {
                         if !entries.is_empty() {
@@ -501,16 +507,12 @@ impl super::Fs for Fs {
                     return Ok(());
                 }
 
-                // Remove the destination directory and proceed as if it wasn't there to begin
-                // with. We may have to adjust the source_component_path to account for the
-                // removal of the destination.
-                state.root.remove_component_path(&dest_component_path);
-                dest_component_path.pop();
-                dest_component_path
+                // Remove the destination entry and proceed like it wasn't there to begin with.
+                state.root.remove_component_path(dest_component_path).1
             }
         };
 
-        let source_entry = state.root.remove_component_path(&source_component_path);
+        let (source_entry, _) = state.root.remove_component_path(source_component_path);
         state.root.append_entry_to_directory(
             &dest_parent_component_path,
             dest_path.file_name().unwrap(),
