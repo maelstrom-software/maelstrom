@@ -12,7 +12,7 @@ use std::{
 use strum::Display;
 
 #[derive(Debug, Display, PartialEq)]
-enum TestFsError {
+enum Error {
     Exists,
     IsDir,
     Inval,
@@ -21,34 +21,34 @@ enum TestFsError {
     NotEmpty,
 }
 
-impl error::Error for TestFsError {}
+impl error::Error for Error {}
 
 #[derive(Debug)]
-struct TestTempFile {
+struct TempFile {
     path: PathBuf,
 }
 
-impl PartialOrd for TestTempFile {
+impl PartialOrd for TempFile {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for TestTempFile {
+impl Ord for TempFile {
     fn cmp(&self, other: &Self) -> Ordering {
         self.path.cmp(&other.path)
     }
 }
 
-impl PartialEq for TestTempFile {
+impl PartialEq for TempFile {
     fn eq(&self, other: &Self) -> bool {
         self.path.eq(&other.path)
     }
 }
 
-impl Eq for TestTempFile {}
+impl Eq for TempFile {}
 
-impl super::FsTempFile for TestTempFile {
+impl super::FsTempFile for TempFile {
     fn path(&self) -> &Path {
         &self.path
     }
@@ -59,31 +59,31 @@ impl super::FsTempFile for TestTempFile {
 }
 
 #[derive(Debug)]
-struct TestTempDir {
+struct TempDir {
     path: PathBuf,
 }
 
-impl PartialOrd for TestTempDir {
+impl PartialOrd for TempDir {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for TestTempDir {
+impl Ord for TempDir {
     fn cmp(&self, other: &Self) -> Ordering {
         self.path.cmp(&other.path)
     }
 }
 
-impl PartialEq for TestTempDir {
+impl PartialEq for TempDir {
     fn eq(&self, other: &Self) -> bool {
         self.path.eq(&other.path)
     }
 }
 
-impl Eq for TestTempDir {}
+impl Eq for TempDir {}
 
-impl super::FsTempDir for TestTempDir {
+impl super::FsTempDir for TempDir {
     fn path(&self) -> &Path {
         &self.path
     }
@@ -94,18 +94,18 @@ impl super::FsTempDir for TestTempDir {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum FsEntry {
+enum Entry {
     File { size: u64 },
-    Directory { entries: Vec<(String, FsEntry)> },
+    Directory { entries: Vec<(String, Entry)> },
     Symlink { target: String },
 }
 
-impl FsEntry {
+impl Entry {
     fn file(size: u64) -> Self {
         Self::File { size }
     }
 
-    fn directory<const N: usize>(entries: [(&str, FsEntry); N]) -> Self {
+    fn directory<const N: usize>(entries: [(&str, Entry); N]) -> Self {
         Self::Directory {
             entries: entries
                 .into_iter()
@@ -122,9 +122,9 @@ impl FsEntry {
 
     fn metadata(&self) -> FileMetadata {
         match self {
-            FsEntry::File { size } => FileMetadata::file(*size),
-            FsEntry::Symlink { target } => FileMetadata::symlink(target.len().try_into().unwrap()),
-            FsEntry::Directory { entries } => {
+            Entry::File { size } => FileMetadata::file(*size),
+            Entry::Symlink { target } => FileMetadata::symlink(target.len().try_into().unwrap()),
+            Entry::Directory { entries } => {
                 FileMetadata::directory(entries.len().try_into().unwrap())
             }
         }
@@ -144,7 +144,7 @@ macro_rules! fs {
                 @expand
                 [$($($tail)*)?] -> [
                     $($($expanded)+,)?
-                    (stringify!($name), FsEntry::file($size))
+                    (stringify!($name), Entry::file($size))
                 ]
             )
         };
@@ -153,7 +153,7 @@ macro_rules! fs {
                 @expand
                 [$($($tail)*)?] -> [
                     $($($expanded)+,)?
-                    (stringify!($name), FsEntry::symlink($target))
+                    (stringify!($name), Entry::symlink($target))
                 ]
             )
         };
@@ -166,28 +166,28 @@ macro_rules! fs {
                 ]
             )
         };
-        ($($body:tt)*) => (FsEntry::directory(fs!(@expand [$($body)*] -> [])));
+        ($($body:tt)*) => (Entry::directory(fs!(@expand [$($body)*] -> [])));
     }
 
 #[derive(Debug)]
-struct TestFsState {
-    root: FsEntry,
+struct State {
+    root: Entry,
     last_random_number: u64,
 }
 
 #[derive(Debug)]
-struct TestFs2 {
-    state: Rc<RefCell<TestFsState>>,
+struct Fs {
+    state: Rc<RefCell<State>>,
 }
 
 enum LookupIndexPath<'state> {
     /// The path resolved to an actual entry. This contains the entry and the path to it.
-    Found(&'state FsEntry, Vec<usize>),
+    Found(&'state Entry, Vec<usize>),
 
     /// There was entry at the given path, but the parent directory exists. This contains the
     /// parent entry (which is guaranteed to be a directory) and the path to it.
     #[expect(dead_code)]
-    FoundParent(&'state FsEntry, Vec<usize>),
+    FoundParent(&'state Entry, Vec<usize>),
 
     /// There was no entry at the given path, nor does its parent directory exist. However, all
     /// ancestors that do exist are directories.
@@ -200,11 +200,11 @@ enum LookupIndexPath<'state> {
     FileAncestor,
 }
 
-impl TestFs2 {
-    fn new(root: FsEntry) -> Self {
+impl Fs {
+    fn new(root: Entry) -> Self {
         assert!(root.is_directory());
         Self {
-            state: Rc::new(RefCell::new(TestFsState {
+            state: Rc::new(RefCell::new(State {
                 root,
                 last_random_number: 0,
             })),
@@ -212,14 +212,14 @@ impl TestFs2 {
     }
 
     #[track_caller]
-    fn assert_tree(&self, expected: FsEntry) {
+    fn assert_tree(&self, expected: Entry) {
         assert_eq!(self.state.borrow().root, expected);
     }
 
-    fn resolve_index_path(root: &FsEntry, index_path: impl IntoIterator<Item = usize>) -> &FsEntry {
+    fn resolve_index_path(root: &Entry, index_path: impl IntoIterator<Item = usize>) -> &Entry {
         let mut cur = root;
         for index in index_path {
-            let FsEntry::Directory { entries } = cur else {
+            let Entry::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
             cur = &entries[index].1;
@@ -228,27 +228,27 @@ impl TestFs2 {
     }
 
     fn resolve_index_path_mut_as_directory(
-        root: &mut FsEntry,
+        root: &mut Entry,
         index_path: impl IntoIterator<Item = usize>,
-    ) -> &mut Vec<(String, FsEntry)> {
+    ) -> &mut Vec<(String, Entry)> {
         let mut cur = root;
         for index in index_path {
-            let FsEntry::Directory { entries } = cur else {
+            let Entry::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
             cur = &mut entries[index].1;
         }
-        let FsEntry::Directory { entries } = cur else {
+        let Entry::Directory { entries } = cur else {
             panic!("entry not a directory");
         };
         entries
     }
 
     fn append_entry_to_directory(
-        root: &mut FsEntry,
+        root: &mut Entry,
         directory_index_path: impl IntoIterator<Item = usize>,
         name: &OsStr,
-        entry: FsEntry,
+        entry: Entry,
     ) {
         let directory_entries =
             Self::resolve_index_path_mut_as_directory(root, directory_index_path);
@@ -275,16 +275,16 @@ impl TestFs2 {
     }
 
     fn remove_leaf_from_index_path(
-        root: &mut FsEntry,
+        root: &mut Entry,
         index_path: &Vec<usize>,
         to_keep_index_path: &mut Vec<usize>,
-    ) -> FsEntry {
+    ) -> Entry {
         assert!(!index_path.is_empty());
         Self::adjust_one_index_path_for_removal_of_other(to_keep_index_path, index_path);
         let mut cur = root;
         let index_path_len = index_path.len();
         for (i, index) in index_path.into_iter().enumerate() {
-            let FsEntry::Directory { entries } = cur else {
+            let Entry::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
             if i + 1 == index_path_len {
@@ -296,7 +296,7 @@ impl TestFs2 {
         unreachable!();
     }
 
-    fn pop_index_path(root: &FsEntry, mut index_path: Vec<usize>) -> (&FsEntry, Vec<usize>) {
+    fn pop_index_path(root: &Entry, mut index_path: Vec<usize>) -> (&Entry, Vec<usize>) {
         index_path.pop();
         (
             Self::resolve_index_path(root, index_path.iter().copied()),
@@ -317,8 +317,8 @@ impl TestFs2 {
     }
 
     fn lookup_index_path<'state, 'path>(
-        root: &'state FsEntry,
-        mut cur: &'state FsEntry,
+        root: &'state Entry,
+        mut cur: &'state Entry,
         mut index_path: Vec<usize>,
         path: &'path Path,
     ) -> LookupIndexPath<'state> {
@@ -339,7 +339,7 @@ impl TestFs2 {
                 }
                 Component::Normal(name) => loop {
                     match cur {
-                        FsEntry::Directory { entries } => {
+                        Entry::Directory { entries } => {
                             let entry_index = entries
                                 .into_iter()
                                 .position(|(entry_name, _)| name.eq(OsStr::new(&entry_name)));
@@ -358,10 +358,10 @@ impl TestFs2 {
                                 }
                             }
                         }
-                        FsEntry::File { .. } => {
+                        Entry::File { .. } => {
                             return LookupIndexPath::FileAncestor;
                         }
-                        FsEntry::Symlink { target } => {
+                        Entry::Symlink { target } => {
                             (cur, index_path) = Self::pop_index_path(root, index_path);
                             match Self::lookup_index_path(root, cur, index_path, Path::new(target))
                             {
@@ -385,12 +385,12 @@ impl TestFs2 {
     }
 }
 
-impl super::Fs for TestFs2 {
-    type Error = TestFsError;
+impl super::Fs for Fs {
+    type Error = Error;
 
-    type TempFile = TestTempFile;
+    type TempFile = TempFile;
 
-    type TempDir = TestTempDir;
+    type TempDir = TempDir;
 
     fn rand_u64(&self) -> u64 {
         let mut state = self.state.borrow_mut();
@@ -398,18 +398,18 @@ impl super::Fs for TestFs2 {
         state.last_random_number
     }
 
-    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), TestFsError> {
+    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
 
         let (source_entry, mut source_index_path) =
             match Self::lookup_index_path(&state.root, &state.root, vec![], source_path) {
                 LookupIndexPath::FileAncestor => {
-                    return Err(TestFsError::NotDir);
+                    return Err(Error::NotDir);
                 }
                 LookupIndexPath::DanglingSymlink
                 | LookupIndexPath::NotFound
                 | LookupIndexPath::FoundParent(_, _) => {
-                    return Err(TestFsError::NoEnt);
+                    return Err(Error::NoEnt);
                 }
                 LookupIndexPath::Found(source_entry, source_index_path) => {
                     (source_entry, source_index_path)
@@ -419,27 +419,27 @@ impl super::Fs for TestFs2 {
         let mut dest_parent_index_path =
             match Self::lookup_index_path(&state.root, &state.root, vec![], dest_path) {
                 LookupIndexPath::FileAncestor => {
-                    return Err(TestFsError::NotDir);
+                    return Err(Error::NotDir);
                 }
                 LookupIndexPath::DanglingSymlink | LookupIndexPath::NotFound => {
-                    return Err(TestFsError::NoEnt);
+                    return Err(Error::NoEnt);
                 }
                 LookupIndexPath::FoundParent(_, dest_parent_index_path) => {
                     if source_entry.is_directory()
                         && Self::is_descendant_of(&dest_parent_index_path, &source_index_path)
                     {
                         // We can't move a directory into one of its descendants, including itself.
-                        return Err(TestFsError::Inval);
+                        return Err(Error::Inval);
                     } else {
                         dest_parent_index_path
                     }
                 }
                 LookupIndexPath::Found(dest_entry, mut dest_index_path) => {
                     if source_entry.is_directory() {
-                        if let FsEntry::Directory { entries } = dest_entry {
+                        if let Entry::Directory { entries } = dest_entry {
                             if !entries.is_empty() {
                                 // A directory can't be moved on top of a non-empty directory.
-                                return Err(TestFsError::NotEmpty);
+                                return Err(Error::NotEmpty);
                             } else if source_index_path == dest_index_path {
                                 // This is a weird edge case, but we allow it. We're moving an
                                 // empty directory on top of itself. It's unknown if this matches
@@ -448,15 +448,15 @@ impl super::Fs for TestFs2 {
                                 return Ok(());
                             } else if Self::is_descendant_of(&dest_index_path, &source_index_path) {
                                 // We can't move a directory into one of its descendants.
-                                return Err(TestFsError::Inval);
+                                return Err(Error::Inval);
                             }
                         } else {
                             // A directory can't be moved on top of a non-directory.
-                            return Err(TestFsError::NotDir);
+                            return Err(Error::NotDir);
                         }
                     } else if dest_entry.is_directory() {
                         // A non-directory can't be moved on top of a directory.
-                        return Err(TestFsError::IsDir);
+                        return Err(Error::IsDir);
                     } else if source_index_path == dest_index_path {
                         // Moving something onto itself is an accepted edge case.
                         return Ok(());
@@ -490,14 +490,14 @@ impl super::Fs for TestFs2 {
         Ok(())
     }
 
-    fn remove(&self, path: &Path) -> Result<(), TestFsError> {
+    fn remove(&self, path: &Path) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
         match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-            LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
+            LookupIndexPath::FileAncestor => Err(Error::NotDir),
             LookupIndexPath::DanglingSymlink
             | LookupIndexPath::NotFound
-            | LookupIndexPath::FoundParent(_, _) => Err(TestFsError::NoEnt),
-            LookupIndexPath::Found(FsEntry::Directory { .. }, _) => Err(TestFsError::IsDir),
+            | LookupIndexPath::FoundParent(_, _) => Err(Error::NoEnt),
+            LookupIndexPath::Found(Entry::Directory { .. }, _) => Err(Error::IsDir),
             LookupIndexPath::Found(_, mut index_path) => {
                 let index = index_path.pop().unwrap();
                 Self::resolve_index_path_mut_as_directory(&mut state.root, index_path)
@@ -507,7 +507,7 @@ impl super::Fs for TestFs2 {
         }
     }
 
-    fn rmdir_recursively_on_thread(&self, _path: PathBuf) -> Result<(), TestFsError> {
+    fn rmdir_recursively_on_thread(&self, _path: PathBuf) -> Result<(), Error> {
         unimplemented!()
         /*
         self.messages
@@ -516,19 +516,19 @@ impl super::Fs for TestFs2 {
             */
     }
 
-    fn mkdir_recursively(&self, path: &Path) -> Result<(), TestFsError> {
+    fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
         match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-            LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
-            LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
-            LookupIndexPath::Found(FsEntry::Directory { .. }, _) => Ok(()),
-            LookupIndexPath::Found(_, _) => Err(TestFsError::Exists),
+            LookupIndexPath::FileAncestor => Err(Error::NotDir),
+            LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupIndexPath::Found(Entry::Directory { .. }, _) => Ok(()),
+            LookupIndexPath::Found(_, _) => Err(Error::Exists),
             LookupIndexPath::FoundParent(_, parent_index_path) => {
                 Self::append_entry_to_directory(
                     &mut state.root,
                     parent_index_path,
                     path.file_name().unwrap(),
-                    FsEntry::directory([]),
+                    Entry::directory([]),
                 );
                 Ok(())
             }
@@ -543,69 +543,66 @@ impl super::Fs for TestFs2 {
     fn read_dir(
         &self,
         path: &Path,
-    ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), TestFsError>>, TestFsError>
-    {
+    ) -> Result<impl Iterator<Item = Result<(OsString, FileMetadata), Error>>, Error> {
         let state = self.state.borrow();
         match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-            LookupIndexPath::Found(FsEntry::Directory { entries }, _) => Ok(entries
+            LookupIndexPath::Found(Entry::Directory { entries }, _) => Ok(entries
                 .iter()
                 .map(|(name, entry)| Ok((OsStr::new(name).to_owned(), entry.metadata())))
                 .collect_vec()
                 .into_iter()),
-            LookupIndexPath::Found(_, _) | LookupIndexPath::FileAncestor => {
-                Err(TestFsError::NotDir)
-            }
+            LookupIndexPath::Found(_, _) | LookupIndexPath::FileAncestor => Err(Error::NotDir),
             LookupIndexPath::NotFound
             | LookupIndexPath::FoundParent(_, _)
-            | LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
+            | LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
         }
     }
 
-    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), TestFsError> {
+    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
         let parent_index_path =
             match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
-                LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
-                LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
-                LookupIndexPath::NotFound => Err(TestFsError::NoEnt),
-                LookupIndexPath::Found(_, _) => Err(TestFsError::Exists),
+                LookupIndexPath::FileAncestor => Err(Error::NotDir),
+                LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
+                LookupIndexPath::NotFound => Err(Error::NoEnt),
+                LookupIndexPath::Found(_, _) => Err(Error::Exists),
                 LookupIndexPath::FoundParent(_, index_path) => Ok(index_path),
             }?;
         Self::append_entry_to_directory(
             &mut state.root,
             parent_index_path,
             path.file_name().unwrap(),
-            FsEntry::file(contents.len().try_into().unwrap()),
+            Entry::file(contents.len().try_into().unwrap()),
         );
         Ok(())
     }
 
-    fn symlink(&self, target: &Path, link: &Path) -> Result<(), TestFsError> {
+    fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
         let mut state = self.state.borrow_mut();
         let parent_index_path =
             match Self::lookup_index_path(&state.root, &state.root, vec![], target) {
-                LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
-                LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
-                LookupIndexPath::NotFound => Err(TestFsError::NoEnt),
-                LookupIndexPath::Found(_, _) => Err(TestFsError::Exists),
+                LookupIndexPath::FileAncestor => Err(Error::NotDir),
+                LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
+                LookupIndexPath::NotFound => Err(Error::NoEnt),
+                LookupIndexPath::Found(_, _) => Err(Error::Exists),
                 LookupIndexPath::FoundParent(_, index_path) => Ok(index_path),
             }?;
         Self::append_entry_to_directory(
             &mut state.root,
             parent_index_path,
             target.file_name().unwrap(),
-            FsEntry::symlink(link.to_str().unwrap()),
+            Entry::symlink(link.to_str().unwrap()),
         );
         Ok(())
     }
 
-    fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, TestFsError> {
+    fn metadata(&self, path: &Path) -> Result<Option<FileMetadata>, Error> {
         let state = self.state.borrow();
         match Self::lookup_index_path(&state.root, &state.root, vec![], path) {
             LookupIndexPath::Found(entry, _) => Ok(Some(entry.metadata())),
             LookupIndexPath::NotFound | LookupIndexPath::FoundParent(_, _) => Ok(None),
-            LookupIndexPath::DanglingSymlink => Err(TestFsError::NoEnt),
-            LookupIndexPath::FileAncestor => Err(TestFsError::NotDir),
+            LookupIndexPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupIndexPath::FileAncestor => Err(Error::NotDir),
         }
     }
 
@@ -614,7 +611,7 @@ impl super::Fs for TestFs2 {
         /*
         let path = parent.join(format!("{:0>16x}", self.rand_u64()));
         self.messages.borrow_mut().push(TempFile(path.clone()));
-        TestTempFile {
+        TempFile {
             path,
             messages: self.messages.clone(),
         }
@@ -626,7 +623,7 @@ impl super::Fs for TestFs2 {
         /*
         let path = parent.join(format!("{:0>16x}", self.rand_u64()));
         self.messages.borrow_mut().push(TempDir(path.clone()));
-        TestTempDir {
+        TempDir {
             path,
             messages: self.messages.clone(),
         }
@@ -642,7 +639,7 @@ mod tests {
 
     #[test]
     fn fs_empty() {
-        assert_eq!(fs! {}, FsEntry::directory([]));
+        assert_eq!(fs! {}, Entry::directory([]));
     }
 
     #[test]
@@ -651,7 +648,7 @@ mod tests {
             fs! {
                 foo(42)
             },
-            FsEntry::directory([("foo", FsEntry::file(42))])
+            Entry::directory([("foo", Entry::file(42))])
         );
     }
 
@@ -661,7 +658,7 @@ mod tests {
             fs! {
                 foo(42),
             },
-            FsEntry::directory([("foo", FsEntry::file(42))])
+            Entry::directory([("foo", Entry::file(42))])
         );
     }
 
@@ -671,7 +668,7 @@ mod tests {
             fs! {
                 foo -> "/target"
             },
-            FsEntry::directory([("foo", FsEntry::symlink("/target"))])
+            Entry::directory([("foo", Entry::symlink("/target"))])
         );
     }
 
@@ -681,7 +678,7 @@ mod tests {
             fs! {
                 foo -> "/target",
             },
-            FsEntry::directory([("foo", FsEntry::symlink("/target"))])
+            Entry::directory([("foo", Entry::symlink("/target"))])
         );
     }
 
@@ -691,7 +688,7 @@ mod tests {
             fs! {
                 foo {}
             },
-            FsEntry::directory([("foo", FsEntry::directory([]))])
+            Entry::directory([("foo", Entry::directory([]))])
         );
     }
 
@@ -701,7 +698,7 @@ mod tests {
             fs! {
                 foo {},
             },
-            FsEntry::directory([("foo", FsEntry::directory([]))])
+            Entry::directory([("foo", Entry::directory([]))])
         );
     }
 
@@ -711,7 +708,7 @@ mod tests {
             fs! {
                 foo {},
             },
-            FsEntry::directory([("foo", FsEntry::directory([]))])
+            Entry::directory([("foo", Entry::directory([]))])
         );
     }
 
@@ -732,19 +729,19 @@ mod tests {
                     },
                 }
             },
-            FsEntry::directory([
-                ("foo", FsEntry::file(42)),
-                ("bar", FsEntry::symlink("/target/1")),
+            Entry::directory([
+                ("foo", Entry::file(42)),
+                ("bar", Entry::symlink("/target/1")),
                 (
                     "baz",
-                    FsEntry::directory([
-                        ("zero", FsEntry::directory([])),
-                        ("one", FsEntry::directory([("foo", FsEntry::file(43))])),
+                    Entry::directory([
+                        ("zero", Entry::directory([])),
+                        ("one", Entry::directory([("foo", Entry::file(43))])),
                         (
                             "two",
-                            FsEntry::directory([
-                                ("foo", FsEntry::file(44)),
-                                ("bar", FsEntry::symlink("/target/2")),
+                            Entry::directory([
+                                ("foo", Entry::file(44)),
+                                ("bar", Entry::symlink("/target/2")),
                             ])
                         ),
                     ])
@@ -755,7 +752,7 @@ mod tests {
 
     #[test]
     fn test_fs2_rand_u64() {
-        let fs = TestFs2::new(fs! {});
+        let fs = Fs::new(fs! {});
         assert_eq!(fs.rand_u64(), 1);
         assert_eq!(fs.rand_u64(), 2);
         assert_eq!(fs.rand_u64(), 3);
@@ -763,7 +760,7 @@ mod tests {
 
     #[test]
     fn test_fs2_metadata_empty() {
-        let fs = TestFs2::new(fs! {});
+        let fs = Fs::new(fs! {});
         assert_eq!(
             fs.metadata(Path::new("/")),
             Ok(Some(FileMetadata::directory(0)))
@@ -773,7 +770,7 @@ mod tests {
 
     #[test]
     fn test_fs2_metadata() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             foo(42),
             bar {
                 baz -> "/target",
@@ -814,18 +811,15 @@ mod tests {
         );
 
         assert_eq!(fs.metadata(Path::new("/foo2")), Ok(None));
-        assert_eq!(
-            fs.metadata(Path::new("/bar/baz/foo")),
-            Err(TestFsError::NoEnt)
-        );
+        assert_eq!(fs.metadata(Path::new("/bar/baz/foo")), Err(Error::NoEnt));
         assert_eq!(fs.metadata(Path::new("/bar/baz2")), Ok(None));
         assert_eq!(fs.metadata(Path::new("/bar/baz2/blah")), Ok(None));
-        assert_eq!(fs.metadata(Path::new("/foo/bar")), Err(TestFsError::NotDir));
+        assert_eq!(fs.metadata(Path::new("/foo/bar")), Err(Error::NotDir));
     }
 
     #[test]
     fn test_fs2_create_file() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             foo(42),
             bar {
                 baz -> "/target",
@@ -854,29 +848,29 @@ mod tests {
 
         assert_eq!(
             fs.create_file(Path::new("/new_file"), b"contents-3"),
-            Err(TestFsError::Exists)
+            Err(Error::Exists)
         );
         assert_eq!(
             fs.create_file(Path::new("/foo"), b"contents-3"),
-            Err(TestFsError::Exists)
+            Err(Error::Exists)
         );
         assert_eq!(
             fs.create_file(Path::new("/blah/new_file"), b"contents-3"),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
         assert_eq!(
             fs.create_file(Path::new("/foo/new_file"), b"contents-3"),
-            Err(TestFsError::NotDir)
+            Err(Error::NotDir)
         );
         assert_eq!(
             fs.create_file(Path::new("/bar/baz/new_file"), b"contents-3"),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
     }
 
     #[test]
     fn test_fs2_symlink() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             foo(42),
             bar {
                 baz -> "/target",
@@ -911,29 +905,29 @@ mod tests {
 
         assert_eq!(
             fs.symlink(Path::new("/new_symlink"), Path::new("new-target-3")),
-            Err(TestFsError::Exists)
+            Err(Error::Exists)
         );
         assert_eq!(
             fs.symlink(Path::new("/foo"), Path::new("new-target-3")),
-            Err(TestFsError::Exists)
+            Err(Error::Exists)
         );
         assert_eq!(
             fs.symlink(Path::new("/blah/new_symlink"), Path::new("new-target-3")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
         assert_eq!(
             fs.symlink(Path::new("/foo/new_symlink"), Path::new("new-target-3")),
-            Err(TestFsError::NotDir)
+            Err(Error::NotDir)
         );
         assert_eq!(
             fs.symlink(Path::new("/bar/baz/new_symlink"), Path::new("new-target-3")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
     }
 
     #[test]
     fn test_fs2_mkdir_recursively() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             foo(42),
             bar {
                 baz -> "/target",
@@ -982,23 +976,20 @@ mod tests {
             Ok(Some(FileMetadata::directory(0)))
         );
 
-        assert_eq!(
-            fs.mkdir_recursively(Path::new("/foo")),
-            Err(TestFsError::Exists)
-        );
+        assert_eq!(fs.mkdir_recursively(Path::new("/foo")), Err(Error::Exists));
         assert_eq!(
             fs.mkdir_recursively(Path::new("/foo/baz")),
-            Err(TestFsError::NotDir)
+            Err(Error::NotDir)
         );
         assert_eq!(
             fs.mkdir_recursively(Path::new("/bar/baz/new/directory")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
     }
 
     #[test]
     fn test_fs2_remove() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             foo(42),
             bar {
                 baz -> "/target",
@@ -1010,13 +1001,10 @@ mod tests {
             },
         });
 
-        assert_eq!(fs.remove(Path::new("/")), Err(TestFsError::IsDir));
-        assert_eq!(fs.remove(Path::new("/bar")), Err(TestFsError::IsDir));
-        assert_eq!(fs.remove(Path::new("/foo/baz")), Err(TestFsError::NotDir));
-        assert_eq!(
-            fs.remove(Path::new("/bar/baz/blah")),
-            Err(TestFsError::NoEnt)
-        );
+        assert_eq!(fs.remove(Path::new("/")), Err(Error::IsDir));
+        assert_eq!(fs.remove(Path::new("/bar")), Err(Error::IsDir));
+        assert_eq!(fs.remove(Path::new("/foo/baz")), Err(Error::NotDir));
+        assert_eq!(fs.remove(Path::new("/bar/baz/blah")), Err(Error::NoEnt));
 
         assert_eq!(fs.remove(Path::new("/bar/baz")), Ok(()));
         assert_eq!(fs.metadata(Path::new("/bar/baz")), Ok(None));
@@ -1034,7 +1022,7 @@ mod tests {
 
     #[test]
     fn test_fs2_read_dir() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             foo(42),
             bar {
                 baz -> "/target",
@@ -1071,39 +1059,33 @@ mod tests {
             vec![],
         );
 
-        assert!(matches!(
-            fs.read_dir(Path::new("/foo")),
-            Err(TestFsError::NotDir)
-        ));
+        assert!(matches!(fs.read_dir(Path::new("/foo")), Err(Error::NotDir)));
         assert!(matches!(
             fs.read_dir(Path::new("/foo/foo")),
-            Err(TestFsError::NotDir)
+            Err(Error::NotDir)
         ));
         assert!(matches!(
             fs.read_dir(Path::new("/bar/baz")),
-            Err(TestFsError::NotDir)
+            Err(Error::NotDir)
         ));
         assert!(matches!(
             fs.read_dir(Path::new("/bar/baz/foo")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         ));
-        assert!(matches!(
-            fs.read_dir(Path::new("/blah")),
-            Err(TestFsError::NoEnt)
-        ));
+        assert!(matches!(fs.read_dir(Path::new("/blah")), Err(Error::NoEnt)));
         assert!(matches!(
             fs.read_dir(Path::new("/blah/blah")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         ));
     }
 
     #[test]
     fn test_fs2_rename_source_path_with_file_ancestor() {
         let expected = fs! { foo(42) };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo/bar"), Path::new("/bar")),
-            Err(TestFsError::NotDir)
+            Err(Error::NotDir)
         );
         fs.assert_tree(expected);
     }
@@ -1111,10 +1093,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_source_path_with_dangling_symlink() {
         let expected = fs! { foo -> "/dangle" };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo/bar"), Path::new("/bar")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
         fs.assert_tree(expected);
     }
@@ -1122,14 +1104,14 @@ mod tests {
     #[test]
     fn test_fs2_rename_source_path_not_found() {
         let expected = fs! {};
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo"), Path::new("/bar")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
         assert_eq!(
             fs.rename(Path::new("/foo/bar"), Path::new("/bar")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
         fs.assert_tree(expected);
     }
@@ -1137,10 +1119,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_destination_path_with_file_ancestor() {
         let expected = fs! { foo(42), bar(43) };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo"), Path::new("/bar/baz")),
-            Err(TestFsError::NotDir)
+            Err(Error::NotDir)
         );
         fs.assert_tree(expected);
     }
@@ -1148,10 +1130,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_destination_path_with_dangling_symlink() {
         let expected = fs! { foo(42), bar -> "dangle" };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo"), Path::new("/bar/baz")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
         fs.assert_tree(expected);
     }
@@ -1159,10 +1141,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_destination_path_not_found() {
         let expected = fs! { foo(42) };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo"), Path::new("/bar/baz")),
-            Err(TestFsError::NoEnt)
+            Err(Error::NoEnt)
         );
         fs.assert_tree(expected);
     }
@@ -1170,10 +1152,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_directory_into_new_entry_in_itself() {
         let expected = fs! { foo { bar { baz {} } } };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo"), Path::new("/foo/bar/baz/a")),
-            Err(TestFsError::Inval)
+            Err(Error::Inval)
         );
         fs.assert_tree(expected);
     }
@@ -1181,10 +1163,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_directory_into_new_entry_in_descendant_of_itself() {
         let expected = fs! { dir {} };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/dir"), Path::new("/dir/a")),
-            Err(TestFsError::Inval)
+            Err(Error::Inval)
         );
         fs.assert_tree(expected);
     }
@@ -1192,10 +1174,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_directory_onto_nonempty_directory() {
         let expected = fs! { dir1 {}, dir2 { foo(42) } };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/dir1"), Path::new("/dir2")),
-            Err(TestFsError::NotEmpty)
+            Err(Error::NotEmpty)
         );
         fs.assert_tree(expected);
     }
@@ -1203,10 +1185,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_nonempty_directory_onto_itself() {
         let expected = fs! { dir { foo(42) } };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/dir"), Path::new("/dir")),
-            Err(TestFsError::NotEmpty)
+            Err(Error::NotEmpty)
         );
         fs.assert_tree(expected);
     }
@@ -1214,10 +1196,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_nonempty_root_onto_itself() {
         let expected = fs! { foo(42) };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/"), Path::new("/")),
-            Err(TestFsError::NotEmpty)
+            Err(Error::NotEmpty)
         );
         fs.assert_tree(expected);
     }
@@ -1225,10 +1207,10 @@ mod tests {
     #[test]
     fn test_fs2_rename_directory_onto_descendant() {
         let expected = fs! { dir1 { dir2 {} } };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/dir1"), Path::new("/dir1/dir2")),
-            Err(TestFsError::Inval)
+            Err(Error::Inval)
         );
         fs.assert_tree(expected);
     }
@@ -1236,14 +1218,14 @@ mod tests {
     #[test]
     fn test_fs2_rename_directory_onto_nondirectory() {
         let expected = fs! { dir {}, file(42), symlink -> "file" };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/dir"), Path::new("/file")),
-            Err(TestFsError::NotDir)
+            Err(Error::NotDir)
         );
         assert_eq!(
             fs.rename(Path::new("/dir"), Path::new("/symlink")),
-            Err(TestFsError::NotDir)
+            Err(Error::NotDir)
         );
         fs.assert_tree(expected);
     }
@@ -1251,21 +1233,21 @@ mod tests {
     #[test]
     fn test_fs2_rename_nondirectory_onto_directory() {
         let expected = fs! { dir {}, file(42), symlink -> "file" };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/file"), Path::new("/dir")),
-            Err(TestFsError::IsDir)
+            Err(Error::IsDir)
         );
         assert_eq!(
             fs.rename(Path::new("/symlink"), Path::new("/dir")),
-            Err(TestFsError::IsDir)
+            Err(Error::IsDir)
         );
         fs.assert_tree(expected);
     }
 
     #[test]
     fn test_fs2_rename_empty_root_onto_itself() {
-        let fs = TestFs2::new(fs! {});
+        let fs = Fs::new(fs! {});
         assert_eq!(fs.rename(Path::new("/"), Path::new("/")), Ok(()));
         fs.assert_tree(fs! {});
     }
@@ -1277,7 +1259,7 @@ mod tests {
             root -> "/",
             root2 -> ".",
         };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(fs.rename(Path::new("/dir"), Path::new("/dir")), Ok(()));
         fs.assert_tree(expected.clone());
         assert_eq!(fs.rename(Path::new("/dir"), Path::new("/root/dir")), Ok(()));
@@ -1298,7 +1280,7 @@ mod tests {
             root -> "/",
             root2 -> ".",
         };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(fs.rename(Path::new("/file"), Path::new("/file")), Ok(()));
         fs.assert_tree(expected.clone());
         assert_eq!(
@@ -1325,7 +1307,7 @@ mod tests {
             root -> "/",
             root2 -> ".",
         };
-        let fs = TestFs2::new(expected.clone());
+        let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/symlink"), Path::new("/symlink")),
             Ok(())
@@ -1358,35 +1340,35 @@ mod tests {
 
     #[test]
     fn test_fs2_rename_file_onto_file() {
-        let fs = TestFs2::new(fs! { foo(42), bar(43) });
+        let fs = Fs::new(fs! { foo(42), bar(43) });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
         fs.assert_tree(fs! { bar(42) });
     }
 
     #[test]
     fn test_fs2_rename_file_onto_symlink() {
-        let fs = TestFs2::new(fs! { foo(42), bar -> "foo" });
+        let fs = Fs::new(fs! { foo(42), bar -> "foo" });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
         fs.assert_tree(fs! { bar(42) });
     }
 
     #[test]
     fn test_fs2_rename_symlink_onto_file() {
-        let fs = TestFs2::new(fs! { foo -> "bar", bar(43) });
+        let fs = Fs::new(fs! { foo -> "bar", bar(43) });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
         fs.assert_tree(fs! { bar -> "bar" });
     }
 
     #[test]
     fn test_fs2_rename_symlink_onto_symlink() {
-        let fs = TestFs2::new(fs! { foo -> "bar", bar -> "foo" });
+        let fs = Fs::new(fs! { foo -> "bar", bar -> "foo" });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
         fs.assert_tree(fs! { bar -> "bar" });
     }
 
     #[test]
     fn test_fs2_rename_into_new_entries_in_directory() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             a {
                 file(42),
                 symlink -> "/dangle",
@@ -1415,7 +1397,7 @@ mod tests {
 
     #[test]
     fn test_fs2_rename_directory() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             a {
                 b {
                     c(42),
@@ -1440,7 +1422,7 @@ mod tests {
 
     #[test]
     fn test_fs2_rename_destination_in_ancestor_of_source() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             before(41),
             target(42),
             dir1 {
@@ -1466,7 +1448,7 @@ mod tests {
 
     #[test]
     fn test_fs2_rename_source_in_ancestor_of_target() {
-        let fs = TestFs2::new(fs! {
+        let fs = Fs::new(fs! {
             before(41),
             source(42),
             dir1 {
