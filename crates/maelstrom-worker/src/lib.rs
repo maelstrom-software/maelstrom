@@ -12,7 +12,7 @@ pub mod signals;
 use anyhow::{anyhow, bail, Context as _, Result};
 use cache::{
     fs::{
-        std::{StdFs, StdTempDir},
+        std::{Fs as StdFs, TempDir},
         FsTempDir as _, FsTempFile as _,
     },
     Cache, CacheDir, GotArtifact,
@@ -292,7 +292,7 @@ impl Deps for DispatcherAdapter {
     fn build_bottom_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: StdTempDir,
+        layer_path: TempDir,
         artifact_type: ArtifactType,
         artifact_path: PathBuf,
     ) {
@@ -329,7 +329,7 @@ impl Deps for DispatcherAdapter {
     fn build_upper_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: StdTempDir,
+        layer_path: TempDir,
         lower_layer_path: PathBuf,
         upper_layer_path: PathBuf,
     ) {

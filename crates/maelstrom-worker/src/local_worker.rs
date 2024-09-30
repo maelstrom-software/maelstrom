@@ -1,6 +1,6 @@
 pub use crate::{
     cache::{
-        fs::std::{StdFs, StdTempFile},
+        fs::std::{Fs, TempFile},
         Cache, CacheDir, GetArtifact, GotArtifact,
     },
     check_open_file_limit,

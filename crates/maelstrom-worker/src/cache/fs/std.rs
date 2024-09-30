@@ -8,12 +8,12 @@ use std::{
     path::{Path, PathBuf},
     thread,
 };
-use tempfile::{NamedTempFile, TempDir, TempPath};
+use tempfile::{self, NamedTempFile};
 
 #[derive(Debug)]
-pub struct StdTempFile(TempPath);
+pub struct TempFile(tempfile::TempPath);
 
-impl super::FsTempFile for StdTempFile {
+impl super::FsTempFile for TempFile {
     fn path(&self) -> &Path {
         &self.0
     }
@@ -24,9 +24,9 @@ impl super::FsTempFile for StdTempFile {
 }
 
 #[derive(Debug)]
-pub struct StdTempDir(TempDir);
+pub struct TempDir(tempfile::TempDir);
 
-impl super::FsTempDir for StdTempDir {
+impl super::FsTempDir for TempDir {
     fn path(&self) -> &Path {
         self.0.path()
     }
@@ -37,12 +37,12 @@ impl super::FsTempDir for StdTempDir {
 }
 
 /// The standard implementation of CacheFs that uses [std] and [rand].
-pub struct StdFs;
+pub struct Fs;
 
-impl super::Fs for StdFs {
+impl super::Fs for Fs {
     type Error = io::Error;
-    type TempFile = StdTempFile;
-    type TempDir = StdTempDir;
+    type TempFile = TempFile;
+    type TempDir = TempDir;
 
     fn rand_u64(&self) -> u64 {
         rand::random()
@@ -101,10 +101,10 @@ impl super::Fs for StdFs {
     }
 
     fn temp_file(&self, parent: &Path) -> Self::TempFile {
-        StdTempFile(NamedTempFile::new_in(parent).unwrap().into_temp_path())
+        TempFile(NamedTempFile::new_in(parent).unwrap().into_temp_path())
     }
 
     fn temp_dir(&self, parent: &Path) -> Self::TempDir {
-        StdTempDir(TempDir::new_in(parent).unwrap())
+        TempDir(tempfile::TempDir::new_in(parent).unwrap())
     }
 }
