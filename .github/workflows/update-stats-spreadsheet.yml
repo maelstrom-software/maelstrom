@@ -1,9 +1,16 @@
-steps:
-  - name: Update the Maelstrom Statistics Spreadsheet
-    with:
-      gsheet_service_account: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
-  - shell: bash
-    env:
-      GSHEET_SERVICE_ACCOUNT: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
-    run: |
-      scripts/update-stats-spreadsheet.sh $GSHEET_SERVICE_ACCOUNT $GITHUB_TOKEN
+on:
+  schedule:
+    - cron:  '0 7 * * *'
+jobs:
+  update_stats_spreadsheet:
+    name: Update the Maelstrom Statistics Spreadsheet
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Update the Maelstrom Statistics Spreadsheet
+        with:
+          gsheet_service_account: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
+      - shell: bash
+        env:
+          GSHEET_SERVICE_ACCOUNT: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
+        run: |
+          scripts/update-stats-spreadsheet.sh $GSHEET_SERVICE_ACCOUNT $GITHUB_TOKEN
