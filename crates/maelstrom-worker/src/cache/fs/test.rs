@@ -274,7 +274,7 @@ impl Entry {
             .insert(name.to_str().unwrap().to_owned(), entry);
     }
 
-    fn remove_leaf_from_component_path(&mut self, component_path: &ComponentPath) -> Self {
+    fn remove_component_path(&mut self, component_path: &ComponentPath) -> Self {
         assert!(!component_path.is_empty());
         let mut cur = self;
         for component in component_path.iter().with_position() {
@@ -451,17 +451,13 @@ impl super::Fs for Fs {
                 // Remove the destination directory and proceed as if it wasn't there to begin
                 // with. We may have to adjust the source_component_path to account for the
                 // removal of the destination.
-                state
-                    .root
-                    .remove_leaf_from_component_path(&dest_component_path);
+                state.root.remove_component_path(&dest_component_path);
                 dest_component_path.pop();
                 dest_component_path
             }
         };
 
-        let source_entry = state
-            .root
-            .remove_leaf_from_component_path(&source_component_path);
+        let source_entry = state.root.remove_component_path(&source_component_path);
         state.root.append_entry_to_directory(
             &dest_parent_component_path,
             dest_path.file_name().unwrap(),
