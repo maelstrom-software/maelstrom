@@ -1,5 +1,6 @@
 mod book;
 mod changelog;
+mod clone_benchmark;
 mod distribute;
 mod publish;
 mod update_stats_spreadsheet;
@@ -14,6 +15,7 @@ enum Command {
     Publish(publish::CliArgs),
     Distribute(distribute::CliArgs),
     UpdateStatsSpreadsheet(update_stats_spreadsheet::CliArgs),
+    CloneBenchmark(clone_benchmark::CliArgs),
 }
 
 /// Perform a number of different tasks for the Maelstrom project related to building, testing,
@@ -33,5 +35,6 @@ fn main() -> Result<()> {
         Command::Publish(options) => publish::main(options),
         Command::Distribute(options) => distribute::main(options),
         Command::UpdateStatsSpreadsheet(options) => update_stats_spreadsheet::main(options),
+        Command::CloneBenchmark(options) => clone_benchmark::main(options),
     }
 }

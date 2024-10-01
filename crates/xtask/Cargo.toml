@@ -15,6 +15,7 @@ chrono.workspace = true
 clap.workspace = true
 elf.workspace = true
 google-sheets4.workspace = true
+maelstrom-linux.workspace = true
 maelstrom-util.workspace = true
 regex.workspace = true
 reqwest.workspace = true

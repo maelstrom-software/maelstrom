@@ -95,6 +95,7 @@ impl CloneFlags {
     pub const NEWPID: Self = Self(libc::CLONE_NEWPID);
     pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER);
     pub const VM: Self = Self(libc::CLONE_VM);
+    pub const SIGCHLD: Self = Self(libc::SIGCHLD);
 
     fn as_u64(&self) -> u64 {
         self.0.try_into().unwrap()
@@ -1071,6 +1072,20 @@ pub unsafe fn clone_with_child_pidfd(
     Ok((Pid(ret), OwnedFd(child_pidfd)))
 }
 
+/// # Safety
+///
+/// stack and arg pointers must point to memory the child can access while it is around
+pub unsafe fn clone(
+    func: extern "C" fn(*mut c_void) -> i32,
+    stack: *mut c_void,
+    arg: *mut c_void,
+    args: &CloneArgs,
+) -> Result<Pid, Errno> {
+    let flags = args.0.flags as i32 | (args.0.exit_signal & 0xFF) as i32;
+    let ret = Errno::result(unsafe { libc::clone(func, stack, flags, arg) })?;
+    Ok(Pid(ret))
+}
+
 pub fn close_range(
     first: CloseRangeFirst,
     last: CloseRangeLast,
@@ -1136,6 +1151,82 @@ pub fn fcntl_setpipe_sz(fd: &impl AsFd, size: usize) -> Result<(), Errno> {
 
 pub fn fork() -> Result<Option<Pid>, Errno> {
     Errno::result(unsafe { libc::fork() }).map(|p| (p != 0).then_some(Pid(p)))
+}
+
+pub struct PosixSpawnFileActions(libc::posix_spawn_file_actions_t);
+
+impl Default for PosixSpawnFileActions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PosixSpawnFileActions {
+    pub fn new() -> Self {
+        let mut inner: libc::posix_spawn_file_actions_t = unsafe { mem::zeroed() };
+        Errno::result(unsafe { libc::posix_spawn_file_actions_init(&mut inner) }).unwrap();
+        Self(inner)
+    }
+
+    pub fn add_dup2(&mut self, from: &impl AsFd, to: &impl AsFd) -> Result<(), Errno> {
+        Errno::result(unsafe {
+            libc::posix_spawn_file_actions_adddup2(&mut self.0, from.fd().0, to.fd().0)
+        })?;
+        Ok(())
+    }
+}
+
+impl Drop for PosixSpawnFileActions {
+    fn drop(&mut self) {
+        Errno::result(unsafe { libc::posix_spawn_file_actions_destroy(&mut self.0) }).unwrap();
+    }
+}
+
+pub struct PosixSpawnAttrs(libc::posix_spawnattr_t);
+
+impl Default for PosixSpawnAttrs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PosixSpawnAttrs {
+    pub fn new() -> Self {
+        let mut inner: libc::posix_spawnattr_t = unsafe { mem::zeroed() };
+        Errno::result(unsafe { libc::posix_spawnattr_init(&mut inner) }).unwrap();
+        Self(inner)
+    }
+}
+
+impl Drop for PosixSpawnAttrs {
+    fn drop(&mut self) {
+        Errno::result(unsafe { libc::posix_spawnattr_destroy(&mut self.0) }).unwrap();
+    }
+}
+
+pub fn posix_spawn(
+    path: &CStr,
+    file_actions: &PosixSpawnFileActions,
+    attrs: &PosixSpawnAttrs,
+    argv: &[Option<&u8>],
+    envp: &[Option<&u8>],
+) -> Result<Pid, Errno> {
+    let mut pid = Pid(0);
+    let path_ptr = path.as_ptr();
+    let argv_ptr = argv.as_ptr() as *const *mut c_char;
+    let envp_ptr = envp.as_ptr() as *const *mut c_char;
+    Errno::result(unsafe {
+        libc::posix_spawn(
+            &mut pid.0,
+            path_ptr,
+            &file_actions.0,
+            &attrs.0,
+            argv_ptr,
+            envp_ptr,
+        )
+    })?;
+
+    Ok(pid)
 }
 
 pub fn fsconfig(
