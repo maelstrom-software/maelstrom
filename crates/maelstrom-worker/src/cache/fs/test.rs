@@ -187,7 +187,7 @@ impl Entry {
                 }
                 Component::CurDir => {}
                 Component::ParentDir => {
-                    (cur, component_path) = Self::pop_component_path(self, component_path);
+                    cur = self.pop_component_path(&mut component_path);
                 }
                 Component::Normal(name) => loop {
                     match cur {
@@ -215,7 +215,7 @@ impl Entry {
                             return LookupComponentPath::FileAncestor;
                         }
                         Self::Symlink { target } => {
-                            (cur, component_path) = Self::pop_component_path(self, component_path);
+                            cur = self.pop_component_path(&mut component_path);
                             match self.lookup_component_path_helper(
                                 cur,
                                 component_path,
@@ -240,9 +240,9 @@ impl Entry {
         LookupComponentPath::Found(cur, component_path)
     }
 
-    fn pop_component_path(&self, mut component_path: ComponentPath) -> (&Self, ComponentPath) {
+    fn pop_component_path(&self, component_path: &mut ComponentPath) -> &Self {
         component_path.pop();
-        (self.resolve_component_path(&component_path), component_path)
+        self.resolve_component_path(&component_path)
     }
 
     /// Resolve `path` starting at this entry.
