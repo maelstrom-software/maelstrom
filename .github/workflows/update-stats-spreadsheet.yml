@@ -23,7 +23,7 @@ jobs:
         run: rm -rf ~/.cargo ~/.rustup
       - name: Update the Spreadsheet
         env:
-          GSHEET_SERVICE_ACCOUNT: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SERVICE_ACCOUNT_JSON: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          scripts/update-stats-spreadsheet.sh "$GSHEET_SERVICE_ACCOUNT" "$GITHUB_TOKEN"
+          scripts/update-stats-spreadsheet.sh
