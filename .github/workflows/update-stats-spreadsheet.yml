@@ -6,11 +6,11 @@ jobs:
     name: Update the Maelstrom Statistics Spreadsheet
     runs-on: ubuntu-24.04
     steps:
-      - name: Update the Maelstrom Statistics Spreadsheet
+      - name: Load the Google Sheets Secret
         with:
           gsheet_service_account: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
-      - shell: bash
         env:
           GSHEET_SERVICE_ACCOUNT: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
+      - name: Update the Spreadsheet
         run: |
           scripts/update-stats-spreadsheet.sh $GSHEET_SERVICE_ACCOUNT $GITHUB_TOKEN
