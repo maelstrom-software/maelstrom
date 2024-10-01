@@ -2,7 +2,7 @@ mod book;
 mod changelog;
 mod distribute;
 mod publish;
-mod pull_stats;
+mod update_stats_spreadsheet;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -13,7 +13,7 @@ enum Command {
     Changelog(changelog::CliArgs),
     Publish(publish::CliArgs),
     Distribute(distribute::CliArgs),
-    PullStats(pull_stats::CliArgs),
+    UpdateStatsSpreadsheet(update_stats_spreadsheet::CliArgs),
 }
 
 /// Perform a number of different tasks for the Maelstrom project related to building, testing,
@@ -32,6 +32,6 @@ fn main() -> Result<()> {
         Command::Changelog(options) => changelog::main(options),
         Command::Publish(options) => publish::main(options),
         Command::Distribute(options) => distribute::main(options),
-        Command::PullStats(options) => pull_stats::main(options),
+        Command::UpdateStatsSpreadsheet(options) => update_stats_spreadsheet::main(options),
     }
 }

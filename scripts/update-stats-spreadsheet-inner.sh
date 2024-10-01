@@ -10,4 +10,4 @@ fi
 
 export SERVICE_ACCOUNT_JSON=$1
 export GH_TOKEN=$2
-cargo xtask pull-stats
+cargo xtask update-stats-spreadsheet
