@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Testing
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.ADMIN_READ_GH_TOKEN }}
         run: |
           gh api repos/:owner/:repo/traffic/clones
       - name: Install Nix
@@ -30,6 +30,6 @@ jobs:
       - name: Update the Spreadsheet
         env:
           SERVICE_ACCOUNT_JSON: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.ADMIN_READ_GH_TOKEN }}
         run: |
           scripts/update-stats-spreadsheet.sh "$SERVICE_ACCOUNT_JSON" "$GH_TOKEN"
