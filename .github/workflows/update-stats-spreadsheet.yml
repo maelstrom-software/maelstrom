@@ -11,6 +11,11 @@ jobs:
     permissions: read-all
     runs-on: ubuntu-24.04
     steps:
+      - name: Testing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api repos/:owner/:repo/traffic/clones
       - name: Get Repository from Git
         uses: actions/checkout@v4
       - name: Install Nix
