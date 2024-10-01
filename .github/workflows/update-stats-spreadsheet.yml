@@ -24,5 +24,6 @@ jobs:
       - name: Update the Spreadsheet
         env:
           GSHEET_SERVICE_ACCOUNT: ${{ secrets.GSHEET_SERVICE_ACCOUNT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           scripts/update-stats-spreadsheet.sh "$GSHEET_SERVICE_ACCOUNT" "$GITHUB_TOKEN"
