@@ -726,7 +726,7 @@ impl State {
     }
 
     fn symlink(&mut self, target: &Path, link: &Path) -> Result<(), Error> {
-        let parent_component_path = match self.root.lookup_component_path(target) {
+        let parent_component_path = match self.root.lookup_component_path(link) {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::NotFound => Err(Error::NoEnt),
@@ -735,8 +735,8 @@ impl State {
         }?;
         self.root.append_entry_to_directory(
             &parent_component_path,
-            target.file_name().unwrap(),
-            Entry::symlink(link.to_str().unwrap()),
+            link.file_name().unwrap(),
+            Entry::symlink(target.to_str().unwrap()),
         );
         Ok(())
     }
@@ -1060,7 +1060,7 @@ mod tests {
         });
 
         assert_eq!(
-            fs.symlink(Path::new("/new_symlink"), Path::new("new-target")),
+            fs.symlink(Path::new("new-target"), Path::new("/new_symlink")),
             Ok(())
         );
         assert_eq!(
@@ -1070,8 +1070,8 @@ mod tests {
 
         assert_eq!(
             fs.symlink(
+                Path::new("new-target-2"),
                 Path::new("/bar/root/bar/a/new_symlink"),
-                Path::new("new-target-2")
             ),
             Ok(())
         );
@@ -1081,23 +1081,23 @@ mod tests {
         );
 
         assert_eq!(
-            fs.symlink(Path::new("/new_symlink"), Path::new("new-target-3")),
+            fs.symlink(Path::new("new-target-3"), Path::new("/new_symlink")),
             Err(Error::Exists)
         );
         assert_eq!(
-            fs.symlink(Path::new("/foo"), Path::new("new-target-3")),
+            fs.symlink(Path::new("new-target-3"), Path::new("/foo")),
             Err(Error::Exists)
         );
         assert_eq!(
-            fs.symlink(Path::new("/blah/new_symlink"), Path::new("new-target-3")),
+            fs.symlink(Path::new("new-target-3"), Path::new("/blah/new_symlink")),
             Err(Error::NoEnt)
         );
         assert_eq!(
-            fs.symlink(Path::new("/foo/new_symlink"), Path::new("new-target-3")),
+            fs.symlink(Path::new("new-target-3"), Path::new("/foo/new_symlink")),
             Err(Error::NotDir)
         );
         assert_eq!(
-            fs.symlink(Path::new("/bar/baz/new_symlink"), Path::new("new-target-3")),
+            fs.symlink(Path::new("new-target-3"), Path::new("/bar/baz/new_symlink")),
             Err(Error::NoEnt)
         );
     }
