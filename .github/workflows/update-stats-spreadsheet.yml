@@ -13,11 +13,6 @@ jobs:
     steps:
       - name: Get Repository from Git
         uses: actions/checkout@v4
-      - name: Testing
-        env:
-          GH_TOKEN: ${{ secrets.ADMIN_READ_GH_TOKEN }}
-        run: |
-          gh api repos/:owner/:repo/traffic/clones
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
       - name: Set up Nix Cache
