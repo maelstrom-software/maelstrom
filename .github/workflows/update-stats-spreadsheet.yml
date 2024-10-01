@@ -1,5 +1,7 @@
 name: Update the Maelstrom Statistics Spreadsheet
 
+permissions: read-all
+
 on:
   schedule:
     - cron:  '0 7 * * *'
