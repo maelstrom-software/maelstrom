@@ -382,12 +382,6 @@ macro_rules! fs {
 }
 
 #[derive(Debug)]
-struct State {
-    root: Entry,
-    last_random_number: u64,
-}
-
-#[derive(Debug)]
 pub struct Fs {
     state: Rc<RefCell<State>>,
 }
@@ -437,16 +431,68 @@ impl super::Fs for Fs {
     type TempDir = TempDir;
 
     fn rand_u64(&self) -> u64 {
-        let mut state = self.state.borrow_mut();
-        state.last_random_number += 1;
-        state.last_random_number
+        self.state.borrow_mut().rand_u64()
     }
 
     fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
-        let mut state = self.state.borrow_mut();
+        self.state.borrow_mut().rename(source_path, dest_path)
+    }
 
+    fn remove(&self, path: &Path) -> Result<(), Error> {
+        self.state.borrow_mut().remove(path)
+    }
+
+    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Error> {
+        self.state.borrow_mut().rmdir_recursively_on_thread(path)
+    }
+
+    fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
+        self.state.borrow_mut().mkdir_recursively(path)
+    }
+
+    fn read_dir(
+        &self,
+        path: &Path,
+    ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
+        self.state.borrow().read_dir(path)
+    }
+
+    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+        self.state.borrow_mut().create_file(path, contents)
+    }
+
+    fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
+        self.state.borrow_mut().symlink(target, link)
+    }
+
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
+        self.state.borrow().metadata(path)
+    }
+
+    fn temp_file(&self, parent: &Path) -> Self::TempFile {
+        self.state.borrow_mut().temp_file(parent)
+    }
+
+    fn temp_dir(&self, parent: &Path) -> Self::TempDir {
+        self.state.borrow_mut().temp_dir(parent)
+    }
+}
+
+#[derive(Debug)]
+struct State {
+    root: Entry,
+    last_random_number: u64,
+}
+
+impl State {
+    fn rand_u64(&mut self) -> u64 {
+        self.last_random_number += 1;
+        self.last_random_number
+    }
+
+    fn rename(&mut self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
         let (source_entry, source_component_path) =
-            match state.root.lookup_component_path(source_path) {
+            match self.root.lookup_component_path(source_path) {
                 LookupComponentPath::FileAncestor => {
                     return Err(Error::NotDir);
                 }
@@ -460,7 +506,7 @@ impl super::Fs for Fs {
                 }
             };
 
-        let dest_parent_component_path = match state.root.lookup_component_path(dest_path) {
+        let dest_parent_component_path = match self.root.lookup_component_path(dest_path) {
             LookupComponentPath::FileAncestor => {
                 return Err(Error::NotDir);
             }
@@ -506,12 +552,12 @@ impl super::Fs for Fs {
                 }
 
                 // Remove the destination entry and proceed like it wasn't there to begin with.
-                state.root.remove_component_path(dest_component_path).1
+                self.root.remove_component_path(dest_component_path).1
             }
         };
 
-        let (source_entry, _) = state.root.remove_component_path(source_component_path);
-        state.root.append_entry_to_directory(
+        let (source_entry, _) = self.root.remove_component_path(source_component_path);
+        self.root.append_entry_to_directory(
             &dest_parent_component_path,
             dest_path.file_name().unwrap(),
             source_entry,
@@ -520,9 +566,8 @@ impl super::Fs for Fs {
         Ok(())
     }
 
-    fn remove(&self, path: &Path) -> Result<(), Error> {
-        let mut state = self.state.borrow_mut();
-        match state.root.lookup_component_path(path) {
+    fn remove(&mut self, path: &Path) -> Result<(), Error> {
+        match self.root.lookup_component_path(path) {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::DanglingSymlink
             | LookupComponentPath::NotFound
@@ -530,8 +575,7 @@ impl super::Fs for Fs {
             LookupComponentPath::Found(Entry::Directory { .. }, _) => Err(Error::IsDir),
             LookupComponentPath::Found(_, mut component_path) => {
                 let component = component_path.pop().unwrap();
-                state
-                    .root
+                self.root
                     .resolve_component_path_mut(&component_path)
                     .directory_entries_mut()
                     .remove(&component)
@@ -541,24 +585,18 @@ impl super::Fs for Fs {
         }
     }
 
-    fn rmdir_recursively_on_thread(&self, _path: PathBuf) -> Result<(), Error> {
+    fn rmdir_recursively_on_thread(&mut self, _path: PathBuf) -> Result<(), Error> {
         unimplemented!()
-        /*
-        self.messages
-            .borrow_mut()
-            .push(RemoveRecursively(path.to_owned()));
-            */
     }
 
-    fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
-        let mut state = self.state.borrow_mut();
-        match state.root.lookup_component_path(path) {
+    fn mkdir_recursively(&mut self, path: &Path) -> Result<(), Error> {
+        match self.root.lookup_component_path(path) {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::Found(Entry::Directory { .. }, _) => Ok(()),
             LookupComponentPath::Found(_, _) => Err(Error::Exists),
             LookupComponentPath::FoundParent(_, parent_component_path) => {
-                state.root.append_entry_to_directory(
+                self.root.append_entry_to_directory(
                     &parent_component_path,
                     path.file_name().unwrap(),
                     Entry::directory([]),
@@ -566,7 +604,6 @@ impl super::Fs for Fs {
                 Ok(())
             }
             LookupComponentPath::NotFound => {
-                drop(state);
                 self.mkdir_recursively(path.parent().unwrap())?;
                 self.mkdir_recursively(path)
             }
@@ -577,7 +614,7 @@ impl super::Fs for Fs {
         &self,
         path: &Path,
     ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
-        match self.state.borrow().root.lookup_component_path(path) {
+        match self.root.lookup_component_path(path) {
             LookupComponentPath::Found(Entry::Directory { entries }, _) => Ok(entries
                 .iter()
                 .map(|(name, entry)| Ok((name.into(), entry.metadata())))
@@ -592,16 +629,15 @@ impl super::Fs for Fs {
         }
     }
 
-    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
-        let mut state = self.state.borrow_mut();
-        let parent_component_path = match state.root.lookup_component_path(path) {
+    fn create_file(&mut self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+        let parent_component_path = match self.root.lookup_component_path(path) {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::NotFound => Err(Error::NoEnt),
             LookupComponentPath::Found(_, _) => Err(Error::Exists),
             LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
         }?;
-        state.root.append_entry_to_directory(
+        self.root.append_entry_to_directory(
             &parent_component_path,
             path.file_name().unwrap(),
             Entry::file(contents.len().try_into().unwrap()),
@@ -609,16 +645,15 @@ impl super::Fs for Fs {
         Ok(())
     }
 
-    fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
-        let mut state = self.state.borrow_mut();
-        let parent_component_path = match state.root.lookup_component_path(target) {
+    fn symlink(&mut self, target: &Path, link: &Path) -> Result<(), Error> {
+        let parent_component_path = match self.root.lookup_component_path(target) {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::NotFound => Err(Error::NoEnt),
             LookupComponentPath::Found(_, _) => Err(Error::Exists),
             LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
         }?;
-        state.root.append_entry_to_directory(
+        self.root.append_entry_to_directory(
             &parent_component_path,
             target.file_name().unwrap(),
             Entry::symlink(link.to_str().unwrap()),
@@ -627,7 +662,7 @@ impl super::Fs for Fs {
     }
 
     fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
-        match self.state.borrow().root.lookup_component_path(path) {
+        match self.root.lookup_component_path(path) {
             LookupComponentPath::Found(entry, _) => Ok(Some(entry.metadata())),
             LookupComponentPath::NotFound | LookupComponentPath::FoundParent(_, _) => Ok(None),
             LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
@@ -635,28 +670,12 @@ impl super::Fs for Fs {
         }
     }
 
-    fn temp_file(&self, _parent: &Path) -> Self::TempFile {
+    fn temp_file(&self, _parent: &Path) -> TempFile {
         unimplemented!()
-        /*
-        let path = parent.join(format!("{:0>16x}", self.rand_u64()));
-        self.messages.borrow_mut().push(TempFile(path.clone()));
-        TempFile {
-            path,
-            messages: self.messages.clone(),
-        }
-        */
     }
 
-    fn temp_dir(&self, _parent: &Path) -> Self::TempDir {
+    fn temp_dir(&self, _parent: &Path) -> TempDir {
         unimplemented!()
-        /*
-        let path = parent.join(format!("{:0>16x}", self.rand_u64()));
-        self.messages.borrow_mut().push(TempDir(path.clone()));
-        TempDir {
-            path,
-            messages: self.messages.clone(),
-        }
-        */
     }
 }
 
