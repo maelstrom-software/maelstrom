@@ -15,6 +15,7 @@
   black,
   zola,
   go,
+  git,
   version ? null
 }:
 
@@ -60,6 +61,7 @@ let
       mdbook
       zola
       go
+      git
     ];
 
     buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];
