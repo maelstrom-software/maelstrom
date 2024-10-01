@@ -144,6 +144,22 @@ impl Entry {
         matches!(self, Self::Directory { .. })
     }
 
+    /// Assume [`Entry`] is a directory, and return a reference to its entries.
+    fn directory_entries(&self) -> &HashMap<String, Self> {
+        let Self::Directory { entries } = self else {
+            panic!("expected entry {self:?} to be a directory");
+        };
+        entries
+    }
+
+    /// Assume [`Entry`] is a directory, and return a mutable reference to its entries.
+    fn directory_entries_mut(&mut self) -> &mut HashMap<String, Self> {
+        let Self::Directory { entries } = self else {
+            panic!("expected entry {self:?} to be a directory");
+        };
+        entries
+    }
+
     fn lookup_component_path<'state, 'path>(
         &'state self,
         path: &'path Path,
@@ -232,10 +248,7 @@ impl Entry {
     fn resolve_component_path(&self, component_path: &ComponentPath) -> &Self {
         let mut cur = self;
         for component in component_path {
-            let Self::Directory { entries } = cur else {
-                panic!("intermediate path entry not a directory");
-            };
-            cur = entries.get(component).unwrap();
+            cur = cur.directory_entries().get(component).unwrap();
         }
         cur
     }
@@ -246,15 +259,9 @@ impl Entry {
     ) -> &mut HashMap<String, Self> {
         let mut cur = self;
         for component in component_path {
-            let Self::Directory { entries } = cur else {
-                panic!("intermediate path entry not a directory");
-            };
-            cur = entries.get_mut(component).unwrap();
+            cur = cur.directory_entries_mut().get_mut(component).unwrap();
         }
-        let Self::Directory { entries } = cur else {
-            panic!("entry not a directory");
-        };
-        entries
+        cur.directory_entries_mut()
     }
 
     fn append_entry_to_directory(
@@ -271,9 +278,7 @@ impl Entry {
         assert!(!component_path.is_empty());
         let mut cur = self;
         for component in component_path.iter().with_position() {
-            let Self::Directory { entries } = cur else {
-                panic!("intermediate path entry not a directory");
-            };
+            let entries = cur.directory_entries_mut();
             if let Position::Last(component) | Position::Only(component) = component {
                 return entries.remove(component).unwrap();
             } else {
