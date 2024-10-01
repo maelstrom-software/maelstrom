@@ -1,7 +1,5 @@
 name: Update the Maelstrom Statistics Spreadsheet
 
-permissions: read-all
-
 on:
   schedule:
     - cron:  '0 7 * * *'
@@ -10,6 +8,7 @@ on:
 jobs:
   update_stats_spreadsheet:
     name: Update the Maelstrom Statistics Spreadsheet
+    permissions: read-all
     runs-on: ubuntu-24.04
     steps:
       - name: Get Repository from Git
