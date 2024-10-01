@@ -360,6 +360,15 @@ macro_rules! fs {
             ]
         )
     };
+    (@expand [$name:literal($size:literal) $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+        fs!(
+            @expand
+            [$($($tail)*)?] -> [
+                $($($expanded)+,)?
+                ($name, $crate::cache::fs::test::Entry::file($size))
+            ]
+        )
+    };
     (@expand [$name:ident -> $target:literal $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
         fs!(
             @expand
@@ -369,12 +378,30 @@ macro_rules! fs {
             ]
         )
     };
+    (@expand [$name:literal -> $target:literal $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+        fs!(
+            @expand
+            [$($($tail)*)?] -> [
+                $($($expanded)+,)?
+                ($name, $crate::cache::fs::test::Entry::symlink($target))
+            ]
+        )
+    };
     (@expand [$name:ident { $($dirents:tt)* } $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
         fs!(
             @expand
             [$($($tail)*)?] -> [
                 $($($expanded)+,)?
                 (stringify!($name), fs!($($dirents)*))
+            ]
+        )
+    };
+    (@expand [$name:literal { $($dirents:tt)* } $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+        fs!(
+            @expand
+            [$($($tail)*)?] -> [
+                $($($expanded)+,)?
+                ($name, fs!($($dirents)*))
             ]
         )
     };
@@ -759,6 +786,22 @@ mod tests {
                     foo {},
                 },
                 Entry::directory([("foo", Entry::directory([]))])
+            );
+        }
+
+        #[test]
+        fn non_identifier_keys() {
+            assert_eq!(
+                fs! {
+                    "foo"(42),
+                    "bar" -> "/target/1",
+                    "baz" { "empty" {} },
+                },
+                Entry::directory([
+                    ("foo", Entry::file(42)),
+                    ("bar", Entry::symlink("/target/1")),
+                    ("baz", Entry::directory([("empty", Entry::directory([]))])),
+                ])
             );
         }
 
