@@ -665,121 +665,125 @@ mod tests {
     use super::super::Fs as _;
     use super::*;
 
-    #[test]
-    fn fs_empty() {
-        assert_eq!(fs! {}, Entry::directory([]));
+    mod fs_macro {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            assert_eq!(fs! {}, Entry::directory([]));
+        }
+
+        #[test]
+        fn one_file_no_comma() {
+            assert_eq!(
+                fs! {
+                    foo(42)
+                },
+                Entry::directory([("foo", Entry::file(42))])
+            );
+        }
+
+        #[test]
+        fn one_file_comma() {
+            assert_eq!(
+                fs! {
+                    foo(42),
+                },
+                Entry::directory([("foo", Entry::file(42))])
+            );
+        }
+
+        #[test]
+        fn one_symlink_no_comma() {
+            assert_eq!(
+                fs! {
+                    foo -> "/target"
+                },
+                Entry::directory([("foo", Entry::symlink("/target"))])
+            );
+        }
+
+        #[test]
+        fn one_symlink_comma() {
+            assert_eq!(
+                fs! {
+                    foo -> "/target",
+                },
+                Entry::directory([("foo", Entry::symlink("/target"))])
+            );
+        }
+
+        #[test]
+        fn one_directory_no_comma() {
+            assert_eq!(
+                fs! {
+                    foo {}
+                },
+                Entry::directory([("foo", Entry::directory([]))])
+            );
+        }
+
+        #[test]
+        fn one_directory_comma() {
+            assert_eq!(
+                fs! {
+                    foo {},
+                },
+                Entry::directory([("foo", Entry::directory([]))])
+            );
+        }
+
+        #[test]
+        fn one_directory_with_no_files() {
+            assert_eq!(
+                fs! {
+                    foo {},
+                },
+                Entry::directory([("foo", Entry::directory([]))])
+            );
+        }
+
+        #[test]
+        fn kitchen_sink() {
+            assert_eq!(
+                fs! {
+                    foo(42),
+                    bar -> "/target/1",
+                    baz {
+                        zero {},
+                        one {
+                            foo(43)
+                        },
+                        two {
+                            foo(44),
+                            bar -> "/target/2"
+                        },
+                    }
+                },
+                Entry::directory([
+                    ("foo", Entry::file(42)),
+                    ("bar", Entry::symlink("/target/1")),
+                    (
+                        "baz",
+                        Entry::directory([
+                            ("zero", Entry::directory([])),
+                            ("one", Entry::directory([("foo", Entry::file(43))])),
+                            (
+                                "two",
+                                Entry::directory([
+                                    ("foo", Entry::file(44)),
+                                    ("bar", Entry::symlink("/target/2")),
+                                ])
+                            ),
+                        ])
+                    )
+                ])
+            );
+        }
     }
 
     #[test]
-    fn fs_one_file_no_comma() {
-        assert_eq!(
-            fs! {
-                foo(42)
-            },
-            Entry::directory([("foo", Entry::file(42))])
-        );
-    }
-
-    #[test]
-    fn fs_one_file_comma() {
-        assert_eq!(
-            fs! {
-                foo(42),
-            },
-            Entry::directory([("foo", Entry::file(42))])
-        );
-    }
-
-    #[test]
-    fn fs_one_symlink_no_comma() {
-        assert_eq!(
-            fs! {
-                foo -> "/target"
-            },
-            Entry::directory([("foo", Entry::symlink("/target"))])
-        );
-    }
-
-    #[test]
-    fn fs_one_symlink_comma() {
-        assert_eq!(
-            fs! {
-                foo -> "/target",
-            },
-            Entry::directory([("foo", Entry::symlink("/target"))])
-        );
-    }
-
-    #[test]
-    fn fs_one_directory_no_comma() {
-        assert_eq!(
-            fs! {
-                foo {}
-            },
-            Entry::directory([("foo", Entry::directory([]))])
-        );
-    }
-
-    #[test]
-    fn fs_one_directory_comma() {
-        assert_eq!(
-            fs! {
-                foo {},
-            },
-            Entry::directory([("foo", Entry::directory([]))])
-        );
-    }
-
-    #[test]
-    fn fs_one_directory_with_no_files() {
-        assert_eq!(
-            fs! {
-                foo {},
-            },
-            Entry::directory([("foo", Entry::directory([]))])
-        );
-    }
-
-    #[test]
-    fn fs_kitchen_sink() {
-        assert_eq!(
-            fs! {
-                foo(42),
-                bar -> "/target/1",
-                baz {
-                    zero {},
-                    one {
-                        foo(43)
-                    },
-                    two {
-                        foo(44),
-                        bar -> "/target/2"
-                    },
-                }
-            },
-            Entry::directory([
-                ("foo", Entry::file(42)),
-                ("bar", Entry::symlink("/target/1")),
-                (
-                    "baz",
-                    Entry::directory([
-                        ("zero", Entry::directory([])),
-                        ("one", Entry::directory([("foo", Entry::file(43))])),
-                        (
-                            "two",
-                            Entry::directory([
-                                ("foo", Entry::file(44)),
-                                ("bar", Entry::symlink("/target/2")),
-                            ])
-                        ),
-                    ])
-                )
-            ])
-        );
-    }
-
-    #[test]
-    fn test_fs2_rand_u64() {
+    fn rand_u64() {
         let fs = Fs::new(fs! {});
         assert_eq!(fs.rand_u64(), 1);
         assert_eq!(fs.rand_u64(), 2);
@@ -787,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_metadata_empty() {
+    fn metadata_empty() {
         let fs = Fs::new(fs! {});
         assert_eq!(
             fs.metadata(Path::new("/")),
@@ -797,7 +801,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_metadata() {
+    fn metadata() {
         let fs = Fs::new(fs! {
             foo(42),
             bar {
@@ -843,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_create_file() {
+    fn create_file() {
         let fs = Fs::new(fs! {
             foo(42),
             bar {
@@ -894,7 +898,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_symlink() {
+    fn symlink() {
         let fs = Fs::new(fs! {
             foo(42),
             bar {
@@ -951,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_mkdir_recursively() {
+    fn mkdir_recursively() {
         let fs = Fs::new(fs! {
             foo(42),
             bar {
@@ -1013,7 +1017,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_remove() {
+    fn remove() {
         let fs = Fs::new(fs! {
             foo(42),
             bar {
@@ -1046,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_read_dir() {
+    fn read_dir() {
         let fs = Fs::new(fs! {
             foo(42),
             bar {
@@ -1105,7 +1109,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_source_path_with_file_ancestor() {
+    fn rename_source_path_with_file_ancestor() {
         let expected = fs! { foo(42) };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1116,7 +1120,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_source_path_with_dangling_symlink() {
+    fn rename_source_path_with_dangling_symlink() {
         let expected = fs! { foo -> "/dangle" };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1127,7 +1131,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_source_path_not_found() {
+    fn rename_source_path_not_found() {
         let expected = fs! {};
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1142,7 +1146,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_destination_path_with_file_ancestor() {
+    fn rename_destination_path_with_file_ancestor() {
         let expected = fs! { foo(42), bar(43) };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1153,7 +1157,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_destination_path_with_dangling_symlink() {
+    fn rename_destination_path_with_dangling_symlink() {
         let expected = fs! { foo(42), bar -> "dangle" };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1164,7 +1168,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_destination_path_not_found() {
+    fn rename_destination_path_not_found() {
         let expected = fs! { foo(42) };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1175,7 +1179,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_directory_into_new_entry_in_itself() {
+    fn rename_directory_into_new_entry_in_itself() {
         let expected = fs! { foo { bar { baz {} } } };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1186,7 +1190,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_directory_into_new_entry_in_descendant_of_itself() {
+    fn rename_directory_into_new_entry_in_descendant_of_itself() {
         let expected = fs! { dir {} };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1197,7 +1201,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_directory_onto_nonempty_directory() {
+    fn rename_directory_onto_nonempty_directory() {
         let expected = fs! { dir1 {}, dir2 { foo(42) } };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1208,7 +1212,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_nonempty_directory_onto_itself() {
+    fn rename_nonempty_directory_onto_itself() {
         let expected = fs! { dir { foo(42) } };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1219,7 +1223,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_nonempty_root_onto_itself() {
+    fn rename_nonempty_root_onto_itself() {
         let expected = fs! { foo(42) };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1230,7 +1234,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_directory_onto_descendant() {
+    fn rename_directory_onto_descendant() {
         let expected = fs! { dir1 { dir2 {} } };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1241,7 +1245,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_directory_onto_nondirectory() {
+    fn rename_directory_onto_nondirectory() {
         let expected = fs! { dir {}, file(42), symlink -> "file" };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1256,7 +1260,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_nondirectory_onto_directory() {
+    fn rename_nondirectory_onto_directory() {
         let expected = fs! { dir {}, file(42), symlink -> "file" };
         let fs = Fs::new(expected.clone());
         assert_eq!(
@@ -1271,14 +1275,14 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_empty_root_onto_itself() {
+    fn rename_empty_root_onto_itself() {
         let fs = Fs::new(fs! {});
         assert_eq!(fs.rename(Path::new("/"), Path::new("/")), Ok(()));
         fs.assert_tree(fs! {});
     }
 
     #[test]
-    fn test_fs2_rename_empty_directory_onto_itself() {
+    fn rename_empty_directory_onto_itself() {
         let expected = fs! {
             dir {},
             root -> "/",
@@ -1299,7 +1303,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_file_onto_itself() {
+    fn rename_file_onto_itself() {
         let expected = fs! {
             file(42),
             root -> "/",
@@ -1326,7 +1330,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_symlink_onto_itself() {
+    fn rename_symlink_onto_itself() {
         let expected = fs! {
             symlink -> "dangle",
             root -> "/",
@@ -1364,35 +1368,35 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_file_onto_file() {
+    fn rename_file_onto_file() {
         let fs = Fs::new(fs! { foo(42), bar(43) });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
         fs.assert_tree(fs! { bar(42) });
     }
 
     #[test]
-    fn test_fs2_rename_file_onto_symlink() {
+    fn rename_file_onto_symlink() {
         let fs = Fs::new(fs! { foo(42), bar -> "foo" });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
         fs.assert_tree(fs! { bar(42) });
     }
 
     #[test]
-    fn test_fs2_rename_symlink_onto_file() {
+    fn rename_symlink_onto_file() {
         let fs = Fs::new(fs! { foo -> "bar", bar(43) });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
         fs.assert_tree(fs! { bar -> "bar" });
     }
 
     #[test]
-    fn test_fs2_rename_symlink_onto_symlink() {
+    fn rename_symlink_onto_symlink() {
         let fs = Fs::new(fs! { foo -> "bar", bar -> "foo" });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
         fs.assert_tree(fs! { bar -> "bar" });
     }
 
     #[test]
-    fn test_fs2_rename_into_new_entries_in_directory() {
+    fn rename_into_new_entries_in_directory() {
         let fs = Fs::new(fs! {
             a {
                 file(42),
@@ -1421,7 +1425,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_directory() {
+    fn rename_directory() {
         let fs = Fs::new(fs! {
             a {
                 b {
@@ -1446,7 +1450,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_destination_in_ancestor_of_source() {
+    fn rename_destination_in_ancestor_of_source() {
         let fs = Fs::new(fs! {
             before(41),
             target(42),
@@ -1472,7 +1476,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fs2_rename_source_in_ancestor_of_target() {
+    fn rename_source_in_ancestor_of_target() {
         let fs = Fs::new(fs! {
             before(41),
             source(42),
