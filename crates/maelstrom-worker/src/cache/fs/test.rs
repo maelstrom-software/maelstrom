@@ -1,5 +1,6 @@
 use super::FileMetadata;
 use itertools::{Itertools, Position};
+use maelstrom_util::ext::OptionExt as _;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -269,7 +270,8 @@ impl Entry {
     ) {
         self.resolve_component_path_mut(directory_component_path)
             .directory_entries_mut()
-            .insert(name.to_str().unwrap().to_owned(), entry);
+            .insert(name.to_str().unwrap().to_owned(), entry)
+            .assert_is_none();
     }
 
     fn remove_component_path(&mut self, component_path: &ComponentPath) -> Self {
@@ -479,7 +481,8 @@ impl super::Fs for Fs {
                     .root
                     .resolve_component_path_mut(&component_path)
                     .directory_entries_mut()
-                    .remove(&component);
+                    .remove(&component)
+                    .assert_is_some();
                 Ok(())
             }
         }
