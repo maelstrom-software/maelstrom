@@ -253,15 +253,12 @@ impl Entry {
         cur
     }
 
-    fn resolve_component_path_mut_as_directory(
-        &mut self,
-        component_path: &ComponentPath,
-    ) -> &mut HashMap<String, Self> {
+    fn resolve_component_path_mut(&mut self, component_path: &ComponentPath) -> &mut Self {
         let mut cur = self;
         for component in component_path {
             cur = cur.directory_entries_mut().get_mut(component).unwrap();
         }
-        cur.directory_entries_mut()
+        cur
     }
 
     fn append_entry_to_directory(
@@ -270,7 +267,8 @@ impl Entry {
         name: &OsStr,
         entry: Self,
     ) {
-        self.resolve_component_path_mut_as_directory(directory_component_path)
+        self.resolve_component_path_mut(directory_component_path)
+            .directory_entries_mut()
             .insert(name.to_str().unwrap().to_owned(), entry);
     }
 
@@ -479,7 +477,8 @@ impl super::Fs for Fs {
                 let component = component_path.pop().unwrap();
                 state
                     .root
-                    .resolve_component_path_mut_as_directory(&component_path)
+                    .resolve_component_path_mut(&component_path)
+                    .directory_entries_mut()
                     .remove(&component);
                 Ok(())
             }
