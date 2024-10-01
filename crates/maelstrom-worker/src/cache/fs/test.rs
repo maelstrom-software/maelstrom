@@ -58,10 +58,6 @@ impl super::FsTempDir for TempDir {
 struct ComponentPath(Vec<String>);
 
 impl ComponentPath {
-    fn clear(&mut self) {
-        *self = Default::default()
-    }
-
     fn push(&mut self, component: String) {
         self.0.push(component);
     }
@@ -170,7 +166,7 @@ impl Entry {
                 }
                 Component::RootDir => {
                     cur = self;
-                    component_path.clear();
+                    component_path = Default::default();
                 }
                 Component::CurDir => {}
                 Component::ParentDir => {
