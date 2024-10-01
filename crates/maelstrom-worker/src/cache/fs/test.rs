@@ -1,9 +1,9 @@
 use super::Metadata;
 use itertools::{Itertools, Position};
-use maelstrom_util::ext::OptionExt as _;
+use maelstrom_util::ext::{BoolExt as _, OptionExt as _};
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     error,
     ffi::{OsStr, OsString},
     fmt::Debug,
@@ -442,6 +442,7 @@ impl Fs {
             state: Rc::new(RefCell::new(State {
                 root,
                 last_random_number: 0,
+                recursive_rmdirs: Default::default(),
             })),
         }
     }
@@ -449,6 +450,17 @@ impl Fs {
     #[track_caller]
     pub fn assert_tree(&self, expected: Entry) {
         assert_eq!(self.state.borrow().root, expected);
+    }
+
+    #[track_caller]
+    pub fn assert_recursive_rmdirs(&self, expected: HashSet<String>) {
+        assert_eq!(self.state.borrow().recursive_rmdirs, expected);
+    }
+
+    pub fn complete_recursive_rmdir(&self, path: &str) {
+        let mut state = self.state.borrow_mut();
+        state.recursive_rmdirs.remove(path).assert_is_true();
+        state.complete_recursive_rmdir(path).unwrap();
     }
 }
 
@@ -517,6 +529,7 @@ impl super::Fs for Fs {
 struct State {
     root: Entry,
     last_random_number: u64,
+    recursive_rmdirs: HashSet<String>,
 }
 
 impl State {
@@ -620,8 +633,25 @@ impl State {
         }
     }
 
-    fn rmdir_recursively_on_thread(&mut self, _path: PathBuf) -> Result<(), Error> {
-        unimplemented!()
+    fn rmdir_recursively_on_thread(&mut self, path: PathBuf) -> Result<(), Error> {
+        match self.root.lookup_component_path(&path) {
+            LookupComponentPath::Found(Entry::Directory { .. }, component_path) => {
+                if component_path.is_empty() {
+                    // Can't rmdir /.
+                    Err(Error::Inval)
+                } else {
+                    self.recursive_rmdirs
+                        .insert(path.into_os_string().into_string().unwrap())
+                        .assert_is_true();
+                    Ok(())
+                }
+            }
+            LookupComponentPath::Found(_, _) => Err(Error::NotDir),
+            LookupComponentPath::NotFound
+            | LookupComponentPath::FoundParent(_, _)
+            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+        }
     }
 
     fn mkdir_recursively(&mut self, path: &Path) -> Result<(), Error> {
@@ -725,6 +755,25 @@ impl State {
             }
         }
         unreachable!();
+    }
+
+    fn complete_recursive_rmdir(&mut self, path: &str) -> Result<(), Error> {
+        match self.root.lookup_component_path(Path::new(path)) {
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::DanglingSymlink
+            | LookupComponentPath::NotFound
+            | LookupComponentPath::FoundParent(_, _) => Err(Error::NoEnt),
+            LookupComponentPath::Found(Entry::Directory { .. }, mut component_path) => {
+                let component = component_path.pop().unwrap();
+                self.root
+                    .resolve_component_path_mut(&component_path)
+                    .directory_entries_mut()
+                    .remove(&component)
+                    .assert_is_some();
+                Ok(())
+            }
+            LookupComponentPath::Found(_, _) => Err(Error::NotDir),
+        }
     }
 }
 
@@ -1584,6 +1633,87 @@ mod tests {
             },
             after(44),
         });
+    }
+
+    #[test]
+    fn rmdir_recursively_on_thread() {
+        let fs = Fs::new(fs! {
+            dir1 {
+                dir2 {
+                    file1(43),
+                    symlink1 -> "file1",
+                },
+            },
+            dir3 {
+                dir4 {
+                    file2(43),
+                    symlink2 -> "file2",
+                },
+            },
+        });
+        assert_eq!(fs.rmdir_recursively_on_thread("/dir1".into()), Ok(()));
+        assert_eq!(fs.rmdir_recursively_on_thread("/dir3".into()), Ok(()));
+        fs.assert_tree(fs! {
+            dir1 {
+                dir2 {
+                    file1(43),
+                    symlink1 -> "file1",
+                },
+            },
+            dir3 {
+                dir4 {
+                    file2(43),
+                    symlink2 -> "file2",
+                },
+            },
+        });
+        fs.assert_recursive_rmdirs(HashSet::from(["/dir1".into(), "/dir3".into()]));
+        fs.complete_recursive_rmdir("/dir1");
+        fs.assert_tree(fs! {
+            dir3 {
+                dir4 {
+                    file2(43),
+                    symlink2 -> "file2",
+                },
+            },
+        });
+        fs.complete_recursive_rmdir("/dir3");
+        fs.assert_tree(fs! {});
+    }
+
+    #[test]
+    fn rmdir_recursively_on_thread_errors() {
+        let fs = Fs::new(fs! {
+            foo(42),
+            bar {
+                baz -> "/target",
+            },
+        });
+
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/".into()),
+            Err(Error::Inval)
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/foo".into()),
+            Err(Error::NotDir)
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/bar/baz".into()),
+            Err(Error::NotDir)
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/bar/frob".into()),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/bar/frob/blah".into()),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/bar/baz/blah".into()),
+            Err(Error::NoEnt)
+        );
     }
 
     #[test]
