@@ -150,7 +150,7 @@ pub trait Fs {
 
     /// Create a new temporary file in the directory `parent`. Panic on file system error or if
     /// `parent` isn't a directory.
-    fn temp_file(&self, parent: &Path) -> Self::TempFile;
+    fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Self::Error>;
 
     /// The type returned by the [`Self::temp_dir`] method. Some implementations may make this
     /// type [`Drop`] so that the temporary directory can be cleaned up when it is closed.
@@ -158,5 +158,5 @@ pub trait Fs {
 
     /// Create a new temporary directory in the directory `parent`. Panic on file system error or
     /// if `parent` isn't a directory.
-    fn temp_dir(&self, parent: &Path) -> Self::TempDir;
+    fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Self::Error>;
 }

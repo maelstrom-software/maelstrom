@@ -1004,16 +1004,16 @@ mod tests {
             unimplemented!()
         }
 
-        fn temp_file(&self, parent: &Path) -> Self::TempFile {
+        fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, TestFsError> {
             let path = parent.join(format!("{:0>16x}", self.rand_u64()));
             self.borrow_mut().messages.push(TempFile(path.clone()));
-            TestTempFile(path)
+            Ok(TestTempFile(path))
         }
 
-        fn temp_dir(&self, parent: &Path) -> Self::TempDir {
+        fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, TestFsError> {
             let path = parent.join(format!("{:0>16x}", self.rand_u64()));
             self.borrow_mut().messages.push(TempDir(path.clone()));
-            TestTempDir(path)
+            Ok(TestTempDir(path))
         }
     }
 

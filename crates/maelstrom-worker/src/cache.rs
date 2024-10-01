@@ -514,11 +514,11 @@ impl<FsT: Fs> Cache<FsT> {
     }
 
     pub fn temp_dir(&self) -> FsT::TempDir {
-        self.fs.temp_dir(&self.root.join("tmp"))
+        self.fs.temp_dir(&self.root.join("tmp")).unwrap()
     }
 
     pub fn temp_file(&self) -> FsT::TempFile {
-        self.fs.temp_file(&self.root.join("tmp"))
+        self.fs.temp_file(&self.root.join("tmp")).unwrap()
     }
 
     fn remove_all_from_directory_except<S>(
@@ -789,22 +789,22 @@ mod tests {
             Ok(self.metadata.get(path).copied())
         }
 
-        fn temp_file(&self, parent: &Path) -> Self::TempFile {
+        fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, TestFsError> {
             let path = parent.join(format!("{:0>16x}", self.rand_u64()));
             self.messages.borrow_mut().push(TempFile(path.clone()));
-            TestTempFile {
+            Ok(TestTempFile {
                 path,
                 messages: self.messages.clone(),
-            }
+            })
         }
 
-        fn temp_dir(&self, parent: &Path) -> Self::TempDir {
+        fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, TestFsError> {
             let path = parent.join(format!("{:0>16x}", self.rand_u64()));
             self.messages.borrow_mut().push(TempDir(path.clone()));
-            TestTempDir {
+            Ok(TestTempDir {
                 path,
                 messages: self.messages.clone(),
-            }
+            })
         }
     }
 

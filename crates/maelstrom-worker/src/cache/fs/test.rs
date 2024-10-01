@@ -510,18 +510,18 @@ impl super::Fs for Fs {
         self.state.borrow().metadata(path)
     }
 
-    fn temp_file(&self, parent: &Path) -> Self::TempFile {
-        TempFile {
+    fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Error> {
+        Ok(TempFile {
             state: self.state.clone(),
-            path: self.state.borrow_mut().temp_file(parent),
-        }
+            path: self.state.borrow_mut().temp_file(parent)?,
+        })
     }
 
-    fn temp_dir(&self, parent: &Path) -> Self::TempDir {
-        TempDir {
+    fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Error> {
+        Ok(TempDir {
             state: self.state.clone(),
-            path: self.state.borrow_mut().temp_dir(parent),
-        }
+            path: self.state.borrow_mut().temp_dir(parent)?,
+        })
     }
 }
 
@@ -654,11 +654,12 @@ impl State {
         }
     }
 
-    fn mkdir_recursively(&mut self, path: &Path) -> Result<(), Error> {
+    fn mkdir(&mut self, path: &Path) -> Result<(), Error> {
         match self.root.lookup_component_path(path) {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::Found(Entry::Directory { .. }, _) => Ok(()),
+            LookupComponentPath::DanglingSymlink | LookupComponentPath::NotFound => {
+                Err(Error::NoEnt)
+            }
             LookupComponentPath::Found(_, _) => Err(Error::Exists),
             LookupComponentPath::FoundParent(_, parent_component_path) => {
                 self.root.append_entry_to_directory(
@@ -668,9 +669,19 @@ impl State {
                 );
                 Ok(())
             }
+        }
+    }
+
+    fn mkdir_recursively(&mut self, path: &Path) -> Result<(), Error> {
+        match self.root.lookup_component_path(path) {
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::Found(Entry::Directory { .. }, _) => Ok(()),
+            LookupComponentPath::Found(_, _) => Err(Error::Exists),
+            LookupComponentPath::FoundParent(_, _) => self.mkdir(path),
             LookupComponentPath::NotFound => {
                 self.mkdir_recursively(path.parent().unwrap())?;
-                self.mkdir_recursively(path)
+                self.mkdir(path)
             }
         }
     }
@@ -735,23 +746,23 @@ impl State {
         }
     }
 
-    fn temp_file(&mut self, parent: &Path) -> PathBuf {
+    fn temp_file(&mut self, parent: &Path) -> Result<PathBuf, Error> {
         for i in 0.. {
             let path = parent.join(format!("{i:03}"));
-            if self.metadata(&path).unwrap().is_none() {
-                self.create_file(&path, b"").unwrap();
-                return path;
+            if self.metadata(&path)?.is_none() {
+                self.create_file(&path, b"")?;
+                return Ok(path);
             }
         }
         unreachable!();
     }
 
-    fn temp_dir(&mut self, parent: &Path) -> PathBuf {
+    fn temp_dir(&mut self, parent: &Path) -> Result<PathBuf, Error> {
         for i in 0.. {
             let path = parent.join(format!("{i:03}"));
-            if self.metadata(&path).unwrap().is_none() {
-                self.mkdir_recursively(&path).unwrap();
-                return path;
+            if self.metadata(&path)?.is_none() {
+                self.mkdir(&path)?;
+                return Ok(path);
             }
         }
         unreachable!();
@@ -1718,21 +1729,183 @@ mod tests {
 
     #[test]
     fn temp_file() {
-        let fs = Fs::new(fs! {});
-        let temp_file = fs.temp_file(Path::new("/"));
-        assert_eq!(temp_file.path().to_str().unwrap(), "/000");
-        fs.assert_tree(fs! { "000"(0) });
-        temp_file.persist(Path::new("/persist"));
-        fs.assert_tree(fs! { persist(0) });
+        let fs = Fs::new(fs! {
+            "000"(42),
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {
+                },
+            },
+            persist {
+            },
+        });
+
+        let temp_file_1 = fs.temp_file(Path::new("/")).unwrap();
+        assert_eq!(temp_file_1.path().to_str().unwrap(), "/001");
+
+        let temp_file_2 = fs.temp_file(Path::new("/dir")).unwrap();
+        assert_eq!(temp_file_2.path().to_str().unwrap(), "/dir/003");
+
+        let temp_file_3 = fs.temp_file(Path::new("/dir/002")).unwrap();
+        assert_eq!(temp_file_3.path().to_str().unwrap(), "/dir/002/000");
+
+        fs.assert_tree(fs! {
+            "000"(42),
+            "001"(0),
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {
+                    "000"(0),
+                },
+                "003"(0),
+            },
+            persist {
+            },
+        });
+
+        temp_file_1.persist(Path::new("/persist/1"));
+        fs.assert_tree(fs! {
+            "000"(42),
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {
+                    "000"(0),
+                },
+                "003"(0),
+            },
+            persist {
+                "1"(0),
+            },
+        });
+
+        temp_file_2.persist(Path::new("/persist/2"));
+        fs.assert_tree(fs! {
+            "000"(42),
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {
+                    "000"(0),
+                },
+            },
+            persist {
+                "1"(0),
+                "2"(0),
+            },
+        });
+
+        temp_file_3.persist(Path::new("/persist/3"));
+        fs.assert_tree(fs! {
+            "000"(42),
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {},
+            },
+            persist {
+                "1"(0),
+                "2"(0),
+                "3"(0),
+            },
+        });
+
+        assert_eq!(
+            fs.temp_file(Path::new("/nonexistent")).unwrap_err(),
+            Error::NoEnt
+        );
     }
 
     #[test]
     fn temp_dir() {
-        let fs = Fs::new(fs! {});
-        let temp_dir = fs.temp_dir(Path::new("/"));
-        assert_eq!(temp_dir.path().to_str().unwrap(), "/000");
-        fs.assert_tree(fs! { "000" {} });
-        temp_dir.persist(Path::new("/persist"));
-        fs.assert_tree(fs! { persist {} });
+        let fs = Fs::new(fs! {
+            "000"(42),
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {
+                },
+            },
+            persist {
+            },
+        });
+
+        let temp_dir_1 = fs.temp_dir(Path::new("/")).unwrap();
+        assert_eq!(temp_dir_1.path().to_str().unwrap(), "/001");
+
+        let temp_dir_2 = fs.temp_dir(Path::new("/dir")).unwrap();
+        assert_eq!(temp_dir_2.path().to_str().unwrap(), "/dir/003");
+
+        let temp_dir_3 = fs.temp_dir(Path::new("/dir/002")).unwrap();
+        assert_eq!(temp_dir_3.path().to_str().unwrap(), "/dir/002/000");
+
+        fs.assert_tree(fs! {
+            "000"(42),
+            "001" {},
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {
+                    "000" {},
+                },
+                "003" {},
+            },
+            persist {
+            },
+        });
+
+        temp_dir_1.persist(Path::new("/persist/1"));
+        fs.assert_tree(fs! {
+            "000"(42),
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {
+                    "000" {},
+                },
+                "003" {},
+            },
+            persist {
+                "1" {},
+            },
+        });
+
+        temp_dir_2.persist(Path::new("/persist/2"));
+        fs.assert_tree(fs! {
+            "000"(42),
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {
+                    "000" {},
+                },
+            },
+            persist {
+                "1" {},
+                "2" {},
+            },
+        });
+
+        temp_dir_3.persist(Path::new("/persist/3"));
+        fs.assert_tree(fs! {
+            "000"(42),
+            dir {
+                "000"(43),
+                "001" -> "000",
+                "002" {},
+            },
+            persist {
+                "1" {},
+                "2" {},
+                "3" {},
+            },
+        });
+
+        assert_eq!(
+            fs.temp_dir(Path::new("/nonexistent")).unwrap_err(),
+            Error::NoEnt,
+        );
     }
 }

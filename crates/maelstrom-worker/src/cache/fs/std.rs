@@ -100,11 +100,11 @@ impl super::Fs for Fs {
         }
     }
 
-    fn temp_file(&self, parent: &Path) -> Self::TempFile {
-        TempFile(NamedTempFile::new_in(parent).unwrap().into_temp_path())
+    fn temp_file(&self, parent: &Path) -> io::Result<Self::TempFile> {
+        Ok(TempFile(NamedTempFile::new_in(parent)?.into_temp_path()))
     }
 
-    fn temp_dir(&self, parent: &Path) -> Self::TempDir {
-        TempDir(tempfile::TempDir::new_in(parent).unwrap())
+    fn temp_dir(&self, parent: &Path) -> io::Result<Self::TempDir> {
+        Ok(TempDir(tempfile::TempDir::new_in(parent)?))
     }
 }
