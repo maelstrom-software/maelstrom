@@ -120,6 +120,9 @@ pub trait Fs {
     /// another thread. If an error occurs there, the calling function won't be notified.
     fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Self::Error>;
 
+    /// Create an empty directory with given `path`.
+    fn mkdir(&self, path: &Path) -> Result<(), Self::Error>;
+
     /// Ensure `path` exists and is a directory. If it doesn't exist, recusively ensure its parent exists,
     /// then create it. Panic on file system error or if `path` or any of its ancestors aren't
     /// directories.

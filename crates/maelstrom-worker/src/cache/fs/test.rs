@@ -487,6 +487,10 @@ impl super::Fs for Fs {
         self.state.borrow_mut().rmdir_recursively_on_thread(path)
     }
 
+    fn mkdir(&self, path: &Path) -> Result<(), Error> {
+        self.state.borrow_mut().mkdir(path)
+    }
+
     fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
         self.state.borrow_mut().mkdir_recursively(path)
     }
@@ -1096,6 +1100,39 @@ mod tests {
             fs.symlink(Path::new("/bar/baz/new_symlink"), Path::new("new-target-3")),
             Err(Error::NoEnt)
         );
+    }
+
+    #[test]
+    fn mkdir() {
+        let fs = Fs::new(fs! {
+            foo(42),
+            bar {
+                baz -> "/target",
+                root -> "/",
+            },
+        });
+
+        assert_eq!(fs.mkdir(Path::new("/")), Err(Error::Exists));
+        assert_eq!(fs.mkdir(Path::new("/bar/blah/foo")), Err(Error::NoEnt));
+        assert_eq!(fs.mkdir(Path::new("/bar/baz/blah")), Err(Error::NoEnt));
+        assert_eq!(fs.mkdir(Path::new("/blah/baz")), Err(Error::NoEnt));
+        assert_eq!(fs.mkdir(Path::new("/foo/bar/baz")), Err(Error::NotDir));
+
+        assert_eq!(fs.mkdir(Path::new("/bar/blah")), Ok(()));
+        assert_eq!(fs.mkdir(Path::new("/bar/root/dir1")), Ok(()));
+        assert_eq!(fs.mkdir(Path::new("/bar/root/dir1/dir2")), Ok(()));
+
+        fs.assert_tree(fs! {
+            foo(42),
+            bar {
+                baz -> "/target",
+                root -> "/",
+                blah {},
+            },
+            dir1 {
+                dir2 {},
+            },
+        });
     }
 
     #[test]

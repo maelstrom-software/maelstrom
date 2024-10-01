@@ -747,6 +747,10 @@ mod tests {
             Ok(())
         }
 
+        fn mkdir(&self, _path: &Path) -> Result<(), TestFsError> {
+            unimplemented!()
+        }
+
         fn mkdir_recursively(&self, path: &Path) -> Result<(), TestFsError> {
             self.messages
                 .borrow_mut()

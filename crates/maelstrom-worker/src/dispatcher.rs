@@ -978,6 +978,10 @@ mod tests {
             unimplemented!()
         }
 
+        fn mkdir(&self, _path: &Path) -> Result<(), TestFsError> {
+            unimplemented!()
+        }
+
         fn mkdir_recursively(&self, _path: &Path) -> Result<(), TestFsError> {
             unimplemented!()
         }

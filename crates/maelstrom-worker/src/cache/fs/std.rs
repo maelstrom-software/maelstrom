@@ -68,6 +68,10 @@ impl super::Fs for Fs {
         }
     }
 
+    fn mkdir(&self, path: &Path) -> io::Result<()> {
+        fs::create_dir(path)
+    }
+
     fn mkdir_recursively(&self, path: &Path) -> io::Result<()> {
         fs::create_dir_all(path)
     }
