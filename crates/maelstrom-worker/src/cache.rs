@@ -597,590 +597,413 @@ impl<FsT: Fs> Cache<FsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fs::{Metadata, TempDir, TempFile};
-    use itertools::Itertools;
+    use fs::test::{self, fs};
     use maelstrom_test::*;
     use slog::{o, Discard};
-    use std::{
-        cell::{Cell, RefCell},
-        cmp::Ordering,
-        error,
-        rc::Rc,
-    };
-    use strum::Display;
-    use TestMessage::*;
-
-    #[derive(Clone, Debug, PartialEq)]
-    enum TestMessage {
-        Rename(PathBuf, PathBuf),
-        Remove(PathBuf),
-        RemoveRecursively(PathBuf),
-        MkdirRecursively(PathBuf),
-        ReadDir(PathBuf),
-        CreateFile(PathBuf, Box<[u8]>),
-        Symlink(PathBuf, PathBuf),
-        Metadata(PathBuf),
-        TempFile(PathBuf),
-        TempDir(PathBuf),
-        PersistTempFile(PathBuf, PathBuf),
-        PersistTempDir(PathBuf, PathBuf),
-    }
-
-    #[derive(Debug)]
-    struct TestTempFile {
-        path: PathBuf,
-        messages: Rc<RefCell<Vec<TestMessage>>>,
-    }
-
-    impl PartialOrd for TestTempFile {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-
-    impl Ord for TestTempFile {
-        fn cmp(&self, other: &Self) -> Ordering {
-            self.path.cmp(&other.path)
-        }
-    }
-
-    impl PartialEq for TestTempFile {
-        fn eq(&self, other: &Self) -> bool {
-            self.path.eq(&other.path)
-        }
-    }
-
-    impl Eq for TestTempFile {}
-
-    impl TempFile for TestTempFile {
-        fn path(&self) -> &Path {
-            &self.path
-        }
-
-        fn persist(self, target: &Path) {
-            self.messages
-                .borrow_mut()
-                .push(PersistTempFile(self.path, target.to_owned()));
-        }
-    }
-
-    #[derive(Debug)]
-    struct TestTempDir {
-        path: PathBuf,
-        messages: Rc<RefCell<Vec<TestMessage>>>,
-    }
-
-    impl PartialOrd for TestTempDir {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-
-    impl Ord for TestTempDir {
-        fn cmp(&self, other: &Self) -> Ordering {
-            self.path.cmp(&other.path)
-        }
-    }
-
-    impl PartialEq for TestTempDir {
-        fn eq(&self, other: &Self) -> bool {
-            self.path.eq(&other.path)
-        }
-    }
-
-    impl Eq for TestTempDir {}
-
-    impl TempDir for TestTempDir {
-        fn path(&self) -> &Path {
-            &self.path
-        }
-
-        fn persist(self, target: &Path) {
-            self.messages
-                .borrow_mut()
-                .push(PersistTempDir(self.path, target.to_owned()));
-        }
-    }
-
-    #[derive(Default)]
-    struct TestFs {
-        messages: Rc<RefCell<Vec<TestMessage>>>,
-        directories: HashMap<PathBuf, Vec<(PathBuf, Metadata)>>,
-        metadata: HashMap<PathBuf, Metadata>,
-        last_random_number: Cell<u64>,
-    }
-
-    #[derive(Debug, Display, PartialEq)]
-    enum TestFsError {}
-
-    impl error::Error for TestFsError {}
-
-    impl Fs for TestFs {
-        type Error = TestFsError;
-
-        type TempFile = TestTempFile;
-
-        type TempDir = TestTempDir;
-
-        fn rand_u64(&self) -> u64 {
-            let result = self.last_random_number.get() + 1;
-            self.last_random_number.set(result);
-            result
-        }
-
-        fn rename(&self, source: &Path, destination: &Path) -> Result<(), TestFsError> {
-            self.messages
-                .borrow_mut()
-                .push(Rename(source.to_owned(), destination.to_owned()));
-            Ok(())
-        }
-
-        fn remove(&self, path: &Path) -> Result<(), TestFsError> {
-            self.messages.borrow_mut().push(Remove(path.to_owned()));
-            Ok(())
-        }
-
-        fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), TestFsError> {
-            self.messages
-                .borrow_mut()
-                .push(RemoveRecursively(path.to_owned()));
-            Ok(())
-        }
-
-        fn mkdir(&self, _path: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn mkdir_recursively(&self, path: &Path) -> Result<(), TestFsError> {
-            self.messages
-                .borrow_mut()
-                .push(MkdirRecursively(path.to_owned()));
-            Ok(())
-        }
-
-        fn read_dir(
-            &self,
-            path: &Path,
-        ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), TestFsError>>, TestFsError>
-        {
-            self.messages.borrow_mut().push(ReadDir(path.to_owned()));
-            Ok(self
-                .directories
-                .get(path)
-                .unwrap_or(&vec![])
-                .clone()
-                .into_iter()
-                .map(|(path, metadata)| Ok((path.file_name().unwrap().to_owned(), metadata))))
-        }
-
-        fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), TestFsError> {
-            self.messages.borrow_mut().push(CreateFile(
-                path.to_owned(),
-                contents.to_vec().into_boxed_slice(),
-            ));
-            Ok(())
-        }
-
-        fn symlink(&self, target: &Path, link: &Path) -> Result<(), TestFsError> {
-            self.messages
-                .borrow_mut()
-                .push(Symlink(target.to_owned(), link.to_owned()));
-            Ok(())
-        }
-
-        fn metadata(&self, path: &Path) -> Result<Option<Metadata>, TestFsError> {
-            self.messages.borrow_mut().push(Metadata(path.to_owned()));
-            Ok(self.metadata.get(path).copied())
-        }
-
-        fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, TestFsError> {
-            let path = parent.join(format!("{:0>16x}", self.rand_u64()));
-            self.messages.borrow_mut().push(TempFile(path.clone()));
-            Ok(TestTempFile {
-                path,
-                messages: self.messages.clone(),
-            })
-        }
-
-        fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, TestFsError> {
-            let path = parent.join(format!("{:0>16x}", self.rand_u64()));
-            self.messages.borrow_mut().push(TempDir(path.clone()));
-            Ok(TestTempDir {
-                path,
-                messages: self.messages.clone(),
-            })
-        }
-    }
+    use std::{iter, rc::Rc};
 
     struct Fixture {
-        messages: Rc<RefCell<Vec<TestMessage>>>,
-        cache: Cache<TestFs>,
+        cache: Cache<Rc<test::Fs>>,
+        fs: Rc<test::Fs>,
     }
 
     impl Fixture {
-        fn new_with_fs_and_clear_messages(test_cache_fs: TestFs, bytes_used_target: u64) -> Self {
-            let mut fixture = Fixture::new(test_cache_fs, bytes_used_target);
-            fixture.clear_messages();
-            fixture
-        }
-
-        fn new_and_clear_messages(bytes_used_target: u64) -> Self {
-            Self::new_with_fs_and_clear_messages(TestFs::default(), bytes_used_target)
-        }
-
-        fn new(test_cache_fs: TestFs, bytes_used_target: u64) -> Self {
-            let messages = test_cache_fs.messages.clone();
+        fn new(bytes_used_target: u64, root: test::Entry) -> Self {
+            let fs = Rc::new(test::Fs::new(root));
             let cache = Cache::new(
-                test_cache_fs,
+                fs.clone(),
                 "/z".parse().unwrap(),
                 ByteSize::b(bytes_used_target).into(),
                 Logger::root(Discard, o!()),
             );
-            Fixture { messages, cache }
+            Fixture { fs, cache }
         }
 
         #[track_caller]
-        fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
-            let mut messages = self.messages.borrow_mut();
-            for perm in expected.clone().into_iter().permutations(expected.len()) {
-                if perm == *messages {
-                    messages.clear();
-                    return;
-                }
-            }
-            panic!(
-                "Expected messages didn't match actual messages in any order.\n{}",
-                colored_diff::PrettyDifference {
-                    expected: &format!("{:#?}", expected),
-                    actual: &format!("{:#?}", messages)
-                }
-            );
+        fn assert_fs(&self, expected_fs: test::Entry) {
+            self.fs.assert_tree(expected_fs);
         }
 
         #[track_caller]
-        fn expect_messages_in_specific_order(&mut self, expected: Vec<TestMessage>) {
-            assert!(
-                *self.messages.borrow() == expected,
-                "Expected messages didn't match actual messages in specific order.\n{}",
-                colored_diff::PrettyDifference {
-                    expected: &format!("{:#?}", expected),
-                    actual: &format!("{:#?}", self.messages.borrow())
-                }
-            );
-            self.clear_messages();
-        }
-
-        fn clear_messages(&mut self) {
-            self.messages.borrow_mut().clear();
+        fn assert_pending_recursive_rmdirs<const N: usize>(&self, paths: [&str; N]) {
+            self.fs.assert_recursive_rmdirs(HashSet::from_iter(
+                paths.into_iter().map(|s| s.to_string()),
+            ))
         }
 
         #[track_caller]
         fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId, expected: GetArtifact) {
             let result = self.cache.get_artifact(EntryKind::Blob, digest, jid);
             assert_eq!(result, expected);
-            self.expect_messages_in_any_order(vec![]);
         }
 
-        #[track_caller]
         fn get_artifact_ign(&mut self, digest: Sha256Digest, jid: JobId) {
             self.cache.get_artifact(EntryKind::Blob, digest, jid);
-            self.expect_messages_in_any_order(vec![]);
         }
 
         #[track_caller]
         fn got_artifact_success_directory(
             &mut self,
             digest: Sha256Digest,
-            source: PathBuf,
             size: u64,
             expected: Vec<JobId>,
-            expected_fs_operations: Vec<TestMessage>,
         ) {
-            let source = TestTempDir {
-                path: source,
-                messages: self.messages.clone(),
-            };
-            self.got_artifact_success(
-                digest,
-                GotArtifact::Directory { source, size },
-                expected,
-                expected_fs_operations,
-            )
+            let source = self.cache.temp_dir();
+            self.got_artifact_success(digest, GotArtifact::Directory { source, size }, expected)
         }
 
         #[track_caller]
         fn got_artifact_success_file(
             &mut self,
             digest: Sha256Digest,
-            source: PathBuf,
+            size: u64,
             expected: Vec<JobId>,
-            expected_fs_operations: Vec<TestMessage>,
         ) {
-            let source = TestTempFile {
-                path: source,
-                messages: self.messages.clone(),
-            };
-            self.got_artifact_success(
-                digest,
-                GotArtifact::File { source },
-                expected,
-                expected_fs_operations,
-            )
+            let source = self.cache.temp_file();
+            let source_path = source.path();
+            self.fs.remove(source_path).unwrap();
+            self.fs
+                .create_file(
+                    source_path,
+                    &iter::repeat(0u8)
+                        .take(size.try_into().unwrap())
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
+            self.got_artifact_success(digest, GotArtifact::File { source }, expected)
         }
 
         #[track_caller]
         fn got_artifact_success_symlink(
             &mut self,
             digest: Sha256Digest,
-            target: PathBuf,
+            target: &str,
             expected: Vec<JobId>,
-            expected_fs_operations: Vec<TestMessage>,
         ) {
-            self.got_artifact_success(
-                digest,
-                GotArtifact::Symlink { target },
-                expected,
-                expected_fs_operations,
-            )
+            let target = target.into();
+            self.got_artifact_success(digest, GotArtifact::Symlink { target }, expected)
         }
 
         #[track_caller]
         fn got_artifact_success(
             &mut self,
             digest: Sha256Digest,
-            artifact: GotArtifact<TestFs>,
+            artifact: GotArtifact<Rc<test::Fs>>,
             expected: Vec<JobId>,
-            expected_fs_operations: Vec<TestMessage>,
         ) {
             let result = self
                 .cache
                 .got_artifact_success(EntryKind::Blob, &digest, artifact);
             assert_eq!(result, expected);
-            self.expect_messages_in_any_order(expected_fs_operations);
         }
 
         #[track_caller]
         fn got_artifact_failure(&mut self, digest: Sha256Digest, expected: Vec<JobId>) {
             let result = self.cache.got_artifact_failure(EntryKind::Blob, &digest);
             assert_eq!(result, expected);
-            self.expect_messages_in_any_order(vec![]);
         }
 
-        #[track_caller]
         fn got_artifact_success_directory_ign(&mut self, digest: Sha256Digest, size: u64) {
-            let source = TestTempDir {
-                path: "/foo".into(),
-                messages: self.messages.clone(),
-            };
+            let source = self.cache.temp_dir();
             self.got_artifact_success_ign(digest, GotArtifact::Directory { source, size })
         }
 
-        #[track_caller]
+        fn got_artifact_success_file_ign(&mut self, digest: Sha256Digest, size: u64) {
+            let source = self.cache.temp_file();
+            let source_path = source.path();
+            self.fs.remove(source_path).unwrap();
+            self.fs
+                .create_file(
+                    source_path,
+                    &iter::repeat(0u8)
+                        .take(size.try_into().unwrap())
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
+            self.got_artifact_success_ign(digest, GotArtifact::File { source })
+        }
+
         fn got_artifact_success_ign(
             &mut self,
             digest: Sha256Digest,
-            artifact: GotArtifact<TestFs>,
+            artifact: GotArtifact<Rc<test::Fs>>,
         ) {
             self.cache
                 .got_artifact_success(EntryKind::Blob, &digest, artifact);
-            self.clear_messages();
         }
 
-        #[track_caller]
-        fn decrement_ref_count(&mut self, digest: Sha256Digest, expected: Vec<TestMessage>) {
+        fn decrement_ref_count(&mut self, digest: Sha256Digest) {
             self.cache.decrement_ref_count(EntryKind::Blob, &digest);
-            self.expect_messages_in_any_order(expected);
-        }
-
-        #[track_caller]
-        fn decrement_ref_count_ign(&mut self, digest: Sha256Digest) {
-            self.cache.decrement_ref_count(EntryKind::Blob, &digest);
-            self.clear_messages();
         }
     }
 
     #[test]
     fn get_miss_filled_with_directory() {
-        let mut fixture = Fixture::new_and_clear_messages(1000);
+        let mut fixture = Fixture::new(1000, fs! {});
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_directory(
-            digest!(42),
-            short_path!("/z/tmp", 1),
-            100,
-            vec![jid!(1)],
-            vec![PersistTempDir(
-                short_path!("/z/tmp", 1),
-                long_path!("/z/sha256/blob", 42),
-            )],
-        );
+        fixture.got_artifact_success_directory(digest!(42), 100, vec![jid!(1)]);
+
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "000000000000000000000000000000000000000000000000000000000000002a" {},
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
     fn get_miss_filled_with_file() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs
-            .metadata
-            .insert(long_path!("/z/sha256/blob", 42), Metadata::file(100));
-        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
+        let mut fixture = Fixture::new(1000, fs! {});
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(
-            digest!(42),
-            short_path!("/z/tmp", 1),
-            vec![jid!(1)],
-            vec![
-                PersistTempFile(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 42)),
-                Metadata(long_path!("/z/sha256/blob", 42)),
-            ],
-        );
+        fixture.got_artifact_success_file(digest!(42), 8, vec![jid!(1)]);
+
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "000000000000000000000000000000000000000000000000000000000000002a"(8),
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
     fn get_miss_filled_with_symlink() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs
-            .metadata
-            .insert(long_path!("/z/sha256/blob", 42), Metadata::symlink(10));
-        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
+        let mut fixture = Fixture::new(1000, fs! {});
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_symlink(
-            digest!(42),
-            path_buf!("/somewhere"),
-            vec![jid!(1)],
-            vec![
-                Symlink(path_buf!("/somewhere"), long_path!("/z/sha256/blob", 42)),
-                Metadata(long_path!("/z/sha256/blob", 42)),
-            ],
-        );
+        fixture.got_artifact_success_symlink(digest!(42), "/somewhere", vec![jid!(1)]);
+
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "000000000000000000000000000000000000000000000000000000000000002a"
+                            -> "/somewhere",
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
     fn get_miss_filled_with_directory_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
-        let mut fixture = Fixture::new_and_clear_messages(1000);
+        let mut fixture = Fixture::new(1000, fs! {});
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_directory(
-            digest!(42),
-            short_path!("/z/tmp", 1),
-            10000,
-            vec![jid!(1)],
-            vec![PersistTempDir(
-                short_path!("/z/tmp", 1),
-                long_path!("/z/sha256/blob", 42),
-            )],
-        );
+        fixture.got_artifact_success_directory(digest!(42), 10000, vec![jid!(1)]);
+        fixture.decrement_ref_count(digest!(42));
 
-        fixture.decrement_ref_count(
-            digest!(42),
-            vec![
-                Metadata(short_path!("/z/removing", 1)),
-                Rename(
-                    long_path!("/z/sha256/blob", 42),
-                    short_path!("/z/removing", 1),
-                ),
-                RemoveRecursively(short_path!("/z/removing", 1)),
-            ],
-        );
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {},
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {
+                    "0000000000000001" {},
+                },
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
     }
 
     #[test]
     fn get_miss_filled_with_file_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs
-            .metadata
-            .insert(long_path!("/z/sha256/blob", 42), Metadata::file(10000));
-        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
+        let mut fixture = Fixture::new(1000, fs! {});
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_file(
-            digest!(42),
-            short_path!("/z/tmp", 1),
-            vec![jid!(1)],
-            vec![
-                PersistTempFile(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 42)),
-                Metadata(long_path!("/z/sha256/blob", 42)),
-            ],
-        );
+        fixture.got_artifact_success_file(digest!(42), 10000, vec![jid!(1)]);
+        fixture.decrement_ref_count(digest!(42));
 
-        fixture.decrement_ref_count(digest!(42), vec![Remove(long_path!("/z/sha256/blob", 42))]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {},
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
     fn get_miss_filled_with_symlink_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs
-            .metadata
-            .insert(long_path!("/z/sha256/blob", 42), Metadata::symlink(10));
-        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1);
+        let mut fixture = Fixture::new(1, fs! {});
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_symlink(
-            digest!(42),
-            path_buf!("/somewhere"),
-            vec![jid!(1)],
-            vec![
-                Symlink(path_buf!("/somewhere"), long_path!("/z/sha256/blob", 42)),
-                Metadata(long_path!("/z/sha256/blob", 42)),
-            ],
-        );
+        fixture.got_artifact_success_symlink(digest!(42), "/somewhere", vec![jid!(1)]);
+        fixture.decrement_ref_count(digest!(42));
 
-        fixture.decrement_ref_count(digest!(42), vec![Remove(long_path!("/z/sha256/blob", 42))]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {},
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
     fn cache_entries_are_removed_in_lru_order() {
-        let mut fixture = Fixture::new_and_clear_messages(10);
+        let mut fixture = Fixture::new(10, fs! {});
 
         fixture.get_artifact_ign(digest!(1), jid!(1));
         fixture.got_artifact_success_directory_ign(digest!(1), 4);
-        fixture.decrement_ref_count(digest!(1), vec![]);
+        fixture.decrement_ref_count(digest!(1));
 
         fixture.get_artifact_ign(digest!(2), jid!(2));
         fixture.got_artifact_success_directory_ign(digest!(2), 4);
-        fixture.decrement_ref_count(digest!(2), vec![]);
+        fixture.decrement_ref_count(digest!(2));
+
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "0000000000000000000000000000000000000000000000000000000000000001" {},
+                        "0000000000000000000000000000000000000000000000000000000000000002" {},
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
 
         fixture.get_artifact_ign(digest!(3), jid!(3));
-        fixture.got_artifact_success_directory(
-            digest!(3),
-            short_path!("/z/tmp", 1),
-            4,
-            vec![jid!(3)],
-            vec![
-                PersistTempDir(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 3)),
-                Metadata(short_path!("/z/removing", 1)),
-                Rename(
-                    long_path!("/z/sha256/blob", 1),
-                    short_path!("/z/removing", 1),
-                ),
-                RemoveRecursively(short_path!("/z/removing", 1)),
-            ],
-        );
-        fixture.decrement_ref_count(digest!(3), vec![]);
+        fixture.got_artifact_success_directory(digest!(3), 4, vec![jid!(3)]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "0000000000000000000000000000000000000000000000000000000000000002" {},
+                        "0000000000000000000000000000000000000000000000000000000000000003" {},
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {
+                    "0000000000000001" {},
+                },
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
+
+        fixture.decrement_ref_count(digest!(3));
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "0000000000000000000000000000000000000000000000000000000000000002" {},
+                        "0000000000000000000000000000000000000000000000000000000000000003" {},
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {
+                    "0000000000000001" {},
+                },
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
 
         fixture.get_artifact_ign(digest!(4), jid!(4));
-        fixture.got_artifact_success_directory(
-            digest!(4),
-            short_path!("/z/tmp", 2),
-            4,
-            vec![jid!(4)],
-            vec![
-                PersistTempDir(short_path!("/z/tmp", 2), long_path!("/z/sha256/blob", 4)),
-                Metadata(short_path!("/z/removing", 2)),
-                Rename(
-                    long_path!("/z/sha256/blob", 2),
-                    short_path!("/z/removing", 2),
-                ),
-                RemoveRecursively(short_path!("/z/removing", 2)),
-            ],
-        );
-        fixture.decrement_ref_count(digest!(4), vec![]);
+        fixture.got_artifact_success_directory(digest!(4), 4, vec![jid!(4)]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "0000000000000000000000000000000000000000000000000000000000000003" {},
+                        "0000000000000000000000000000000000000000000000000000000000000004" {},
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {
+                    "0000000000000001" {},
+                    "0000000000000002" {},
+                },
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([
+            "/z/removing/0000000000000001",
+            "/z/removing/0000000000000002",
+        ]);
+
+        fixture.decrement_ref_count(digest!(4));
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "0000000000000000000000000000000000000000000000000000000000000003" {},
+                        "0000000000000000000000000000000000000000000000000000000000000004" {},
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {
+                    "0000000000000001" {},
+                    "0000000000000002" {},
+                },
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([
+            "/z/removing/0000000000000001",
+            "/z/removing/0000000000000002",
+        ]);
     }
 
     #[test]
     fn lru_order_augmented_by_last_use() {
-        let mut fixture = Fixture::new_and_clear_messages(10);
+        let mut fixture = Fixture::new(10, fs! {});
 
         fixture.get_artifact_ign(digest!(1), jid!(1));
         fixture.got_artifact_success_directory_ign(digest!(1), 3);
@@ -1191,161 +1014,204 @@ mod tests {
         fixture.get_artifact_ign(digest!(3), jid!(3));
         fixture.got_artifact_success_directory_ign(digest!(3), 3);
 
-        fixture.decrement_ref_count(digest!(3), vec![]);
-        fixture.decrement_ref_count(digest!(2), vec![]);
-        fixture.decrement_ref_count(digest!(1), vec![]);
+        fixture.decrement_ref_count(digest!(3));
+        fixture.decrement_ref_count(digest!(2));
+        fixture.decrement_ref_count(digest!(1));
 
         fixture.get_artifact_ign(digest!(4), jid!(4));
-        fixture.got_artifact_success_directory(
-            digest!(4),
-            short_path!("/z/tmp", 1),
-            3,
-            vec![jid!(4)],
-            vec![
-                PersistTempDir(short_path!("/z/tmp", 1), long_path!("/z/sha256/blob", 4)),
-                Metadata(short_path!("/z/removing", 1)),
-                Rename(
-                    long_path!("/z/sha256/blob", 3),
-                    short_path!("/z/removing", 1),
-                ),
-                RemoveRecursively(short_path!("/z/removing", 1)),
-            ],
-        );
+        fixture.got_artifact_success_directory(digest!(4), 3, vec![jid!(4)]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "0000000000000000000000000000000000000000000000000000000000000001" {},
+                        "0000000000000000000000000000000000000000000000000000000000000002" {},
+                        "0000000000000000000000000000000000000000000000000000000000000004" {},
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {
+                    "0000000000000001" {},
+                },
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
     }
 
     #[test]
     fn multiple_get_requests_for_empty() {
-        let mut fixture = Fixture::new_and_clear_messages(1000);
+        let mut fixture = Fixture::new(1000, fs! {});
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
         fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Wait);
         fixture.get_artifact(digest!(42), jid!(3), GetArtifact::Wait);
 
-        fixture.got_artifact_success_directory(
-            digest!(42),
-            short_path!("/z/tmp", 1),
-            100,
-            vec![jid!(1), jid!(2), jid!(3)],
-            vec![PersistTempDir(
-                short_path!("/z/tmp", 1),
-                long_path!("/z/sha256/blob", 42),
-            )],
-        );
+        fixture.got_artifact_success_directory(digest!(42), 100, vec![jid!(1), jid!(2), jid!(3)]);
     }
 
     #[test]
     fn multiple_get_requests_for_empty_larger_than_goal_remove_on_last_decrement() {
-        let mut fixture = Fixture::new_and_clear_messages(1000);
+        let mut fixture = Fixture::new(1000, fs! {});
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
         fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Wait);
         fixture.get_artifact(digest!(42), jid!(3), GetArtifact::Wait);
 
-        fixture.got_artifact_success_directory(
-            digest!(42),
-            short_path!("/z/tmp", 1),
-            10000,
-            vec![jid!(1), jid!(2), jid!(3)],
-            vec![PersistTempDir(
-                short_path!("/z/tmp", 1),
-                long_path!("/z/sha256/blob", 42),
-            )],
-        );
+        fixture.got_artifact_success_directory(digest!(42), 10000, vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.decrement_ref_count(digest!(42));
+        fixture.decrement_ref_count(digest!(42));
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "000000000000000000000000000000000000000000000000000000000000002a" {},
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.decrement_ref_count(digest!(42), vec![]);
-        fixture.decrement_ref_count(digest!(42), vec![]);
-        fixture.decrement_ref_count(
-            digest!(42),
-            vec![
-                Metadata(short_path!("/z/removing", 1)),
-                Rename(
-                    long_path!("/z/sha256/blob", 42),
-                    short_path!("/z/removing", 1),
-                ),
-                RemoveRecursively(short_path!("/z/removing", 1)),
-            ],
-        );
+        fixture.decrement_ref_count(digest!(42));
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {},
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {
+                    "0000000000000001" {},
+                },
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
     }
 
     #[test]
     fn get_request_for_currently_used() {
-        let mut fixture = Fixture::new_and_clear_messages(10);
+        let mut fixture = Fixture::new(10, fs! {});
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_directory_ign(digest!(42), 100);
+        fixture.got_artifact_success_file_ign(digest!(42), 100);
 
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Success);
 
-        fixture.decrement_ref_count(digest!(42), vec![]);
-        fixture.decrement_ref_count(
-            digest!(42),
-            vec![
-                Metadata(short_path!("/z/removing", 1)),
-                Rename(
-                    long_path!("/z/sha256/blob", 42),
-                    short_path!("/z/removing", 1),
-                ),
-                RemoveRecursively(short_path!("/z/removing", 1)),
-            ],
-        );
+        fixture.decrement_ref_count(digest!(42));
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "000000000000000000000000000000000000000000000000000000000000002a"(100),
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        fixture.decrement_ref_count(digest!(42));
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {},
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
     fn get_request_for_cached_followed_by_big_get_does_not_evict_until_decrement_ref_count() {
-        let mut fixture = Fixture::new_and_clear_messages(100);
+        let mut fixture = Fixture::new(100, fs! {});
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_directory_ign(digest!(42), 10);
-        fixture.decrement_ref_count_ign(digest!(42));
+        fixture.got_artifact_success_file_ign(digest!(42), 10);
+        fixture.decrement_ref_count(digest!(42));
 
         fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Success);
         fixture.get_artifact(digest!(43), jid!(3), GetArtifact::Get);
-        fixture.got_artifact_success_directory(
-            digest!(43),
-            short_path!("/z/tmp", 1),
-            100,
-            vec![jid!(3)],
-            vec![PersistTempDir(
-                short_path!("/z/tmp", 1),
-                long_path!("/z/sha256/blob", 43),
-            )],
-        );
+        fixture.got_artifact_success_file(digest!(43), 100, vec![jid!(3)]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "000000000000000000000000000000000000000000000000000000000000002a"(10),
+                        "000000000000000000000000000000000000000000000000000000000000002b"(100),
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.decrement_ref_count(
-            digest!(42),
-            vec![
-                Metadata(short_path!("/z/removing", 1)),
-                Rename(
-                    long_path!("/z/sha256/blob", 42),
-                    short_path!("/z/removing", 1),
-                ),
-                RemoveRecursively(short_path!("/z/removing", 1)),
-            ],
-        );
+        fixture.decrement_ref_count(digest!(42));
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {
+                        "000000000000000000000000000000000000000000000000000000000000002b"(100),
+                    },
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
     fn get_request_for_empty_with_get_failure() {
-        let mut fixture = Fixture::new_and_clear_messages(1000);
-
+        let mut fixture = Fixture::new(1000, fs! {});
         fixture.get_artifact_ign(digest!(42), jid!(1));
         fixture.got_artifact_failure(digest!(42), vec![jid!(1)]);
     }
 
     #[test]
     fn preexisting_directories_do_not_affect_get_request() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs
-            .metadata
-            .insert(long_path!("/z/sha256/blob", 42), Metadata::directory(1));
-        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
-
+        let mut fixture = Fixture::new(
+            1000,
+            fs! {
+                z {
+                    sha256 {
+                        blob {
+                            "000000000000000000000000000000000000000000000000000000000000002a"(10),
+                        }
+                    }
+                }
+            },
+        );
         fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
     }
 
     #[test]
     fn multiple_get_requests_for_empty_with_download_and_extract_failure() {
-        let mut fixture = Fixture::new_and_clear_messages(1000);
+        let mut fixture = Fixture::new(1000, fs! {});
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
         fixture.get_artifact_ign(digest!(42), jid!(2));
@@ -1356,7 +1222,7 @@ mod tests {
 
     #[test]
     fn get_after_error_retries() {
-        let mut fixture = Fixture::new_and_clear_messages(1000);
+        let mut fixture = Fixture::new(1000, fs! {});
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
         fixture.got_artifact_failure(digest!(42), vec![jid!(1)]);
@@ -1364,283 +1230,71 @@ mod tests {
     }
 
     #[test]
-    fn rename_retries_until_unique_path_name() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs.directories.insert(
-            path_buf!("/z"),
-            vec![(path_buf!("/z/tmp"), Metadata::directory(10))],
+    fn new_does_proper_cleanup() {
+        let fixture = Fixture::new(
+            1000,
+            fs! {
+                z {
+                    removing {
+                        "0000000000000001" { a(1) },
+                        "0000000000000002"(2),
+                        "0000000000000003" -> "foo",
+                    },
+                    sha256 {
+                        blob {
+                            bad_blob {
+                                foo(20),
+                                symlink -> "bad_blob",
+                                more_bad_blob {
+                                    bar(20),
+                                },
+                            },
+                        },
+                    },
+                    garbage {
+                        foo(10),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(10),
+                        },
+                    },
+                },
+            },
         );
-        test_cache_fs
-            .metadata
-            .insert(path_buf!("/z/tmp"), Metadata::directory(1));
-        test_cache_fs
-            .metadata
-            .insert(short_path!("/z/removing", 1), Metadata::file(42));
-        test_cache_fs
-            .metadata
-            .insert(short_path!("/z/removing", 2), Metadata::file(42));
-        test_cache_fs
-            .metadata
-            .insert(short_path!("/z/removing", 3), Metadata::file(42));
-        let mut fixture = Fixture::new(test_cache_fs, 1000);
-        fixture.expect_messages_in_specific_order(vec![
-            MkdirRecursively(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z")),
-            Metadata(short_path!("/z/removing", 1)),
-            Metadata(short_path!("/z/removing", 2)),
-            Metadata(short_path!("/z/removing", 3)),
-            Metadata(short_path!("/z/removing", 4)),
-            Rename(path_buf!("/z/tmp"), short_path!("/z/removing", 4)),
-            RemoveRecursively(short_path!("/z/removing", 4)),
-            Metadata(path_buf!("/z/CACHEDIR.TAG")),
-            CreateFile(
-                path_buf!("/z/CACHEDIR.TAG"),
-                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
-            ),
-            MkdirRecursively(path_buf!("/z/tmp")),
-            MkdirRecursively(path_buf!("/z/sha256")),
-            ReadDir(path_buf!("/z/sha256")),
-            Metadata(path_buf!("/z/sha256/blob")),
-            MkdirRecursively(path_buf!("/z/sha256/blob")),
-            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
-        ]);
-    }
-
-    #[test]
-    fn new_ensures_directories_exist() {
-        let mut fixture = Fixture::new(TestFs::default(), 1000);
-        fixture.expect_messages_in_specific_order(vec![
-            MkdirRecursively(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z")),
-            Metadata(path_buf!("/z/CACHEDIR.TAG")),
-            CreateFile(
-                path_buf!("/z/CACHEDIR.TAG"),
-                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
-            ),
-            MkdirRecursively(path_buf!("/z/tmp")),
-            MkdirRecursively(path_buf!("/z/sha256")),
-            ReadDir(path_buf!("/z/sha256")),
-            Metadata(path_buf!("/z/sha256/blob")),
-            MkdirRecursively(path_buf!("/z/sha256/blob")),
-            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
-        ]);
-    }
-
-    #[test]
-    fn new_does_not_write_cachedir_tag_if_it_exists() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs
-            .metadata
-            .insert(path_buf!("/z/CACHEDIR.TAG"), Metadata::file(42));
-        let mut fixture = Fixture::new(test_cache_fs, 1000);
-        fixture.expect_messages_in_specific_order(vec![
-            MkdirRecursively(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z")),
-            Metadata(path_buf!("/z/CACHEDIR.TAG")),
-            MkdirRecursively(path_buf!("/z/tmp")),
-            MkdirRecursively(path_buf!("/z/sha256")),
-            ReadDir(path_buf!("/z/sha256")),
-            Metadata(path_buf!("/z/sha256/blob")),
-            MkdirRecursively(path_buf!("/z/sha256/blob")),
-            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
-        ]);
-    }
-
-    #[test]
-    fn new_restarts_old_removes() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs.directories.insert(
-            path_buf!("/z"),
-            vec![(path_buf!("/z/removing"), Metadata::directory(10))],
-        );
-        test_cache_fs.directories.insert(
-            path_buf!("/z/removing"),
-            vec![
-                (short_path!("/z/removing", 10), Metadata::directory(10)),
-                (short_path!("/z/removing", 20), Metadata::file(10)),
-                (short_path!("/z/removing", 30), Metadata::symlink(10)),
-            ],
-        );
-        let mut fixture = Fixture::new(test_cache_fs, 1000);
-        fixture.expect_messages_in_specific_order(vec![
-            MkdirRecursively(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z/removing")),
-            RemoveRecursively(short_path!("/z/removing", 10)),
-            Remove(short_path!("/z/removing", 20)),
-            Remove(short_path!("/z/removing", 30)),
-            ReadDir(path_buf!("/z")),
-            Metadata(path_buf!("/z/CACHEDIR.TAG")),
-            CreateFile(
-                path_buf!("/z/CACHEDIR.TAG"),
-                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
-            ),
-            MkdirRecursively(path_buf!("/z/tmp")),
-            MkdirRecursively(path_buf!("/z/sha256")),
-            ReadDir(path_buf!("/z/sha256")),
-            Metadata(path_buf!("/z/sha256/blob")),
-            MkdirRecursively(path_buf!("/z/sha256/blob")),
-            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
-        ]);
-    }
-
-    #[test]
-    fn new_removes_top_level_garbage() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs.directories.insert(
-            path_buf!("/z"),
-            vec![
-                (path_buf!("/z/blah"), Metadata::directory(10)),
-                (path_buf!("/z/CACHEDIR.TAG"), Metadata::file(43)),
-                (path_buf!("/z/sha256"), Metadata::directory(10)),
-                (path_buf!("/z/baz"), Metadata::directory(10)),
-                (path_buf!("/z/removing"), Metadata::directory(10)),
-            ],
-        );
-        let mut fixture = Fixture::new(test_cache_fs, 1000);
-        fixture.expect_messages_in_specific_order(vec![
-            MkdirRecursively(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z")),
-            Metadata(short_path!("/z/removing", 1)),
-            Rename(path_buf!("/z/blah"), short_path!("/z/removing", 1)),
-            RemoveRecursively(short_path!("/z/removing", 1)),
-            Metadata(short_path!("/z/removing", 2)),
-            Rename(path_buf!("/z/baz"), short_path!("/z/removing", 2)),
-            RemoveRecursively(short_path!("/z/removing", 2)),
-            Metadata(path_buf!("/z/CACHEDIR.TAG")),
-            CreateFile(
-                path_buf!("/z/CACHEDIR.TAG"),
-                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
-            ),
-            MkdirRecursively(path_buf!("/z/tmp")),
-            MkdirRecursively(path_buf!("/z/sha256")),
-            ReadDir(path_buf!("/z/sha256")),
-            Metadata(path_buf!("/z/sha256/blob")),
-            MkdirRecursively(path_buf!("/z/sha256/blob")),
-            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
-        ]);
-    }
-
-    #[test]
-    fn new_removes_garbage_in_sha256() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs.directories.insert(
-            path_buf!("/z/sha256"),
-            vec![
-                (path_buf!("/z/sha256/blah"), Metadata::directory(10)),
-                (path_buf!("/z/sha256/blob"), Metadata::directory(10)),
-                (path_buf!("/z/sha256/baz"), Metadata::directory(10)),
-                (
-                    path_buf!("/z/sha256/bottom_fs_layer"),
-                    Metadata::directory(10),
-                ),
-            ],
-        );
-        let mut fixture = Fixture::new(test_cache_fs, 1000);
-        fixture.expect_messages_in_specific_order(vec![
-            MkdirRecursively(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z")),
-            Metadata(path_buf!("/z/CACHEDIR.TAG")),
-            CreateFile(
-                path_buf!("/z/CACHEDIR.TAG"),
-                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
-            ),
-            MkdirRecursively(path_buf!("/z/tmp")),
-            MkdirRecursively(path_buf!("/z/sha256")),
-            ReadDir(path_buf!("/z/sha256")),
-            Metadata(short_path!("/z/removing", 1)),
-            Rename(path_buf!("/z/sha256/blah"), short_path!("/z/removing", 1)),
-            RemoveRecursively(short_path!("/z/removing", 1)),
-            Metadata(short_path!("/z/removing", 2)),
-            Rename(path_buf!("/z/sha256/baz"), short_path!("/z/removing", 2)),
-            RemoveRecursively(short_path!("/z/removing", 2)),
-            Metadata(path_buf!("/z/sha256/blob")),
-            MkdirRecursively(path_buf!("/z/sha256/blob")),
-            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
-            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
-        ]);
-    }
-
-    #[test]
-    fn new_removes_old_sha256_if_it_exists() {
-        let mut test_cache_fs = TestFs::default();
-        test_cache_fs
-            .metadata
-            .insert(path_buf!("/z/sha256/blob"), Metadata::directory(1));
-        test_cache_fs.metadata.insert(
-            path_buf!("/z/sha256/bottom_fs_layer"),
-            Metadata::directory(1),
-        );
-        test_cache_fs.metadata.insert(
-            path_buf!("/z/sha256/upper_fs_layer"),
-            Metadata::directory(1),
-        );
-        test_cache_fs
-            .metadata
-            .insert(path_buf!("/z/sha256/blob"), Metadata::directory(42));
-        test_cache_fs.metadata.insert(
-            path_buf!("/z/sha256/bottom_fs_layer"),
-            Metadata::directory(42),
-        );
-        test_cache_fs.metadata.insert(
-            path_buf!("/z/sha256/upper_fs_layer"),
-            Metadata::directory(42),
-        );
-        let mut fixture = Fixture::new(test_cache_fs, 1000);
-        fixture.expect_messages_in_specific_order(vec![
-            MkdirRecursively(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z/removing")),
-            ReadDir(path_buf!("/z")),
-            Metadata(path_buf!("/z/CACHEDIR.TAG")),
-            CreateFile(
-                path_buf!("/z/CACHEDIR.TAG"),
-                boxed_u8!(&CACHEDIR_TAG_CONTENTS),
-            ),
-            MkdirRecursively(path_buf!("/z/tmp")),
-            MkdirRecursively(path_buf!("/z/sha256")),
-            ReadDir(path_buf!("/z/sha256")),
-            Metadata(path_buf!("/z/sha256/blob")),
-            Metadata(short_path!("/z/removing", 1)),
-            Rename(path_buf!("/z/sha256/blob"), short_path!("/z/removing", 1)),
-            RemoveRecursively(short_path!("/z/removing", 1)),
-            MkdirRecursively(path_buf!("/z/sha256/blob")),
-            Metadata(path_buf!("/z/sha256/bottom_fs_layer")),
-            Metadata(short_path!("/z/removing", 2)),
-            Rename(
-                path_buf!("/z/sha256/bottom_fs_layer"),
-                short_path!("/z/removing", 2),
-            ),
-            RemoveRecursively(short_path!("/z/removing", 2)),
-            MkdirRecursively(path_buf!("/z/sha256/bottom_fs_layer")),
-            Metadata(path_buf!("/z/sha256/upper_fs_layer")),
-            Metadata(short_path!("/z/removing", 3)),
-            Rename(
-                path_buf!("/z/sha256/upper_fs_layer"),
-                short_path!("/z/removing", 3),
-            ),
-            RemoveRecursively(short_path!("/z/removing", 3)),
-            MkdirRecursively(path_buf!("/z/sha256/upper_fs_layer")),
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    blob {},
+                    bottom_fs_layer {},
+                    upper_fs_layer {},
+                },
+                tmp {},
+                removing {
+                    "0000000000000001" { a(1) },
+                    "0000000000000002" {
+                        foo(10),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(10),
+                        },
+                    },
+                    "0000000000000003" {
+                        bad_blob {
+                            foo(20),
+                            symlink -> "bad_blob",
+                            more_bad_blob {
+                                bar(20),
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([
+            "/z/removing/0000000000000001",
+            "/z/removing/0000000000000002",
+            "/z/removing/0000000000000003",
         ]);
     }
 }

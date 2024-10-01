@@ -3,7 +3,7 @@ use itertools::{Itertools, Position};
 use maelstrom_util::ext::{BoolExt as _, OptionExt as _};
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     error,
     ffi::{OsStr, OsString},
     fmt::Debug,
@@ -124,7 +124,7 @@ impl<'a> IntoIterator for &'a ComponentPath {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Entry {
     File { size: u64 },
-    Directory { entries: HashMap<String, Entry> },
+    Directory { entries: BTreeMap<String, Entry> },
     Symlink { target: String },
 }
 
@@ -166,7 +166,7 @@ impl Entry {
     }
 
     /// Assume [`Entry`] is a directory, and return a reference to its entries.
-    fn directory_entries(&self) -> &HashMap<String, Self> {
+    fn directory_entries(&self) -> &BTreeMap<String, Self> {
         let Self::Directory { entries } = self else {
             panic!("expected entry {self:?} to be a directory");
         };
@@ -174,7 +174,7 @@ impl Entry {
     }
 
     /// Assume [`Entry`] is a directory, and return a mutable reference to its entries.
-    fn directory_entries_mut(&mut self) -> &mut HashMap<String, Self> {
+    fn directory_entries_mut(&mut self) -> &mut BTreeMap<String, Self> {
         let Self::Directory { entries } = self else {
             panic!("expected entry {self:?} to be a directory");
         };
@@ -348,7 +348,6 @@ impl Entry {
     }
 }
 
-#[macro_export]
 macro_rules! fs {
     (@expand [] -> [$($expanded:tt)*]) => {
         [$($expanded)*]
@@ -409,6 +408,8 @@ macro_rules! fs {
     };
     ($($body:tt)*) => ($crate::cache::fs::test::Entry::directory(fs!(@expand [$($body)*] -> [])));
 }
+
+pub(crate) use fs;
 
 #[derive(Debug)]
 pub struct Fs {
@@ -526,6 +527,52 @@ impl super::Fs for Fs {
             state: self.state.clone(),
             path: self.state.borrow_mut().temp_dir(parent)?,
         })
+    }
+}
+
+impl super::Fs for Rc<Fs> {
+    type Error = <Fs as super::Fs>::Error;
+    type TempFile = <Fs as super::Fs>::TempFile;
+    type TempDir = <Fs as super::Fs>::TempDir;
+
+    fn rand_u64(&self) -> u64 {
+        (**self).rand_u64()
+    }
+    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
+        (**self).rename(source_path, dest_path)
+    }
+    fn remove(&self, path: &Path) -> Result<(), Error> {
+        (**self).remove(path)
+    }
+    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Error> {
+        (**self).rmdir_recursively_on_thread(path)
+    }
+    fn mkdir(&self, path: &Path) -> Result<(), Error> {
+        (**self).mkdir(path)
+    }
+    fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
+        (**self).mkdir_recursively(path)
+    }
+    fn read_dir(
+        &self,
+        path: &Path,
+    ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
+        (**self).read_dir(path)
+    }
+    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+        (**self).create_file(path, contents)
+    }
+    fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
+        (**self).symlink(target, link)
+    }
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
+        (**self).metadata(path)
+    }
+    fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Error> {
+        (**self).temp_file(parent)
+    }
+    fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Error> {
+        (**self).temp_dir(parent)
     }
 }
 
