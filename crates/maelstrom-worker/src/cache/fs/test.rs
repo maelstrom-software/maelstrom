@@ -119,7 +119,7 @@ impl Entry {
         Self::File { size }
     }
 
-    pub fn directory<const N: usize>(entries: [(&str, Entry); N]) -> Self {
+    pub fn directory<const N: usize>(entries: [(&str, Self); N]) -> Self {
         Self::Directory {
             entries: entries
                 .into_iter()
@@ -136,9 +136,9 @@ impl Entry {
 
     fn metadata(&self) -> FileMetadata {
         match self {
-            Entry::File { size } => FileMetadata::file(*size),
-            Entry::Symlink { target } => FileMetadata::symlink(target.len().try_into().unwrap()),
-            Entry::Directory { entries } => {
+            Self::File { size } => FileMetadata::file(*size),
+            Self::Symlink { target } => FileMetadata::symlink(target.len().try_into().unwrap()),
+            Self::Directory { entries } => {
                 FileMetadata::directory(entries.len().try_into().unwrap())
             }
         }
@@ -157,7 +157,7 @@ impl Entry {
 
     fn lookup_component_path_helper<'state, 'path>(
         &'state self,
-        mut cur: &'state Entry,
+        mut cur: &'state Self,
         mut component_path: ComponentPath,
         path: &'path Path,
     ) -> LookupComponentPath<'state> {
@@ -178,7 +178,7 @@ impl Entry {
                 }
                 Component::Normal(name) => loop {
                     match cur {
-                        Entry::Directory { entries } => {
+                        Self::Directory { entries } => {
                             let name = name.to_str().unwrap();
                             match entries.get(name) {
                                 Some(entry) => {
@@ -198,10 +198,10 @@ impl Entry {
                                 }
                             }
                         }
-                        Entry::File { .. } => {
+                        Self::File { .. } => {
                             return LookupComponentPath::FileAncestor;
                         }
-                        Entry::Symlink { target } => {
+                        Self::Symlink { target } => {
                             (cur, component_path) = Self::pop_component_path(self, component_path);
                             match self.lookup_component_path_helper(
                                 cur,
@@ -227,16 +227,16 @@ impl Entry {
         LookupComponentPath::Found(cur, component_path)
     }
 
-    fn pop_component_path(&self, mut component_path: ComponentPath) -> (&Entry, ComponentPath) {
+    fn pop_component_path(&self, mut component_path: ComponentPath) -> (&Self, ComponentPath) {
         component_path.pop();
         (self.resolve_component_path(&component_path), component_path)
     }
 
     /// Resolve `path` starting at this entry.
-    fn resolve_component_path(&self, component_path: &ComponentPath) -> &Entry {
+    fn resolve_component_path(&self, component_path: &ComponentPath) -> &Self {
         let mut cur = self;
         for component in component_path {
-            let Entry::Directory { entries } = cur else {
+            let Self::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
             cur = entries.get(component).unwrap();
@@ -247,15 +247,15 @@ impl Entry {
     fn resolve_component_path_mut_as_directory(
         &mut self,
         component_path: &ComponentPath,
-    ) -> &mut HashMap<String, Entry> {
+    ) -> &mut HashMap<String, Self> {
         let mut cur = self;
         for component in component_path {
-            let Entry::Directory { entries } = cur else {
+            let Self::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
             cur = entries.get_mut(component).unwrap();
         }
-        let Entry::Directory { entries } = cur else {
+        let Self::Directory { entries } = cur else {
             panic!("entry not a directory");
         };
         entries
@@ -265,17 +265,17 @@ impl Entry {
         &mut self,
         directory_component_path: &ComponentPath,
         name: &OsStr,
-        entry: Entry,
+        entry: Self,
     ) {
         self.resolve_component_path_mut_as_directory(directory_component_path)
             .insert(name.to_str().unwrap().to_owned(), entry);
     }
 
-    fn remove_leaf_from_component_path(&mut self, component_path: &ComponentPath) -> Entry {
+    fn remove_leaf_from_component_path(&mut self, component_path: &ComponentPath) -> Self {
         assert!(!component_path.is_empty());
         let mut cur = self;
         for component in component_path.iter().with_position() {
-            let Entry::Directory { entries } = cur else {
+            let Self::Directory { entries } = cur else {
                 panic!("intermediate path entry not a directory");
             };
             if let Position::Last(component) | Position::Only(component) = component {
