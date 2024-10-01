@@ -29,6 +29,7 @@ impl error::Error for Error {}
 
 #[derive(Debug)]
 pub struct TempFile {
+    state: Rc<RefCell<State>>,
     path: PathBuf,
 }
 
@@ -37,13 +38,14 @@ impl super::TempFile for TempFile {
         &self.path
     }
 
-    fn persist(self, _target: &Path) {
-        todo!()
+    fn persist(self, target: &Path) {
+        self.state.borrow_mut().rename(&self.path, target).unwrap();
     }
 }
 
 #[derive(Debug)]
 pub struct TempDir {
+    state: Rc<RefCell<State>>,
     path: PathBuf,
 }
 
@@ -52,8 +54,8 @@ impl super::TempDir for TempDir {
         &self.path
     }
 
-    fn persist(self, _target: &Path) {
-        todo!()
+    fn persist(self, target: &Path) {
+        self.state.borrow_mut().rename(&self.path, target).unwrap();
     }
 }
 
@@ -497,11 +499,17 @@ impl super::Fs for Fs {
     }
 
     fn temp_file(&self, parent: &Path) -> Self::TempFile {
-        self.state.borrow_mut().temp_file(parent)
+        TempFile {
+            state: self.state.clone(),
+            path: self.state.borrow_mut().temp_file(parent),
+        }
     }
 
     fn temp_dir(&self, parent: &Path) -> Self::TempDir {
-        self.state.borrow_mut().temp_dir(parent)
+        TempDir {
+            state: self.state.clone(),
+            path: self.state.borrow_mut().temp_dir(parent),
+        }
     }
 }
 
@@ -697,18 +705,32 @@ impl State {
         }
     }
 
-    fn temp_file(&self, _parent: &Path) -> TempFile {
-        unimplemented!()
+    fn temp_file(&mut self, parent: &Path) -> PathBuf {
+        for i in 0.. {
+            let path = parent.join(format!("{i:03}"));
+            if self.metadata(&path).unwrap().is_none() {
+                self.create_file(&path, b"").unwrap();
+                return path;
+            }
+        }
+        unreachable!();
     }
 
-    fn temp_dir(&self, _parent: &Path) -> TempDir {
-        unimplemented!()
+    fn temp_dir(&mut self, parent: &Path) -> PathBuf {
+        for i in 0.. {
+            let path = parent.join(format!("{i:03}"));
+            if self.metadata(&path).unwrap().is_none() {
+                self.mkdir_recursively(&path).unwrap();
+                return path;
+            }
+        }
+        unreachable!();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::Fs as _;
+    use super::super::{Fs as _, TempDir as _, TempFile as _};
     use super::*;
 
     mod fs_macro {
@@ -1562,5 +1584,25 @@ mod tests {
             },
             after(44),
         });
+    }
+
+    #[test]
+    fn temp_file() {
+        let fs = Fs::new(fs! {});
+        let temp_file = fs.temp_file(Path::new("/"));
+        assert_eq!(temp_file.path().to_str().unwrap(), "/000");
+        fs.assert_tree(fs! { "000"(0) });
+        temp_file.persist(Path::new("/persist"));
+        fs.assert_tree(fs! { persist(0) });
+    }
+
+    #[test]
+    fn temp_dir() {
+        let fs = Fs::new(fs! {});
+        let temp_dir = fs.temp_dir(Path::new("/"));
+        assert_eq!(temp_dir.path().to_str().unwrap(), "/000");
+        fs.assert_tree(fs! { "000" {} });
+        temp_dir.persist(Path::new("/persist"));
+        fs.assert_tree(fs! { persist {} });
     }
 }
