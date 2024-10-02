@@ -94,7 +94,7 @@ pub fn main(args: CliArgs) -> Result<()> {
     run_benchmark("posix_spawn + wait", args.iterations, || {
         posix_spawn_wait(&dev_null)
     })?;
-    run_benchmark("clone3(CLONE_VM) + execve + wait", args.iterations, || {
+    run_benchmark("clone(CLONE_VM) + execve + wait", args.iterations, || {
         clone3_clone_vm_execve_wait(&dev_null)
     })?;
 
