@@ -11,83 +11,6 @@ use ::std::{
 };
 use strum::Display;
 
-/// A type used to represent a temporary file. The assumption is that the implementer may want to
-/// make the type [`Drop`] so that the temporary file is cleaned up if it isn't consumed.
-pub trait TempFile: Debug {
-    /// Return the path to the temporary file. Can be used to open the file to write into it.
-    fn path(&self) -> &Path;
-}
-
-/// A type used to represent a temporary directory. The assumption is that the implementer may want
-/// to make the type [`Drop`] so that the temporary directory is cleaned up if it isn't consumed.
-pub trait TempDir: Debug {
-    /// Return the path to the temporary directory. Can be used to create files in the directory
-    /// before it is made persistent.
-    fn path(&self) -> &Path;
-}
-
-/// The type of a file, as far as the cache cares.
-#[derive(Clone, Copy, Debug, Display, PartialEq)]
-pub enum FileType {
-    Directory,
-    File,
-    Symlink,
-    Other,
-}
-
-impl From<fs::FileType> for FileType {
-    fn from(file_type: fs::FileType) -> Self {
-        if file_type.is_dir() {
-            FileType::Directory
-        } else if file_type.is_file() {
-            FileType::File
-        } else if file_type.is_symlink() {
-            FileType::Symlink
-        } else {
-            FileType::Other
-        }
-    }
-}
-
-/// The file metadata the cache cares about.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Metadata {
-    pub type_: FileType,
-    pub size: u64,
-}
-
-impl Metadata {
-    pub fn directory(size: u64) -> Self {
-        Self {
-            type_: FileType::Directory,
-            size,
-        }
-    }
-
-    pub fn file(size: u64) -> Self {
-        Self {
-            type_: FileType::File,
-            size,
-        }
-    }
-
-    pub fn symlink(size: u64) -> Self {
-        Self {
-            type_: FileType::Symlink,
-            size,
-        }
-    }
-}
-
-impl From<fs::Metadata> for Metadata {
-    fn from(metadata: fs::Metadata) -> Self {
-        Self {
-            type_: metadata.file_type().into(),
-            size: metadata.len(),
-        }
-    }
-}
-
 /// Dependencies that [`Cache`] has on the file system.
 pub trait Fs {
     /// Error type for methods.
@@ -173,4 +96,84 @@ pub trait Fs {
     /// Rename `temp_dir` to `target` while consuming `temp_dir`. This is different than the
     /// caller just doing the rename itself in that it consumes `temp_dir` without dropping it.
     fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<(), Self::Error>;
+}
+
+/// A type used to represent a temporary file. The assumption is that the implementer may want to
+/// make the type [`Drop`] so that the temporary file is cleaned up if it isn't consumed.
+pub trait TempFile: Debug {
+    /// Return the path to the temporary file. Can be used to open the file to write into it.
+    fn path(&self) -> &Path;
+}
+
+/// A type used to represent a temporary directory. The assumption is that the implementer may want
+/// to make the type [`Drop`] so that the temporary directory is cleaned up if it isn't consumed.
+pub trait TempDir: Debug {
+    /// Return the path to the temporary directory. Can be used to create files in the directory
+    /// before it is made persistent.
+    fn path(&self) -> &Path;
+}
+
+/// The file metadata returned from [`Fs`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Metadata {
+    pub type_: FileType,
+    pub size: u64,
+}
+
+impl Metadata {
+    /// Create a new [`Metadata`] for a directory of size `size`.
+    pub fn directory(size: u64) -> Self {
+        Self {
+            type_: FileType::Directory,
+            size,
+        }
+    }
+
+    /// Create a new [`Metadata`] for a file of size `size`.
+    pub fn file(size: u64) -> Self {
+        Self {
+            type_: FileType::File,
+            size,
+        }
+    }
+
+    /// Create a new [`Metadata`] for a symlink of size `size`.
+    pub fn symlink(size: u64) -> Self {
+        Self {
+            type_: FileType::Symlink,
+            size,
+        }
+    }
+}
+
+impl From<fs::Metadata> for Metadata {
+    fn from(metadata: fs::Metadata) -> Self {
+        Self {
+            type_: metadata.file_type().into(),
+            size: metadata.len(),
+        }
+    }
+}
+
+/// The file type returned from [`Fs`].
+#[derive(Clone, Copy, Debug, Display, PartialEq)]
+pub enum FileType {
+    Directory,
+    File,
+    Symlink,
+    Other,
+}
+
+impl From<fs::FileType> for FileType {
+    fn from(file_type: fs::FileType) -> Self {
+        if file_type.is_dir() {
+            FileType::Directory
+        } else if file_type.is_file() {
+            FileType::File
+        } else if file_type.is_symlink() {
+            FileType::Symlink
+        } else {
+            FileType::Other
+        }
+    }
 }

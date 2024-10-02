@@ -13,339 +13,37 @@ use std::{
 };
 use strum::Display;
 
-/// The potential errors that can happen in a file-system operation. These are modelled off of
-/// errnos.
-#[derive(Debug, Display, PartialEq)]
-pub enum Error {
-    Exists,
-    IsDir,
-    Inval,
-    NoEnt,
-    NotDir,
-    NotEmpty,
-}
-
-impl error::Error for Error {}
-
-#[derive(Debug)]
-pub struct TempFile(PathBuf);
-
-impl super::TempFile for TempFile {
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-#[derive(Debug)]
-pub struct TempDir(PathBuf);
-
-impl super::TempDir for TempDir {
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-/// A component path represents a path to an [`Entry`] that can be reached only through
-/// directories. No symlinks are allowed. Put another way, this is the canonical path to an entry
-/// in a file-system tree. Every entry in the component path, except for the last, must correspond
-/// to a directory.
+/// This macro is used to create a file-system tree to be passed to various functions in this
+/// module. It expands to an [`Entry::Directory`].
 ///
-/// The motivation for using this struct is to keep the Rust code safe in modifying operations. We
-/// will generally resolve a [`Path`] into a [`ComponentPath`] at the beginning of an operation,
-/// and then operate using the [`ComponentPath`] for the rest of the operation. The assumption is
-/// that one we've got it, we can always resolve a [`ComponentPath`] into an [`Entry`].
-#[derive(Default, PartialEq)]
-struct ComponentPath(Vec<String>);
-
-impl ComponentPath {
-    fn push(&mut self, component: String) {
-        self.0.push(component);
-    }
-
-    fn pop(&mut self) -> Option<String> {
-        self.0.pop()
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &'_ String> {
-        self.0.iter()
-    }
-
-    /// Return true iff `potential_ancestor` is an actual ancestor of this component path. What
-    /// that means in practice is that `potential_ancestor` is a prefix of this component path.
-    fn is_descendant_of(&self, potential_ancestor: &ComponentPath) -> bool {
-        self.iter()
-            .zip(potential_ancestor)
-            .take_while(|(l, r)| *l == *r)
-            .count()
-            == potential_ancestor.len()
-    }
-}
-
-impl IntoIterator for ComponentPath {
-    type Item = String;
-    type IntoIter = vec::IntoIter<String>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a ComponentPath {
-    type Item = &'a String;
-    type IntoIter = slice::Iter<'a, String>;
-    fn into_iter(self) -> Self::IntoIter {
-        (&self.0).into_iter()
-    }
-}
-
-/// A file-system entry. There's no notion of hard links or things like sockets, devices, etc. in
-/// this test file system.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Entry {
-    File { size: u64 },
-    Directory { entries: BTreeMap<String, Entry> },
-    Symlink { target: String },
-}
-
-impl Entry {
-    /// Create a new [`Entry::File`] of the given `size`.
-    pub fn file(size: u64) -> Self {
-        Self::File { size }
-    }
-
-    /// Create a new [`Entry::Directory`] with the given `entries`.
-    pub fn directory<const N: usize>(entries: [(&str, Self); N]) -> Self {
-        Self::Directory {
-            entries: entries
-                .into_iter()
-                .map(|(name, entry)| (name.to_owned(), entry))
-                .collect(),
-        }
-    }
-
-    /// Create a new [`Entry::Symlink`] that points to `target`.
-    pub fn symlink(target: impl ToString) -> Self {
-        Self::Symlink {
-            target: target.to_string(),
-        }
-    }
-
-    /// Return the [`FileMetadata`] for an [`Entry`].
-    fn metadata(&self) -> Metadata {
-        match self {
-            Self::File { size } => Metadata::file(*size),
-            Self::Symlink { target } => Metadata::symlink(target.len().try_into().unwrap()),
-            Self::Directory { entries } => Metadata::directory(entries.len().try_into().unwrap()),
-        }
-    }
-
-    /// Return true iff [`Entry`] is a directory.
-    fn is_directory(&self) -> bool {
-        matches!(self, Self::Directory { .. })
-    }
-
-    /// Assume [`Entry`] is a directory, and return a reference to its entries.
-    fn directory_entries(&self) -> &BTreeMap<String, Self> {
-        let Self::Directory { entries } = self else {
-            panic!("expected entry {self:?} to be a directory");
-        };
-        entries
-    }
-
-    /// Assume [`Entry`] is a directory, and return a mutable reference to its entries.
-    fn directory_entries_mut(&mut self) -> &mut BTreeMap<String, Self> {
-        let Self::Directory { entries } = self else {
-            panic!("expected entry {self:?} to be a directory");
-        };
-        entries
-    }
-
-    /// Treating `self` as the root of the file system, attempt to resolve `path`.
-    fn lookup_component_path<'state, 'path>(
-        &'state self,
-        path: &'path Path,
-    ) -> LookupComponentPath<'state> {
-        self.lookup_component_path_helper(self, Default::default(), path)
-    }
-
-    /// Treating `self` as the root of the file system, resolve `path`. `cur` indicates the
-    /// directory the resolution should be done relative to, while `component_path` represents the
-    /// component path to `cur`.
-    fn lookup_component_path_helper<'state, 'path>(
-        &'state self,
-        mut cur: &'state Self,
-        mut component_path: ComponentPath,
-        path: &'path Path,
-    ) -> LookupComponentPath<'state> {
-        for component in path.components().with_position() {
-            let is_last_component = matches!(component, Position::Last(_) | Position::Only(_));
-            let component = component.into_inner();
-            match component {
-                Component::Prefix(_) => {
-                    unimplemented!("prefix components don't occur in Unix")
-                }
-                Component::RootDir => {
-                    cur = self;
-                    component_path = Default::default();
-                }
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    cur = self.pop_component_path(&mut component_path);
-                }
-                Component::Normal(name) => match self.expand_to_directory(cur, component_path) {
-                    LookupComponentPath::Found(new_cur, new_component_path) => {
-                        cur = new_cur;
-                        component_path = new_component_path;
-                        let name = name.to_str().unwrap();
-                        match cur.directory_entries().get(name) {
-                            Some(entry) => {
-                                cur = entry;
-                                component_path.push(name.to_owned());
-                            }
-                            None => {
-                                if is_last_component {
-                                    return LookupComponentPath::FoundParent(cur, component_path);
-                                } else {
-                                    return LookupComponentPath::NotFound;
-                                }
-                            }
-                        }
-                    }
-                    LookupComponentPath::FoundParent(_, _) => {
-                        unreachable!();
-                    }
-                    result @ _ => {
-                        return result;
-                    }
-                },
-            }
-        }
-        LookupComponentPath::Found(cur, component_path)
-    }
-
-    /// Treating `self` as the root of the file system, resolve `cur` and `component` into a
-    /// directory by recursively resolving any symlinks encountered.
-    fn expand_to_directory<'state>(
-        &'state self,
-        mut cur: &'state Self,
-        mut component_path: ComponentPath,
-    ) -> LookupComponentPath<'state> {
-        loop {
-            match cur {
-                Self::Directory { .. } => {
-                    return LookupComponentPath::Found(cur, component_path);
-                }
-                Self::File { .. } => {
-                    return LookupComponentPath::FileAncestor;
-                }
-                Self::Symlink { target } => {
-                    match self.lookup_component_path_helper(
-                        self.pop_component_path(&mut component_path),
-                        component_path,
-                        Path::new(target),
-                    ) {
-                        LookupComponentPath::Found(new_cur, new_component_path) => {
-                            cur = new_cur;
-                            component_path = new_component_path;
-                        }
-                        LookupComponentPath::FileAncestor => {
-                            return LookupComponentPath::FileAncestor;
-                        }
-                        _ => {
-                            return LookupComponentPath::DanglingSymlink;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Treating `self` as the root of the file system, pop one component off of `component_path`.
-    /// If `component_path` is empty, this will be a no-op. Return the [`Entry`] now pointed to by
-    /// `component_path`.
-    fn pop_component_path(&self, component_path: &mut ComponentPath) -> &Self {
-        component_path.pop();
-        self.resolve_component_path(&component_path)
-    }
-
-    /// Treating `self` as the root of the file system, resolve `component_path` to its
-    /// corresponding [`Entry`].
-    fn resolve_component_path(&self, component_path: &ComponentPath) -> &Self {
-        let mut cur = self;
-        for component in component_path {
-            cur = cur.directory_entries().get(component).unwrap();
-        }
-        cur
-    }
-
-    /// Treating `self` as the root of the file system, resolve `component_path` to its
-    /// corresponding [`Entry`], an return that entry as a mutable reference.
-    fn resolve_component_path_mut(&mut self, component_path: &ComponentPath) -> &mut Self {
-        let mut cur = self;
-        for component in component_path {
-            cur = cur.directory_entries_mut().get_mut(component).unwrap();
-        }
-        cur
-    }
-
-    /// Treating `self` as the root of the file system, resolve `directory_component_path` to its
-    /// corresponding directory [`Entry`], then insert `entry` into the directory. The path
-    /// component `name` must not already be in the directory.
-    fn append_entry_to_directory(
-        &mut self,
-        directory_component_path: &ComponentPath,
-        name: &OsStr,
-        entry: Self,
-    ) {
-        self.resolve_component_path_mut(directory_component_path)
-            .directory_entries_mut()
-            .insert(name.to_str().unwrap().to_owned(), entry)
-            .assert_is_none();
-    }
-
-    /// Treating `self` as the root of the file system, resolve `component_path` to its
-    /// corresponding directory [`Entry`], then remove that entry from its parent and return the
-    /// entry. `component_path` must not be empty: you can't remove the root from its parent.
-    fn remove_component_path(
-        &mut self,
-        mut component_path: ComponentPath,
-    ) -> (Self, ComponentPath) {
-        assert!(!component_path.is_empty());
-        let mut cur = self;
-        let mut entry = None;
-        for component in component_path.iter().with_position() {
-            let entries = cur.directory_entries_mut();
-            if let Position::Last(component) | Position::Only(component) = component {
-                entry = Some(entries.remove(component).unwrap());
-                break;
-            } else {
-                cur = entries.get_mut(component.into_inner()).unwrap();
-            }
-        }
-        component_path.pop();
-        (entry.unwrap(), component_path)
-    }
-
-    /// Treating `self` as the root of the file system, resolve `path` to its parent directory.
-    /// Return an error if `path` exists, or if the parent directory can't be found.
-    fn lookup_parent(&self, path: &Path) -> Result<ComponentPath, Error> {
-        match self.lookup_component_path(path) {
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::NotFound => Err(Error::NoEnt),
-            LookupComponentPath::Found(_, _) => Err(Error::Exists),
-            LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
-        }
-    }
-}
-
+/// Here is an example that illustrates most of the features:
+/// ```
+/// fs! {
+///     subdir {
+///         file_in_subdir(42),
+///         symlink_in_subdir -> "../subdir2",
+///         nested_subdir {
+///             file_in_nested_subdir(43),
+///         },
+///     },
+///     "subdir2" {},
+///     "file"(44),
+///     "symlink" -> "subdir",
+/// }
+/// ```
+///
+/// More specifically, this macro expects an "entry list". An entry list consists of zero or more
+/// "entries", separated by ","s, with an optional trailing ",".
+///
+/// Each entry must be one of:
+///   - A file entry, which consists of the file name, plus the size of the file in parenthesis.
+///     The file name can either be a bare word, if it's a valid identifier, or a quoted string.
+///   - A symlink entry, which consists of the symlink name, the token "->", then the target of the
+///     link in quotes. The symlink name can either be a bare word, if it's a valid identifier, or
+///     a quoted string.
+///   - A directory entry, which consists of the directory name, plus an entry list enclosed in
+///     curly braces. The directory name can either be a bare word, if it's a valid identifier, or
+///     a quoted string.
 macro_rules! fs {
     (@expand [] -> [$($expanded:tt)*]) => {
         [$($expanded)*]
@@ -412,33 +110,6 @@ pub(crate) use fs;
 #[derive(Debug)]
 pub struct Fs {
     state: RefCell<State>,
-}
-
-#[derive(Debug)]
-struct State {
-    root: Entry,
-    last_random_number: u64,
-    recursive_rmdirs: HashSet<String>,
-}
-
-enum LookupComponentPath<'state> {
-    /// The path resolved to an actual entry. This contains the entry and the path to it.
-    Found(&'state Entry, ComponentPath),
-
-    /// There was entry at the given path, but the parent directory exists. This contains the
-    /// parent entry (which is guaranteed to be a directory) and the path to it.
-    #[expect(dead_code)]
-    FoundParent(&'state Entry, ComponentPath),
-
-    /// There was no entry at the given path, nor does its parent directory exist. However, all
-    /// ancestors that do exist are directories.
-    NotFound,
-
-    /// A symlink in the path didn't resolve.
-    DanglingSymlink,
-
-    /// An ancestor in the path was a file.
-    FileAncestor,
 }
 
 impl Fs {
@@ -742,6 +413,366 @@ impl super::Fs for Fs {
 
     fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<(), Error> {
         self.rename(&temp_dir.0, target)
+    }
+}
+
+/// The potential errors that can happen in a file-system operation. These are modelled off of
+/// errnos.
+#[derive(Debug, Display, PartialEq)]
+pub enum Error {
+    Exists,
+    IsDir,
+    Inval,
+    NoEnt,
+    NotDir,
+    NotEmpty,
+}
+
+impl error::Error for Error {}
+
+#[derive(Debug)]
+pub struct TempFile(PathBuf);
+
+impl super::TempFile for TempFile {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+#[derive(Debug)]
+pub struct TempDir(PathBuf);
+
+impl super::TempDir for TempDir {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+#[derive(Debug)]
+struct State {
+    root: Entry,
+    last_random_number: u64,
+    recursive_rmdirs: HashSet<String>,
+}
+
+/// A file-system entry. There's no notion of hard links or things like sockets, devices, etc. in
+/// this test file system.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Entry {
+    File { size: u64 },
+    Directory { entries: BTreeMap<String, Entry> },
+    Symlink { target: String },
+}
+
+impl Entry {
+    /// Create a new [`Entry::File`] of the given `size`.
+    pub fn file(size: u64) -> Self {
+        Self::File { size }
+    }
+
+    /// Create a new [`Entry::Directory`] with the given `entries`.
+    pub fn directory<const N: usize>(entries: [(&str, Self); N]) -> Self {
+        Self::Directory {
+            entries: entries
+                .into_iter()
+                .map(|(name, entry)| (name.to_owned(), entry))
+                .collect(),
+        }
+    }
+
+    /// Create a new [`Entry::Symlink`] that points to `target`.
+    pub fn symlink(target: impl ToString) -> Self {
+        Self::Symlink {
+            target: target.to_string(),
+        }
+    }
+
+    /// Return the [`FileMetadata`] for an [`Entry`].
+    fn metadata(&self) -> Metadata {
+        match self {
+            Self::File { size } => Metadata::file(*size),
+            Self::Symlink { target } => Metadata::symlink(target.len().try_into().unwrap()),
+            Self::Directory { entries } => Metadata::directory(entries.len().try_into().unwrap()),
+        }
+    }
+
+    /// Return true iff [`Entry`] is a directory.
+    fn is_directory(&self) -> bool {
+        matches!(self, Self::Directory { .. })
+    }
+
+    /// Assume [`Entry`] is a directory, and return a reference to its entries.
+    fn directory_entries(&self) -> &BTreeMap<String, Self> {
+        let Self::Directory { entries } = self else {
+            panic!("expected entry {self:?} to be a directory");
+        };
+        entries
+    }
+
+    /// Assume [`Entry`] is a directory, and return a mutable reference to its entries.
+    fn directory_entries_mut(&mut self) -> &mut BTreeMap<String, Self> {
+        let Self::Directory { entries } = self else {
+            panic!("expected entry {self:?} to be a directory");
+        };
+        entries
+    }
+
+    /// Treating `self` as the root of the file system, attempt to resolve `path`.
+    fn lookup_component_path<'state, 'path>(
+        &'state self,
+        path: &'path Path,
+    ) -> LookupComponentPath<'state> {
+        self.lookup_component_path_helper(self, Default::default(), path)
+    }
+
+    /// Treating `self` as the root of the file system, resolve `path`. `cur` indicates the
+    /// directory the resolution should be done relative to, while `component_path` represents the
+    /// component path to `cur`.
+    fn lookup_component_path_helper<'state, 'path>(
+        &'state self,
+        mut cur: &'state Self,
+        mut component_path: ComponentPath,
+        path: &'path Path,
+    ) -> LookupComponentPath<'state> {
+        for component in path.components().with_position() {
+            let is_last_component = matches!(component, Position::Last(_) | Position::Only(_));
+            let component = component.into_inner();
+            match component {
+                Component::Prefix(_) => {
+                    unimplemented!("prefix components don't occur in Unix")
+                }
+                Component::RootDir => {
+                    cur = self;
+                    component_path = Default::default();
+                }
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    cur = self.pop_component_path(&mut component_path);
+                }
+                Component::Normal(name) => match self.expand_to_directory(cur, component_path) {
+                    LookupComponentPath::Found(new_cur, new_component_path) => {
+                        cur = new_cur;
+                        component_path = new_component_path;
+                        let name = name.to_str().unwrap();
+                        match cur.directory_entries().get(name) {
+                            Some(entry) => {
+                                cur = entry;
+                                component_path.push(name.to_owned());
+                            }
+                            None => {
+                                if is_last_component {
+                                    return LookupComponentPath::FoundParent(cur, component_path);
+                                } else {
+                                    return LookupComponentPath::NotFound;
+                                }
+                            }
+                        }
+                    }
+                    LookupComponentPath::FoundParent(_, _) => {
+                        unreachable!();
+                    }
+                    result @ _ => {
+                        return result;
+                    }
+                },
+            }
+        }
+        LookupComponentPath::Found(cur, component_path)
+    }
+
+    /// Treating `self` as the root of the file system, resolve `cur` and `component` into a
+    /// directory by recursively resolving any symlinks encountered.
+    fn expand_to_directory<'state>(
+        &'state self,
+        mut cur: &'state Self,
+        mut component_path: ComponentPath,
+    ) -> LookupComponentPath<'state> {
+        loop {
+            match cur {
+                Self::Directory { .. } => {
+                    return LookupComponentPath::Found(cur, component_path);
+                }
+                Self::File { .. } => {
+                    return LookupComponentPath::FileAncestor;
+                }
+                Self::Symlink { target } => {
+                    match self.lookup_component_path_helper(
+                        self.pop_component_path(&mut component_path),
+                        component_path,
+                        Path::new(target),
+                    ) {
+                        LookupComponentPath::Found(new_cur, new_component_path) => {
+                            cur = new_cur;
+                            component_path = new_component_path;
+                        }
+                        LookupComponentPath::FileAncestor => {
+                            return LookupComponentPath::FileAncestor;
+                        }
+                        _ => {
+                            return LookupComponentPath::DanglingSymlink;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Treating `self` as the root of the file system, pop one component off of `component_path`.
+    /// If `component_path` is empty, this will be a no-op. Return the [`Entry`] now pointed to by
+    /// `component_path`.
+    fn pop_component_path(&self, component_path: &mut ComponentPath) -> &Self {
+        component_path.pop();
+        self.resolve_component_path(&component_path)
+    }
+
+    /// Treating `self` as the root of the file system, resolve `component_path` to its
+    /// corresponding [`Entry`].
+    fn resolve_component_path(&self, component_path: &ComponentPath) -> &Self {
+        let mut cur = self;
+        for component in component_path {
+            cur = cur.directory_entries().get(component).unwrap();
+        }
+        cur
+    }
+
+    /// Treating `self` as the root of the file system, resolve `component_path` to its
+    /// corresponding [`Entry`], an return that entry as a mutable reference.
+    fn resolve_component_path_mut(&mut self, component_path: &ComponentPath) -> &mut Self {
+        let mut cur = self;
+        for component in component_path {
+            cur = cur.directory_entries_mut().get_mut(component).unwrap();
+        }
+        cur
+    }
+
+    /// Treating `self` as the root of the file system, resolve `directory_component_path` to its
+    /// corresponding directory [`Entry`], then insert `entry` into the directory. The path
+    /// component `name` must not already be in the directory.
+    fn append_entry_to_directory(
+        &mut self,
+        directory_component_path: &ComponentPath,
+        name: &OsStr,
+        entry: Self,
+    ) {
+        self.resolve_component_path_mut(directory_component_path)
+            .directory_entries_mut()
+            .insert(name.to_str().unwrap().to_owned(), entry)
+            .assert_is_none();
+    }
+
+    /// Treating `self` as the root of the file system, resolve `component_path` to its
+    /// corresponding directory [`Entry`], then remove that entry from its parent and return the
+    /// entry. `component_path` must not be empty: you can't remove the root from its parent.
+    fn remove_component_path(
+        &mut self,
+        mut component_path: ComponentPath,
+    ) -> (Self, ComponentPath) {
+        assert!(!component_path.is_empty());
+        let mut cur = self;
+        let mut entry = None;
+        for component in component_path.iter().with_position() {
+            let entries = cur.directory_entries_mut();
+            if let Position::Last(component) | Position::Only(component) = component {
+                entry = Some(entries.remove(component).unwrap());
+                break;
+            } else {
+                cur = entries.get_mut(component.into_inner()).unwrap();
+            }
+        }
+        component_path.pop();
+        (entry.unwrap(), component_path)
+    }
+
+    /// Treating `self` as the root of the file system, resolve `path` to its parent directory.
+    /// Return an error if `path` exists, or if the parent directory can't be found.
+    fn lookup_parent(&self, path: &Path) -> Result<ComponentPath, Error> {
+        match self.lookup_component_path(path) {
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::NotFound => Err(Error::NoEnt),
+            LookupComponentPath::Found(_, _) => Err(Error::Exists),
+            LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
+        }
+    }
+}
+
+enum LookupComponentPath<'state> {
+    /// The path resolved to an actual entry. This contains the entry and the path to it.
+    Found(&'state Entry, ComponentPath),
+
+    /// There was entry at the given path, but the parent directory exists. This contains the
+    /// parent entry (which is guaranteed to be a directory) and the path to it.
+    #[expect(dead_code)]
+    FoundParent(&'state Entry, ComponentPath),
+
+    /// There was no entry at the given path, nor does its parent directory exist. However, all
+    /// ancestors that do exist are directories.
+    NotFound,
+
+    /// A symlink in the path didn't resolve.
+    DanglingSymlink,
+
+    /// An ancestor in the path was a file.
+    FileAncestor,
+}
+
+/// A component path represents a path to an [`Entry`] that can be reached only through
+/// directories. No symlinks are allowed. Put another way, this is the canonical path to an entry
+/// in a file-system tree. Every entry in the component path, except for the last, must correspond
+/// to a directory.
+///
+/// The motivation for using this struct is to keep the Rust code safe in modifying operations. We
+/// will generally resolve a [`Path`] into a [`ComponentPath`] at the beginning of an operation,
+/// and then operate using the [`ComponentPath`] for the rest of the operation. The assumption is
+/// that one we've got it, we can always resolve a [`ComponentPath`] into an [`Entry`].
+#[derive(Default, PartialEq)]
+struct ComponentPath(Vec<String>);
+
+impl ComponentPath {
+    fn push(&mut self, component: String) {
+        self.0.push(component);
+    }
+
+    fn pop(&mut self) -> Option<String> {
+        self.0.pop()
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &'_ String> {
+        self.0.iter()
+    }
+
+    /// Return true iff `potential_ancestor` is an actual ancestor of this component path. What
+    /// that means in practice is that `potential_ancestor` is a prefix of this component path.
+    fn is_descendant_of(&self, potential_ancestor: &ComponentPath) -> bool {
+        self.iter()
+            .zip(potential_ancestor)
+            .take_while(|(l, r)| *l == *r)
+            .count()
+            == potential_ancestor.len()
+    }
+}
+
+impl IntoIterator for ComponentPath {
+    type Item = String;
+    type IntoIter = vec::IntoIter<String>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a ComponentPath {
+    type Item = &'a String;
+    type IntoIter = slice::Iter<'a, String>;
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.0).into_iter()
     }
 }
 
