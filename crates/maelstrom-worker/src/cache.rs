@@ -175,7 +175,8 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
+#[derive(Clone, Copy, Debug, strum::Display, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
+#[strum(serialize_all = "snake_case")]
 pub enum EntryKind {
     Blob,
     BottomFsLayer,
@@ -185,16 +186,6 @@ pub enum EntryKind {
 impl EntryKind {
     fn iter() -> impl DoubleEndedIterator<Item = Self> {
         <Self as strum::IntoEnumIterator>::iter()
-    }
-}
-
-impl fmt::Display for EntryKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Blob => write!(f, "blob"),
-            Self::BottomFsLayer => write!(f, "bottom_fs_layer"),
-            Self::UpperFsLayer => write!(f, "upper_fs_layer"),
-        }
     }
 }
 
