@@ -17,10 +17,6 @@ impl super::TempFile for TempFile {
     fn path(&self) -> &Path {
         &self.0
     }
-
-    fn persist(self, target: &Path) {
-        self.0.persist(target).unwrap();
-    }
 }
 
 #[derive(Debug)]
@@ -29,10 +25,6 @@ pub struct TempDir(tempfile::TempDir);
 impl super::TempDir for TempDir {
     fn path(&self) -> &Path {
         self.0.path()
-    }
-
-    fn persist(self, target: &Path) {
-        fs::rename(self.0.into_path(), target).unwrap();
     }
 }
 
@@ -108,7 +100,15 @@ impl super::Fs for Fs {
         Ok(TempFile(NamedTempFile::new_in(parent)?.into_temp_path()))
     }
 
+    fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> io::Result<()> {
+        Ok(temp_file.0.persist(target)?)
+    }
+
     fn temp_dir(&self, parent: &Path) -> io::Result<Self::TempDir> {
         Ok(TempDir(tempfile::TempDir::new_in(parent)?))
+    }
+
+    fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> io::Result<()> {
+        fs::rename(temp_dir.0.into_path(), target)
     }
 }

@@ -28,34 +28,20 @@ pub enum Error {
 impl error::Error for Error {}
 
 #[derive(Debug)]
-pub struct TempFile {
-    state: Rc<RefCell<State>>,
-    path: PathBuf,
-}
+pub struct TempFile(PathBuf);
 
 impl super::TempFile for TempFile {
     fn path(&self) -> &Path {
-        &self.path
-    }
-
-    fn persist(self, target: &Path) {
-        self.state.borrow_mut().rename(&self.path, target).unwrap();
+        &self.0
     }
 }
 
 #[derive(Debug)]
-pub struct TempDir {
-    state: Rc<RefCell<State>>,
-    path: PathBuf,
-}
+pub struct TempDir(PathBuf);
 
 impl super::TempDir for TempDir {
     fn path(&self) -> &Path {
-        &self.path
-    }
-
-    fn persist(self, target: &Path) {
-        self.state.borrow_mut().rename(&self.path, target).unwrap();
+        &self.0
     }
 }
 
@@ -516,17 +502,19 @@ impl super::Fs for Fs {
     }
 
     fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Error> {
-        Ok(TempFile {
-            state: self.state.clone(),
-            path: self.state.borrow_mut().temp_file(parent)?,
-        })
+        Ok(TempFile(self.state.borrow_mut().temp_file(parent)?))
+    }
+
+    fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> Result<(), Error> {
+        self.state.borrow_mut().rename(&temp_file.0, target)
     }
 
     fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Error> {
-        Ok(TempDir {
-            state: self.state.clone(),
-            path: self.state.borrow_mut().temp_dir(parent)?,
-        })
+        Ok(TempDir(self.state.borrow_mut().temp_dir(parent)?))
+    }
+
+    fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<(), Error> {
+        self.state.borrow_mut().rename(&temp_dir.0, target)
     }
 }
 
@@ -571,8 +559,14 @@ impl super::Fs for Rc<Fs> {
     fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Error> {
         (**self).temp_file(parent)
     }
+    fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> Result<(), Error> {
+        (**self).persist_temp_file(temp_file, target)
+    }
     fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Error> {
         (**self).temp_dir(parent)
+    }
+    fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<(), Error> {
+        (**self).persist_temp_dir(temp_dir, target)
     }
 }
 
@@ -1849,7 +1843,8 @@ mod tests {
             },
         });
 
-        temp_file_1.persist(Path::new("/persist/1"));
+        fs.persist_temp_file(temp_file_1, Path::new("/persist/1"))
+            .unwrap();
         fs.assert_tree(fs! {
             "000"(42),
             dir {
@@ -1865,7 +1860,8 @@ mod tests {
             },
         });
 
-        temp_file_2.persist(Path::new("/persist/2"));
+        fs.persist_temp_file(temp_file_2, Path::new("/persist/2"))
+            .unwrap();
         fs.assert_tree(fs! {
             "000"(42),
             dir {
@@ -1881,7 +1877,8 @@ mod tests {
             },
         });
 
-        temp_file_3.persist(Path::new("/persist/3"));
+        fs.persist_temp_file(temp_file_3, Path::new("/persist/3"))
+            .unwrap();
         fs.assert_tree(fs! {
             "000"(42),
             dir {
@@ -1899,6 +1896,32 @@ mod tests {
         assert_eq!(
             fs.temp_file(Path::new("/nonexistent")).unwrap_err(),
             Error::NoEnt
+        );
+    }
+
+    #[test]
+    fn persist_temp_file_error() {
+        let fs = Fs::new(fs! {
+            tmp {},
+            file(42),
+            bad_symlink -> "/foo",
+        });
+
+        let temp_file_1 = fs.temp_file(Path::new("/tmp")).unwrap();
+        let temp_file_2 = fs.temp_file(Path::new("/tmp")).unwrap();
+        let temp_file_3 = fs.temp_file(Path::new("/tmp")).unwrap();
+
+        assert_eq!(
+            fs.persist_temp_file(temp_file_1, Path::new("/foo/bar")),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.persist_temp_file(temp_file_2, Path::new("/file/file")),
+            Err(Error::NotDir)
+        );
+        assert_eq!(
+            fs.persist_temp_file(temp_file_3, Path::new("/bad_symlink/bar")),
+            Err(Error::NoEnt)
         );
     }
 
@@ -1940,7 +1963,8 @@ mod tests {
             },
         });
 
-        temp_dir_1.persist(Path::new("/persist/1"));
+        fs.persist_temp_dir(temp_dir_1, Path::new("/persist/1"))
+            .unwrap();
         fs.assert_tree(fs! {
             "000"(42),
             dir {
@@ -1956,7 +1980,8 @@ mod tests {
             },
         });
 
-        temp_dir_2.persist(Path::new("/persist/2"));
+        fs.persist_temp_dir(temp_dir_2, Path::new("/persist/2"))
+            .unwrap();
         fs.assert_tree(fs! {
             "000"(42),
             dir {
@@ -1972,7 +1997,8 @@ mod tests {
             },
         });
 
-        temp_dir_3.persist(Path::new("/persist/3"));
+        fs.persist_temp_dir(temp_dir_3, Path::new("/persist/3"))
+            .unwrap();
         fs.assert_tree(fs! {
             "000"(42),
             dir {
@@ -1990,6 +2016,32 @@ mod tests {
         assert_eq!(
             fs.temp_dir(Path::new("/nonexistent")).unwrap_err(),
             Error::NoEnt,
+        );
+    }
+
+    #[test]
+    fn persist_temp_dir_error() {
+        let fs = Fs::new(fs! {
+            tmp {},
+            file(42),
+            bad_symlink -> "/foo",
+        });
+
+        let temp_dir_1 = fs.temp_dir(Path::new("/tmp")).unwrap();
+        let temp_dir_2 = fs.temp_dir(Path::new("/tmp")).unwrap();
+        let temp_dir_3 = fs.temp_dir(Path::new("/tmp")).unwrap();
+
+        assert_eq!(
+            fs.persist_temp_dir(temp_dir_1, Path::new("/foo/bar")),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.persist_temp_dir(temp_dir_2, Path::new("/file/file")),
+            Err(Error::NotDir)
+        );
+        assert_eq!(
+            fs.persist_temp_dir(temp_dir_3, Path::new("/bad_symlink/bar")),
+            Err(Error::NoEnt)
         );
     }
 }

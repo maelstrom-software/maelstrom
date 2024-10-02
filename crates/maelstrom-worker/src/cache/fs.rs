@@ -16,10 +16,6 @@ use strum::Display;
 pub trait TempFile: Debug {
     /// Return the path to the temporary file. Can be used to open the file to write into it.
     fn path(&self) -> &Path;
-
-    /// Make the file temporary no more, by moving it to `target`. Will panic on file system error
-    /// or if the parent directory of `target` doesn't exist, or if `target` already exists.
-    fn persist(self, target: &Path);
 }
 
 /// A type used to represent a temporary directory. The assumption is that the implementer may want
@@ -28,10 +24,6 @@ pub trait TempDir: Debug {
     /// Return the path to the temporary directory. Can be used to create files in the directory
     /// before it is made persistent.
     fn path(&self) -> &Path;
-
-    /// Make the directory temporary no more, by moving it to `target`. Will panic on file system
-    /// error or if the parent directory of `target` doesn't exist, or if `target` already exists.
-    fn persist(self, target: &Path);
 }
 
 /// The type of a file, as far as the cache cares.
@@ -155,6 +147,13 @@ pub trait Fs {
     /// `parent` isn't a directory.
     fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Self::Error>;
 
+    /// Make `temp_file` exist no more, by moving it to `target`.
+    fn persist_temp_file(
+        &self,
+        temp_file: Self::TempFile,
+        target: &Path,
+    ) -> Result<(), Self::Error>;
+
     /// The type returned by the [`Self::temp_dir`] method. Some implementations may make this
     /// type [`Drop`] so that the temporary directory can be cleaned up when it is closed.
     type TempDir: TempDir;
@@ -162,4 +161,7 @@ pub trait Fs {
     /// Create a new temporary directory in the directory `parent`. Panic on file system error or
     /// if `parent` isn't a directory.
     fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Self::Error>;
+
+    /// Make `temp_dir` exist no more, by moving it to `target`.
+    fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<(), Self::Error>;
 }

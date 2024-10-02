@@ -931,10 +931,6 @@ mod tests {
         fn path(&self) -> &Path {
             &self.0
         }
-
-        fn persist(self, _target: &Path) {
-            unimplemented!()
-        }
     }
 
     #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -943,10 +939,6 @@ mod tests {
     impl TempDir for TestTempDir {
         fn path(&self) -> &Path {
             &self.0
-        }
-
-        fn persist(self, _target: &Path) {
-            unimplemented!()
         }
     }
 
@@ -1014,10 +1006,26 @@ mod tests {
             Ok(TestTempFile(path))
         }
 
+        fn persist_temp_file(
+            &self,
+            _temp_file: Self::TempFile,
+            _target: &Path,
+        ) -> Result<(), TestFsError> {
+            unimplemented!()
+        }
+
         fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, TestFsError> {
             let path = parent.join(format!("{:0>16x}", self.rand_u64()));
             self.borrow_mut().messages.push(TempDir(path.clone()));
             Ok(TestTempDir(path))
+        }
+
+        fn persist_temp_dir(
+            &self,
+            _temp_dir: Self::TempDir,
+            _target: &Path,
+        ) -> Result<(), TestFsError> {
+            unimplemented!()
         }
     }
 

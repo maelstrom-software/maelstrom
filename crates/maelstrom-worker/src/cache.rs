@@ -3,7 +3,7 @@
 pub mod fs;
 
 use bytesize::ByteSize;
-use fs::{FileType, Fs, TempDir as _, TempFile as _};
+use fs::{FileType, Fs};
 use maelstrom_base::{JobId, Sha256Digest};
 use maelstrom_util::{
     config::common::CacheSize,
@@ -428,11 +428,11 @@ impl<FsT: Fs> Cache<FsT> {
         let path = self.cache_path(kind, digest);
         let (file_type, bytes_used) = match artifact {
             GotArtifact::Directory { source, size } => {
-                source.persist(&path);
+                self.fs.persist_temp_dir(source, &path).unwrap();
                 (FileType::Directory, size)
             }
             GotArtifact::File { source } => {
-                source.persist(&path);
+                self.fs.persist_temp_file(source, &path).unwrap();
                 let metadata = self.fs.metadata(&path).unwrap().unwrap();
                 assert!(matches!(metadata.type_, FileType::File));
                 (FileType::File, metadata.size)
@@ -597,7 +597,10 @@ impl<FsT: Fs> Cache<FsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fs::test::{self, fs};
+    use fs::{
+        test::{self, fs},
+        TempFile as _,
+    };
     use maelstrom_test::*;
     use slog::{o, Discard};
     use std::{iter, rc::Rc};
