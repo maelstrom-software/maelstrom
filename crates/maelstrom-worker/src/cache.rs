@@ -603,9 +603,10 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::fs::Metadata;
     use fs::{
         test::{self, fs},
-        TempFile as _,
+        TempDir as _, TempFile as _,
     };
     use maelstrom_test::*;
     use slog::{o, Discard};
@@ -657,6 +658,31 @@ mod tests {
         }
 
         #[track_caller]
+        fn assert_file_exists(
+            &self,
+            kind: TestKeyKind,
+            digest: Sha256Digest,
+            expected_metadata: Metadata,
+        ) {
+            let cache_path = self.cache.cache_path(kind, &digest);
+            assert_eq!(
+                self.fs.metadata(&cache_path).unwrap().unwrap(),
+                expected_metadata
+            );
+        }
+
+        #[track_caller]
+        fn assert_file_does_not_exist(&self, kind: TestKeyKind, digest: Sha256Digest) {
+            let cache_path = self.cache.cache_path(kind, &digest);
+            assert!(self.fs.metadata(&cache_path).unwrap().is_none());
+        }
+
+        #[track_caller]
+        fn assert_bytes_used(&self, expected_bytes_used: u64) {
+            assert_eq!(self.cache.bytes_used, expected_bytes_used);
+        }
+
+        #[track_caller]
         fn get_artifact(
             &mut self,
             kind: TestKeyKind,
@@ -666,10 +692,6 @@ mod tests {
         ) {
             let result = self.cache.get_artifact(kind, digest, jid);
             assert_eq!(result, expected);
-        }
-
-        fn get_artifact_ign(&mut self, kind: TestKeyKind, digest: Sha256Digest, jid: JobId) {
-            self.cache.get_artifact(kind, digest, jid);
         }
 
         #[track_caller]
@@ -746,532 +768,9 @@ mod tests {
             assert_eq!(result, expected);
         }
 
-        fn got_artifact_success_directory_ign(
-            &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
-            size: u64,
-        ) {
-            let source = self.cache.temp_dir();
-            self.got_artifact_success_ign(kind, digest, GotArtifact::Directory { source, size })
-        }
-
-        fn got_artifact_success_file_ign(
-            &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
-            size: u64,
-        ) {
-            let source = self.cache.temp_file();
-            let source_path = source.path();
-            self.fs.remove(source_path).unwrap();
-            self.fs
-                .create_file(
-                    source_path,
-                    &iter::repeat(0u8)
-                        .take(size.try_into().unwrap())
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap();
-            self.got_artifact_success_ign(kind, digest, GotArtifact::File { source })
-        }
-
-        fn got_artifact_success_ign(
-            &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
-            artifact: GotArtifact<Rc<test::Fs>>,
-        ) {
-            self.cache.got_artifact_success(kind, &digest, artifact);
-        }
-
         fn decrement_ref_count(&mut self, kind: TestKeyKind, digest: Sha256Digest) {
             self.cache.decrement_ref_count(kind, &digest);
         }
-    }
-
-    #[test]
-    fn get_miss_filled_with_directory() {
-        let mut fixture = Fixture::new(1000, fs! {});
-
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_directory(Apple, digest!(42), 100, vec![jid!(1)]);
-
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "000000000000000000000000000000000000000000000000000000000000002a" {},
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-    }
-
-    #[test]
-    fn get_miss_filled_with_file() {
-        let mut fixture = Fixture::new(1000, fs! {});
-
-        fixture.get_artifact(Orange, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Orange, digest!(42), 8, vec![jid!(1)]);
-
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {},
-                    orange {
-                        "000000000000000000000000000000000000000000000000000000000000002a"(8),
-                    },
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-    }
-
-    #[test]
-    fn get_miss_filled_with_symlink() {
-        let mut fixture = Fixture::new(1000, fs! {});
-
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_symlink(Apple, digest!(42), "/somewhere", vec![jid!(1)]);
-
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "000000000000000000000000000000000000000000000000000000000000002a"
-                            -> "/somewhere",
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-    }
-
-    #[test]
-    fn get_miss_filled_with_directory_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
-        let mut fixture = Fixture::new(1000, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.got_artifact_success_directory(Apple, digest!(42), 10000, vec![jid!(1)]);
-        fixture.decrement_ref_count(Apple, digest!(42));
-
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {
-                    "0000000000000001" {},
-                },
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
-    }
-
-    #[test]
-    fn get_miss_filled_with_file_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
-        let mut fixture = Fixture::new(1000, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.got_artifact_success_file(Apple, digest!(42), 10000, vec![jid!(1)]);
-        fixture.decrement_ref_count(Apple, digest!(42));
-
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-    }
-
-    #[test]
-    fn get_miss_filled_with_symlink_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
-        let mut fixture = Fixture::new(1, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.got_artifact_success_symlink(Apple, digest!(42), "/somewhere", vec![jid!(1)]);
-        fixture.decrement_ref_count(Apple, digest!(42));
-
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-    }
-
-    #[test]
-    fn cache_entries_are_removed_in_lru_order() {
-        let mut fixture = Fixture::new(10, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(1), jid!(1));
-        fixture.got_artifact_success_directory_ign(Apple, digest!(1), 4);
-        fixture.decrement_ref_count(Apple, digest!(1));
-
-        fixture.get_artifact_ign(Apple, digest!(2), jid!(2));
-        fixture.got_artifact_success_directory_ign(Apple, digest!(2), 4);
-        fixture.decrement_ref_count(Apple, digest!(2));
-
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "0000000000000000000000000000000000000000000000000000000000000001" {},
-                        "0000000000000000000000000000000000000000000000000000000000000002" {},
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-
-        fixture.get_artifact_ign(Apple, digest!(3), jid!(3));
-        fixture.got_artifact_success_directory(Apple, digest!(3), 4, vec![jid!(3)]);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "0000000000000000000000000000000000000000000000000000000000000002" {},
-                        "0000000000000000000000000000000000000000000000000000000000000003" {},
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {
-                    "0000000000000001" {},
-                },
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
-
-        fixture.decrement_ref_count(Apple, digest!(3));
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "0000000000000000000000000000000000000000000000000000000000000002" {},
-                        "0000000000000000000000000000000000000000000000000000000000000003" {},
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {
-                    "0000000000000001" {},
-                },
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
-
-        fixture.get_artifact_ign(Apple, digest!(4), jid!(4));
-        fixture.got_artifact_success_directory(Apple, digest!(4), 4, vec![jid!(4)]);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "0000000000000000000000000000000000000000000000000000000000000003" {},
-                        "0000000000000000000000000000000000000000000000000000000000000004" {},
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {
-                    "0000000000000001" {},
-                    "0000000000000002" {},
-                },
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([
-            "/z/removing/0000000000000001",
-            "/z/removing/0000000000000002",
-        ]);
-
-        fixture.decrement_ref_count(Apple, digest!(4));
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "0000000000000000000000000000000000000000000000000000000000000003" {},
-                        "0000000000000000000000000000000000000000000000000000000000000004" {},
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {
-                    "0000000000000001" {},
-                    "0000000000000002" {},
-                },
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([
-            "/z/removing/0000000000000001",
-            "/z/removing/0000000000000002",
-        ]);
-    }
-
-    #[test]
-    fn lru_order_augmented_by_last_use() {
-        let mut fixture = Fixture::new(10, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(1), jid!(1));
-        fixture.got_artifact_success_directory_ign(Apple, digest!(1), 3);
-
-        fixture.get_artifact_ign(Apple, digest!(2), jid!(2));
-        fixture.got_artifact_success_directory_ign(Apple, digest!(2), 3);
-
-        fixture.get_artifact_ign(Apple, digest!(3), jid!(3));
-        fixture.got_artifact_success_directory_ign(Apple, digest!(3), 3);
-
-        fixture.decrement_ref_count(Apple, digest!(3));
-        fixture.decrement_ref_count(Apple, digest!(2));
-        fixture.decrement_ref_count(Apple, digest!(1));
-
-        fixture.get_artifact_ign(Apple, digest!(4), jid!(4));
-        fixture.got_artifact_success_directory(Apple, digest!(4), 3, vec![jid!(4)]);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "0000000000000000000000000000000000000000000000000000000000000001" {},
-                        "0000000000000000000000000000000000000000000000000000000000000002" {},
-                        "0000000000000000000000000000000000000000000000000000000000000004" {},
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {
-                    "0000000000000001" {},
-                },
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
-    }
-
-    #[test]
-    fn multiple_get_requests_for_empty() {
-        let mut fixture = Fixture::new(1000, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
-        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
-
-        fixture.got_artifact_success_directory(
-            Apple,
-            digest!(42),
-            100,
-            vec![jid!(1), jid!(2), jid!(3)],
-        );
-    }
-
-    #[test]
-    fn multiple_get_requests_for_empty_larger_than_goal_remove_on_last_decrement() {
-        let mut fixture = Fixture::new(1000, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
-        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
-
-        fixture.got_artifact_success_directory(
-            Apple,
-            digest!(42),
-            10000,
-            vec![jid!(1), jid!(2), jid!(3)],
-        );
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "000000000000000000000000000000000000000000000000000000000000002a" {},
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {
-                    "0000000000000001" {},
-                },
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
-    }
-
-    #[test]
-    fn get_request_for_currently_used() {
-        let mut fixture = Fixture::new(10, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.got_artifact_success_file_ign(Apple, digest!(42), 100);
-
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Success);
-
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "000000000000000000000000000000000000000000000000000000000000002a"(100),
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-    }
-
-    #[test]
-    fn get_request_for_cached_followed_by_big_get_does_not_evict_until_decrement_ref_count() {
-        let mut fixture = Fixture::new(100, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.got_artifact_success_file_ign(Apple, digest!(42), 10);
-        fixture.decrement_ref_count(Apple, digest!(42));
-
-        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Success);
-        fixture.get_artifact(Apple, digest!(43), jid!(3), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(43), 100, vec![jid!(3)]);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "000000000000000000000000000000000000000000000000000000000000002a"(10),
-                        "000000000000000000000000000000000000000000000000000000000000002b"(100),
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(43),
-                sha256 {
-                    apple {
-                        "000000000000000000000000000000000000000000000000000000000000002b"(100),
-                    },
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([]);
-    }
-
-    #[test]
-    fn get_request_for_empty_with_get_failure() {
-        let mut fixture = Fixture::new(1000, fs! {});
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.got_artifact_failure(Apple, digest!(42), vec![jid!(1)]);
-    }
-
-    #[test]
-    fn preexisting_directories_do_not_affect_get_request() {
-        let mut fixture = Fixture::new(
-            1000,
-            fs! {
-                z {
-                    sha256 {
-                        apple {
-                            "000000000000000000000000000000000000000000000000000000000000002a"(10),
-                        }
-                    }
-                }
-            },
-        );
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-    }
-
-    #[test]
-    fn multiple_get_requests_for_empty_with_download_and_extract_failure() {
-        let mut fixture = Fixture::new(1000, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(2));
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(3));
-
-        fixture.got_artifact_failure(Apple, digest!(42), vec![jid!(1), jid!(2), jid!(3)]);
-    }
-
-    #[test]
-    fn get_after_error_retries() {
-        let mut fixture = Fixture::new(1000, fs! {});
-
-        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
-        fixture.got_artifact_failure(Apple, digest!(42), vec![jid!(1)]);
-        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Get);
     }
 
     #[test]
@@ -1347,5 +846,404 @@ mod tests {
             "/z/removing/0000000000000003",
             "/z/removing/0000000000000004",
         ]);
+    }
+
+    #[test]
+    fn success_flow() {
+        let mut fixture = Fixture::new(10, fs! {});
+        fixture.assert_bytes_used(0);
+
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_bytes_used(0);
+
+        fixture.got_artifact_success_file(Apple, digest!(42), 1, vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.assert_bytes_used(1);
+
+        fixture.get_artifact(Apple, digest!(42), jid!(4), GetArtifact::Success);
+        fixture.get_artifact(Apple, digest!(42), jid!(5), GetArtifact::Success);
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.assert_bytes_used(1);
+    }
+
+    #[test]
+    fn success_flow_with_files() {
+        let mut fixture = Fixture::new(1, fs! {});
+        fixture.assert_bytes_used(0);
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
+        fixture.assert_bytes_used(0);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        fixture.got_artifact_success_file(Apple, digest!(1), 6, vec![jid!(1), jid!(2)]);
+        fixture.assert_bytes_used(6);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000001"(6),
+                    },
+                    orange {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.assert_bytes_used(0);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+    }
+
+    #[test]
+    fn success_flow_with_symlinks() {
+        let mut fixture = Fixture::new(1, fs! {});
+        fixture.assert_bytes_used(0);
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
+        fixture.assert_bytes_used(0);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        fixture.got_artifact_success_symlink(Apple, digest!(1), "target", vec![jid!(1), jid!(2)]);
+        fixture.assert_bytes_used(6);
+        fixture.assert_fs(fs!{
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000001" -> "target",
+                    },
+                    orange {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.assert_bytes_used(0);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+    }
+
+    #[test]
+    fn success_flow_with_directories() {
+        let mut fixture = Fixture::new(1, fs! {});
+        fixture.assert_bytes_used(0);
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
+        fixture.assert_bytes_used(0);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        fixture.got_artifact_success_directory(Apple, digest!(1), 6, vec![jid!(1), jid!(2)]);
+        fixture.assert_bytes_used(6);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000001" {},
+                    },
+                    orange {},
+                },
+                tmp {},
+                removing {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.assert_bytes_used(0);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(43),
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+                removing {
+                    "0000000000000001" {},
+                },
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
+    }
+
+    #[test]
+    fn artifact_stays_in_cache() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(Apple, digest!(42), 1, vec![jid!(1)]);
+        fixture.decrement_ref_count(Apple, digest!(42));
+
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.assert_bytes_used(1);
+
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Success);
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.assert_bytes_used(1);
+    }
+
+    #[test]
+    fn large_artifact_does_not_stay_in_cache() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(Apple, digest!(42), 100, vec![jid!(1)]);
+        fixture.assert_bytes_used(100);
+        fixture.decrement_ref_count(Apple, digest!(42));
+
+        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_bytes_used(0);
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+    }
+
+    #[test]
+    fn large_artifact_stays_in_cache_while_referenced() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(Apple, digest!(42), 100, vec![jid!(1)]);
+
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Success);
+
+        fixture.decrement_ref_count(Apple, digest!(42));
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(100));
+        fixture.assert_bytes_used(100);
+
+        fixture.decrement_ref_count(Apple, digest!(42));
+        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_bytes_used(0);
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+    }
+
+    #[test]
+    fn different_key_kinds_are_independent() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_bytes_used(0);
+
+        fixture.get_artifact(Orange, digest!(42), jid!(4), GetArtifact::Get);
+        fixture.get_artifact(Orange, digest!(42), jid!(5), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(Orange, digest!(42));
+        fixture.assert_bytes_used(0);
+
+        fixture.got_artifact_success_file(Apple, digest!(42), 100, vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(100));
+        fixture.assert_file_does_not_exist(Orange, digest!(42));
+        fixture.assert_bytes_used(100);
+
+        fixture.get_artifact(Orange, digest!(42), jid!(6), GetArtifact::Wait);
+
+        fixture.got_artifact_success_file(Orange, digest!(42), 99, vec![jid!(4), jid!(5), jid!(6)]);
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(100));
+        fixture.assert_file_exists(Orange, digest!(42), Metadata::file(99));
+        fixture.assert_bytes_used(199);
+
+        fixture.decrement_ref_count(Apple, digest!(42));
+        fixture.decrement_ref_count(Apple, digest!(42));
+        fixture.decrement_ref_count(Apple, digest!(42));
+        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_file_exists(Orange, digest!(42), Metadata::file(99));
+        fixture.assert_bytes_used(99);
+
+        fixture.decrement_ref_count(Orange, digest!(42));
+        fixture.decrement_ref_count(Orange, digest!(42));
+        fixture.decrement_ref_count(Orange, digest!(42));
+        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_file_does_not_exist(Orange, digest!(42));
+        fixture.assert_bytes_used(0);
+    }
+
+    #[test]
+    fn entries_are_removed_in_lru_order() {
+        let mut fixture = Fixture::new(3, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Orange, digest!(2), jid!(2), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(3), jid!(3), GetArtifact::Get);
+        fixture.get_artifact(Orange, digest!(4), jid!(4), GetArtifact::Get);
+        fixture.assert_bytes_used(0);
+
+        fixture.got_artifact_success_file(Apple, digest!(1), 1, vec![jid!(1)]);
+        fixture.got_artifact_success_file(Orange, digest!(2), 1, vec![jid!(2)]);
+        fixture.got_artifact_success_file(Apple, digest!(3), 1, vec![jid!(3)]);
+        fixture.got_artifact_success_file(Orange, digest!(4), 1, vec![jid!(4)]);
+
+        fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
+        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
+        fixture.assert_file_exists(Apple, digest!(3), Metadata::file(1));
+        fixture.assert_file_exists(Orange, digest!(4), Metadata::file(1));
+        fixture.assert_bytes_used(4);
+
+        fixture.decrement_ref_count(Orange, digest!(4));
+
+        fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
+        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
+        fixture.assert_file_exists(Apple, digest!(3), Metadata::file(1));
+        fixture.assert_file_does_not_exist(Orange, digest!(4));
+        fixture.assert_bytes_used(3);
+        fixture.get_artifact(Orange, digest!(4), jid!(14), GetArtifact::Get);
+
+        fixture.decrement_ref_count(Apple, digest!(3));
+        fixture.decrement_ref_count(Orange, digest!(2));
+        fixture.decrement_ref_count(Apple, digest!(1));
+
+        fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
+        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
+        fixture.assert_file_exists(Apple, digest!(3), Metadata::file(1));
+        fixture.assert_file_does_not_exist(Orange, digest!(4));
+        fixture.assert_bytes_used(3);
+
+        fixture.get_artifact(Apple, digest!(5), jid!(5), GetArtifact::Get);
+        fixture.got_artifact_success_file(Apple, digest!(5), 1, vec![jid!(5)]);
+
+        fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
+        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
+        fixture.assert_file_does_not_exist(Apple, digest!(3));
+        fixture.assert_file_does_not_exist(Orange, digest!(4));
+        fixture.assert_file_exists(Apple, digest!(5), Metadata::file(1));
+        fixture.assert_bytes_used(3);
+        fixture.get_artifact(Apple, digest!(3), jid!(13), GetArtifact::Get);
+
+        fixture.get_artifact(Orange, digest!(2), jid!(12), GetArtifact::Success);
+        fixture.decrement_ref_count(Orange, digest!(2));
+
+        fixture.get_artifact(Orange, digest!(6), jid!(6), GetArtifact::Get);
+        fixture.got_artifact_success_file(Orange, digest!(6), 1, vec![jid!(6)]);
+
+        fixture.assert_file_does_not_exist(Apple, digest!(1));
+        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
+        fixture.assert_file_does_not_exist(Apple, digest!(3));
+        fixture.assert_file_does_not_exist(Orange, digest!(4));
+        fixture.assert_file_exists(Apple, digest!(5), Metadata::file(1));
+        fixture.assert_file_exists(Orange, digest!(6), Metadata::file(1));
+        fixture.assert_bytes_used(3);
+        fixture.get_artifact(Apple, digest!(1), jid!(11), GetArtifact::Get);
+    }
+
+    #[test]
+    fn failure_flow() {
+        let mut fixture = Fixture::new(10, fs! {});
+        fixture.assert_bytes_used(0);
+
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_bytes_used(0);
+
+        fixture.got_artifact_failure(Apple, digest!(42), vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_bytes_used(0);
+
+        fixture.get_artifact(Apple, digest!(42), jid!(4), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(42), jid!(5), GetArtifact::Wait);
+        fixture.get_artifact(Apple, digest!(42), jid!(6), GetArtifact::Wait);
+
+        fixture.got_artifact_success_file(Apple, digest!(42), 1, vec![jid!(4), jid!(5), jid!(6)]);
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.assert_bytes_used(1);
+    }
+
+    #[test]
+    fn cache_path() {
+        let fixture = Fixture::new(10, fs! {});
+        let cache_path: PathBuf = long_path!("/z/sha256/apple", 42);
+        assert_eq!(fixture.cache.cache_path(Apple, &digest!(42)), cache_path);
+    }
+
+    #[test]
+    fn temp_file() {
+        let fixture = Fixture::new(10, fs! {});
+        let temp_file = fixture.cache.temp_file();
+        assert_eq!(temp_file.path(), Path::new("/z/tmp/000"));
+        assert_eq!(
+            fixture.fs.metadata(temp_file.path()).unwrap().unwrap(),
+            Metadata::file(0)
+        );
+    }
+
+    #[test]
+    fn temp_dir() {
+        let fixture = Fixture::new(10, fs! {});
+        let temp_dir = fixture.cache.temp_dir();
+        assert_eq!(temp_dir.path(), Path::new("/z/tmp/000"));
+        assert_eq!(
+            fixture.fs.metadata(temp_dir.path()).unwrap().unwrap(),
+            Metadata::directory(0)
+        );
     }
 }
