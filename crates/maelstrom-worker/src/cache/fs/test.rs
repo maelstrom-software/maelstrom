@@ -399,7 +399,7 @@ pub(crate) use fs;
 
 #[derive(Debug)]
 pub struct Fs {
-    state: Rc<RefCell<State>>,
+    state: RefCell<State>,
 }
 
 enum LookupComponentPath<'state> {
@@ -426,11 +426,11 @@ impl Fs {
     pub fn new(root: Entry) -> Self {
         assert!(root.is_directory());
         Self {
-            state: Rc::new(RefCell::new(State {
+            state: RefCell::new(State {
                 root,
                 last_random_number: 0,
                 recursive_rmdirs: Default::default(),
-            })),
+            }),
         }
     }
 
