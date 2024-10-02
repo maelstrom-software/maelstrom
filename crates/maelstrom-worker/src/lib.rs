@@ -15,7 +15,7 @@ use cache::{
         std::{Fs as StdFs, TempDir},
         TempDir as _, TempFile as _,
     },
-    Cache, CacheDir, GotArtifact,
+    Cache, CacheDir, EntryKind, GotArtifact,
 };
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
@@ -489,7 +489,8 @@ async fn handle_incoming_messages(
     }
 }
 
-type DefaultDispatcher = Dispatcher<DispatcherAdapter, ArtifactFetcher, BrokerSender, Cache<StdFs>>;
+type DefaultDispatcher =
+    Dispatcher<DispatcherAdapter, ArtifactFetcher, BrokerSender, Cache<StdFs, EntryKind>>;
 
 async fn dispatcher_main(
     config: Config,

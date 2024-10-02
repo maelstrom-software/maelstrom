@@ -85,7 +85,7 @@ pub struct LayerTracker {
     layers: NonEmpty<Sha256Digest>,
     bottom_layers: HashMap<Sha256Digest, PendingBottomLayer>,
     top_fs_layer: PendingTopLayer,
-    cache_keys: HashSet<Key>,
+    cache_keys: HashSet<Key<EntryKind>>,
     pending_manifest_dependencies: HashMap<Sha256Digest, Vec<Sha256Digest>>,
 }
 
@@ -352,11 +352,11 @@ impl LayerTracker {
         ) || (self.bottom_layers_all_ready() && self.layers.len() < 2)
     }
 
-    pub fn into_cache_keys(self) -> HashSet<Key> {
+    pub fn into_cache_keys(self) -> HashSet<Key<EntryKind>> {
         self.cache_keys
     }
 
-    pub fn into_path_and_cache_keys(self) -> (PathBuf, HashSet<Key>) {
+    pub fn into_path_and_cache_keys(self) -> (PathBuf, HashSet<Key<EntryKind>>) {
         assert!(self.is_complete());
         if self.layers.len() < 2 {
             (

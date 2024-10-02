@@ -117,7 +117,7 @@ pub trait Cache<FsT: cache::fs::Fs> {
 }
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
-impl Cache<cache::fs::std::Fs> for cache::Cache<cache::fs::std::Fs> {
+impl Cache<cache::fs::std::Fs> for cache::Cache<cache::fs::std::Fs, cache::EntryKind> {
     fn get_artifact(
         &mut self,
         kind: cache::EntryKind,
@@ -268,7 +268,7 @@ struct AvailableJob {
     jid: JobId,
     spec: JobSpec,
     path: PathBuf,
-    cache_keys: HashSet<cache::Key>,
+    cache_keys: HashSet<cache::Key<cache::EntryKind>>,
 }
 
 impl PartialEq for AvailableJob {
@@ -327,7 +327,7 @@ enum ExecutingJobState<DepsT: Deps> {
 /// and destroyed when we get a `Message::JobCompleted`.
 struct ExecutingJob<DepsT: Deps> {
     state: ExecutingJobState<DepsT>,
-    cache_keys: HashSet<cache::Key>,
+    cache_keys: HashSet<cache::Key<cache::EntryKind>>,
 }
 
 /// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
@@ -536,7 +536,7 @@ where
             *state = ExecutingJobState::Canceled;
         } else {
             // It may be the queue.
-            let mut keys_to_drop: Vec<cache::Key> = vec![];
+            let mut keys_to_drop: Vec<cache::Key<cache::EntryKind>> = vec![];
             let keys_to_drop_ref = &mut keys_to_drop;
             self.available.retain(|entry| {
                 if entry.jid != jid {
@@ -829,10 +829,10 @@ mod tests {
 
     struct TestState {
         messages: Vec<TestMessage>,
-        get_artifact_returns: HashMap<cache::Key, GetArtifact>,
-        got_artifact_success_returns: HashMap<cache::Key, Vec<JobId>>,
-        got_artifact_failure_returns: HashMap<cache::Key, Vec<JobId>>,
-        cache_path_returns: HashMap<cache::Key, PathBuf>,
+        get_artifact_returns: HashMap<cache::Key<cache::EntryKind>, GetArtifact>,
+        got_artifact_success_returns: HashMap<cache::Key<cache::EntryKind>, Vec<JobId>>,
+        got_artifact_failure_returns: HashMap<cache::Key<cache::EntryKind>, Vec<JobId>>,
+        cache_path_returns: HashMap<cache::Key<cache::EntryKind>, PathBuf>,
         closed: bool,
         last_random_number: u64,
     }
@@ -1115,10 +1115,10 @@ mod tests {
     impl Fixture {
         fn new<const L: usize, const M: usize, const N: usize, const O: usize>(
             slots: u16,
-            get_artifact_returns: [(cache::Key, GetArtifact); L],
-            got_artifact_success_returns: [(cache::Key, Vec<JobId>); M],
-            got_artifact_failure_returns: [(cache::Key, Vec<JobId>); N],
-            cache_path_returns: [(cache::Key, PathBuf); O],
+            get_artifact_returns: [(cache::Key<cache::EntryKind>, GetArtifact); L],
+            got_artifact_success_returns: [(cache::Key<cache::EntryKind>, Vec<JobId>); M],
+            got_artifact_failure_returns: [(cache::Key<cache::EntryKind>, Vec<JobId>); N],
+            cache_path_returns: [(cache::Key<cache::EntryKind>, PathBuf); O],
         ) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
                 messages: Vec::default(),

@@ -15,7 +15,8 @@ use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
     ffi::OsString,
-    fmt::{self, Debug, Formatter},
+    fmt::{self, Debug, Display, Formatter},
+    hash::Hash,
     iter::IntoIterator,
     mem,
     num::NonZeroU32,
@@ -175,7 +176,14 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, strum::Display, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
+pub trait KeyKind: Clone + Copy + Debug + Display + Eq + Hash + PartialEq {
+    type Iterator: Iterator<Item = Self>;
+    fn iter() -> Self::Iterator;
+}
+
+#[derive(
+    Clone, Copy, Debug, strum::Display, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter,
+)]
 #[strum(serialize_all = "snake_case")]
 pub enum EntryKind {
     Blob,
@@ -183,20 +191,22 @@ pub enum EntryKind {
     UpperFsLayer,
 }
 
-impl EntryKind {
-    fn iter() -> impl DoubleEndedIterator<Item = Self> {
+impl KeyKind for EntryKind {
+    type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
+
+    fn iter() -> Self::Iterator {
         <Self as strum::IntoEnumIterator>::iter()
     }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Key {
-    pub kind: EntryKind,
+pub struct Key<KeyKindT> {
+    pub kind: KeyKindT,
     pub digest: Sha256Digest,
 }
 
-impl Key {
-    pub fn new(kind: EntryKind, digest: Sha256Digest) -> Self {
+impl<KeyKindT> Key<KeyKindT> {
+    pub fn new(kind: KeyKindT, digest: Sha256Digest) -> Self {
         Self { kind, digest }
     }
 }
@@ -229,25 +239,30 @@ enum Entry {
 
 /// An implementation of the "newtype" pattern so that we can implement [`HeapDeps`] on a
 /// [`HashMap`].
-#[derive(Default)]
-struct Map(HashMap<Key, Entry>);
+struct Map<KeyKindT: KeyKind>(HashMap<Key<KeyKindT>, Entry>);
 
-impl Deref for Map {
-    type Target = HashMap<Key, Entry>;
+impl<KeyKindT: KeyKind> Default for Map<KeyKindT> {
+    fn default() -> Self {
+        Self(HashMap::default())
+    }
+}
+
+impl<KeyKindT: KeyKind> Deref for Map<KeyKindT> {
+    type Target = HashMap<Key<KeyKindT>, Entry>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl DerefMut for Map {
+impl<KeyKindT: KeyKind> DerefMut for Map<KeyKindT> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl HeapDeps for Map {
-    type Element = Key;
+impl<KeyKindT: KeyKind> HeapDeps for Map<KeyKindT> {
+    type Element = Key<KeyKindT>;
 
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
         let lhs_priority = match self.get(lhs) {
@@ -274,18 +289,18 @@ pub struct CacheDir;
 /// Manage a directory of downloaded, extracted artifacts. Coordinate fetching of these artifacts,
 /// and removing them when they are no longer in use and the amount of space used by the directory
 /// has grown too large.
-pub struct Cache<FsT> {
+pub struct Cache<FsT, KeyKindT: KeyKind> {
     fs: FsT,
     root: PathBuf,
-    entries: Map,
-    heap: Heap<Map>,
+    entries: Map<KeyKindT>,
+    heap: Heap<Map<KeyKindT>>,
     next_priority: u64,
     bytes_used: u64,
     bytes_used_target: u64,
     log: Logger,
 }
 
-impl<FsT: Fs> Cache<FsT> {
+impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     /// Create a new [Cache] rooted at `root`. The directory `root` and all necessary ancestors
     /// will be created, along with `{root}/removing` and `{root}/{kind}/sha256`. Any pre-existing
     /// entries in `{root}/removing` and `{root}/{kind}/sha256` will be removed. That implies that
@@ -332,9 +347,9 @@ impl<FsT: Fs> Cache<FsT> {
 
         let sha256 = root.join("sha256");
         fs.mkdir_recursively(&sha256).unwrap();
-        Self::remove_all_from_directory_except(&fs, &root, &sha256, EntryKind::iter());
+        Self::remove_all_from_directory_except(&fs, &root, &sha256, KeyKindT::iter());
 
-        for kind in EntryKind::iter() {
+        for kind in KeyKindT::iter() {
             let kind_dir = sha256.join(kind.to_string());
             if let Some(metadata) = fs.metadata(&kind_dir).unwrap() {
                 Self::remove_in_background(&fs, &root, &kind_dir, metadata.type_);
@@ -358,7 +373,7 @@ impl<FsT: Fs> Cache<FsT> {
     /// return values.
     pub fn get_artifact(
         &mut self,
-        kind: EntryKind,
+        kind: KeyKindT,
         digest: Sha256Digest,
         jid: JobId,
     ) -> GetArtifact {
@@ -400,7 +415,7 @@ impl<FsT: Fs> Cache<FsT> {
 
     /// Notify the cache that an artifact fetch has failed. The returned vector lists the jobs that
     /// are affected and that need to be canceled.
-    pub fn got_artifact_failure(&mut self, kind: EntryKind, digest: &Sha256Digest) -> Vec<JobId> {
+    pub fn got_artifact_failure(&mut self, kind: KeyKindT, digest: &Sha256Digest) -> Vec<JobId> {
         let Some(Entry::Getting(jobs)) = self.entries.remove(&Key::new(kind, digest.clone()))
         else {
             panic!("Got got_artifact in unexpected state");
@@ -412,7 +427,7 @@ impl<FsT: Fs> Cache<FsT> {
     /// lists the jobs that are affected, and the path they can use to access the artifact.
     pub fn got_artifact_success(
         &mut self,
-        kind: EntryKind,
+        kind: KeyKindT,
         digest: &Sha256Digest,
         artifact: GotArtifact<FsT>,
     ) -> Vec<JobId> {
@@ -466,7 +481,7 @@ impl<FsT: Fs> Cache<FsT> {
     }
 
     /// Notify the cache that a reference to an artifact is no longer needed.
-    pub fn decrement_ref_count(&mut self, kind: EntryKind, digest: &Sha256Digest) {
+    pub fn decrement_ref_count(&mut self, kind: KeyKindT, digest: &Sha256Digest) {
         let key = Key::new(kind, digest.clone());
         let entry = self
             .entries
@@ -497,7 +512,7 @@ impl<FsT: Fs> Cache<FsT> {
     }
 
     /// Return the directory path for the artifact referenced by `digest`.
-    pub fn cache_path(&self, kind: EntryKind, digest: &Sha256Digest) -> PathBuf {
+    pub fn cache_path(&self, kind: KeyKindT, digest: &Sha256Digest) -> PathBuf {
         let mut path = self.root.join("sha256");
         path.push(kind.to_string());
         path.push(digest.to_string());
@@ -597,7 +612,7 @@ mod tests {
     use std::{iter, rc::Rc};
 
     struct Fixture {
-        cache: Cache<Rc<test::Fs>>,
+        cache: Cache<Rc<test::Fs>, EntryKind>,
         fs: Rc<test::Fs>,
     }
 
