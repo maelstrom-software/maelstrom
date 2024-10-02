@@ -332,6 +332,18 @@ impl Entry {
         component_path.pop();
         (entry.unwrap(), component_path)
     }
+
+    /// Treating `self` as the root of the file system, resolve `path` to its parent directory.
+    /// Return an error if `path` exists, or if the parent directory can't be found.
+    fn lookup_parent(&self, path: &Path) -> Result<ComponentPath, Error> {
+        match self.lookup_component_path(path) {
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::NotFound => Err(Error::NoEnt),
+            LookupComponentPath::Found(_, _) => Err(Error::Exists),
+            LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
+        }
+    }
 }
 
 macro_rules! fs {
@@ -520,13 +532,7 @@ impl super::Fs for Fs {
 
     fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
         let root = &mut self.state.borrow_mut().root;
-        let parent_component_path = match root.lookup_component_path(path) {
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::NotFound => Err(Error::NoEnt),
-            LookupComponentPath::Found(_, _) => Err(Error::Exists),
-            LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
-        }?;
+        let parent_component_path = root.lookup_parent(path)?;
         root.append_entry_to_directory(
             &parent_component_path,
             path.file_name().unwrap(),
@@ -537,13 +543,7 @@ impl super::Fs for Fs {
 
     fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
         let root = &mut self.state.borrow_mut().root;
-        let parent_component_path = match root.lookup_component_path(link) {
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::NotFound => Err(Error::NoEnt),
-            LookupComponentPath::Found(_, _) => Err(Error::Exists),
-            LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
-        }?;
+        let parent_component_path = root.lookup_parent(link)?;
         root.append_entry_to_directory(
             &parent_component_path,
             link.file_name().unwrap(),
@@ -554,13 +554,7 @@ impl super::Fs for Fs {
 
     fn mkdir(&self, path: &Path) -> Result<(), Error> {
         let root = &mut self.state.borrow_mut().root;
-        let parent_component_path = match root.lookup_component_path(path) {
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::NotFound => Err(Error::NoEnt),
-            LookupComponentPath::Found(_, _) => Err(Error::Exists),
-            LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
-        }?;
+        let parent_component_path = root.lookup_parent(path)?;
         root.append_entry_to_directory(
             &parent_component_path,
             path.file_name().unwrap(),
