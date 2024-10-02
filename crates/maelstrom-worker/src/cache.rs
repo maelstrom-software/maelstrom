@@ -610,9 +610,25 @@ mod tests {
     use maelstrom_test::*;
     use slog::{o, Discard};
     use std::{iter, rc::Rc};
+    use TestKeyKind::*;
+
+    #[derive(Clone, Copy, Debug, strum::Display, strum::EnumIter, Eq, Hash, PartialEq)]
+    #[strum(serialize_all = "snake_case")]
+    pub enum TestKeyKind {
+        Apple,
+        Orange,
+    }
+
+    impl KeyKind for TestKeyKind {
+        type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
+
+        fn iter() -> Self::Iterator {
+            <Self as strum::IntoEnumIterator>::iter()
+        }
+    }
 
     struct Fixture {
-        cache: Cache<Rc<test::Fs>, EntryKind>,
+        cache: Cache<Rc<test::Fs>, TestKeyKind>,
         fs: Rc<test::Fs>,
     }
 
@@ -641,29 +657,42 @@ mod tests {
         }
 
         #[track_caller]
-        fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId, expected: GetArtifact) {
-            let result = self.cache.get_artifact(EntryKind::Blob, digest, jid);
+        fn get_artifact(
+            &mut self,
+            kind: TestKeyKind,
+            digest: Sha256Digest,
+            jid: JobId,
+            expected: GetArtifact,
+        ) {
+            let result = self.cache.get_artifact(kind, digest, jid);
             assert_eq!(result, expected);
         }
 
-        fn get_artifact_ign(&mut self, digest: Sha256Digest, jid: JobId) {
-            self.cache.get_artifact(EntryKind::Blob, digest, jid);
+        fn get_artifact_ign(&mut self, kind: TestKeyKind, digest: Sha256Digest, jid: JobId) {
+            self.cache.get_artifact(kind, digest, jid);
         }
 
         #[track_caller]
         fn got_artifact_success_directory(
             &mut self,
+            kind: TestKeyKind,
             digest: Sha256Digest,
             size: u64,
             expected: Vec<JobId>,
         ) {
             let source = self.cache.temp_dir();
-            self.got_artifact_success(digest, GotArtifact::Directory { source, size }, expected)
+            self.got_artifact_success(
+                kind,
+                digest,
+                GotArtifact::Directory { source, size },
+                expected,
+            )
         }
 
         #[track_caller]
         fn got_artifact_success_file(
             &mut self,
+            kind: TestKeyKind,
             digest: Sha256Digest,
             size: u64,
             expected: Vec<JobId>,
@@ -679,45 +708,60 @@ mod tests {
                         .collect::<Vec<_>>(),
                 )
                 .unwrap();
-            self.got_artifact_success(digest, GotArtifact::File { source }, expected)
+            self.got_artifact_success(kind, digest, GotArtifact::File { source }, expected)
         }
 
         #[track_caller]
         fn got_artifact_success_symlink(
             &mut self,
+            kind: TestKeyKind,
             digest: Sha256Digest,
             target: &str,
             expected: Vec<JobId>,
         ) {
             let target = target.into();
-            self.got_artifact_success(digest, GotArtifact::Symlink { target }, expected)
+            self.got_artifact_success(kind, digest, GotArtifact::Symlink { target }, expected)
         }
 
         #[track_caller]
         fn got_artifact_success(
             &mut self,
+            kind: TestKeyKind,
             digest: Sha256Digest,
             artifact: GotArtifact<Rc<test::Fs>>,
             expected: Vec<JobId>,
         ) {
-            let result = self
-                .cache
-                .got_artifact_success(EntryKind::Blob, &digest, artifact);
+            let result = self.cache.got_artifact_success(kind, &digest, artifact);
             assert_eq!(result, expected);
         }
 
         #[track_caller]
-        fn got_artifact_failure(&mut self, digest: Sha256Digest, expected: Vec<JobId>) {
-            let result = self.cache.got_artifact_failure(EntryKind::Blob, &digest);
+        fn got_artifact_failure(
+            &mut self,
+            kind: TestKeyKind,
+            digest: Sha256Digest,
+            expected: Vec<JobId>,
+        ) {
+            let result = self.cache.got_artifact_failure(kind, &digest);
             assert_eq!(result, expected);
         }
 
-        fn got_artifact_success_directory_ign(&mut self, digest: Sha256Digest, size: u64) {
+        fn got_artifact_success_directory_ign(
+            &mut self,
+            kind: TestKeyKind,
+            digest: Sha256Digest,
+            size: u64,
+        ) {
             let source = self.cache.temp_dir();
-            self.got_artifact_success_ign(digest, GotArtifact::Directory { source, size })
+            self.got_artifact_success_ign(kind, digest, GotArtifact::Directory { source, size })
         }
 
-        fn got_artifact_success_file_ign(&mut self, digest: Sha256Digest, size: u64) {
+        fn got_artifact_success_file_ign(
+            &mut self,
+            kind: TestKeyKind,
+            digest: Sha256Digest,
+            size: u64,
+        ) {
             let source = self.cache.temp_file();
             let source_path = source.path();
             self.fs.remove(source_path).unwrap();
@@ -729,20 +773,20 @@ mod tests {
                         .collect::<Vec<_>>(),
                 )
                 .unwrap();
-            self.got_artifact_success_ign(digest, GotArtifact::File { source })
+            self.got_artifact_success_ign(kind, digest, GotArtifact::File { source })
         }
 
         fn got_artifact_success_ign(
             &mut self,
+            kind: TestKeyKind,
             digest: Sha256Digest,
             artifact: GotArtifact<Rc<test::Fs>>,
         ) {
-            self.cache
-                .got_artifact_success(EntryKind::Blob, &digest, artifact);
+            self.cache.got_artifact_success(kind, &digest, artifact);
         }
 
-        fn decrement_ref_count(&mut self, digest: Sha256Digest) {
-            self.cache.decrement_ref_count(EntryKind::Blob, &digest);
+        fn decrement_ref_count(&mut self, kind: TestKeyKind, digest: Sha256Digest) {
+            self.cache.decrement_ref_count(kind, &digest);
         }
     }
 
@@ -750,18 +794,17 @@ mod tests {
     fn get_miss_filled_with_directory() {
         let mut fixture = Fixture::new(1000, fs! {});
 
-        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_directory(digest!(42), 100, vec![jid!(1)]);
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_directory(Apple, digest!(42), 100, vec![jid!(1)]);
 
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "000000000000000000000000000000000000000000000000000000000000002a" {},
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -774,18 +817,17 @@ mod tests {
     fn get_miss_filled_with_file() {
         let mut fixture = Fixture::new(1000, fs! {});
 
-        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(digest!(42), 8, vec![jid!(1)]);
+        fixture.get_artifact(Orange, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(Orange, digest!(42), 8, vec![jid!(1)]);
 
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {},
+                    orange {
                         "000000000000000000000000000000000000000000000000000000000000002a"(8),
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
                 },
                 tmp {},
                 removing {},
@@ -798,19 +840,18 @@ mod tests {
     fn get_miss_filled_with_symlink() {
         let mut fixture = Fixture::new(1000, fs! {});
 
-        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_symlink(digest!(42), "/somewhere", vec![jid!(1)]);
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_symlink(Apple, digest!(42), "/somewhere", vec![jid!(1)]);
 
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "000000000000000000000000000000000000000000000000000000000000002a"
                             -> "/somewhere",
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -823,17 +864,16 @@ mod tests {
     fn get_miss_filled_with_directory_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
         let mut fixture = Fixture::new(1000, fs! {});
 
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_directory(digest!(42), 10000, vec![jid!(1)]);
-        fixture.decrement_ref_count(digest!(42));
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.got_artifact_success_directory(Apple, digest!(42), 10000, vec![jid!(1)]);
+        fixture.decrement_ref_count(Apple, digest!(42));
 
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {},
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    apple {},
+                    orange {},
                 },
                 tmp {},
                 removing {
@@ -848,17 +888,16 @@ mod tests {
     fn get_miss_filled_with_file_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
         let mut fixture = Fixture::new(1000, fs! {});
 
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_file(digest!(42), 10000, vec![jid!(1)]);
-        fixture.decrement_ref_count(digest!(42));
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.got_artifact_success_file(Apple, digest!(42), 10000, vec![jid!(1)]);
+        fixture.decrement_ref_count(Apple, digest!(42));
 
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {},
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    apple {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -871,17 +910,16 @@ mod tests {
     fn get_miss_filled_with_symlink_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_symlink(digest!(42), "/somewhere", vec![jid!(1)]);
-        fixture.decrement_ref_count(digest!(42));
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.got_artifact_success_symlink(Apple, digest!(42), "/somewhere", vec![jid!(1)]);
+        fixture.decrement_ref_count(Apple, digest!(42));
 
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {},
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    apple {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -894,24 +932,23 @@ mod tests {
     fn cache_entries_are_removed_in_lru_order() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.get_artifact_ign(digest!(1), jid!(1));
-        fixture.got_artifact_success_directory_ign(digest!(1), 4);
-        fixture.decrement_ref_count(digest!(1));
+        fixture.get_artifact_ign(Apple, digest!(1), jid!(1));
+        fixture.got_artifact_success_directory_ign(Apple, digest!(1), 4);
+        fixture.decrement_ref_count(Apple, digest!(1));
 
-        fixture.get_artifact_ign(digest!(2), jid!(2));
-        fixture.got_artifact_success_directory_ign(digest!(2), 4);
-        fixture.decrement_ref_count(digest!(2));
+        fixture.get_artifact_ign(Apple, digest!(2), jid!(2));
+        fixture.got_artifact_success_directory_ign(Apple, digest!(2), 4);
+        fixture.decrement_ref_count(Apple, digest!(2));
 
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "0000000000000000000000000000000000000000000000000000000000000001" {},
                         "0000000000000000000000000000000000000000000000000000000000000002" {},
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -919,18 +956,17 @@ mod tests {
         });
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.get_artifact_ign(digest!(3), jid!(3));
-        fixture.got_artifact_success_directory(digest!(3), 4, vec![jid!(3)]);
+        fixture.get_artifact_ign(Apple, digest!(3), jid!(3));
+        fixture.got_artifact_success_directory(Apple, digest!(3), 4, vec![jid!(3)]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "0000000000000000000000000000000000000000000000000000000000000002" {},
                         "0000000000000000000000000000000000000000000000000000000000000003" {},
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {
@@ -940,17 +976,16 @@ mod tests {
         });
         fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
 
-        fixture.decrement_ref_count(digest!(3));
+        fixture.decrement_ref_count(Apple, digest!(3));
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "0000000000000000000000000000000000000000000000000000000000000002" {},
                         "0000000000000000000000000000000000000000000000000000000000000003" {},
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {
@@ -960,18 +995,17 @@ mod tests {
         });
         fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
 
-        fixture.get_artifact_ign(digest!(4), jid!(4));
-        fixture.got_artifact_success_directory(digest!(4), 4, vec![jid!(4)]);
+        fixture.get_artifact_ign(Apple, digest!(4), jid!(4));
+        fixture.got_artifact_success_directory(Apple, digest!(4), 4, vec![jid!(4)]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "0000000000000000000000000000000000000000000000000000000000000003" {},
                         "0000000000000000000000000000000000000000000000000000000000000004" {},
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {
@@ -985,17 +1019,16 @@ mod tests {
             "/z/removing/0000000000000002",
         ]);
 
-        fixture.decrement_ref_count(digest!(4));
+        fixture.decrement_ref_count(Apple, digest!(4));
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "0000000000000000000000000000000000000000000000000000000000000003" {},
                         "0000000000000000000000000000000000000000000000000000000000000004" {},
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {
@@ -1014,32 +1047,31 @@ mod tests {
     fn lru_order_augmented_by_last_use() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.get_artifact_ign(digest!(1), jid!(1));
-        fixture.got_artifact_success_directory_ign(digest!(1), 3);
+        fixture.get_artifact_ign(Apple, digest!(1), jid!(1));
+        fixture.got_artifact_success_directory_ign(Apple, digest!(1), 3);
 
-        fixture.get_artifact_ign(digest!(2), jid!(2));
-        fixture.got_artifact_success_directory_ign(digest!(2), 3);
+        fixture.get_artifact_ign(Apple, digest!(2), jid!(2));
+        fixture.got_artifact_success_directory_ign(Apple, digest!(2), 3);
 
-        fixture.get_artifact_ign(digest!(3), jid!(3));
-        fixture.got_artifact_success_directory_ign(digest!(3), 3);
+        fixture.get_artifact_ign(Apple, digest!(3), jid!(3));
+        fixture.got_artifact_success_directory_ign(Apple, digest!(3), 3);
 
-        fixture.decrement_ref_count(digest!(3));
-        fixture.decrement_ref_count(digest!(2));
-        fixture.decrement_ref_count(digest!(1));
+        fixture.decrement_ref_count(Apple, digest!(3));
+        fixture.decrement_ref_count(Apple, digest!(2));
+        fixture.decrement_ref_count(Apple, digest!(1));
 
-        fixture.get_artifact_ign(digest!(4), jid!(4));
-        fixture.got_artifact_success_directory(digest!(4), 3, vec![jid!(4)]);
+        fixture.get_artifact_ign(Apple, digest!(4), jid!(4));
+        fixture.got_artifact_success_directory(Apple, digest!(4), 3, vec![jid!(4)]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "0000000000000000000000000000000000000000000000000000000000000001" {},
                         "0000000000000000000000000000000000000000000000000000000000000002" {},
                         "0000000000000000000000000000000000000000000000000000000000000004" {},
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {
@@ -1054,33 +1086,42 @@ mod tests {
     fn multiple_get_requests_for_empty() {
         let mut fixture = Fixture::new(1000, fs! {});
 
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Wait);
-        fixture.get_artifact(digest!(42), jid!(3), GetArtifact::Wait);
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
 
-        fixture.got_artifact_success_directory(digest!(42), 100, vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.got_artifact_success_directory(
+            Apple,
+            digest!(42),
+            100,
+            vec![jid!(1), jid!(2), jid!(3)],
+        );
     }
 
     #[test]
     fn multiple_get_requests_for_empty_larger_than_goal_remove_on_last_decrement() {
         let mut fixture = Fixture::new(1000, fs! {});
 
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Wait);
-        fixture.get_artifact(digest!(42), jid!(3), GetArtifact::Wait);
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
 
-        fixture.got_artifact_success_directory(digest!(42), 10000, vec![jid!(1), jid!(2), jid!(3)]);
-        fixture.decrement_ref_count(digest!(42));
-        fixture.decrement_ref_count(digest!(42));
+        fixture.got_artifact_success_directory(
+            Apple,
+            digest!(42),
+            10000,
+            vec![jid!(1), jid!(2), jid!(3)],
+        );
+        fixture.decrement_ref_count(Apple, digest!(42));
+        fixture.decrement_ref_count(Apple, digest!(42));
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "000000000000000000000000000000000000000000000000000000000000002a" {},
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -1088,14 +1129,13 @@ mod tests {
         });
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.decrement_ref_count(digest!(42));
+        fixture.decrement_ref_count(Apple, digest!(42));
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {},
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    apple {},
+                    orange {},
                 },
                 tmp {},
                 removing {
@@ -1110,21 +1150,20 @@ mod tests {
     fn get_request_for_currently_used() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_file_ign(digest!(42), 100);
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.got_artifact_success_file_ign(Apple, digest!(42), 100);
 
-        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Success);
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Success);
 
-        fixture.decrement_ref_count(digest!(42));
+        fixture.decrement_ref_count(Apple, digest!(42));
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "000000000000000000000000000000000000000000000000000000000000002a"(100),
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -1132,14 +1171,13 @@ mod tests {
         });
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.decrement_ref_count(digest!(42));
+        fixture.decrement_ref_count(Apple, digest!(42));
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {},
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    apple {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -1152,23 +1190,22 @@ mod tests {
     fn get_request_for_cached_followed_by_big_get_does_not_evict_until_decrement_ref_count() {
         let mut fixture = Fixture::new(100, fs! {});
 
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_success_file_ign(digest!(42), 10);
-        fixture.decrement_ref_count(digest!(42));
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.got_artifact_success_file_ign(Apple, digest!(42), 10);
+        fixture.decrement_ref_count(Apple, digest!(42));
 
-        fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Success);
-        fixture.get_artifact(digest!(43), jid!(3), GetArtifact::Get);
-        fixture.got_artifact_success_file(digest!(43), 100, vec![jid!(3)]);
+        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Success);
+        fixture.get_artifact(Apple, digest!(43), jid!(3), GetArtifact::Get);
+        fixture.got_artifact_success_file(Apple, digest!(43), 100, vec![jid!(3)]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "000000000000000000000000000000000000000000000000000000000000002a"(10),
                         "000000000000000000000000000000000000000000000000000000000000002b"(100),
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -1176,16 +1213,15 @@ mod tests {
         });
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.decrement_ref_count(digest!(42));
+        fixture.decrement_ref_count(Apple, digest!(42));
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {
+                    apple {
                         "000000000000000000000000000000000000000000000000000000000000002b"(100),
                     },
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    orange {},
                 },
                 tmp {},
                 removing {},
@@ -1197,8 +1233,8 @@ mod tests {
     #[test]
     fn get_request_for_empty_with_get_failure() {
         let mut fixture = Fixture::new(1000, fs! {});
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_failure(digest!(42), vec![jid!(1)]);
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.got_artifact_failure(Apple, digest!(42), vec![jid!(1)]);
     }
 
     #[test]
@@ -1208,34 +1244,34 @@ mod tests {
             fs! {
                 z {
                     sha256 {
-                        blob {
+                        apple {
                             "000000000000000000000000000000000000000000000000000000000000002a"(10),
                         }
                     }
                 }
             },
         );
-        fixture.get_artifact(digest!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
     }
 
     #[test]
     fn multiple_get_requests_for_empty_with_download_and_extract_failure() {
         let mut fixture = Fixture::new(1000, fs! {});
 
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.get_artifact_ign(digest!(42), jid!(2));
-        fixture.get_artifact_ign(digest!(42), jid!(3));
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(2));
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(3));
 
-        fixture.got_artifact_failure(digest!(42), vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.got_artifact_failure(Apple, digest!(42), vec![jid!(1), jid!(2), jid!(3)]);
     }
 
     #[test]
     fn get_after_error_retries() {
         let mut fixture = Fixture::new(1000, fs! {});
 
-        fixture.get_artifact_ign(digest!(42), jid!(1));
-        fixture.got_artifact_failure(digest!(42), vec![jid!(1)]);
-        fixture.get_artifact(digest!(42), jid!(2), GetArtifact::Get);
+        fixture.get_artifact_ign(Apple, digest!(42), jid!(1));
+        fixture.got_artifact_failure(Apple, digest!(42), vec![jid!(1)]);
+        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Get);
     }
 
     #[test]
@@ -1250,14 +1286,17 @@ mod tests {
                         "0000000000000003" -> "foo",
                     },
                     sha256 {
-                        blob {
-                            bad_blob {
+                        apple {
+                            bad_apple {
                                 foo(20),
-                                symlink -> "bad_blob",
-                                more_bad_blob {
+                                symlink -> "bad_apple",
+                                more_bad_apple {
                                     bar(20),
                                 },
                             },
+                        },
+                        banana {
+                            bread(20),
                         },
                     },
                     garbage {
@@ -1274,9 +1313,8 @@ mod tests {
             z {
                 "CACHEDIR.TAG"(43),
                 sha256 {
-                    blob {},
-                    bottom_fs_layer {},
-                    upper_fs_layer {},
+                    apple {},
+                    orange {},
                 },
                 tmp {},
                 removing {
@@ -1289,10 +1327,13 @@ mod tests {
                         },
                     },
                     "0000000000000003" {
-                        bad_blob {
+                        bread(20),
+                    },
+                    "0000000000000004" {
+                        bad_apple {
                             foo(20),
-                            symlink -> "bad_blob",
-                            more_bad_blob {
+                            symlink -> "bad_apple",
+                            more_bad_apple {
                                 bar(20),
                             },
                         },
@@ -1304,6 +1345,7 @@ mod tests {
             "/z/removing/0000000000000001",
             "/z/removing/0000000000000002",
             "/z/removing/0000000000000003",
+            "/z/removing/0000000000000004",
         ]);
     }
 }
