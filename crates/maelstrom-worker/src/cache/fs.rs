@@ -93,61 +93,70 @@ pub trait Fs {
     /// Error type for methods.
     type Error: error::Error;
 
-    /// Return a random u64. This is used for creating unique path names in the directory removal
-    /// code path.
+    /// Return a random u64. This is used for creating unique path names.
     fn rand_u64(&self) -> u64;
 
-    /// Rename `source` to `destination`. Panic on file system error. Assume that all intermediate
-    /// directories exist for `destination`, and that `source` and `destination` are on the same
-    /// file system.
-    fn rename(&self, source: &Path, destination: &Path) -> Result<(), Self::Error>;
+    /// Get the metadata of the file at `path`. If `path` doesn't exist, return `Ok(None)`. If the
+    /// last component is a symlink, return the metadata about the symlink instead of trying to
+    /// resolve it. An error may be returned if there is an error attempting to resolve `path`.
+    /// For example, if `path` contains a dangling symlink, or if an intermediate component of the
+    /// path is a file.
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Self::Error>;
 
-    /// Remove `path`. Panic on file system error. Assume that `path` actually exists and is not a
-    /// directory.
-    fn remove(&self, path: &Path) -> Result<(), Self::Error>;
-
-    /// Remove `path` and all its descendants. `path` must exist, and it must be a directory. The
-    /// function will return an error immediately if `path` doesn't exist, can't be resolved, or
-    /// doesn't point to a directory. Otherwise, the removal will happen in the background on
-    /// another thread. If an error occurs there, the calling function won't be notified.
-    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Self::Error>;
-
-    /// Create an empty directory with given `path`.
-    fn mkdir(&self, path: &Path) -> Result<(), Self::Error>;
-
-    /// Ensure `path` exists and is a directory. If it doesn't exist, recusively ensure its parent exists,
-    /// then create it. Panic on file system error or if `path` or any of its ancestors aren't
-    /// directories.
-    fn mkdir_recursively(&self, path: &Path) -> Result<(), Self::Error>;
-
-    /// Return and iterator that will yield all of the children of a directory. Panic on file
-    /// system error or if `path` doesn't exist or isn't a directory.
+    /// Return and iterator that will yield all of the children of a directory, excluding "." and
+    /// "..". There must be a directory at `path`, or an error will be returned.
     fn read_dir(
         &self,
         path: &Path,
     ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Self::Error>>, Self::Error>;
 
-    /// Create a file with given `path` and `contents`. Panic on file system error, including if
-    /// the file already exists.
+    /// Create a file with given `path` and `contents`. There must not be any file or directory at
+    /// `path`, but its parent directory must be exist.
     fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Self::Error>;
 
-    /// Create a symlink at `link` that points to `target`. Panic on file system error.
+    /// Create a symlink at `link` that points to `target`. There must not be any file or directory
+    /// at `link`, but its parent directory must exist.
     fn symlink(&self, target: &Path, link: &Path) -> Result<(), Self::Error>;
 
-    /// Get the metadata of the file at `path`. Panic on file system error. If `path` doesn't
-    /// exist, return None. If the last component is a symlink, return the metadata about the
-    /// symlink instead of trying to resolve it.
-    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Self::Error>;
+    /// Create an empty directory at `path`. There must not be any file or directory at `path`, but
+    /// its parent directory must exist.
+    fn mkdir(&self, path: &Path) -> Result<(), Self::Error>;
+
+    /// Attempt to create a directory at `path` by creating any missing ancestor directories. Don't
+    /// error if there is already a directory at `path`.
+    fn mkdir_recursively(&self, path: &Path) -> Result<(), Self::Error>;
+
+    /// Remove an existing, non-directory entry at `path`.
+    fn remove(&self, path: &Path) -> Result<(), Self::Error>;
+
+    /// Remove an existing directory, and all of its descendants, on a background thread. `path`
+    /// must exist, and it must be a directory. This function will return an error immediately if
+    /// `path` doesn't exist, can't be resolved, or doesn't point to a directory. Otherwise, the
+    /// removal will happen in the background on another thread. If an error occurs there, the
+    /// calling function won't be notified.
+    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Self::Error>;
+
+    /// Rename `source` to `destination`. There are a bunch of rules that must be satisfied for
+    /// this to succeed:
+    ///   - `source` must exist.
+    ///   - Either `destination` exists, or its parent exists and is a directory.
+    ///   - If `destination` exists and `source` is not a directory, then `destination` must also
+    ///     no be a directory. It will be removed as part of the rename.
+    ///   - If `destination` exists and `source` is a directory, then `destination` must be an
+    ///     empty directory.
+    ///   - If `source` is a directory, it cannot be moved into one of its descendants, as this
+    ///     would create a disconnected cycle.
+    fn rename(&self, source: &Path, destination: &Path) -> Result<(), Self::Error>;
 
     /// The type returned by the [`Self::temp_file`] method. Some implementations may make this
     /// type [`Drop`] so that the temporary file can be cleaned up when it is closed.
     type TempFile: TempFile;
 
-    /// Create a new temporary file in the directory `parent`. Panic on file system error or if
-    /// `parent` isn't a directory.
+    /// Create a new temporary file in the directory `parent`.
     fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Self::Error>;
 
-    /// Make `temp_file` exist no more, by moving it to `target`.
+    /// Rename `temp_file` to `target` while consuming `temp_file`. This is different than the
+    /// caller just doing the rename itself in that it consumes `temp_file` without dropping it.
     fn persist_temp_file(
         &self,
         temp_file: Self::TempFile,
@@ -158,10 +167,10 @@ pub trait Fs {
     /// type [`Drop`] so that the temporary directory can be cleaned up when it is closed.
     type TempDir: TempDir;
 
-    /// Create a new temporary directory in the directory `parent`. Panic on file system error or
-    /// if `parent` isn't a directory.
+    /// Create a new temporary directory in the directory `parent`.
     fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Self::Error>;
 
-    /// Make `temp_dir` exist no more, by moving it to `target`.
+    /// Rename `temp_dir` to `target` while consuming `temp_dir`. This is different than the
+    /// caller just doing the rename itself in that it consumes `temp_dir` without dropping it.
     fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<(), Self::Error>;
 }
