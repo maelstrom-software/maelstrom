@@ -179,23 +179,14 @@ impl super::Fs for Fs {
     }
 
     fn read_file(&self, path: &Path, contents_out: &mut [u8]) -> Result<usize, Error> {
-        let root = &self.state.borrow().root;
-        match root.lookup_component_path(path) {
-            LookupComponentPath::FoundParent(_)
-            | LookupComponentPath::NotFound
-            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::Found(entry, component_path) => {
-                match root.expand_symlinks(entry, component_path) {
-                    ExpandSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
-                    ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
-                    ExpandSymlinks::FileAncestor => Err(Error::NotDir),
-                    ExpandSymlinks::FoundFile(contents) => {
-                        let to_read = contents.len().min(contents_out.len());
-                        contents_out[..to_read].copy_from_slice(&contents[..to_read]);
-                        Ok(to_read)
-                    }
-                }
+        match self.state.borrow().root.lookup_leaf(path)? {
+            ExpandSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
+            ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
+            ExpandSymlinks::FileAncestor => Err(Error::NotDir),
+            ExpandSymlinks::FoundFile(contents) => {
+                let to_read = contents.len().min(contents_out.len());
+                contents_out[..to_read].copy_from_slice(&contents[..to_read]);
+                Ok(to_read)
             }
         }
     }
@@ -204,25 +195,14 @@ impl super::Fs for Fs {
         &self,
         path: &Path,
     ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
-        let root = &self.state.borrow().root;
-        match root.lookup_component_path(path) {
-            LookupComponentPath::FoundParent(_)
-            | LookupComponentPath::NotFound
-            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::Found(entry, component_path) => {
-                match root.expand_symlinks(entry, component_path) {
-                    ExpandSymlinks::FoundFile(_) | ExpandSymlinks::FileAncestor => {
-                        Err(Error::NotDir)
-                    }
-                    ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
-                    ExpandSymlinks::FoundDirectory(entries, _) => Ok(entries
-                        .iter()
-                        .map(|(name, entry)| Ok((name.into(), entry.metadata())))
-                        .collect_vec()
-                        .into_iter()),
-                }
-            }
+        match self.state.borrow().root.lookup_leaf(path)? {
+            ExpandSymlinks::FoundFile(_) | ExpandSymlinks::FileAncestor => Err(Error::NotDir),
+            ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
+            ExpandSymlinks::FoundDirectory(entries, _) => Ok(entries
+                .iter()
+                .map(|(name, entry)| Ok((name.into(), entry.metadata())))
+                .collect_vec()
+                .into_iter()),
         }
     }
 
@@ -728,6 +708,20 @@ impl Entry {
             LookupComponentPath::NotFound => Err(Error::NoEnt),
             LookupComponentPath::Found(_, _) => Err(Error::Exists),
             LookupComponentPath::FoundParent(component_path) => Ok(component_path),
+        }
+    }
+
+    /// Treating `self` as the root of the file system, resolve `path`. If `path` resolves to a
+    /// symlink, expand it recursively until a non-symlink is found.
+    fn lookup_leaf(&self, path: &Path) -> Result<ExpandSymlinks, Error> {
+        match self.lookup_component_path(path) {
+            LookupComponentPath::FoundParent(_)
+            | LookupComponentPath::NotFound
+            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::Found(entry, component_path) => {
+                Ok(self.expand_symlinks(entry, component_path))
+            }
         }
     }
 }
