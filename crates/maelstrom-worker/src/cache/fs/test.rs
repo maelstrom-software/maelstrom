@@ -173,265 +173,70 @@ impl super::Fs for Fs {
     type Error = Error;
 
     fn rand_u64(&self) -> u64 {
-        let mut state = self.state.borrow_mut();
-        state.last_random_number += 1;
-        state.last_random_number
+        self.state.borrow_mut().rand_u64()
     }
 
     fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
-        match self.state.borrow().root.lookup_component_path(path) {
-            LookupComponentPath::Found(entry, _) => Ok(Some(entry.metadata())),
-            LookupComponentPath::FoundParent(_) | LookupComponentPath::NotFound => Ok(None),
-            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-        }
+        self.state.borrow().metadata(path)
     }
 
     fn read_file(&self, path: &Path, contents_out: &mut [u8]) -> Result<usize, Error> {
-        match self.state.borrow().root.lookup_leaf(path)? {
-            ExpandSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
-            ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
-            ExpandSymlinks::FileAncestor => Err(Error::NotDir),
-            ExpandSymlinks::FoundFile(contents) => {
-                let to_read = contents.len().min(contents_out.len());
-                contents_out[..to_read].copy_from_slice(&contents[..to_read]);
-                Ok(to_read)
-            }
-        }
+        self.state.borrow().read_file(path, contents_out)
     }
 
     fn read_dir(
         &self,
         path: &Path,
     ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
-        match self.state.borrow().root.lookup_leaf(path)? {
-            ExpandSymlinks::FoundFile(_) | ExpandSymlinks::FileAncestor => Err(Error::NotDir),
-            ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
-            ExpandSymlinks::FoundDirectory(entries, _) => Ok(entries
-                .iter()
-                .map(|(name, entry)| Ok((name.into(), entry.metadata())))
-                .collect_vec()
-                .into_iter()),
-        }
+        self.state.borrow().read_dir(path)
     }
 
     fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
-        let root = &mut self.state.borrow_mut().root;
-        let parent_component_path = root.lookup_parent(path)?;
-        root.append_entry_to_directory(
-            &parent_component_path,
-            path.file_name().unwrap(),
-            Entry::file(contents),
-        );
-        Ok(())
+        self.state.borrow_mut().create_file(path, contents)
     }
 
     fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
-        let root = &mut self.state.borrow_mut().root;
-        let parent_component_path = root.lookup_parent(link)?;
-        root.append_entry_to_directory(
-            &parent_component_path,
-            link.file_name().unwrap(),
-            Entry::symlink(target.to_str().unwrap()),
-        );
-        Ok(())
+        self.state.borrow_mut().symlink(target, link)
     }
 
     fn mkdir(&self, path: &Path) -> Result<(), Error> {
-        let root = &mut self.state.borrow_mut().root;
-        let parent_component_path = root.lookup_parent(path)?;
-        root.append_entry_to_directory(
-            &parent_component_path,
-            path.file_name().unwrap(),
-            Entry::directory([]),
-        );
-        Ok(())
+        self.state.borrow_mut().mkdir(path)
     }
 
     fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
-        let state = self.state.borrow();
-        match state.root.lookup_component_path(path) {
-            LookupComponentPath::Found(Entry::Directory { .. }, _) => Ok(()),
-            LookupComponentPath::Found(_, _) => Err(Error::Exists),
-            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::FoundParent(_) => {
-                drop(state);
-                self.mkdir(path)
-            }
-            LookupComponentPath::NotFound => {
-                drop(state);
-                self.mkdir_recursively(path.parent().unwrap())?;
-                self.mkdir(path)
-            }
-        }
+        self.state.borrow_mut().mkdir_recursively(path)
     }
 
     fn remove(&self, path: &Path) -> Result<(), Error> {
-        let root = &mut self.state.borrow_mut().root;
-        match root.lookup_component_path(path) {
-            LookupComponentPath::Found(Entry::Directory { .. }, _) => Err(Error::IsDir),
-            LookupComponentPath::FoundParent(_)
-            | LookupComponentPath::NotFound
-            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::Found(
-                Entry::File { .. } | Entry::Symlink { .. },
-                mut component_path,
-            ) => {
-                let component = component_path.pop().unwrap();
-                root.resolve_component_path_mut(&component_path)
-                    .directory_entries_mut()
-                    .remove(&component)
-                    .assert_is_some();
-                Ok(())
-            }
-        }
+        self.state.borrow_mut().remove(path)
     }
 
     fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Error> {
-        let state = &mut self.state.borrow_mut();
-        match state.root.lookup_component_path(&path) {
-            LookupComponentPath::Found(Entry::File { .. } | Entry::Symlink { .. }, _) => {
-                Err(Error::NotDir)
-            }
-            LookupComponentPath::FoundParent(_)
-            | LookupComponentPath::NotFound
-            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::Found(Entry::Directory { .. }, component_path) => {
-                if component_path.is_empty() {
-                    // Can't rmdir /.
-                    Err(Error::Inval)
-                } else {
-                    state
-                        .recursive_rmdirs
-                        .insert(path.into_os_string().into_string().unwrap())
-                        .assert_is_true();
-                    Ok(())
-                }
-            }
-        }
+        self.state.borrow_mut().rmdir_recursively_on_thread(path)
     }
 
     fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
-        let root = &mut self.state.borrow_mut().root;
-        let (source_entry, source_component_path) = match root.lookup_component_path(source_path) {
-            LookupComponentPath::FoundParent(_)
-            | LookupComponentPath::NotFound
-            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::Found(source_entry, source_component_path) => {
-                Ok((source_entry, source_component_path))
-            }
-        }?;
-
-        let dest_parent_component_path = match root.lookup_component_path(dest_path) {
-            LookupComponentPath::NotFound | LookupComponentPath::DanglingSymlink => {
-                return Err(Error::NoEnt);
-            }
-            LookupComponentPath::FileAncestor => {
-                return Err(Error::NotDir);
-            }
-            LookupComponentPath::Found(dest_entry, dest_component_path) => {
-                if source_entry.is_directory() {
-                    if let Entry::Directory { entries } = dest_entry {
-                        if !entries.is_empty() {
-                            // A directory can't be moved on top of a non-empty directory.
-                            return Err(Error::NotEmpty);
-                        } else if source_component_path == dest_component_path {
-                            // This is a weird edge case, but we allow it. We're moving an
-                            // empty directory on top of itself. It's unknown if this matches
-                            // Linux behavior, but it doesn't really matter as we don't
-                            // imagine ever seeing this in our cache code.
-                            return Ok(());
-                        } else if dest_component_path.is_descendant_of(&source_component_path) {
-                            // We can't move a directory into one of its descendants.
-                            return Err(Error::Inval);
-                        }
-                    } else {
-                        // A directory can't be moved on top of a non-directory.
-                        return Err(Error::NotDir);
-                    }
-                } else if dest_entry.is_directory() {
-                    // A non-directory can't be moved on top of a directory.
-                    return Err(Error::IsDir);
-                } else if source_component_path == dest_component_path {
-                    // Moving something onto itself is an accepted edge case.
-                    return Ok(());
-                }
-
-                // Remove the destination entry and proceed like it wasn't there to begin with.
-                root.remove_component_path(dest_component_path).1
-            }
-            LookupComponentPath::FoundParent(dest_parent_component_path) => {
-                if source_entry.is_directory()
-                    && dest_parent_component_path.is_descendant_of(&source_component_path)
-                {
-                    // We can't move a directory into one of its descendants, including itself.
-                    return Err(Error::Inval);
-                } else {
-                    dest_parent_component_path
-                }
-            }
-        };
-
-        let (source_entry, _) = root.remove_component_path(source_component_path);
-        root.append_entry_to_directory(
-            &dest_parent_component_path,
-            dest_path.file_name().unwrap(),
-            source_entry,
-        );
-
-        Ok(())
+        self.state.borrow_mut().rename(source_path, dest_path)
     }
 
     type TempFile = TempFile;
 
-    fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Error> {
-        for i in 0.. {
-            let path = parent.join(format!("{i:03}"));
-            match self.create_file(&path, b"") {
-                Ok(()) => {
-                    return Ok(TempFile(path));
-                }
-                Err(Error::Exists) => {
-                    continue;
-                }
-                Err(err) => {
-                    return Err(err);
-                }
-            }
-        }
-        unreachable!();
+    fn temp_file(&self, parent: &Path) -> Result<TempFile, Error> {
+        self.state.borrow_mut().temp_file(parent)
     }
 
-    fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> Result<(), Error> {
-        self.rename(&temp_file.0, target)
+    fn persist_temp_file(&self, temp_file: TempFile, target: &Path) -> Result<(), Error> {
+        self.state.borrow_mut().persist_temp_file(temp_file, target)
     }
 
     type TempDir = TempDir;
 
-    fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Error> {
-        for i in 0.. {
-            let path = parent.join(format!("{i:03}"));
-            match self.mkdir(&path) {
-                Ok(()) => {
-                    return Ok(TempDir(path));
-                }
-                Err(Error::Exists) => {
-                    continue;
-                }
-                Err(err) => {
-                    return Err(err);
-                }
-            }
-        }
-        unreachable!();
+    fn temp_dir(&self, parent: &Path) -> Result<TempDir, Error> {
+        self.state.borrow_mut().temp_dir(parent)
     }
 
-    fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<(), Error> {
-        self.rename(&temp_dir.0, target)
+    fn persist_temp_dir(&self, temp_dir: TempDir, target: &Path) -> Result<(), Error> {
+        self.state.borrow_mut().persist_temp_dir(temp_dir, target)
     }
 }
 
@@ -472,6 +277,255 @@ struct State {
     root: Entry,
     last_random_number: u64,
     recursive_rmdirs: HashSet<String>,
+}
+
+impl State {
+    fn rand_u64(&mut self) -> u64 {
+        self.last_random_number += 1;
+        self.last_random_number
+    }
+
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
+        match self.root.lookup_component_path(path) {
+            LookupComponentPath::Found(entry, _) => Ok(Some(entry.metadata())),
+            LookupComponentPath::FoundParent(_) | LookupComponentPath::NotFound => Ok(None),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+        }
+    }
+
+    fn read_file(&self, path: &Path, contents_out: &mut [u8]) -> Result<usize, Error> {
+        match self.root.lookup_leaf(path)? {
+            ExpandSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
+            ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
+            ExpandSymlinks::FileAncestor => Err(Error::NotDir),
+            ExpandSymlinks::FoundFile(contents) => {
+                let to_read = contents.len().min(contents_out.len());
+                contents_out[..to_read].copy_from_slice(&contents[..to_read]);
+                Ok(to_read)
+            }
+        }
+    }
+
+    fn read_dir(
+        &self,
+        path: &Path,
+    ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
+        match self.root.lookup_leaf(path)? {
+            ExpandSymlinks::FoundFile(_) | ExpandSymlinks::FileAncestor => Err(Error::NotDir),
+            ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
+            ExpandSymlinks::FoundDirectory(entries, _) => Ok(entries
+                .iter()
+                .map(|(name, entry)| Ok((name.into(), entry.metadata())))
+                .collect_vec()
+                .into_iter()),
+        }
+    }
+
+    fn create_file(&mut self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+        let parent_component_path = self.root.lookup_parent(path)?;
+        self.root.append_entry_to_directory(
+            &parent_component_path,
+            path.file_name().unwrap(),
+            Entry::file(contents),
+        );
+        Ok(())
+    }
+
+    fn symlink(&mut self, target: &Path, link: &Path) -> Result<(), Error> {
+        let parent_component_path = self.root.lookup_parent(link)?;
+        self.root.append_entry_to_directory(
+            &parent_component_path,
+            link.file_name().unwrap(),
+            Entry::symlink(target.to_str().unwrap()),
+        );
+        Ok(())
+    }
+
+    fn mkdir(&mut self, path: &Path) -> Result<(), Error> {
+        let parent_component_path = self.root.lookup_parent(path)?;
+        self.root.append_entry_to_directory(
+            &parent_component_path,
+            path.file_name().unwrap(),
+            Entry::directory([]),
+        );
+        Ok(())
+    }
+
+    fn mkdir_recursively(&mut self, path: &Path) -> Result<(), Error> {
+        match self.root.lookup_component_path(path) {
+            LookupComponentPath::Found(Entry::Directory { .. }, _) => Ok(()),
+            LookupComponentPath::Found(_, _) => Err(Error::Exists),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::FoundParent(_) => self.mkdir(path),
+            LookupComponentPath::NotFound => {
+                self.mkdir_recursively(path.parent().unwrap())?;
+                self.mkdir(path)
+            }
+        }
+    }
+
+    fn remove(&mut self, path: &Path) -> Result<(), Error> {
+        match self.root.lookup_component_path(path) {
+            LookupComponentPath::Found(Entry::Directory { .. }, _) => Err(Error::IsDir),
+            LookupComponentPath::FoundParent(_)
+            | LookupComponentPath::NotFound
+            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::Found(
+                Entry::File { .. } | Entry::Symlink { .. },
+                mut component_path,
+            ) => {
+                let component = component_path.pop().unwrap();
+                self.root
+                    .resolve_component_path_mut(&component_path)
+                    .directory_entries_mut()
+                    .remove(&component)
+                    .assert_is_some();
+                Ok(())
+            }
+        }
+    }
+
+    fn rmdir_recursively_on_thread(&mut self, path: PathBuf) -> Result<(), Error> {
+        match self.root.lookup_component_path(&path) {
+            LookupComponentPath::Found(Entry::File { .. } | Entry::Symlink { .. }, _) => {
+                Err(Error::NotDir)
+            }
+            LookupComponentPath::FoundParent(_)
+            | LookupComponentPath::NotFound
+            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::Found(Entry::Directory { .. }, component_path) => {
+                if component_path.is_empty() {
+                    // Can't rmdir /.
+                    Err(Error::Inval)
+                } else {
+                    self.recursive_rmdirs
+                        .insert(path.into_os_string().into_string().unwrap())
+                        .assert_is_true();
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    fn rename(&mut self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
+        let (source_entry, source_component_path) =
+            match self.root.lookup_component_path(source_path) {
+                LookupComponentPath::FoundParent(_)
+                | LookupComponentPath::NotFound
+                | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+                LookupComponentPath::FileAncestor => Err(Error::NotDir),
+                LookupComponentPath::Found(source_entry, source_component_path) => {
+                    Ok((source_entry, source_component_path))
+                }
+            }?;
+
+        let dest_parent_component_path = match self.root.lookup_component_path(dest_path) {
+            LookupComponentPath::NotFound | LookupComponentPath::DanglingSymlink => {
+                return Err(Error::NoEnt);
+            }
+            LookupComponentPath::FileAncestor => {
+                return Err(Error::NotDir);
+            }
+            LookupComponentPath::Found(dest_entry, dest_component_path) => {
+                if source_entry.is_directory() {
+                    if let Entry::Directory { entries } = dest_entry {
+                        if !entries.is_empty() {
+                            // A directory can't be moved on top of a non-empty directory.
+                            return Err(Error::NotEmpty);
+                        } else if source_component_path == dest_component_path {
+                            // This is a weird edge case, but we allow it. We're moving an
+                            // empty directory on top of itself. It's unknown if this matches
+                            // Linux behavior, but it doesn't really matter as we don't
+                            // imagine ever seeing this in our cache code.
+                            return Ok(());
+                        } else if dest_component_path.is_descendant_of(&source_component_path) {
+                            // We can't move a directory into one of its descendants.
+                            return Err(Error::Inval);
+                        }
+                    } else {
+                        // A directory can't be moved on top of a non-directory.
+                        return Err(Error::NotDir);
+                    }
+                } else if dest_entry.is_directory() {
+                    // A non-directory can't be moved on top of a directory.
+                    return Err(Error::IsDir);
+                } else if source_component_path == dest_component_path {
+                    // Moving something onto itself is an accepted edge case.
+                    return Ok(());
+                }
+
+                // Remove the destination entry and proceed like it wasn't there to begin with.
+                self.root.remove_component_path(dest_component_path).1
+            }
+            LookupComponentPath::FoundParent(dest_parent_component_path) => {
+                if source_entry.is_directory()
+                    && dest_parent_component_path.is_descendant_of(&source_component_path)
+                {
+                    // We can't move a directory into one of its descendants, including itself.
+                    return Err(Error::Inval);
+                } else {
+                    dest_parent_component_path
+                }
+            }
+        };
+
+        let (source_entry, _) = self.root.remove_component_path(source_component_path);
+        self.root.append_entry_to_directory(
+            &dest_parent_component_path,
+            dest_path.file_name().unwrap(),
+            source_entry,
+        );
+
+        Ok(())
+    }
+
+    fn temp_file(&mut self, parent: &Path) -> Result<TempFile, Error> {
+        for i in 0.. {
+            let path = parent.join(format!("{i:03}"));
+            match self.create_file(&path, b"") {
+                Ok(()) => {
+                    return Ok(TempFile(path));
+                }
+                Err(Error::Exists) => {
+                    continue;
+                }
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+        }
+        unreachable!();
+    }
+
+    fn persist_temp_file(&mut self, temp_file: TempFile, target: &Path) -> Result<(), Error> {
+        self.rename(&temp_file.0, target)
+    }
+
+    fn temp_dir(&mut self, parent: &Path) -> Result<TempDir, Error> {
+        for i in 0.. {
+            let path = parent.join(format!("{i:03}"));
+            match self.mkdir(&path) {
+                Ok(()) => {
+                    return Ok(TempDir(path));
+                }
+                Err(Error::Exists) => {
+                    continue;
+                }
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+        }
+        unreachable!();
+    }
+
+    fn persist_temp_dir(&mut self, temp_dir: TempDir, target: &Path) -> Result<(), Error> {
+        self.rename(&temp_dir.0, target)
+    }
 }
 
 /// A file-system entry. There's no notion of hard links or things like sockets, devices, etc. in
