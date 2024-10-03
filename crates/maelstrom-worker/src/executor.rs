@@ -31,6 +31,7 @@ use std::{
     cell::UnsafeCell,
     ffi::{CStr, CString},
     fmt::Write as _,
+    marker::PhantomData,
     mem,
     os::unix::{ffi::OsStrExt as _, fs::MetadataExt},
     result,
@@ -345,8 +346,10 @@ impl Device {
 
 struct ChildProcess<'bump, 'arg> {
     child_pidfd: Option<OwnedFd>,
-    _stack: &'bump mut [u8],
-    _args: &'arg mut maelstrom_worker_child::ChildArgs<'arg, 'bump>,
+    // These are like this so that the type is invariant over the lifetimes
+    // This ensures the things these lifetimes represent actually outlive our type.
+    _stack: PhantomData<&'bump mut &'bump ()>,
+    _args: PhantomData<&'arg mut &'arg ()>,
 }
 
 impl<'bump, 'arg> ChildProcess<'bump, 'arg> {
@@ -372,8 +375,8 @@ impl<'bump, 'arg> ChildProcess<'bump, 'arg> {
         }?;
         Ok(Self {
             child_pidfd: Some(child_pidfd),
-            _stack: stack,
-            _args: args,
+            _stack: PhantomData,
+            _args: PhantomData,
         })
     }
 
