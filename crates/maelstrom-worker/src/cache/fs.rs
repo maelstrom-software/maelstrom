@@ -33,7 +33,9 @@ pub trait Fs {
     fn read_file(&self, path: &Path, contents: &mut [u8]) -> Result<usize, Self::Error>;
 
     /// Return and iterator that will yield all of the children of a directory, excluding "." and
-    /// "..". There must be a directory at `path`, or an error will be returned.
+    /// "..". There must be a directory at `path`, or an error will be returned. If `path` resolves
+    /// to a symlink, it will be resolved, recursively, until a directory is found or an error
+    /// occurs.
     fn read_dir(
         &self,
         path: &Path,

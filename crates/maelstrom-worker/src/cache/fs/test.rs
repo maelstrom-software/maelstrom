@@ -191,14 +191,14 @@ impl super::Fs for Fs {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::Found(entry, component_path) => {
                 match root.expand_symlinks(entry, component_path) {
+                    ExpandSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
+                    ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
+                    ExpandSymlinks::FileAncestor => Err(Error::NotDir),
                     ExpandSymlinks::FoundFile(contents) => {
                         let to_read = contents.len().min(contents_out.len());
                         contents_out[..to_read].copy_from_slice(&contents[..to_read]);
                         Ok(to_read)
                     }
-                    ExpandSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
-                    ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
-                    ExpandSymlinks::FileAncestor => Err(Error::NotDir),
                 }
             }
         }
@@ -208,18 +208,25 @@ impl super::Fs for Fs {
         &self,
         path: &Path,
     ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
-        match self.state.borrow().root.lookup_component_path(path) {
-            LookupComponentPath::Found(Entry::Directory { entries }, _) => Ok(entries
-                .iter()
-                .map(|(name, entry)| Ok((name.into(), entry.metadata())))
-                .collect_vec()
-                .into_iter()),
-            LookupComponentPath::Found(_, _) | LookupComponentPath::FileAncestor => {
-                Err(Error::NotDir)
-            }
+        let root = &self.state.borrow().root;
+        match root.lookup_component_path(path) {
             LookupComponentPath::NotFound
             | LookupComponentPath::FoundParent(_)
             | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::Found(entry, component_path) => {
+                match root.expand_symlinks(entry, component_path) {
+                    ExpandSymlinks::FoundFile(_) | ExpandSymlinks::FileAncestor => {
+                        Err(Error::NotDir)
+                    }
+                    ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
+                    ExpandSymlinks::FoundDirectory(entries, _) => Ok(entries
+                        .iter()
+                        .map(|(name, entry)| Ok((name.into(), entry.metadata())))
+                        .collect_vec()
+                        .into_iter()),
+                }
+            }
         }
     }
 
@@ -1414,6 +1421,16 @@ mod tests {
                 .collect::<HashMap<_, _>>(),
             HashMap::default(),
         );
+        assert_eq!(
+            fs.read_dir(Path::new("/bar/root"))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                ("foo".into(), Metadata::file(4)),
+                ("bar".into(), Metadata::directory(3)),
+            ]),
+        );
 
         assert!(matches!(fs.read_dir(Path::new("/foo")), Err(Error::NotDir)));
         assert!(matches!(
@@ -1422,7 +1439,7 @@ mod tests {
         ));
         assert!(matches!(
             fs.read_dir(Path::new("/bar/baz")),
-            Err(Error::NotDir)
+            Err(Error::NoEnt)
         ));
         assert!(matches!(
             fs.read_dir(Path::new("/bar/baz/foo")),
