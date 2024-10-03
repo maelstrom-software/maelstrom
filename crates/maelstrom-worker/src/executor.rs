@@ -1386,7 +1386,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let start = self.clock.now();
 
         // We're finally ready to actually clone the child.
-        let mut clone_flags = CloneFlags::NEWCGROUP
+        let mut clone_flags = CloneFlags::CLEAR_SIGHAND
+            | CloneFlags::NEWCGROUP
             | CloneFlags::NEWIPC
             | CloneFlags::NEWNS
             | CloneFlags::NEWPID
