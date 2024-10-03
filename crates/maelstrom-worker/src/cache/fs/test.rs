@@ -163,10 +163,6 @@ impl Fs {
 impl super::Fs for Fs {
     type Error = Error;
 
-    type TempFile = TempFile;
-
-    type TempDir = TempDir;
-
     fn rand_u64(&self) -> u64 {
         let mut state = self.state.borrow_mut();
         state.last_random_number += 1;
@@ -400,6 +396,8 @@ impl super::Fs for Fs {
         Ok(())
     }
 
+    type TempFile = TempFile;
+
     fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Error> {
         for i in 0.. {
             let path = parent.join(format!("{i:03}"));
@@ -421,6 +419,8 @@ impl super::Fs for Fs {
     fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> Result<(), Error> {
         self.rename(&temp_file.0, target)
     }
+
+    type TempDir = TempDir;
 
     fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Error> {
         for i in 0.. {
@@ -827,26 +827,11 @@ impl<'a> IntoIterator for &'a ComponentPath {
 
 impl super::Fs for Rc<Fs> {
     type Error = <Fs as super::Fs>::Error;
-    type TempFile = <Fs as super::Fs>::TempFile;
-    type TempDir = <Fs as super::Fs>::TempDir;
-
     fn rand_u64(&self) -> u64 {
         (**self).rand_u64()
     }
-    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
-        (**self).rename(source_path, dest_path)
-    }
-    fn remove(&self, path: &Path) -> Result<(), Error> {
-        (**self).remove(path)
-    }
-    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Error> {
-        (**self).rmdir_recursively_on_thread(path)
-    }
-    fn mkdir(&self, path: &Path) -> Result<(), Error> {
-        (**self).mkdir(path)
-    }
-    fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
-        (**self).mkdir_recursively(path)
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
+        (**self).metadata(path)
     }
     fn read_file(&self, path: &Path, contents: &mut [u8]) -> Result<usize, Error> {
         (**self).read_file(path, contents)
@@ -863,15 +848,29 @@ impl super::Fs for Rc<Fs> {
     fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
         (**self).symlink(target, link)
     }
-    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
-        (**self).metadata(path)
+    fn mkdir(&self, path: &Path) -> Result<(), Error> {
+        (**self).mkdir(path)
     }
+    fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
+        (**self).mkdir_recursively(path)
+    }
+    fn remove(&self, path: &Path) -> Result<(), Error> {
+        (**self).remove(path)
+    }
+    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Error> {
+        (**self).rmdir_recursively_on_thread(path)
+    }
+    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
+        (**self).rename(source_path, dest_path)
+    }
+    type TempFile = <Fs as super::Fs>::TempFile;
     fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Error> {
         (**self).temp_file(parent)
     }
     fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> Result<(), Error> {
         (**self).persist_temp_file(temp_file, target)
     }
+    type TempDir = <Fs as super::Fs>::TempDir;
     fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Error> {
         (**self).temp_dir(parent)
     }
@@ -1080,6 +1079,140 @@ mod tests {
         assert_eq!(fs.metadata(Path::new("/bar/baz2")), Ok(None));
         assert_eq!(fs.metadata(Path::new("/bar/baz2/blah")), Ok(None));
         assert_eq!(fs.metadata(Path::new("/foo/bar")), Err(Error::NotDir));
+    }
+
+    #[test]
+    fn read_file() {
+        let fs = Fs::new(fs! {
+            foo(b"foo"),
+            empty(b""),
+            subdir {
+                subdir {
+                    root -> "../dotdot",
+                },
+                dotdot -> "..",
+            },
+            symlink -> "symlink2",
+            symlink2 -> "subdir/subdir/root/foo",
+            bad_symlink -> "dangle",
+        });
+
+        let mut buf = [0u8; 10];
+
+        assert_eq!(fs.read_file(Path::new("/foo"), &mut buf[..]), Ok(3));
+        assert_eq!(&buf[..3], b"foo");
+        assert_eq!(fs.read_file(Path::new("/foo"), &mut buf[..1]), Ok(1));
+        assert_eq!(&buf[..1], b"f");
+        assert_eq!(fs.read_file(Path::new("/foo"), &mut buf[..0]), Ok(0));
+
+        assert_eq!(fs.read_file(Path::new("/empty"), &mut buf[..]), Ok(0));
+
+        assert_eq!(
+            fs.read_file(Path::new("/subdir/subdir/root/foo"), &mut buf[..]),
+            Ok(3)
+        );
+        assert_eq!(&buf[..3], b"foo");
+
+        assert_eq!(fs.read_file(Path::new("/symlink"), &mut buf[..]), Ok(3));
+        assert_eq!(&buf[..3], b"foo");
+
+        assert_eq!(
+            fs.read_file(Path::new("/missing"), &mut buf[..]),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/subdir/missing"), &mut buf[..]),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/dangle/missing"), &mut buf[..]),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/foo/bar"), &mut buf[..]),
+            Err(Error::NotDir)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/subdir"), &mut buf[..]),
+            Err(Error::IsDir)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/subdir/dotdot"), &mut buf[..]),
+            Err(Error::IsDir)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/bad_symlink"), &mut buf[..]),
+            Err(Error::NoEnt)
+        );
+    }
+
+    #[test]
+    fn read_dir() {
+        let fs = Fs::new(fs! {
+            foo(b"abcd"),
+            bar {
+                baz -> "/target",
+                root -> "/",
+                subdir {},
+            },
+        });
+        assert_eq!(
+            fs.read_dir(Path::new("/"))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                ("foo".into(), Metadata::file(4)),
+                ("bar".into(), Metadata::directory(3)),
+            ]),
+        );
+        assert_eq!(
+            fs.read_dir(Path::new("/bar"))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                ("baz".into(), Metadata::symlink(7)),
+                ("root".into(), Metadata::symlink(1)),
+                ("subdir".into(), Metadata::directory(0)),
+            ]),
+        );
+        assert_eq!(
+            fs.read_dir(Path::new("/bar/root/bar/subdir"))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<HashMap<_, _>>(),
+            HashMap::default(),
+        );
+        assert_eq!(
+            fs.read_dir(Path::new("/bar/root"))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                ("foo".into(), Metadata::file(4)),
+                ("bar".into(), Metadata::directory(3)),
+            ]),
+        );
+
+        assert!(matches!(fs.read_dir(Path::new("/foo")), Err(Error::NotDir)));
+        assert!(matches!(
+            fs.read_dir(Path::new("/foo/foo")),
+            Err(Error::NotDir)
+        ));
+        assert!(matches!(
+            fs.read_dir(Path::new("/bar/baz")),
+            Err(Error::NoEnt)
+        ));
+        assert!(matches!(
+            fs.read_dir(Path::new("/bar/baz/foo")),
+            Err(Error::NoEnt)
+        ));
+        assert!(matches!(fs.read_dir(Path::new("/blah")), Err(Error::NoEnt)));
+        assert!(matches!(
+            fs.read_dir(Path::new("/blah/blah")),
+            Err(Error::NoEnt)
+        ));
     }
 
     #[test]
@@ -1319,137 +1452,84 @@ mod tests {
     }
 
     #[test]
-    fn read_file() {
+    fn rmdir_recursively_on_thread() {
         let fs = Fs::new(fs! {
-            foo(b"foo"),
-            empty(b""),
-            subdir {
-                subdir {
-                    root -> "../dotdot",
+            dir1 {
+                dir2 {
+                    file1(b"1"),
+                    symlink1 -> "file1",
                 },
-                dotdot -> "..",
             },
-            symlink -> "symlink2",
-            symlink2 -> "subdir/subdir/root/foo",
-            bad_symlink -> "dangle",
+            dir3 {
+                dir4 {
+                    file2(b"2"),
+                    symlink2 -> "file2",
+                },
+            },
         });
-
-        let mut buf = [0u8; 10];
-
-        assert_eq!(fs.read_file(Path::new("/foo"), &mut buf[..]), Ok(3));
-        assert_eq!(&buf[..3], b"foo");
-        assert_eq!(fs.read_file(Path::new("/foo"), &mut buf[..1]), Ok(1));
-        assert_eq!(&buf[..1], b"f");
-        assert_eq!(fs.read_file(Path::new("/foo"), &mut buf[..0]), Ok(0));
-
-        assert_eq!(fs.read_file(Path::new("/empty"), &mut buf[..]), Ok(0));
-
-        assert_eq!(
-            fs.read_file(Path::new("/subdir/subdir/root/foo"), &mut buf[..]),
-            Ok(3)
-        );
-        assert_eq!(&buf[..3], b"foo");
-
-        assert_eq!(fs.read_file(Path::new("/symlink"), &mut buf[..]), Ok(3));
-        assert_eq!(&buf[..3], b"foo");
-
-        assert_eq!(
-            fs.read_file(Path::new("/missing"), &mut buf[..]),
-            Err(Error::NoEnt)
-        );
-        assert_eq!(
-            fs.read_file(Path::new("/subdir/missing"), &mut buf[..]),
-            Err(Error::NoEnt)
-        );
-        assert_eq!(
-            fs.read_file(Path::new("/dangle/missing"), &mut buf[..]),
-            Err(Error::NoEnt)
-        );
-        assert_eq!(
-            fs.read_file(Path::new("/foo/bar"), &mut buf[..]),
-            Err(Error::NotDir)
-        );
-        assert_eq!(
-            fs.read_file(Path::new("/subdir"), &mut buf[..]),
-            Err(Error::IsDir)
-        );
-        assert_eq!(
-            fs.read_file(Path::new("/subdir/dotdot"), &mut buf[..]),
-            Err(Error::IsDir)
-        );
-        assert_eq!(
-            fs.read_file(Path::new("/bad_symlink"), &mut buf[..]),
-            Err(Error::NoEnt)
-        );
+        assert_eq!(fs.rmdir_recursively_on_thread("/dir1".into()), Ok(()));
+        assert_eq!(fs.rmdir_recursively_on_thread("/dir3".into()), Ok(()));
+        fs.assert_tree(fs! {
+            dir1 {
+                dir2 {
+                    file1(b"1"),
+                    symlink1 -> "file1",
+                },
+            },
+            dir3 {
+                dir4 {
+                    file2(b"2"),
+                    symlink2 -> "file2",
+                },
+            },
+        });
+        fs.assert_recursive_rmdirs(HashSet::from(["/dir1".into(), "/dir3".into()]));
+        fs.complete_recursive_rmdir("/dir1");
+        fs.assert_tree(fs! {
+            dir3 {
+                dir4 {
+                    file2(b"2"),
+                    symlink2 -> "file2",
+                },
+            },
+        });
+        fs.complete_recursive_rmdir("/dir3");
+        fs.assert_tree(fs! {});
     }
 
     #[test]
-    fn read_dir() {
+    fn rmdir_recursively_on_thread_errors() {
         let fs = Fs::new(fs! {
-            foo(b"abcd"),
+            foo(b"a"),
             bar {
                 baz -> "/target",
-                root -> "/",
-                subdir {},
             },
         });
-        assert_eq!(
-            fs.read_dir(Path::new("/"))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect::<HashMap<_, _>>(),
-            HashMap::from([
-                ("foo".into(), Metadata::file(4)),
-                ("bar".into(), Metadata::directory(3)),
-            ]),
-        );
-        assert_eq!(
-            fs.read_dir(Path::new("/bar"))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect::<HashMap<_, _>>(),
-            HashMap::from([
-                ("baz".into(), Metadata::symlink(7)),
-                ("root".into(), Metadata::symlink(1)),
-                ("subdir".into(), Metadata::directory(0)),
-            ]),
-        );
-        assert_eq!(
-            fs.read_dir(Path::new("/bar/root/bar/subdir"))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect::<HashMap<_, _>>(),
-            HashMap::default(),
-        );
-        assert_eq!(
-            fs.read_dir(Path::new("/bar/root"))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect::<HashMap<_, _>>(),
-            HashMap::from([
-                ("foo".into(), Metadata::file(4)),
-                ("bar".into(), Metadata::directory(3)),
-            ]),
-        );
 
-        assert!(matches!(fs.read_dir(Path::new("/foo")), Err(Error::NotDir)));
-        assert!(matches!(
-            fs.read_dir(Path::new("/foo/foo")),
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/".into()),
+            Err(Error::Inval)
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/foo".into()),
             Err(Error::NotDir)
-        ));
-        assert!(matches!(
-            fs.read_dir(Path::new("/bar/baz")),
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/bar/baz".into()),
+            Err(Error::NotDir)
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/bar/frob".into()),
             Err(Error::NoEnt)
-        ));
-        assert!(matches!(
-            fs.read_dir(Path::new("/bar/baz/foo")),
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/bar/frob/blah".into()),
             Err(Error::NoEnt)
-        ));
-        assert!(matches!(fs.read_dir(Path::new("/blah")), Err(Error::NoEnt)));
-        assert!(matches!(
-            fs.read_dir(Path::new("/blah/blah")),
+        );
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/bar/baz/blah".into()),
             Err(Error::NoEnt)
-        ));
+        );
     }
 
     #[test]
@@ -1846,86 +1926,7 @@ mod tests {
         });
     }
 
-    #[test]
-    fn rmdir_recursively_on_thread() {
-        let fs = Fs::new(fs! {
-            dir1 {
-                dir2 {
-                    file1(b"1"),
-                    symlink1 -> "file1",
-                },
-            },
-            dir3 {
-                dir4 {
-                    file2(b"2"),
-                    symlink2 -> "file2",
-                },
-            },
-        });
-        assert_eq!(fs.rmdir_recursively_on_thread("/dir1".into()), Ok(()));
-        assert_eq!(fs.rmdir_recursively_on_thread("/dir3".into()), Ok(()));
-        fs.assert_tree(fs! {
-            dir1 {
-                dir2 {
-                    file1(b"1"),
-                    symlink1 -> "file1",
-                },
-            },
-            dir3 {
-                dir4 {
-                    file2(b"2"),
-                    symlink2 -> "file2",
-                },
-            },
-        });
-        fs.assert_recursive_rmdirs(HashSet::from(["/dir1".into(), "/dir3".into()]));
-        fs.complete_recursive_rmdir("/dir1");
-        fs.assert_tree(fs! {
-            dir3 {
-                dir4 {
-                    file2(b"2"),
-                    symlink2 -> "file2",
-                },
-            },
-        });
-        fs.complete_recursive_rmdir("/dir3");
-        fs.assert_tree(fs! {});
-    }
-
-    #[test]
-    fn rmdir_recursively_on_thread_errors() {
-        let fs = Fs::new(fs! {
-            foo(b"a"),
-            bar {
-                baz -> "/target",
-            },
-        });
-
-        assert_eq!(
-            fs.rmdir_recursively_on_thread("/".into()),
-            Err(Error::Inval)
-        );
-        assert_eq!(
-            fs.rmdir_recursively_on_thread("/foo".into()),
-            Err(Error::NotDir)
-        );
-        assert_eq!(
-            fs.rmdir_recursively_on_thread("/bar/baz".into()),
-            Err(Error::NotDir)
-        );
-        assert_eq!(
-            fs.rmdir_recursively_on_thread("/bar/frob".into()),
-            Err(Error::NoEnt)
-        );
-        assert_eq!(
-            fs.rmdir_recursively_on_thread("/bar/frob/blah".into()),
-            Err(Error::NoEnt)
-        );
-        assert_eq!(
-            fs.rmdir_recursively_on_thread("/bar/baz/blah".into()),
-            Err(Error::NoEnt)
-        );
-    }
+    /******/
 
     #[test]
     fn temp_file() {

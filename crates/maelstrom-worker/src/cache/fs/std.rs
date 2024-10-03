@@ -33,43 +33,21 @@ pub struct Fs;
 
 impl super::Fs for Fs {
     type Error = io::Error;
-    type TempFile = TempFile;
-    type TempDir = TempDir;
 
     fn rand_u64(&self) -> u64 {
         rand::random()
     }
 
-    fn read_file(&self, path: &Path, contents: &mut [u8]) -> io::Result<usize> {
-        File::open(path)?.read(contents)
-    }
-
-    fn rename(&self, source: &Path, destination: &Path) -> io::Result<()> {
-        fs::rename(source, destination)
-    }
-
-    fn remove(&self, path: &Path) -> io::Result<()> {
-        fs::remove_file(path)
-    }
-
-    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> io::Result<()> {
-        if !fs::metadata(&path)?.is_dir() {
-            // We want ErrorKind::NotADirectory, but it's currently unstable.
-            Err(io::Error::from(ErrorKind::InvalidInput))
-        } else {
-            thread::spawn(move || {
-                let _ = fs::remove_dir_all(path);
-            });
-            Ok(())
+    fn metadata(&self, path: &Path) -> io::Result<Option<Metadata>> {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) => Ok(Some(metadata.into())),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err),
         }
     }
 
-    fn mkdir(&self, path: &Path) -> io::Result<()> {
-        fs::create_dir(path)
-    }
-
-    fn mkdir_recursively(&self, path: &Path) -> io::Result<()> {
-        fs::create_dir_all(path)
+    fn read_file(&self, path: &Path, contents: &mut [u8]) -> io::Result<usize> {
+        File::open(path)?.read(contents)
     }
 
     fn read_dir(
@@ -92,13 +70,35 @@ impl super::Fs for Fs {
         unix_fs::symlink(target, link)
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<Option<Metadata>> {
-        match fs::symlink_metadata(path) {
-            Ok(metadata) => Ok(Some(metadata.into())),
-            Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(err),
+    fn mkdir(&self, path: &Path) -> io::Result<()> {
+        fs::create_dir(path)
+    }
+
+    fn mkdir_recursively(&self, path: &Path) -> io::Result<()> {
+        fs::create_dir_all(path)
+    }
+
+    fn remove(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
+    }
+
+    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> io::Result<()> {
+        if !fs::metadata(&path)?.is_dir() {
+            // We want ErrorKind::NotADirectory, but it's currently unstable.
+            Err(io::Error::from(ErrorKind::InvalidInput))
+        } else {
+            thread::spawn(move || {
+                let _ = fs::remove_dir_all(path);
+            });
+            Ok(())
         }
     }
+
+    fn rename(&self, source: &Path, destination: &Path) -> io::Result<()> {
+        fs::rename(source, destination)
+    }
+
+    type TempFile = TempFile;
 
     fn temp_file(&self, parent: &Path) -> io::Result<Self::TempFile> {
         Ok(TempFile(NamedTempFile::new_in(parent)?.into_temp_path()))
@@ -107,6 +107,8 @@ impl super::Fs for Fs {
     fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> io::Result<()> {
         Ok(temp_file.0.persist(target)?)
     }
+
+    type TempDir = TempDir;
 
     fn temp_dir(&self, parent: &Path) -> io::Result<Self::TempDir> {
         Ok(TempDir(tempfile::TempDir::new_in(parent)?))

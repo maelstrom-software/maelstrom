@@ -57,7 +57,8 @@ pub trait Fs {
     /// error if there is already a directory at `path`.
     fn mkdir_recursively(&self, path: &Path) -> Result<(), Self::Error>;
 
-    /// Remove an existing, non-directory entry at `path`.
+    /// Remove an existing, non-directory entry at `path`. If `path` resolves to a symlink, the
+    /// symlink will be removed, not the target of the symlink.
     fn remove(&self, path: &Path) -> Result<(), Self::Error>;
 
     /// Remove an existing directory, and all of its descendants, on a background thread. `path`

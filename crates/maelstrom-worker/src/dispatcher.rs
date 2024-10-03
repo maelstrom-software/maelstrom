@@ -949,8 +949,6 @@ mod tests {
 
     impl cache::fs::Fs for Rc<RefCell<TestState>> {
         type Error = TestFsError;
-        type TempFile = TestTempFile;
-        type TempDir = TestTempDir;
 
         fn rand_u64(&self) -> u64 {
             let mut state = self.borrow_mut();
@@ -958,23 +956,7 @@ mod tests {
             state.last_random_number
         }
 
-        fn rename(&self, _source: &Path, _destination: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn remove(&self, _path: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn rmdir_recursively_on_thread(&self, _path: PathBuf) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn mkdir(&self, _path: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn mkdir_recursively(&self, _path: &Path) -> Result<(), TestFsError> {
+        fn metadata(&self, _path: &Path) -> Result<Option<cache::fs::Metadata>, TestFsError> {
             unimplemented!()
         }
 
@@ -1000,9 +982,27 @@ mod tests {
             unimplemented!()
         }
 
-        fn metadata(&self, _path: &Path) -> Result<Option<cache::fs::Metadata>, TestFsError> {
+        fn mkdir(&self, _path: &Path) -> Result<(), TestFsError> {
             unimplemented!()
         }
+
+        fn mkdir_recursively(&self, _path: &Path) -> Result<(), TestFsError> {
+            unimplemented!()
+        }
+
+        fn remove(&self, _path: &Path) -> Result<(), TestFsError> {
+            unimplemented!()
+        }
+
+        fn rmdir_recursively_on_thread(&self, _path: PathBuf) -> Result<(), TestFsError> {
+            unimplemented!()
+        }
+
+        fn rename(&self, _source: &Path, _destination: &Path) -> Result<(), TestFsError> {
+            unimplemented!()
+        }
+
+        type TempFile = TestTempFile;
 
         fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, TestFsError> {
             let path = parent.join(format!("{:0>16x}", self.rand_u64()));
@@ -1017,6 +1017,8 @@ mod tests {
         ) -> Result<(), TestFsError> {
             unimplemented!()
         }
+
+        type TempDir = TestTempDir;
 
         fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, TestFsError> {
             let path = parent.join(format!("{:0>16x}", self.rand_u64()));
