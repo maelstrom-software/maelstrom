@@ -126,7 +126,16 @@ impl Fs {
 
     #[track_caller]
     pub fn assert_tree(&self, expected: Entry) {
-        assert_eq!(self.state.borrow().root, expected);
+        self.assert_entry(Path::new("/"), expected);
+    }
+
+    #[track_caller]
+    pub fn assert_entry(&self, path: &Path, expected: Entry) {
+        let root = &self.state.borrow().root;
+        let LookupComponentPath::Found(entry, _) = root.lookup_component_path(path) else {
+            panic!("couldn't reolve {path:?}");
+        };
+        assert_eq!(entry, &expected);
     }
 
     #[track_caller]

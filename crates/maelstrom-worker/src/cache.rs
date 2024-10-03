@@ -651,6 +651,11 @@ mod tests {
         }
 
         #[track_caller]
+        fn assert_fs_entry(&self, path: &str, expected_entry: test::Entry) {
+            self.fs.assert_entry(Path::new(path), expected_entry);
+        }
+
+        #[track_caller]
         fn assert_pending_recursive_rmdirs<const N: usize>(&self, paths: [&str; N]) {
             self.fs.assert_recursive_rmdirs(HashSet::from_iter(
                 paths.into_iter().map(|s| s.to_string()),
@@ -875,50 +880,26 @@ mod tests {
         fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
         fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
         fixture.assert_bytes_used(0);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
+        fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
 
         fixture.got_artifact_success_file(Apple, digest!(1), b"123456", vec![jid!(1), jid!(2)]);
         fixture.assert_bytes_used(6);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                sha256 {
-                    apple {
-                        "0000000000000000000000000000000000000000000000000000000000000001"(b"123456"),
-                    },
-                    orange {},
+        fixture.assert_fs_entry(
+            "/z/sha256",
+            fs! {
+                apple {
+                    "0000000000000000000000000000000000000000000000000000000000000001"(b"123456"),
                 },
-                tmp {},
-                removing {},
+                orange {},
             },
-        });
+        );
         fixture.assert_pending_recursive_rmdirs([]);
 
         fixture.decrement_ref_count(Apple, digest!(1));
         fixture.decrement_ref_count(Apple, digest!(1));
         fixture.assert_bytes_used(0);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
+        fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
     }
 
@@ -930,50 +911,26 @@ mod tests {
         fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
         fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
         fixture.assert_bytes_used(0);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
+        fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
 
         fixture.got_artifact_success_symlink(Apple, digest!(1), "target", vec![jid!(1), jid!(2)]);
         fixture.assert_bytes_used(6);
-        fixture.assert_fs(fs!{
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                sha256 {
-                    apple {
-                        "0000000000000000000000000000000000000000000000000000000000000001" -> "target",
-                    },
-                    orange {},
+        fixture.assert_fs_entry(
+            "/z/sha256",
+            fs! {
+                apple {
+                    "0000000000000000000000000000000000000000000000000000000000000001" -> "target",
                 },
-                tmp {},
-                removing {},
+                orange {},
             },
-        });
+        );
         fixture.assert_pending_recursive_rmdirs([]);
 
         fixture.decrement_ref_count(Apple, digest!(1));
         fixture.decrement_ref_count(Apple, digest!(1));
         fixture.assert_bytes_used(0);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
+        fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
     }
 
@@ -985,52 +942,26 @@ mod tests {
         fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
         fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
         fixture.assert_bytes_used(0);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {},
-            },
-        });
+        fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
 
         fixture.got_artifact_success_directory(Apple, digest!(1), 6, vec![jid!(1), jid!(2)]);
         fixture.assert_bytes_used(6);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                sha256 {
-                    apple {
-                        "0000000000000000000000000000000000000000000000000000000000000001" {},
-                    },
-                    orange {},
+        fixture.assert_fs_entry(
+            "/z/sha256",
+            fs! {
+                apple {
+                    "0000000000000000000000000000000000000000000000000000000000000001" {},
                 },
-                tmp {},
-                removing {},
+                orange {},
             },
-        });
+        );
         fixture.assert_pending_recursive_rmdirs([]);
 
         fixture.decrement_ref_count(Apple, digest!(1));
         fixture.decrement_ref_count(Apple, digest!(1));
         fixture.assert_bytes_used(0);
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-                removing {
-                    "0000000000000001" {},
-                },
-            },
-        });
+        fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
     }
 
