@@ -343,17 +343,18 @@ impl Device {
     }
 }
 
-struct ChildProcess<'bump> {
+struct ChildProcess<'bump, 'arg> {
     child_pidfd: Option<OwnedFd>,
     _stack: &'bump mut [u8],
+    _args: &'arg mut maelstrom_worker_child::ChildArgs<'arg, 'bump>,
 }
 
-impl<'bump> ChildProcess<'bump> {
+impl<'bump, 'arg> ChildProcess<'bump, 'arg> {
     fn new(
         bump: &'bump Bump,
         clone_flags: CloneFlags,
         func: extern "C" fn(*mut core::ffi::c_void) -> i32,
-        arg: *mut core::ffi::c_void,
+        args: &'arg mut maelstrom_worker_child::ChildArgs<'arg, 'bump>,
     ) -> Result<Self> {
         let mut clone_args = CloneArgs::default()
             .flags(clone_flags)
@@ -365,13 +366,14 @@ impl<'bump> ChildProcess<'bump> {
             linux::clone_with_child_pidfd(
                 func,
                 stack_ptr.wrapping_add(CHILD_STACK_SIZE) as *mut _,
-                arg,
+                args as *mut _ as *mut core::ffi::c_void,
                 &mut clone_args,
             )
         }?;
         Ok(Self {
             child_pidfd: Some(child_pidfd),
             _stack: stack,
+            _args: args,
         })
     }
 
@@ -380,7 +382,7 @@ impl<'bump> ChildProcess<'bump> {
     }
 }
 
-impl<'bump> Drop for ChildProcess<'bump> {
+impl<'bump, 'arg> Drop for ChildProcess<'bump, 'arg> {
     fn drop(&mut self) {
         if let Some(child_pidfd) = &self.child_pidfd {
             // The pidfd_send_signal really shouldn't ever give us an error. But even if it does
@@ -1404,7 +1406,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             &bump,
             clone_flags,
             maelstrom_worker_child::start_and_exec_in_child_trampoline,
-            &mut args as *mut _ as *mut _,
+            &mut args,
         )
         .map_err(syserr)?;
 
