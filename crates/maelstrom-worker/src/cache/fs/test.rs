@@ -48,21 +48,21 @@ macro_rules! fs {
     (@expand [] -> [$($expanded:tt)*]) => {
         [$($expanded)*]
     };
-    (@expand [$name:ident($size:literal) $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+    (@expand [$name:ident($contents:expr) $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
         fs!(
             @expand
             [$($($tail)*)?] -> [
                 $($($expanded)+,)?
-                (stringify!($name), $crate::cache::fs::test::Entry::file($size))
+                (stringify!($name), $crate::cache::fs::test::Entry::file($contents))
             ]
         )
     };
-    (@expand [$name:literal($size:literal) $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
+    (@expand [$name:literal($contents:expr) $(,$($tail:tt)*)?] -> [$($($expanded:tt)+)?]) => {
         fs!(
             @expand
             [$($($tail)*)?] -> [
                 $($($expanded)+,)?
-                ($name, $crate::cache::fs::test::Entry::file($size))
+                ($name, $crate::cache::fs::test::Entry::file($contents))
             ]
         )
     };
@@ -207,7 +207,7 @@ impl super::Fs for Fs {
         root.append_entry_to_directory(
             &parent_component_path,
             path.file_name().unwrap(),
-            Entry::file(contents.len().try_into().unwrap()),
+            Entry::file(contents),
         );
         Ok(())
     }
@@ -459,15 +459,21 @@ struct State {
 /// this test file system.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Entry {
-    File { size: u64 },
+    File { contents: Box<[u8]> },
     Directory { entries: BTreeMap<String, Entry> },
     Symlink { target: String },
 }
 
 impl Entry {
     /// Create a new [`Entry::File`] of the given `size`.
-    pub fn file(size: u64) -> Self {
-        Self::File { size }
+    pub fn file<'a>(contents: impl IntoIterator<Item = &'a u8>) -> Self {
+        Self::File {
+            contents: contents
+                .into_iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        }
     }
 
     /// Create a new [`Entry::Directory`] with the given `entries`.
@@ -490,7 +496,7 @@ impl Entry {
     /// Return the [`FileMetadata`] for an [`Entry`].
     fn metadata(&self) -> Metadata {
         match self {
-            Self::File { size } => Metadata::file(*size),
+            Self::File { contents } => Metadata::file(contents.len().try_into().unwrap()),
             Self::Symlink { target } => Metadata::symlink(target.len().try_into().unwrap()),
             Self::Directory { entries } => Metadata::directory(entries.len().try_into().unwrap()),
         }
@@ -845,9 +851,9 @@ mod tests {
         fn one_file_no_comma() {
             assert_eq!(
                 fs! {
-                    foo(42)
+                    foo(b"abcd")
                 },
-                Entry::directory([("foo", Entry::file(42))])
+                Entry::directory([("foo", Entry::file(b"abcd"))])
             );
         }
 
@@ -855,9 +861,9 @@ mod tests {
         fn one_file_comma() {
             assert_eq!(
                 fs! {
-                    foo(42),
+                    foo(b"abcd"),
                 },
-                Entry::directory([("foo", Entry::file(42))])
+                Entry::directory([("foo", Entry::file(b"abcd"))])
             );
         }
 
@@ -915,12 +921,12 @@ mod tests {
         fn non_identifier_keys() {
             assert_eq!(
                 fs! {
-                    "foo"(42),
+                    "foo"(b"abcd"),
                     "bar" -> "/target/1",
                     "baz" { "empty" {} },
                 },
                 Entry::directory([
-                    ("foo", Entry::file(42)),
+                    ("foo", Entry::file(b"abcd")),
                     ("bar", Entry::symlink("/target/1")),
                     ("baz", Entry::directory([("empty", Entry::directory([]))])),
                 ])
@@ -931,31 +937,31 @@ mod tests {
         fn kitchen_sink() {
             assert_eq!(
                 fs! {
-                    foo(42),
+                    foo(b"abcd"),
                     bar -> "/target/1",
                     baz {
                         zero {},
                         one {
-                            foo(43)
+                            foo(b"abcde")
                         },
                         two {
-                            foo(44),
+                            foo(b"abcdef"),
                             bar -> "/target/2"
                         },
                     }
                 },
                 Entry::directory([
-                    ("foo", Entry::file(42)),
+                    ("foo", Entry::file(b"abcd")),
                     ("bar", Entry::symlink("/target/1")),
                     (
                         "baz",
                         Entry::directory([
                             ("zero", Entry::directory([])),
-                            ("one", Entry::directory([("foo", Entry::file(43))])),
+                            ("one", Entry::directory([("foo", Entry::file(b"abcde"))])),
                             (
                                 "two",
                                 Entry::directory([
-                                    ("foo", Entry::file(44)),
+                                    ("foo", Entry::file(b"abcdef")),
                                     ("bar", Entry::symlink("/target/2")),
                                 ])
                             ),
@@ -987,7 +993,7 @@ mod tests {
     #[test]
     fn metadata() {
         let fs = Fs::new(fs! {
-            foo(42),
+            foo(b"contents"),
             bar {
                 baz -> "/target",
                 root -> "/",
@@ -1001,7 +1007,7 @@ mod tests {
             fs.metadata(Path::new("/")),
             Ok(Some(Metadata::directory(2)))
         );
-        assert_eq!(fs.metadata(Path::new("/foo")), Ok(Some(Metadata::file(42))));
+        assert_eq!(fs.metadata(Path::new("/foo")), Ok(Some(Metadata::file(8))));
         assert_eq!(
             fs.metadata(Path::new("/bar")),
             Ok(Some(Metadata::directory(6)))
@@ -1012,7 +1018,7 @@ mod tests {
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/root/foo")),
-            Ok(Some(Metadata::file(42)))
+            Ok(Some(Metadata::file(8)))
         );
         assert_eq!(
             fs.metadata(Path::new("/bar/root/bar/a")),
@@ -1033,7 +1039,7 @@ mod tests {
     #[test]
     fn create_file() {
         let fs = Fs::new(fs! {
-            foo(42),
+            foo(b"abcd"),
             bar {
                 baz -> "/target",
                 root -> "/",
@@ -1084,7 +1090,7 @@ mod tests {
     #[test]
     fn symlink() {
         let fs = Fs::new(fs! {
-            foo(42),
+            foo(b"abcd"),
             bar {
                 baz -> "/target",
                 root -> "/",
@@ -1141,7 +1147,7 @@ mod tests {
     #[test]
     fn mkdir() {
         let fs = Fs::new(fs! {
-            foo(42),
+            foo(b"abcd"),
             bar {
                 baz -> "/target",
                 root -> "/",
@@ -1159,7 +1165,7 @@ mod tests {
         assert_eq!(fs.mkdir(Path::new("/bar/root/dir1/dir2")), Ok(()));
 
         fs.assert_tree(fs! {
-            foo(42),
+            foo(b"abcd"),
             bar {
                 baz -> "/target",
                 root -> "/",
@@ -1174,7 +1180,7 @@ mod tests {
     #[test]
     fn mkdir_recursively() {
         let fs = Fs::new(fs! {
-            foo(42),
+            foo(b"abcd"),
             bar {
                 baz -> "/target",
                 root -> "/",
@@ -1236,7 +1242,7 @@ mod tests {
     #[test]
     fn remove() {
         let fs = Fs::new(fs! {
-            foo(42),
+            foo(b"abcd"),
             bar {
                 baz -> "/target",
                 root -> "/",
@@ -1269,7 +1275,7 @@ mod tests {
     #[test]
     fn read_dir() {
         let fs = Fs::new(fs! {
-            foo(42),
+            foo(b"abcd"),
             bar {
                 baz -> "/target",
                 root -> "/",
@@ -1282,7 +1288,7 @@ mod tests {
                 .map(Result::unwrap)
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
-                ("foo".into(), Metadata::file(42)),
+                ("foo".into(), Metadata::file(4)),
                 ("bar".into(), Metadata::directory(3)),
             ]),
         );
@@ -1327,7 +1333,7 @@ mod tests {
 
     #[test]
     fn rename_source_path_with_file_ancestor() {
-        let expected = fs! { foo(42) };
+        let expected = fs! { foo(b"abcd") };
         let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo/bar"), Path::new("/bar")),
@@ -1364,7 +1370,7 @@ mod tests {
 
     #[test]
     fn rename_destination_path_with_file_ancestor() {
-        let expected = fs! { foo(42), bar(43) };
+        let expected = fs! { foo(b"a"), bar(b"b") };
         let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo"), Path::new("/bar/baz")),
@@ -1375,7 +1381,7 @@ mod tests {
 
     #[test]
     fn rename_destination_path_with_dangling_symlink() {
-        let expected = fs! { foo(42), bar -> "dangle" };
+        let expected = fs! { foo(b"a"), bar -> "dangle" };
         let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo"), Path::new("/bar/baz")),
@@ -1386,7 +1392,7 @@ mod tests {
 
     #[test]
     fn rename_destination_path_not_found() {
-        let expected = fs! { foo(42) };
+        let expected = fs! { foo(b"a") };
         let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/foo"), Path::new("/bar/baz")),
@@ -1419,7 +1425,7 @@ mod tests {
 
     #[test]
     fn rename_directory_onto_nonempty_directory() {
-        let expected = fs! { dir1 {}, dir2 { foo(42) } };
+        let expected = fs! { dir1 {}, dir2 { foo(b"a") } };
         let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/dir1"), Path::new("/dir2")),
@@ -1430,7 +1436,7 @@ mod tests {
 
     #[test]
     fn rename_nonempty_directory_onto_itself() {
-        let expected = fs! { dir { foo(42) } };
+        let expected = fs! { dir { foo(b"a") } };
         let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/dir"), Path::new("/dir")),
@@ -1441,7 +1447,7 @@ mod tests {
 
     #[test]
     fn rename_nonempty_root_onto_itself() {
-        let expected = fs! { foo(42) };
+        let expected = fs! { foo(b"a") };
         let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/"), Path::new("/")),
@@ -1463,7 +1469,7 @@ mod tests {
 
     #[test]
     fn rename_directory_onto_nondirectory() {
-        let expected = fs! { dir {}, file(42), symlink -> "file" };
+        let expected = fs! { dir {}, file(b"a"), symlink -> "file" };
         let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/dir"), Path::new("/file")),
@@ -1478,7 +1484,7 @@ mod tests {
 
     #[test]
     fn rename_nondirectory_onto_directory() {
-        let expected = fs! { dir {}, file(42), symlink -> "file" };
+        let expected = fs! { dir {}, file(b"a"), symlink -> "file" };
         let fs = Fs::new(expected.clone());
         assert_eq!(
             fs.rename(Path::new("/file"), Path::new("/dir")),
@@ -1522,7 +1528,7 @@ mod tests {
     #[test]
     fn rename_file_onto_itself() {
         let expected = fs! {
-            file(42),
+            file(b"a"),
             root -> "/",
             root2 -> ".",
         };
@@ -1586,21 +1592,21 @@ mod tests {
 
     #[test]
     fn rename_file_onto_file() {
-        let fs = Fs::new(fs! { foo(42), bar(43) });
+        let fs = Fs::new(fs! { foo(b"a"), bar(b"b") });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
-        fs.assert_tree(fs! { bar(42) });
+        fs.assert_tree(fs! { bar(b"a") });
     }
 
     #[test]
     fn rename_file_onto_symlink() {
-        let fs = Fs::new(fs! { foo(42), bar -> "foo" });
+        let fs = Fs::new(fs! { foo(b"a"), bar -> "foo" });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
-        fs.assert_tree(fs! { bar(42) });
+        fs.assert_tree(fs! { bar(b"a") });
     }
 
     #[test]
     fn rename_symlink_onto_file() {
-        let fs = Fs::new(fs! { foo -> "bar", bar(43) });
+        let fs = Fs::new(fs! { foo -> "bar", bar(b"a") });
         assert_eq!(fs.rename(Path::new("/foo"), Path::new("/bar")), Ok(()));
         fs.assert_tree(fs! { bar -> "bar" });
     }
@@ -1616,9 +1622,9 @@ mod tests {
     fn rename_into_new_entries_in_directory() {
         let fs = Fs::new(fs! {
             a {
-                file(42),
+                file(b"a"),
                 symlink -> "/dangle",
-                dir { c(42), d -> "c", e {} },
+                dir { c(b"b"), d -> "c", e {} },
             },
             b {},
         });
@@ -1634,9 +1640,9 @@ mod tests {
         fs.assert_tree(fs! {
             a {},
             b {
-                xile(42),
+                xile(b"a"),
                 xymlink -> "/dangle",
-                xir { c(42), d -> "c", e {} },
+                xir { c(b"b"), d -> "c", e {} },
             },
         });
     }
@@ -1646,7 +1652,7 @@ mod tests {
         let fs = Fs::new(fs! {
             a {
                 b {
-                    c(42),
+                    c(b"a"),
                     d -> "c",
                     e {},
                 },
@@ -1658,7 +1664,7 @@ mod tests {
             a {},
             f {
                 g {
-                    c(42),
+                    c(b"a"),
                     d -> "c",
                     e {},
                 },
@@ -1669,53 +1675,53 @@ mod tests {
     #[test]
     fn rename_destination_in_ancestor_of_source() {
         let fs = Fs::new(fs! {
-            before(41),
-            target(42),
+            before(b"a"),
+            target(b"b"),
             dir1 {
                 dir2 {
-                    source(43),
+                    source(b"c"),
                 },
             },
-            after(44),
+            after(b"d"),
         });
         assert_eq!(
             fs.rename(Path::new("/dir1/dir2/source"), Path::new("/target")),
             Ok(())
         );
         fs.assert_tree(fs! {
-            before(41),
+            before(b"a"),
             dir1 {
                 dir2 {},
             },
-            after(44),
-            target(43),
+            after(b"d"),
+            target(b"c"),
         });
     }
 
     #[test]
     fn rename_source_in_ancestor_of_target() {
         let fs = Fs::new(fs! {
-            before(41),
-            source(42),
+            before(b"a"),
+            source(b"b"),
             dir1 {
                 dir2 {
-                    target(43),
+                    target(b"c"),
                 },
             },
-            after(44),
+            after(b"d"),
         });
         assert_eq!(
             fs.rename(Path::new("/source"), Path::new("/dir1/dir2/target")),
             Ok(())
         );
         fs.assert_tree(fs! {
-            before(41),
+            before(b"a"),
             dir1 {
                 dir2 {
-                    target(42),
+                    target(b"b"),
                 },
             },
-            after(44),
+            after(b"d"),
         });
     }
 
@@ -1724,13 +1730,13 @@ mod tests {
         let fs = Fs::new(fs! {
             dir1 {
                 dir2 {
-                    file1(43),
+                    file1(b"1"),
                     symlink1 -> "file1",
                 },
             },
             dir3 {
                 dir4 {
-                    file2(43),
+                    file2(b"2"),
                     symlink2 -> "file2",
                 },
             },
@@ -1740,13 +1746,13 @@ mod tests {
         fs.assert_tree(fs! {
             dir1 {
                 dir2 {
-                    file1(43),
+                    file1(b"1"),
                     symlink1 -> "file1",
                 },
             },
             dir3 {
                 dir4 {
-                    file2(43),
+                    file2(b"2"),
                     symlink2 -> "file2",
                 },
             },
@@ -1756,7 +1762,7 @@ mod tests {
         fs.assert_tree(fs! {
             dir3 {
                 dir4 {
-                    file2(43),
+                    file2(b"2"),
                     symlink2 -> "file2",
                 },
             },
@@ -1768,7 +1774,7 @@ mod tests {
     #[test]
     fn rmdir_recursively_on_thread_errors() {
         let fs = Fs::new(fs! {
-            foo(42),
+            foo(b"a"),
             bar {
                 baz -> "/target",
             },
@@ -1803,9 +1809,9 @@ mod tests {
     #[test]
     fn temp_file() {
         let fs = Fs::new(fs! {
-            "000"(42),
+            "000"(b"a"),
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {
                 },
@@ -1824,15 +1830,15 @@ mod tests {
         assert_eq!(temp_file_3.path().to_str().unwrap(), "/dir/002/000");
 
         fs.assert_tree(fs! {
-            "000"(42),
-            "001"(0),
+            "000"(b"a"),
+            "001"(b""),
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {
-                    "000"(0),
+                    "000"(b""),
                 },
-                "003"(0),
+                "003"(b""),
             },
             persist {
             },
@@ -1841,50 +1847,50 @@ mod tests {
         fs.persist_temp_file(temp_file_1, Path::new("/persist/1"))
             .unwrap();
         fs.assert_tree(fs! {
-            "000"(42),
+            "000"(b"a"),
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {
-                    "000"(0),
+                    "000"(b""),
                 },
-                "003"(0),
+                "003"(b""),
             },
             persist {
-                "1"(0),
+                "1"(b""),
             },
         });
 
         fs.persist_temp_file(temp_file_2, Path::new("/persist/2"))
             .unwrap();
         fs.assert_tree(fs! {
-            "000"(42),
+            "000"(b"a"),
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {
-                    "000"(0),
+                    "000"(b""),
                 },
             },
             persist {
-                "1"(0),
-                "2"(0),
+                "1"(b""),
+                "2"(b""),
             },
         });
 
         fs.persist_temp_file(temp_file_3, Path::new("/persist/3"))
             .unwrap();
         fs.assert_tree(fs! {
-            "000"(42),
+            "000"(b"a"),
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {},
             },
             persist {
-                "1"(0),
-                "2"(0),
-                "3"(0),
+                "1"(b""),
+                "2"(b""),
+                "3"(b""),
             },
         });
 
@@ -1898,7 +1904,7 @@ mod tests {
     fn persist_temp_file_error() {
         let fs = Fs::new(fs! {
             tmp {},
-            file(42),
+            file(b"a"),
             bad_symlink -> "/foo",
         });
 
@@ -1923,9 +1929,9 @@ mod tests {
     #[test]
     fn temp_dir() {
         let fs = Fs::new(fs! {
-            "000"(42),
+            "000"(b"a"),
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {
                 },
@@ -1944,10 +1950,10 @@ mod tests {
         assert_eq!(temp_dir_3.path().to_str().unwrap(), "/dir/002/000");
 
         fs.assert_tree(fs! {
-            "000"(42),
+            "000"(b"a"),
             "001" {},
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {
                     "000" {},
@@ -1961,9 +1967,9 @@ mod tests {
         fs.persist_temp_dir(temp_dir_1, Path::new("/persist/1"))
             .unwrap();
         fs.assert_tree(fs! {
-            "000"(42),
+            "000"(b"a"),
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {
                     "000" {},
@@ -1978,9 +1984,9 @@ mod tests {
         fs.persist_temp_dir(temp_dir_2, Path::new("/persist/2"))
             .unwrap();
         fs.assert_tree(fs! {
-            "000"(42),
+            "000"(b"a"),
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {
                     "000" {},
@@ -1995,9 +2001,9 @@ mod tests {
         fs.persist_temp_dir(temp_dir_3, Path::new("/persist/3"))
             .unwrap();
         fs.assert_tree(fs! {
-            "000"(42),
+            "000"(b"a"),
             dir {
-                "000"(43),
+                "000"(b"b"),
                 "001" -> "000",
                 "002" {},
             },
@@ -2018,7 +2024,7 @@ mod tests {
     fn persist_temp_dir_error() {
         let fs = Fs::new(fs! {
             tmp {},
-            file(42),
+            file(b"a"),
             bad_symlink -> "/foo",
         });
 

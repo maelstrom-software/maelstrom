@@ -610,7 +610,7 @@ mod tests {
     };
     use maelstrom_test::*;
     use slog::{o, Discard};
-    use std::{iter, rc::Rc};
+    use std::rc::Rc;
     use TestKeyKind::*;
 
     #[derive(Clone, Copy, Debug, strum::Display, strum::EnumIter, Eq, Hash, PartialEq)]
@@ -716,20 +716,13 @@ mod tests {
             &mut self,
             kind: TestKeyKind,
             digest: Sha256Digest,
-            size: u64,
+            contents: &[u8],
             expected: Vec<JobId>,
         ) {
             let source = self.cache.temp_file();
             let source_path = source.path();
             self.fs.remove(source_path).unwrap();
-            self.fs
-                .create_file(
-                    source_path,
-                    &iter::repeat(0u8)
-                        .take(size.try_into().unwrap())
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap();
+            self.fs.create_file(source_path, contents).unwrap();
             self.got_artifact_success(kind, digest, GotArtifact::File { source }, expected)
         }
 
@@ -780,29 +773,29 @@ mod tests {
             fs! {
                 z {
                     removing {
-                        "0000000000000001" { a(1) },
-                        "0000000000000002"(2),
+                        "0000000000000001" { a(b"a contents") },
+                        "0000000000000002"(b"2 contents"),
                         "0000000000000003" -> "foo",
                     },
                     sha256 {
                         apple {
                             bad_apple {
-                                foo(20),
+                                foo(b"foo contents"),
                                 symlink -> "bad_apple",
                                 more_bad_apple {
-                                    bar(20),
+                                    bar(b"bar contents"),
                                 },
                             },
                         },
                         banana {
-                            bread(20),
+                            bread(b"bread contents"),
                         },
                     },
                     garbage {
-                        foo(10),
+                        foo(b"more foo contents"),
                         symlink -> "garbage",
                         more_garbage {
-                            bar(10),
+                            bar(b"more bar contents"),
                         },
                     },
                 },
@@ -810,30 +803,30 @@ mod tests {
         );
         fixture.assert_fs(fs! {
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {},
                     orange {},
                 },
                 tmp {},
                 removing {
-                    "0000000000000001" { a(1) },
+                    "0000000000000001" { a(b"a contents") },
                     "0000000000000002" {
-                        foo(10),
+                        foo(b"more foo contents"),
                         symlink -> "garbage",
                         more_garbage {
-                            bar(10),
+                            bar(b"more bar contents"),
                         },
                     },
                     "0000000000000003" {
-                        bread(20),
+                        bread(b"bread contents"),
                     },
                     "0000000000000004" {
                         bad_apple {
-                            foo(20),
+                            foo(b"foo contents"),
                             symlink -> "bad_apple",
                             more_bad_apple {
-                                bar(20),
+                                bar(b"bar contents"),
                             },
                         },
                     },
@@ -859,7 +852,12 @@ mod tests {
         fixture.assert_file_does_not_exist(Apple, digest!(42));
         fixture.assert_bytes_used(0);
 
-        fixture.got_artifact_success_file(Apple, digest!(42), 1, vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.got_artifact_success_file(
+            Apple,
+            digest!(42),
+            b"a",
+            vec![jid!(1), jid!(2), jid!(3)],
+        );
         fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
 
@@ -879,7 +877,7 @@ mod tests {
         fixture.assert_bytes_used(0);
         fixture.assert_fs(fs! {
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {},
                     orange {},
@@ -890,14 +888,14 @@ mod tests {
         });
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.got_artifact_success_file(Apple, digest!(1), 6, vec![jid!(1), jid!(2)]);
+        fixture.got_artifact_success_file(Apple, digest!(1), b"123456", vec![jid!(1), jid!(2)]);
         fixture.assert_bytes_used(6);
         fixture.assert_fs(fs! {
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {
-                        "0000000000000000000000000000000000000000000000000000000000000001"(6),
+                        "0000000000000000000000000000000000000000000000000000000000000001"(b"123456"),
                     },
                     orange {},
                 },
@@ -912,7 +910,7 @@ mod tests {
         fixture.assert_bytes_used(0);
         fixture.assert_fs(fs! {
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {},
                     orange {},
@@ -934,7 +932,7 @@ mod tests {
         fixture.assert_bytes_used(0);
         fixture.assert_fs(fs! {
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {},
                     orange {},
@@ -949,7 +947,7 @@ mod tests {
         fixture.assert_bytes_used(6);
         fixture.assert_fs(fs!{
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {
                         "0000000000000000000000000000000000000000000000000000000000000001" -> "target",
@@ -967,7 +965,7 @@ mod tests {
         fixture.assert_bytes_used(0);
         fixture.assert_fs(fs! {
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {},
                     orange {},
@@ -989,7 +987,7 @@ mod tests {
         fixture.assert_bytes_used(0);
         fixture.assert_fs(fs! {
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {},
                     orange {},
@@ -1004,7 +1002,7 @@ mod tests {
         fixture.assert_bytes_used(6);
         fixture.assert_fs(fs! {
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {
                         "0000000000000000000000000000000000000000000000000000000000000001" {},
@@ -1022,7 +1020,7 @@ mod tests {
         fixture.assert_bytes_used(0);
         fixture.assert_fs(fs! {
             z {
-                "CACHEDIR.TAG"(43),
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
                 sha256 {
                     apple {},
                     orange {},
@@ -1041,7 +1039,7 @@ mod tests {
         let mut fixture = Fixture::new(10, fs! {});
 
         fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(42), 1, vec![jid!(1)]);
+        fixture.got_artifact_success_file(Apple, digest!(42), b"a", vec![jid!(1)]);
         fixture.decrement_ref_count(Apple, digest!(42));
 
         fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
@@ -1054,11 +1052,11 @@ mod tests {
 
     #[test]
     fn large_artifact_does_not_stay_in_cache() {
-        let mut fixture = Fixture::new(10, fs! {});
+        let mut fixture = Fixture::new(1, fs! {});
 
         fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(42), 100, vec![jid!(1)]);
-        fixture.assert_bytes_used(100);
+        fixture.got_artifact_success_file(Apple, digest!(42), b"123456789", vec![jid!(1)]);
+        fixture.assert_bytes_used(9);
         fixture.decrement_ref_count(Apple, digest!(42));
 
         fixture.assert_file_does_not_exist(Apple, digest!(42));
@@ -1068,16 +1066,16 @@ mod tests {
 
     #[test]
     fn large_artifact_stays_in_cache_while_referenced() {
-        let mut fixture = Fixture::new(10, fs! {});
+        let mut fixture = Fixture::new(1, fs! {});
 
         fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(42), 100, vec![jid!(1)]);
+        fixture.got_artifact_success_file(Apple, digest!(42), b"123456789", vec![jid!(1)]);
 
         fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Success);
 
         fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(100));
-        fixture.assert_bytes_used(100);
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(9));
+        fixture.assert_bytes_used(9);
 
         fixture.decrement_ref_count(Apple, digest!(42));
         fixture.assert_file_does_not_exist(Apple, digest!(42));
@@ -1087,7 +1085,7 @@ mod tests {
 
     #[test]
     fn different_key_kinds_are_independent() {
-        let mut fixture = Fixture::new(10, fs! {});
+        let mut fixture = Fixture::new(1, fs! {});
 
         fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
         fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
@@ -1100,24 +1098,34 @@ mod tests {
         fixture.assert_file_does_not_exist(Orange, digest!(42));
         fixture.assert_bytes_used(0);
 
-        fixture.got_artifact_success_file(Apple, digest!(42), 100, vec![jid!(1), jid!(2), jid!(3)]);
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(100));
+        fixture.got_artifact_success_file(
+            Apple,
+            digest!(42),
+            b"abc",
+            vec![jid!(1), jid!(2), jid!(3)],
+        );
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(3));
         fixture.assert_file_does_not_exist(Orange, digest!(42));
-        fixture.assert_bytes_used(100);
+        fixture.assert_bytes_used(3);
 
         fixture.get_artifact(Orange, digest!(42), jid!(6), GetArtifact::Wait);
 
-        fixture.got_artifact_success_file(Orange, digest!(42), 99, vec![jid!(4), jid!(5), jid!(6)]);
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(100));
-        fixture.assert_file_exists(Orange, digest!(42), Metadata::file(99));
-        fixture.assert_bytes_used(199);
+        fixture.got_artifact_success_file(
+            Orange,
+            digest!(42),
+            b"1234",
+            vec![jid!(4), jid!(5), jid!(6)],
+        );
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(3));
+        fixture.assert_file_exists(Orange, digest!(42), Metadata::file(4));
+        fixture.assert_bytes_used(7);
 
         fixture.decrement_ref_count(Apple, digest!(42));
         fixture.decrement_ref_count(Apple, digest!(42));
         fixture.decrement_ref_count(Apple, digest!(42));
         fixture.assert_file_does_not_exist(Apple, digest!(42));
-        fixture.assert_file_exists(Orange, digest!(42), Metadata::file(99));
-        fixture.assert_bytes_used(99);
+        fixture.assert_file_exists(Orange, digest!(42), Metadata::file(4));
+        fixture.assert_bytes_used(4);
 
         fixture.decrement_ref_count(Orange, digest!(42));
         fixture.decrement_ref_count(Orange, digest!(42));
@@ -1137,10 +1145,10 @@ mod tests {
         fixture.get_artifact(Orange, digest!(4), jid!(4), GetArtifact::Get);
         fixture.assert_bytes_used(0);
 
-        fixture.got_artifact_success_file(Apple, digest!(1), 1, vec![jid!(1)]);
-        fixture.got_artifact_success_file(Orange, digest!(2), 1, vec![jid!(2)]);
-        fixture.got_artifact_success_file(Apple, digest!(3), 1, vec![jid!(3)]);
-        fixture.got_artifact_success_file(Orange, digest!(4), 1, vec![jid!(4)]);
+        fixture.got_artifact_success_file(Apple, digest!(1), b"a", vec![jid!(1)]);
+        fixture.got_artifact_success_file(Orange, digest!(2), b"b", vec![jid!(2)]);
+        fixture.got_artifact_success_file(Apple, digest!(3), b"c", vec![jid!(3)]);
+        fixture.got_artifact_success_file(Orange, digest!(4), b"d", vec![jid!(4)]);
 
         fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
         fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
@@ -1168,7 +1176,7 @@ mod tests {
         fixture.assert_bytes_used(3);
 
         fixture.get_artifact(Apple, digest!(5), jid!(5), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(5), 1, vec![jid!(5)]);
+        fixture.got_artifact_success_file(Apple, digest!(5), b"e", vec![jid!(5)]);
 
         fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
         fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
@@ -1182,7 +1190,7 @@ mod tests {
         fixture.decrement_ref_count(Orange, digest!(2));
 
         fixture.get_artifact(Orange, digest!(6), jid!(6), GetArtifact::Get);
-        fixture.got_artifact_success_file(Orange, digest!(6), 1, vec![jid!(6)]);
+        fixture.got_artifact_success_file(Orange, digest!(6), b"f", vec![jid!(6)]);
 
         fixture.assert_file_does_not_exist(Apple, digest!(1));
         fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
@@ -1213,7 +1221,12 @@ mod tests {
         fixture.get_artifact(Apple, digest!(42), jid!(5), GetArtifact::Wait);
         fixture.get_artifact(Apple, digest!(42), jid!(6), GetArtifact::Wait);
 
-        fixture.got_artifact_success_file(Apple, digest!(42), 1, vec![jid!(4), jid!(5), jid!(6)]);
+        fixture.got_artifact_success_file(
+            Apple,
+            digest!(42),
+            b"a",
+            vec![jid!(4), jid!(5), jid!(6)],
+        );
         fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
     }
