@@ -114,58 +114,28 @@ pub struct Fs {
 
 impl Fs {
     pub fn new(root: Entry) -> Self {
-        assert!(root.is_directory());
         Self {
-            state: RefCell::new(State {
-                root,
-                last_random_number: 0,
-                recursive_rmdirs: Default::default(),
-            }),
+            state: RefCell::new(State::new(root)),
         }
     }
 
     #[track_caller]
     pub fn assert_tree(&self, expected: Entry) {
-        self.assert_entry(Path::new("/"), expected);
+        self.state.borrow().assert_tree(expected)
     }
 
     #[track_caller]
     pub fn assert_entry(&self, path: &Path, expected: Entry) {
-        let root = &self.state.borrow().root;
-        let LookupComponentPath::Found(entry, _) = root.lookup_component_path(path) else {
-            panic!("couldn't reolve {path:?}");
-        };
-        assert_eq!(entry, &expected);
+        self.state.borrow().assert_entry(path, expected)
     }
 
     #[track_caller]
     pub fn assert_recursive_rmdirs(&self, expected: HashSet<String>) {
-        assert_eq!(self.state.borrow().recursive_rmdirs, expected);
+        self.state.borrow().assert_recursive_rmdirs(expected)
     }
 
     pub fn complete_recursive_rmdir(&self, path: &str) {
-        let mut state = self.state.borrow_mut();
-
-        state.recursive_rmdirs.remove(path).assert_is_true();
-
-        match state.root.lookup_component_path(Path::new(path)) {
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::DanglingSymlink
-            | LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_) => Err(Error::NoEnt),
-            LookupComponentPath::Found(Entry::Directory { .. }, mut component_path) => {
-                let component = component_path.pop().unwrap();
-                state
-                    .root
-                    .resolve_component_path_mut(&component_path)
-                    .directory_entries_mut()
-                    .remove(&component)
-                    .assert_is_some();
-                Ok(())
-            }
-            LookupComponentPath::Found(_, _) => Err(Error::NotDir),
-        }
-        .unwrap();
+        self.state.borrow_mut().complete_recursive_rmdir(path)
     }
 }
 
@@ -280,6 +250,55 @@ struct State {
 }
 
 impl State {
+    fn new(root: Entry) -> Self {
+        assert!(root.is_directory());
+        Self {
+            root,
+            last_random_number: 0,
+            recursive_rmdirs: Default::default(),
+        }
+    }
+
+    #[track_caller]
+    pub fn assert_tree(&self, expected: Entry) {
+        self.assert_entry(Path::new("/"), expected);
+    }
+
+    #[track_caller]
+    pub fn assert_entry(&self, path: &Path, expected: Entry) {
+        let LookupComponentPath::Found(entry, _) = self.root.lookup_component_path(path) else {
+            panic!("couldn't reolve {path:?}");
+        };
+        assert_eq!(entry, &expected);
+    }
+
+    #[track_caller]
+    pub fn assert_recursive_rmdirs(&self, expected: HashSet<String>) {
+        assert_eq!(self.recursive_rmdirs, expected);
+    }
+
+    pub fn complete_recursive_rmdir(&mut self, path: &str) {
+        self.recursive_rmdirs.remove(path).assert_is_true();
+
+        match self.root.lookup_component_path(Path::new(path)) {
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::DanglingSymlink
+            | LookupComponentPath::NotFound
+            | LookupComponentPath::FoundParent(_) => Err(Error::NoEnt),
+            LookupComponentPath::Found(Entry::Directory { .. }, mut component_path) => {
+                let component = component_path.pop().unwrap();
+                self.root
+                    .resolve_component_path_mut(&component_path)
+                    .directory_entries_mut()
+                    .remove(&component)
+                    .assert_is_some();
+                Ok(())
+            }
+            LookupComponentPath::Found(_, _) => Err(Error::NotDir),
+        }
+        .unwrap();
+    }
+
     fn rand_u64(&mut self) -> u64 {
         self.last_random_number += 1;
         self.last_random_number
