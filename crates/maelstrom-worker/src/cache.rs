@@ -603,10 +603,9 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::fs::Metadata;
     use fs::{
-        test::{self, fs},
-        TempDir as _, TempFile as _,
+        test::{self, fs, Entry},
+        Metadata, TempDir as _, TempFile as _,
     };
     use maelstrom_test::*;
     use slog::{o, Discard};
@@ -634,7 +633,7 @@ mod tests {
     }
 
     impl Fixture {
-        fn new(bytes_used_target: u64, root: test::Entry) -> Self {
+        fn new(bytes_used_target: u64, root: Entry) -> Self {
             let fs = Rc::new(test::Fs::new(root));
             let cache = Cache::new(
                 fs.clone(),
@@ -646,12 +645,12 @@ mod tests {
         }
 
         #[track_caller]
-        fn assert_fs(&self, expected_fs: test::Entry) {
+        fn assert_fs(&self, expected_fs: Entry) {
             self.fs.assert_tree(expected_fs);
         }
 
         #[track_caller]
-        fn assert_fs_entry(&self, path: &str, expected_entry: test::Entry) {
+        fn assert_fs_entry(&self, path: &str, expected_entry: Entry) {
             self.fs.assert_entry(Path::new(path), expected_entry);
         }
 
@@ -704,10 +703,12 @@ mod tests {
             &mut self,
             kind: TestKeyKind,
             digest: Sha256Digest,
+            contents: Entry,
             size: u64,
             expected: Vec<JobId>,
         ) {
             let source = self.cache.temp_dir();
+            self.fs.graft(source.path(), contents);
             self.got_artifact_success(
                 kind,
                 digest,
@@ -725,9 +726,7 @@ mod tests {
             expected: Vec<JobId>,
         ) {
             let source = self.cache.temp_file();
-            let source_path = source.path();
-            self.fs.remove(source_path).unwrap();
-            self.fs.create_file(source_path, contents).unwrap();
+            self.fs.graft(source.path(), Entry::file(contents));
             self.got_artifact_success(kind, digest, GotArtifact::File { source }, expected)
         }
 
@@ -945,13 +944,25 @@ mod tests {
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.got_artifact_success_directory(Apple, digest!(1), 6, vec![jid!(1), jid!(2)]);
+        fixture.got_artifact_success_directory(
+            Apple,
+            digest!(1),
+            fs! {
+                foo(b"bar"),
+                symlink -> "foo",
+            },
+            6,
+            vec![jid!(1), jid!(2)],
+        );
         fixture.assert_bytes_used(6);
         fixture.assert_fs_entry(
             "/z/sha256",
             fs! {
                 apple {
-                    "0000000000000000000000000000000000000000000000000000000000000001" {},
+                    "0000000000000000000000000000000000000000000000000000000000000001" {
+                        foo(b"bar"),
+                        symlink -> "foo",
+                    },
                 },
                 orange {},
             },
