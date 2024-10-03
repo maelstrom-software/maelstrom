@@ -978,6 +978,10 @@ mod tests {
             unimplemented!()
         }
 
+        fn read_file(&self, _path: &Path, _contents: &mut [u8]) -> Result<usize, TestFsError> {
+            unimplemented!()
+        }
+
         fn read_dir(
             &self,
             _path: &Path,

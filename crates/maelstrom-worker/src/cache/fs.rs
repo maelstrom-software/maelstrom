@@ -26,6 +26,12 @@ pub trait Fs {
     /// path is a file.
     fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Self::Error>;
 
+    /// Read the first bytes of the file at `path`. If `path` resolves to a symlink, it will be
+    /// resolved, recursively, until a file is found or an error occurs. The number of bytes
+    /// actually read is returned. If this equals the size of the slice passed it, it's
+    /// undetermined whether there are more bytes available in the file.
+    fn read_file(&self, path: &Path, contents: &mut [u8]) -> Result<usize, Self::Error>;
+
     /// Return and iterator that will yield all of the children of a directory, excluding "." and
     /// "..". There must be a directory at `path`, or an error will be returned.
     fn read_dir(

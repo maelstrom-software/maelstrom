@@ -143,7 +143,7 @@ impl Fs {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::DanglingSymlink
             | LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_, _) => Err(Error::NoEnt),
+            | LookupComponentPath::FoundParent(_) => Err(Error::NoEnt),
             LookupComponentPath::Found(Entry::Directory { .. }, mut component_path) => {
                 let component = component_path.pop().unwrap();
                 state
@@ -176,9 +176,31 @@ impl super::Fs for Fs {
     fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
         match self.state.borrow().root.lookup_component_path(path) {
             LookupComponentPath::Found(entry, _) => Ok(Some(entry.metadata())),
-            LookupComponentPath::NotFound | LookupComponentPath::FoundParent(_, _) => Ok(None),
+            LookupComponentPath::NotFound | LookupComponentPath::FoundParent(_) => Ok(None),
             LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
+        }
+    }
+
+    fn read_file(&self, path: &Path, contents_out: &mut [u8]) -> Result<usize, Error> {
+        let root = &self.state.borrow().root;
+        match root.lookup_component_path(path) {
+            LookupComponentPath::NotFound
+            | LookupComponentPath::FoundParent(_)
+            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::Found(entry, component_path) => {
+                match root.expand_symlinks(entry, component_path) {
+                    ExpandSymlinks::FoundFile(contents) => {
+                        let to_read = contents.len().min(contents_out.len());
+                        contents_out[..to_read].copy_from_slice(&contents[..to_read]);
+                        Ok(to_read)
+                    }
+                    ExpandSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
+                    ExpandSymlinks::DanglingSymlink => Err(Error::NoEnt),
+                    ExpandSymlinks::FileAncestor => Err(Error::NotDir),
+                }
+            }
         }
     }
 
@@ -196,7 +218,7 @@ impl super::Fs for Fs {
                 Err(Error::NotDir)
             }
             LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_, _)
+            | LookupComponentPath::FoundParent(_)
             | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
         }
     }
@@ -241,7 +263,7 @@ impl super::Fs for Fs {
             LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::Found(Entry::Directory { .. }, _) => Ok(()),
             LookupComponentPath::Found(_, _) => Err(Error::Exists),
-            LookupComponentPath::FoundParent(_, _) => {
+            LookupComponentPath::FoundParent(_) => {
                 drop(state);
                 self.mkdir(path)
             }
@@ -259,7 +281,7 @@ impl super::Fs for Fs {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::DanglingSymlink
             | LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_, _) => Err(Error::NoEnt),
+            | LookupComponentPath::FoundParent(_) => Err(Error::NoEnt),
             LookupComponentPath::Found(Entry::Directory { .. }, _) => Err(Error::IsDir),
             LookupComponentPath::Found(_, mut component_path) => {
                 let component = component_path.pop().unwrap();
@@ -289,7 +311,7 @@ impl super::Fs for Fs {
             }
             LookupComponentPath::Found(_, _) => Err(Error::NotDir),
             LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_, _)
+            | LookupComponentPath::FoundParent(_)
             | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
         }
@@ -303,7 +325,7 @@ impl super::Fs for Fs {
             }
             LookupComponentPath::DanglingSymlink
             | LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_, _) => {
+            | LookupComponentPath::FoundParent(_) => {
                 return Err(Error::NoEnt);
             }
             LookupComponentPath::Found(source_entry, source_component_path) => {
@@ -318,7 +340,7 @@ impl super::Fs for Fs {
             LookupComponentPath::DanglingSymlink | LookupComponentPath::NotFound => {
                 return Err(Error::NoEnt);
             }
-            LookupComponentPath::FoundParent(_, dest_parent_component_path) => {
+            LookupComponentPath::FoundParent(dest_parent_component_path) => {
                 if source_entry.is_directory()
                     && dest_parent_component_path.is_descendant_of(&source_component_path)
                 {
@@ -555,30 +577,28 @@ impl Entry {
                 Component::ParentDir => {
                     cur = self.pop_component_path(&mut component_path);
                 }
-                Component::Normal(name) => match self.expand_to_directory(cur, component_path) {
-                    LookupComponentPath::Found(new_cur, new_component_path) => {
-                        cur = new_cur;
-                        component_path = new_component_path;
+                Component::Normal(name) => match self.expand_symlinks(cur, component_path) {
+                    ExpandSymlinks::FoundDirectory(entries, new_component_path) => {
                         let name = name.to_str().unwrap();
-                        match cur.directory_entries().get(name) {
+                        match entries.get(name) {
                             Some(entry) => {
                                 cur = entry;
-                                component_path.push(name.to_owned());
+                                component_path = new_component_path.push(name);
                             }
                             None => {
                                 if is_last_component {
-                                    return LookupComponentPath::FoundParent(cur, component_path);
+                                    return LookupComponentPath::FoundParent(new_component_path);
                                 } else {
                                     return LookupComponentPath::NotFound;
                                 }
                             }
                         }
                     }
-                    LookupComponentPath::FoundParent(_, _) => {
-                        unreachable!();
+                    ExpandSymlinks::FoundFile(_) | ExpandSymlinks::FileAncestor => {
+                        return LookupComponentPath::FileAncestor;
                     }
-                    result @ _ => {
-                        return result;
+                    ExpandSymlinks::DanglingSymlink => {
+                        return LookupComponentPath::DanglingSymlink;
                     }
                 },
             }
@@ -586,20 +606,20 @@ impl Entry {
         LookupComponentPath::Found(cur, component_path)
     }
 
-    /// Treating `self` as the root of the file system, resolve `cur` and `component` into a
-    /// directory by recursively resolving any symlinks encountered.
-    fn expand_to_directory<'state>(
+    /// Treating `self` as the root of the file system, resolve `cur` and `component` by expanding
+    /// repeatedly expanding `cur` if it's a symlink.
+    fn expand_symlinks<'state>(
         &'state self,
         mut cur: &'state Self,
         mut component_path: ComponentPath,
-    ) -> LookupComponentPath<'state> {
+    ) -> ExpandSymlinks<'state> {
         loop {
             match cur {
-                Self::Directory { .. } => {
-                    return LookupComponentPath::Found(cur, component_path);
+                Self::Directory { entries } => {
+                    return ExpandSymlinks::FoundDirectory(entries, component_path);
                 }
-                Self::File { .. } => {
-                    return LookupComponentPath::FileAncestor;
+                Self::File { contents } => {
+                    return ExpandSymlinks::FoundFile(contents);
                 }
                 Self::Symlink { target } => {
                     match self.lookup_component_path_helper(
@@ -611,11 +631,13 @@ impl Entry {
                             cur = new_cur;
                             component_path = new_component_path;
                         }
-                        LookupComponentPath::FileAncestor => {
-                            return LookupComponentPath::FileAncestor;
+                        LookupComponentPath::FoundParent(_)
+                        | LookupComponentPath::DanglingSymlink
+                        | LookupComponentPath::NotFound => {
+                            return ExpandSymlinks::DanglingSymlink;
                         }
-                        _ => {
-                            return LookupComponentPath::DanglingSymlink;
+                        LookupComponentPath::FileAncestor => {
+                            return ExpandSymlinks::FileAncestor;
                         }
                     }
                 }
@@ -697,23 +719,36 @@ impl Entry {
             LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::NotFound => Err(Error::NoEnt),
             LookupComponentPath::Found(_, _) => Err(Error::Exists),
-            LookupComponentPath::FoundParent(_, component_path) => Ok(component_path),
+            LookupComponentPath::FoundParent(component_path) => Ok(component_path),
         }
     }
 }
 
 enum LookupComponentPath<'state> {
-    /// The path resolved to an actual entry. This contains the entry and the path to it.
+    /// The path resolved to an actual entry. This contains the entry and the component path to it.
     Found(&'state Entry, ComponentPath),
 
     /// There was entry at the given path, but the parent directory exists. This contains the
-    /// parent entry (which is guaranteed to be a directory) and the path to it.
-    #[expect(dead_code)]
-    FoundParent(&'state Entry, ComponentPath),
+    /// component path to the parent, which is guaranteed to be a directory.
+    FoundParent(ComponentPath),
 
     /// There was no entry at the given path, nor does its parent directory exist. However, all
     /// ancestors that do exist are directories.
     NotFound,
+
+    /// A symlink in the path didn't resolve.
+    DanglingSymlink,
+
+    /// An ancestor in the path was a file.
+    FileAncestor,
+}
+
+enum ExpandSymlinks<'state> {
+    /// The symlink resolved to a file entry. This contains the entry and the path to it.
+    FoundFile(&'state Box<[u8]>),
+
+    /// The symlink resolved to a directory entry. This contains the entry and the path to it.
+    FoundDirectory(&'state BTreeMap<String, Entry>, ComponentPath),
 
     /// A symlink in the path didn't resolve.
     DanglingSymlink,
@@ -735,8 +770,9 @@ enum LookupComponentPath<'state> {
 struct ComponentPath(Vec<String>);
 
 impl ComponentPath {
-    fn push(&mut self, component: String) {
-        self.0.push(component);
+    fn push(mut self, component: &str) -> Self {
+        self.0.push(component.to_owned());
+        self
     }
 
     fn pop(&mut self) -> Option<String> {
@@ -804,6 +840,9 @@ impl super::Fs for Rc<Fs> {
     }
     fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
         (**self).mkdir_recursively(path)
+    }
+    fn read_file(&self, path: &Path, contents: &mut [u8]) -> Result<usize, Error> {
+        (**self).read_file(path, contents)
     }
     fn read_dir(
         &self,
@@ -1270,6 +1309,71 @@ mod tests {
 
         assert_eq!(fs.remove(Path::new("/foo")), Ok(()));
         assert_eq!(fs.metadata(Path::new("/foo")), Ok(None));
+    }
+
+    #[test]
+    fn read_file() {
+        let fs = Fs::new(fs! {
+            foo(b"foo"),
+            empty(b""),
+            subdir {
+                subdir {
+                    root -> "../dotdot",
+                },
+                dotdot -> "..",
+            },
+            symlink -> "symlink2",
+            symlink2 -> "subdir/subdir/root/foo",
+            bad_symlink -> "dangle",
+        });
+
+        let mut buf = [0u8; 10];
+
+        assert_eq!(fs.read_file(Path::new("/foo"), &mut buf[..]), Ok(3));
+        assert_eq!(&buf[..3], b"foo");
+        assert_eq!(fs.read_file(Path::new("/foo"), &mut buf[..1]), Ok(1));
+        assert_eq!(&buf[..1], b"f");
+        assert_eq!(fs.read_file(Path::new("/foo"), &mut buf[..0]), Ok(0));
+
+        assert_eq!(fs.read_file(Path::new("/empty"), &mut buf[..]), Ok(0));
+
+        assert_eq!(
+            fs.read_file(Path::new("/subdir/subdir/root/foo"), &mut buf[..]),
+            Ok(3)
+        );
+        assert_eq!(&buf[..3], b"foo");
+
+        assert_eq!(fs.read_file(Path::new("/symlink"), &mut buf[..]), Ok(3));
+        assert_eq!(&buf[..3], b"foo");
+
+        assert_eq!(
+            fs.read_file(Path::new("/missing"), &mut buf[..]),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/subdir/missing"), &mut buf[..]),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/dangle/missing"), &mut buf[..]),
+            Err(Error::NoEnt)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/foo/bar"), &mut buf[..]),
+            Err(Error::NotDir)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/subdir"), &mut buf[..]),
+            Err(Error::IsDir)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/subdir/dotdot"), &mut buf[..]),
+            Err(Error::IsDir)
+        );
+        assert_eq!(
+            fs.read_file(Path::new("/bad_symlink"), &mut buf[..]),
+            Err(Error::NoEnt)
+        );
     }
 
     #[test]

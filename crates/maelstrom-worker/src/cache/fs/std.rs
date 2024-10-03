@@ -3,7 +3,7 @@ use std::{
     ffi::OsString,
     fmt::Debug,
     fs::{self, File},
-    io::{self, ErrorKind, Write as _},
+    io::{self, ErrorKind, Read as _, Write as _},
     os::unix::fs as unix_fs,
     path::{Path, PathBuf},
     thread,
@@ -38,6 +38,10 @@ impl super::Fs for Fs {
 
     fn rand_u64(&self) -> u64 {
         rand::random()
+    }
+
+    fn read_file(&self, path: &Path, contents: &mut [u8]) -> io::Result<usize> {
+        File::open(path)?.read(contents)
     }
 
     fn rename(&self, source: &Path, destination: &Path) -> io::Result<()> {
