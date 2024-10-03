@@ -44,15 +44,16 @@ extern "C" fn child_func(arg: *mut std::ffi::c_void) -> i32 {
     unreachable!()
 }
 
-fn clone3_clone_vm_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
+fn clone_clone_vm_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
     const CHILD_STACK_SIZE: usize = 1024;
     let mut stack = vec![0u8; CHILD_STACK_SIZE];
 
     let child_args = ChildArgs {
         dev_null: dev_null.fd(),
     };
-    let args =
-        linux::CloneArgs::default().flags(linux::CloneFlags::VM | linux::CloneFlags::SIGCHLD);
+    let args = linux::CloneArgs::default()
+        .flags(linux::CloneFlags::VM)
+        .exit_signal(linux::Signal::CHLD);
     let stack_ptr: *mut u8 = stack.as_mut_ptr();
     let child = unsafe {
         linux::clone(
@@ -95,7 +96,7 @@ pub fn main(args: CliArgs) -> Result<()> {
         posix_spawn_wait(&dev_null)
     })?;
     run_benchmark("clone(CLONE_VM) + execve + wait", args.iterations, || {
-        clone3_clone_vm_execve_wait(&dev_null)
+        clone_clone_vm_execve_wait(&dev_null)
     })?;
 
     Ok(())

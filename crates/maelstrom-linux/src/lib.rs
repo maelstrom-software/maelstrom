@@ -95,7 +95,6 @@ impl CloneFlags {
     pub const NEWPID: Self = Self(libc::CLONE_NEWPID);
     pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER);
     pub const VM: Self = Self(libc::CLONE_VM);
-    pub const SIGCHLD: Self = Self(libc::SIGCHLD);
 
     fn as_u64(&self) -> u64 {
         self.0.try_into().unwrap()
