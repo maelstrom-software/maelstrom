@@ -172,7 +172,7 @@ impl super::Fs for Fs {
     fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
         match self.state.borrow().root.lookup_component_path(path) {
             LookupComponentPath::Found(entry, _) => Ok(Some(entry.metadata())),
-            LookupComponentPath::NotFound | LookupComponentPath::FoundParent(_) => Ok(None),
+            LookupComponentPath::FoundParent(_) | LookupComponentPath::NotFound => Ok(None),
             LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
         }
@@ -181,8 +181,8 @@ impl super::Fs for Fs {
     fn read_file(&self, path: &Path, contents_out: &mut [u8]) -> Result<usize, Error> {
         let root = &self.state.borrow().root;
         match root.lookup_component_path(path) {
-            LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_)
+            LookupComponentPath::FoundParent(_)
+            | LookupComponentPath::NotFound
             | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::Found(entry, component_path) => {
@@ -206,8 +206,8 @@ impl super::Fs for Fs {
     ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
         let root = &self.state.borrow().root;
         match root.lookup_component_path(path) {
-            LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_)
+            LookupComponentPath::FoundParent(_)
+            | LookupComponentPath::NotFound
             | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::Found(entry, component_path) => {
@@ -262,10 +262,10 @@ impl super::Fs for Fs {
     fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
         let state = self.state.borrow();
         match state.root.lookup_component_path(path) {
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
             LookupComponentPath::Found(Entry::Directory { .. }, _) => Ok(()),
             LookupComponentPath::Found(_, _) => Err(Error::Exists),
+            LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::FoundParent(_) => {
                 drop(state);
                 self.mkdir(path)
@@ -281,12 +281,15 @@ impl super::Fs for Fs {
     fn remove(&self, path: &Path) -> Result<(), Error> {
         let root = &mut self.state.borrow_mut().root;
         match root.lookup_component_path(path) {
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
-            LookupComponentPath::DanglingSymlink
-            | LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_) => Err(Error::NoEnt),
             LookupComponentPath::Found(Entry::Directory { .. }, _) => Err(Error::IsDir),
-            LookupComponentPath::Found(_, mut component_path) => {
+            LookupComponentPath::FoundParent(_)
+            | LookupComponentPath::NotFound
+            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
+            LookupComponentPath::Found(
+                Entry::File { .. } | Entry::Symlink { .. },
+                mut component_path,
+            ) => {
                 let component = component_path.pop().unwrap();
                 root.resolve_component_path_mut(&component_path)
                     .directory_entries_mut()
@@ -300,6 +303,13 @@ impl super::Fs for Fs {
     fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Error> {
         let state = &mut self.state.borrow_mut();
         match state.root.lookup_component_path(&path) {
+            LookupComponentPath::Found(Entry::File { .. } | Entry::Symlink { .. }, _) => {
+                Err(Error::NotDir)
+            }
+            LookupComponentPath::FoundParent(_)
+            | LookupComponentPath::NotFound
+            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::Found(Entry::Directory { .. }, component_path) => {
                 if component_path.is_empty() {
                     // Can't rmdir /.
@@ -312,46 +322,27 @@ impl super::Fs for Fs {
                     Ok(())
                 }
             }
-            LookupComponentPath::Found(_, _) => Err(Error::NotDir),
-            LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_)
-            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
-            LookupComponentPath::FileAncestor => Err(Error::NotDir),
         }
     }
 
     fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
         let root = &mut self.state.borrow_mut().root;
         let (source_entry, source_component_path) = match root.lookup_component_path(source_path) {
-            LookupComponentPath::FileAncestor => {
-                return Err(Error::NotDir);
-            }
-            LookupComponentPath::DanglingSymlink
+            LookupComponentPath::FoundParent(_)
             | LookupComponentPath::NotFound
-            | LookupComponentPath::FoundParent(_) => {
-                return Err(Error::NoEnt);
-            }
+            | LookupComponentPath::DanglingSymlink => Err(Error::NoEnt),
+            LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::Found(source_entry, source_component_path) => {
-                (source_entry, source_component_path)
+                Ok((source_entry, source_component_path))
             }
-        };
+        }?;
 
         let dest_parent_component_path = match root.lookup_component_path(dest_path) {
-            LookupComponentPath::FileAncestor => {
-                return Err(Error::NotDir);
-            }
-            LookupComponentPath::DanglingSymlink | LookupComponentPath::NotFound => {
+            LookupComponentPath::NotFound | LookupComponentPath::DanglingSymlink => {
                 return Err(Error::NoEnt);
             }
-            LookupComponentPath::FoundParent(dest_parent_component_path) => {
-                if source_entry.is_directory()
-                    && dest_parent_component_path.is_descendant_of(&source_component_path)
-                {
-                    // We can't move a directory into one of its descendants, including itself.
-                    return Err(Error::Inval);
-                } else {
-                    dest_parent_component_path
-                }
+            LookupComponentPath::FileAncestor => {
+                return Err(Error::NotDir);
             }
             LookupComponentPath::Found(dest_entry, dest_component_path) => {
                 if source_entry.is_directory() {
@@ -383,6 +374,16 @@ impl super::Fs for Fs {
 
                 // Remove the destination entry and proceed like it wasn't there to begin with.
                 root.remove_component_path(dest_component_path).1
+            }
+            LookupComponentPath::FoundParent(dest_parent_component_path) => {
+                if source_entry.is_directory()
+                    && dest_parent_component_path.is_descendant_of(&source_component_path)
+                {
+                    // We can't move a directory into one of its descendants, including itself.
+                    return Err(Error::Inval);
+                } else {
+                    dest_parent_component_path
+                }
             }
         };
 
