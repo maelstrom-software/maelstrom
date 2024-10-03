@@ -20,14 +20,14 @@ use strum::Display;
 /// ```
 /// fs! {
 ///     subdir {
-///         file_in_subdir(42),
+///         file_in_subdir(b"123"),
 ///         symlink_in_subdir -> "../subdir2",
 ///         nested_subdir {
 ///             file_in_nested_subdir(43),
 ///         },
 ///     },
 ///     "subdir2" {},
-///     "file"(44),
+///     "file"(b"456"),
 ///     "symlink" -> "subdir",
 /// }
 /// ```
@@ -36,7 +36,7 @@ use strum::Display;
 /// "entries", separated by ","s, with an optional trailing ",".
 ///
 /// Each entry must be one of:
-///   - A file entry, which consists of the file name, plus the size of the file in parenthesis.
+///   - A file entry, which consists of the file name, plus the contents of the file in parenthesis.
 ///     The file name can either be a bare word, if it's a valid identifier, or a quoted string.
 ///   - A symlink entry, which consists of the symlink name, the token "->", then the target of the
 ///     link in quotes. The symlink name can either be a bare word, if it's a valid identifier, or
