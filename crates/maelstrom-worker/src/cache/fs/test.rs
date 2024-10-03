@@ -137,6 +137,10 @@ impl Fs {
     pub fn complete_recursive_rmdir(&self, path: &str) {
         self.state.borrow_mut().complete_recursive_rmdir(path)
     }
+
+    pub fn graft(&self, path: impl AsRef<Path>, entry: Entry) {
+        self.state.borrow_mut().graft(path.as_ref(), entry)
+    }
 }
 
 impl super::Fs for Fs {
@@ -297,6 +301,28 @@ impl State {
             LookupComponentPath::Found(_, _) => Err(Error::NotDir),
         }
         .unwrap();
+    }
+
+    pub fn graft(&mut self, path: &Path, entry: Entry) {
+        let parent_component_path = match self.root.lookup_component_path(path) {
+            err @ (LookupComponentPath::DanglingSymlink | LookupComponentPath::FileAncestor) => {
+                panic!("error {err:?} looking up graft location {path:?}");
+            }
+            LookupComponentPath::FoundParent(parent_component_path) => parent_component_path,
+            LookupComponentPath::NotFound => {
+                self.mkdir_recursively(path.parent().unwrap()).unwrap();
+                self.graft(path, entry);
+                return;
+            }
+            LookupComponentPath::Found(_, component_path) => {
+                self.root.remove_component_path(component_path).1
+            }
+        };
+        self.root.append_entry_to_directory(
+            &parent_component_path,
+            path.file_name().unwrap(),
+            entry,
+        );
     }
 
     fn rand_u64(&mut self) -> u64 {
@@ -492,7 +518,7 @@ impl State {
             }
         };
 
-        let (source_entry, _) = self.root.remove_component_path(source_component_path);
+        let source_entry = self.root.remove_component_path(source_component_path).0;
         self.root.append_entry_to_directory(
             &dest_parent_component_path,
             dest_path.file_name().unwrap(),
@@ -808,6 +834,7 @@ impl Entry {
     }
 }
 
+#[derive(Debug)]
 enum LookupComponentPath<'state> {
     /// The path resolved to an actual entry. This contains the entry and the component path to it.
     Found(&'state Entry, ComponentPath),
@@ -850,7 +877,7 @@ enum ExpandSymlinks<'state> {
 /// will generally resolve a [`Path`] into a [`ComponentPath`] at the beginning of an operation,
 /// and then operate using the [`ComponentPath`] for the rest of the operation. The assumption is
 /// that one we've got it, we can always resolve a [`ComponentPath`] into an [`Entry`].
-#[derive(Default, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 struct ComponentPath(Vec<String>);
 
 impl ComponentPath {
@@ -2003,8 +2030,6 @@ mod tests {
         });
     }
 
-    /******/
-
     #[test]
     fn temp_file() {
         let fs = Fs::new(fs! {
@@ -2243,5 +2268,42 @@ mod tests {
             fs.persist_temp_dir(temp_dir_3, Path::new("/bad_symlink/bar")),
             Err(Error::NoEnt)
         );
+    }
+
+    /******/
+
+    #[test]
+    fn graft() {
+        let fs = Fs::new(fs! {});
+
+        fs.graft(
+            "/foo/bar/baz",
+            fs! {
+                file(b"file"),
+                symlink -> "file",
+            },
+        );
+        fs.assert_tree(fs! {
+            foo {
+                bar {
+                    baz {
+                        file(b"file"),
+                        symlink -> "file",
+                    }
+                }
+            }
+        });
+
+        fs.graft("/foo", Entry::file(b"abc"));
+        fs.assert_tree(fs! { foo(b"abc") });
+
+        fs.graft("/symlink", Entry::symlink("foo"));
+        fs.assert_tree(fs! { foo(b"abc"), symlink -> "foo" });
+
+        fs.graft("/symlink", fs! {});
+        fs.assert_tree(fs! { foo(b"abc"), symlink {} });
+
+        fs.graft("/foo", fs! {});
+        fs.assert_tree(fs! { foo {}, symlink {} });
     }
 }
