@@ -289,13 +289,8 @@ impl State {
             LookupComponentPath::DanglingSymlink
             | LookupComponentPath::NotFound
             | LookupComponentPath::FoundParent(_) => Err(Error::NoEnt),
-            LookupComponentPath::Found(Entry::Directory { .. }, mut component_path) => {
-                let component = component_path.pop().unwrap();
-                self.root
-                    .resolve_component_path_mut(&component_path)
-                    .directory_entries_mut()
-                    .remove(&component)
-                    .assert_is_some();
+            LookupComponentPath::Found(Entry::Directory { .. }, component_path) => {
+                self.root.remove_component_path(component_path);
                 Ok(())
             }
             LookupComponentPath::Found(_, _) => Err(Error::NotDir),
@@ -420,14 +415,9 @@ impl State {
             LookupComponentPath::FileAncestor => Err(Error::NotDir),
             LookupComponentPath::Found(
                 Entry::File { .. } | Entry::Symlink { .. },
-                mut component_path,
+                component_path,
             ) => {
-                let component = component_path.pop().unwrap();
-                self.root
-                    .resolve_component_path_mut(&component_path)
-                    .directory_entries_mut()
-                    .remove(&component)
-                    .assert_is_some();
+                self.root.remove_component_path(component_path);
                 Ok(())
             }
         }
@@ -661,29 +651,24 @@ impl Entry {
         for component in path.components().with_position() {
             let is_last_component = matches!(component, Position::Last(_) | Position::Only(_));
             let component = component.into_inner();
-            match component {
+            (cur, component_path) = match component {
                 Component::Prefix(_) => {
                     unimplemented!("prefix components don't occur in Unix")
                 }
-                Component::RootDir => {
-                    cur = self;
-                    component_path = Default::default();
-                }
-                Component::CurDir => {}
+                Component::RootDir => (self, Default::default()),
+                Component::CurDir => (cur, component_path),
                 Component::ParentDir => {
-                    cur = self.pop_component_path(&mut component_path);
+                    component_path = component_path.try_pop().0;
+                    (self.resolve_component_path(&component_path), component_path)
                 }
                 Component::Normal(name) => match self.expand_symlinks(cur, component_path) {
-                    ExpandSymlinks::FoundDirectory(entries, new_component_path) => {
+                    ExpandSymlinks::FoundDirectory(entries, component_path) => {
                         let name = name.to_str().unwrap();
                         match entries.get(name) {
-                            Some(entry) => {
-                                cur = entry;
-                                component_path = new_component_path.push(name);
-                            }
+                            Some(entry) => (entry, component_path.push(name)),
                             None => {
                                 if is_last_component {
-                                    return LookupComponentPath::FoundParent(new_component_path);
+                                    return LookupComponentPath::FoundParent(component_path);
                                 } else {
                                     return LookupComponentPath::NotFound;
                                 }
@@ -697,7 +682,7 @@ impl Entry {
                         return LookupComponentPath::DanglingSymlink;
                     }
                 },
-            }
+            };
         }
         LookupComponentPath::Found(cur, component_path)
     }
@@ -718,8 +703,9 @@ impl Entry {
                     return ExpandSymlinks::FoundFile(contents);
                 }
                 Self::Symlink { target } => {
+                    component_path = component_path.pop().0;
                     match self.lookup_component_path_helper(
-                        self.pop_component_path(&mut component_path),
+                        self.resolve_component_path(&component_path),
                         component_path,
                         Path::new(target),
                     ) {
@@ -739,14 +725,6 @@ impl Entry {
                 }
             }
         }
-    }
-
-    /// Treating `self` as the root of the file system, pop one component off of `component_path`.
-    /// If `component_path` is empty, this will be a no-op. Return the [`Entry`] now pointed to by
-    /// `component_path`.
-    fn pop_component_path(&self, component_path: &mut ComponentPath) -> &Self {
-        component_path.pop();
-        self.resolve_component_path(&component_path)
     }
 
     /// Treating `self` as the root of the file system, resolve `component_path` to its
@@ -787,24 +765,14 @@ impl Entry {
     /// Treating `self` as the root of the file system, resolve `component_path` to its
     /// corresponding directory [`Entry`], then remove that entry from its parent and return the
     /// entry. `component_path` must not be empty: you can't remove the root from its parent.
-    fn remove_component_path(
-        &mut self,
-        mut component_path: ComponentPath,
-    ) -> (Self, ComponentPath) {
-        assert!(!component_path.is_empty());
-        let mut cur = self;
-        let mut entry = None;
-        for component in component_path.iter().with_position() {
-            let entries = cur.directory_entries_mut();
-            if let Position::Last(component) | Position::Only(component) = component {
-                entry = Some(entries.remove(component).unwrap());
-                break;
-            } else {
-                cur = entries.get_mut(component.into_inner()).unwrap();
-            }
-        }
-        component_path.pop();
-        (entry.unwrap(), component_path)
+    fn remove_component_path(&mut self, component_path: ComponentPath) -> (Self, ComponentPath) {
+        let (component_path, component) = component_path.pop();
+        let entry = self
+            .resolve_component_path_mut(&component_path)
+            .directory_entries_mut()
+            .remove(&component)
+            .unwrap();
+        (entry, component_path)
     }
 
     /// Treating `self` as the root of the file system, resolve `path` to its parent directory.
@@ -886,8 +854,14 @@ impl ComponentPath {
         self
     }
 
-    fn pop(&mut self) -> Option<String> {
-        self.0.pop()
+    fn pop(self) -> (Self, String) {
+        let (head, tail) = self.try_pop();
+        (head, tail.unwrap())
+    }
+
+    fn try_pop(mut self) -> (Self, Option<String>) {
+        let last = self.0.pop();
+        (self, last)
     }
 
     fn len(&self) -> usize {
