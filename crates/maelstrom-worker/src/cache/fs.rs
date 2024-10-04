@@ -153,6 +153,36 @@ impl Metadata {
             size,
         }
     }
+
+    pub fn is_directory(&self) -> bool {
+        matches!(
+            self,
+            Self {
+                type_: FileType::Directory,
+                ..
+            }
+        )
+    }
+
+    pub fn is_file(&self) -> bool {
+        matches!(
+            self,
+            Self {
+                type_: FileType::File,
+                ..
+            }
+        )
+    }
+
+    pub fn is_symlink(&self) -> bool {
+        matches!(
+            self,
+            Self {
+                type_: FileType::Symlink,
+                ..
+            }
+        )
+    }
 }
 
 impl From<fs::Metadata> for Metadata {
@@ -184,5 +214,71 @@ impl From<fs::FileType> for FileType {
         } else {
             FileType::Other
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constructors() {
+        assert_eq!(
+            Metadata::file(3),
+            Metadata {
+                type_: FileType::File,
+                size: 3
+            }
+        );
+        assert_eq!(
+            Metadata::directory(3),
+            Metadata {
+                type_: FileType::Directory,
+                size: 3
+            }
+        );
+        assert_eq!(
+            Metadata::symlink(3),
+            Metadata {
+                type_: FileType::Symlink,
+                size: 3
+            }
+        );
+    }
+
+    #[test]
+    fn is_file() {
+        assert!(Metadata::file(3).is_file());
+        assert!(!Metadata::directory(3).is_file());
+        assert!(!Metadata::symlink(3).is_file());
+        assert!(!Metadata {
+            type_: FileType::Other,
+            size: 3
+        }
+        .is_file());
+    }
+
+    #[test]
+    fn is_directory() {
+        assert!(!Metadata::file(3).is_directory());
+        assert!(Metadata::directory(3).is_directory());
+        assert!(!Metadata::symlink(3).is_directory());
+        assert!(!Metadata {
+            type_: FileType::Other,
+            size: 3
+        }
+        .is_directory());
+    }
+
+    #[test]
+    fn is_symlink() {
+        assert!(!Metadata::file(3).is_symlink());
+        assert!(!Metadata::directory(3).is_symlink());
+        assert!(Metadata::symlink(3).is_symlink());
+        assert!(!Metadata {
+            type_: FileType::Other,
+            size: 3
+        }
+        .is_symlink());
     }
 }
