@@ -22,6 +22,7 @@ use std::{
     num::NonZeroU32,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    str::FromStr as _,
     string::ToString,
 };
 
@@ -358,22 +359,17 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             Some(_) => {
                 fs.remove(&removing).unwrap();
             }
-            None => {
-            }
+            None => {}
         }
         fs.mkdir(&removing).unwrap();
 
         // Next, remove everything else in the cache directory.
-        Self::remove_all_from_directory_except(
-            &fs,
-            &root,
-            &root,
-            ["removing"],
-        );
+        Self::remove_all_from_directory_except(&fs, &root, &root, ["removing"]);
 
         // Finally, create all of the files all directories that should be there.
         let sha256 = root.join("sha256");
-        fs.create_file(&root.join(CACHEDIR_TAG), &CACHEDIR_TAG_CONTENTS).unwrap();
+        fs.create_file(&root.join(CACHEDIR_TAG), &CACHEDIR_TAG_CONTENTS)
+            .unwrap();
         fs.mkdir(&root.join("tmp")).unwrap();
         fs.mkdir(&sha256).unwrap();
         for kind in KeyKindT::iter() {
@@ -392,8 +388,97 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         }
     }
 
-    fn new_preserve_directory_contents(fs: FsT, root: PathBuf, size: CacheSize, log: Logger) -> Self {
-        Self::new_clear_directory_contents(fs, root, size, log)
+    fn new_preserve_directory_contents(
+        fs: FsT,
+        root: PathBuf,
+        size: CacheSize,
+        log: Logger,
+    ) -> Self {
+        // First, make sure the `removing` directory exists and is empty.
+        let removing = root.join("removing");
+        match fs.metadata(&removing).unwrap() {
+            Some(metadata) if metadata.is_directory() => {
+                let removing_tmp = loop {
+                    let target = root.join(format!("removing.{:016x}", fs.rand_u64()));
+                    if fs.metadata(&target).unwrap().is_none() {
+                        break target;
+                    }
+                };
+                fs.rename(&removing, &removing_tmp).unwrap();
+            }
+            Some(_) => {
+                fs.remove(&removing).unwrap();
+            }
+            None => {}
+        }
+        fs.mkdir(&removing).unwrap();
+
+        // Next, remove any garbage in the cache directory.
+        Self::remove_all_from_directory_except(
+            &fs,
+            &root,
+            &root,
+            ["removing", "sha256", CACHEDIR_TAG],
+        );
+
+        // Next, create the sha256 and tmp directories.
+        let sha256 = root.join("sha256");
+        fs.mkdir(&root.join("tmp")).unwrap();
+        fs.mkdir_recursively(&sha256).unwrap();
+
+        // Next, remove any old or garbage sha256 subdirectories and create any missing ones.
+        Self::remove_all_from_directory_except(&fs, &root, &sha256, KeyKindT::iter());
+        for kind in KeyKindT::iter() {
+            fs.mkdir_recursively(&sha256.join(kind.to_string()))
+                .unwrap();
+        }
+
+        let mut entries = Map::<KeyKindT>::default();
+        let mut heap = Heap::<Map<KeyKindT>>::default();
+        let mut next_priority = 0u64;
+        let mut bytes_used = 0u64;
+
+        // Finally, Go through the sha256 subdirs and decide what to do with the contents.
+        for kind in KeyKindT::iter() {
+            let kind_dir = sha256.join(kind.to_string());
+            for (name, metadata) in fs.read_dir(&kind_dir).unwrap().map(Result::unwrap) {
+                if let Some(name) = name.to_str() {
+                    if let Ok(digest) = Sha256Digest::from_str(name) {
+                        if metadata.is_file() {
+                            let key = Key::new(kind, digest);
+                            entries.insert(
+                                key.clone(),
+                                Entry::InHeap {
+                                    file_type: metadata.type_,
+                                    bytes_used: metadata.size,
+                                    priority: next_priority,
+                                    heap_index: Default::default(),
+                                },
+                            );
+                            heap.push(&mut entries, key);
+                            next_priority = next_priority.checked_add(1).unwrap();
+                            bytes_used = bytes_used.checked_add(metadata.size).unwrap();
+                            continue;
+                        }
+                    }
+                }
+                let path = kind_dir.join(name);
+                Self::remove_in_background(&fs, &root, &path, metadata.type_);
+            }
+        }
+
+        let mut cache = Cache {
+            fs,
+            root,
+            entries,
+            heap,
+            next_priority,
+            bytes_used,
+            bytes_used_target: size.into(),
+            log,
+        };
+        cache.possibly_remove_some();
+        cache
     }
 
     /// Attempt to fetch `artifact` from the cache. See [`GetArtifact`] for the meaning of the
@@ -566,7 +651,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             .into_iter()
             .map(|e| OsString::from(e.to_string()))
             .collect::<HashSet<_>>();
-        for (entry_name, metadata) in fs.read_dir(dir).unwrap().map(|de| de.unwrap()) {
+        for (entry_name, metadata) in fs.read_dir(dir).unwrap().map(Result::unwrap) {
             if !except.contains(&entry_name) {
                 Self::remove_in_background(fs, root, &dir.join(entry_name), metadata.type_);
             }
@@ -684,7 +769,7 @@ mod tests {
         #[track_caller]
         fn assert_pending_recursive_rmdirs<const N: usize>(&self, paths: [&str; N]) {
             self.fs.assert_recursive_rmdirs(HashSet::from_iter(
-                paths.into_iter().map(|s| s.to_string()),
+                paths.into_iter().map(ToString::to_string),
             ))
         }
 
@@ -795,231 +880,6 @@ mod tests {
         fn decrement_ref_count(&mut self, kind: TestKeyKind, digest: Sha256Digest) {
             self.cache.decrement_ref_count(kind, &digest);
         }
-    }
-
-    #[test]
-    fn new_without_cachedir_tag_does_proper_cleanup_with_removing_dir() {
-        let fixture = Fixture::new(
-            1000,
-            fs! {
-                z {
-                    removing {
-                        "0000000000000001" { a(b"a contents") },
-                        "0000000000000002"(b"2 contents"),
-                        "0000000000000003" -> "foo",
-                    },
-                    sha256 {
-                        apple {
-                            bad_apple {
-                                foo(b"foo contents"),
-                                symlink -> "bad_apple",
-                                more_bad_apple {
-                                    bar(b"bar contents"),
-                                },
-                            },
-                        },
-                        banana {
-                            bread(b"bread contents"),
-                        },
-                    },
-                    garbage {
-                        foo(b"more foo contents"),
-                        symlink -> "garbage",
-                        more_garbage {
-                            bar(b"more bar contents"),
-                        },
-                    },
-		    foo(b"foo contents"),
-		    symlink -> "garbage",
-                },
-            },
-        );
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                removing {
-                    "0000000000000002" {
-                        foo(b"more foo contents"),
-                        symlink -> "garbage",
-                        more_garbage {
-                            bar(b"more bar contents"),
-                        },
-                    },
-                    "0000000000000003" {
-                        "0000000000000001" { a(b"a contents") },
-                        "0000000000000002"(b"2 contents"),
-                        "0000000000000003" -> "foo",
-                    },
-                    "0000000000000004" {
-                        apple {
-                            bad_apple {
-                                foo(b"foo contents"),
-                                symlink -> "bad_apple",
-                                more_bad_apple {
-                                    bar(b"bar contents"),
-                                },
-                            },
-                        },
-                        banana {
-                            bread(b"bread contents"),
-                        },
-                    },
-                },
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([
-            "/z/removing/0000000000000002",
-            "/z/removing/0000000000000003",
-            "/z/removing/0000000000000004",
-        ]);
-    }
-
-    #[test]
-    fn new_without_cachedir_tag_does_proper_cleanup_with_removing_file() {
-        let fixture = Fixture::new(
-            1000,
-            fs! {
-                z {
-                    removing (b"removing"),
-                    sha256 {
-                        apple {
-                            bad_apple {
-                                foo(b"foo contents"),
-                                symlink -> "bad_apple",
-                                more_bad_apple {
-                                    bar(b"bar contents"),
-                                },
-                            },
-                        },
-                        banana {
-                            bread(b"bread contents"),
-                        },
-                    },
-                    garbage {
-                        foo(b"more foo contents"),
-                        symlink -> "garbage",
-                        more_garbage {
-                            bar(b"more bar contents"),
-                        },
-                    },
-		    foo(b"foo contents"),
-		    symlink -> "garbage",
-                },
-            },
-        );
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                removing {
-                    "0000000000000001" {
-                        foo(b"more foo contents"),
-                        symlink -> "garbage",
-                        more_garbage {
-                            bar(b"more bar contents"),
-                        },
-                    },
-                    "0000000000000002" {
-                        apple {
-                            bad_apple {
-                                foo(b"foo contents"),
-                                symlink -> "bad_apple",
-                                more_bad_apple {
-                                    bar(b"bar contents"),
-                                },
-                            },
-                        },
-                        banana {
-                            bread(b"bread contents"),
-                        },
-                    },
-                },
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([
-            "/z/removing/0000000000000001",
-            "/z/removing/0000000000000002",
-        ]);
-    }
-
-    #[test]
-    fn new_without_cachedir_tag_does_proper_cleanup_with_no_removing_file_or_dir() {
-        let fixture = Fixture::new(
-            1000,
-            fs! {
-                z {
-                    sha256 {
-                        apple {
-                            bad_apple {
-                                foo(b"foo contents"),
-                                symlink -> "bad_apple",
-                                more_bad_apple {
-                                    bar(b"bar contents"),
-                                },
-                            },
-                        },
-                        banana {
-                            bread(b"bread contents"),
-                        },
-                    },
-                    garbage {
-                        foo(b"more foo contents"),
-                        symlink -> "garbage",
-                        more_garbage {
-                            bar(b"more bar contents"),
-                        },
-                    },
-		    foo(b"foo contents"),
-		    symlink -> "garbage",
-                },
-            },
-        );
-        fixture.assert_fs(fs! {
-            z {
-                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
-                removing {
-                    "0000000000000001" {
-                        foo(b"more foo contents"),
-                        symlink -> "garbage",
-                        more_garbage {
-                            bar(b"more bar contents"),
-                        },
-                    },
-                    "0000000000000002" {
-                        apple {
-                            bad_apple {
-                                foo(b"foo contents"),
-                                symlink -> "bad_apple",
-                                more_bad_apple {
-                                    bar(b"bar contents"),
-                                },
-                            },
-                        },
-                        banana {
-                            bread(b"bread contents"),
-                        },
-                    },
-                },
-                sha256 {
-                    apple {},
-                    orange {},
-                },
-                tmp {},
-            },
-        });
-        fixture.assert_pending_recursive_rmdirs([
-            "/z/removing/0000000000000001",
-            "/z/removing/0000000000000002",
-        ]);
     }
 
     #[test]
@@ -1377,5 +1237,324 @@ mod tests {
             fixture.fs.metadata(temp_dir.path()).unwrap().unwrap(),
             Metadata::directory(0)
         );
+    }
+
+    #[test]
+    fn new_without_cachedir_tag_does_proper_cleanup_with_removing_dir() {
+        let fixture = Fixture::new(
+            1000,
+            fs! {
+                z {
+                    removing {
+                        "0000000000000001" { a(b"a contents") },
+                        "0000000000000002"(b"2 contents"),
+                        "0000000000000003" -> "foo",
+                    },
+                    sha256 {
+                        apple {
+                            bad_apple {
+                                foo(b"foo contents"),
+                                symlink -> "bad_apple",
+                                more_bad_apple {
+                                    bar(b"bar contents"),
+                                },
+                            },
+                        },
+                        banana {
+                            bread(b"bread contents"),
+                        },
+                    },
+                    garbage {
+                        foo(b"more foo contents"),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(b"more bar contents"),
+                        },
+                    },
+            foo(b"foo contents"),
+            symlink -> "garbage",
+                },
+            },
+        );
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                    "0000000000000002" {
+                        foo(b"more foo contents"),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(b"more bar contents"),
+                        },
+                    },
+                    "0000000000000003" {
+                        "0000000000000001" { a(b"a contents") },
+                        "0000000000000002"(b"2 contents"),
+                        "0000000000000003" -> "foo",
+                    },
+                    "0000000000000004" {
+                        apple {
+                            bad_apple {
+                                foo(b"foo contents"),
+                                symlink -> "bad_apple",
+                                more_bad_apple {
+                                    bar(b"bar contents"),
+                                },
+                            },
+                        },
+                        banana {
+                            bread(b"bread contents"),
+                        },
+                    },
+                },
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([
+            "/z/removing/0000000000000002",
+            "/z/removing/0000000000000003",
+            "/z/removing/0000000000000004",
+        ]);
+    }
+
+    #[test]
+    fn new_without_cachedir_tag_does_proper_cleanup_with_removing_file() {
+        let fixture = Fixture::new(
+            1000,
+            fs! {
+                z {
+                    removing (b"removing"),
+                    sha256 {
+                        apple {
+                            bad_apple {
+                                foo(b"foo contents"),
+                                symlink -> "bad_apple",
+                                more_bad_apple {
+                                    bar(b"bar contents"),
+                                },
+                            },
+                        },
+                        banana {
+                            bread(b"bread contents"),
+                        },
+                    },
+                    garbage {
+                        foo(b"more foo contents"),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(b"more bar contents"),
+                        },
+                    },
+            foo(b"foo contents"),
+            symlink -> "garbage",
+                },
+            },
+        );
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                    "0000000000000001" {
+                        foo(b"more foo contents"),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(b"more bar contents"),
+                        },
+                    },
+                    "0000000000000002" {
+                        apple {
+                            bad_apple {
+                                foo(b"foo contents"),
+                                symlink -> "bad_apple",
+                                more_bad_apple {
+                                    bar(b"bar contents"),
+                                },
+                            },
+                        },
+                        banana {
+                            bread(b"bread contents"),
+                        },
+                    },
+                },
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([
+            "/z/removing/0000000000000001",
+            "/z/removing/0000000000000002",
+        ]);
+    }
+
+    #[test]
+    fn new_without_cachedir_tag_does_proper_cleanup_with_no_removing_file_or_dir() {
+        let fixture = Fixture::new(
+            1000,
+            fs! {
+                z {
+                    sha256 {
+                        apple {
+                            bad_apple {
+                                foo(b"foo contents"),
+                                symlink -> "bad_apple",
+                                more_bad_apple {
+                                    bar(b"bar contents"),
+                                },
+                            },
+                        },
+                        banana {
+                            bread(b"bread contents"),
+                        },
+                    },
+                    garbage {
+                        foo(b"more foo contents"),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(b"more bar contents"),
+                        },
+                    },
+            foo(b"foo contents"),
+            symlink -> "garbage",
+                },
+            },
+        );
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                    "0000000000000001" {
+                        foo(b"more foo contents"),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(b"more bar contents"),
+                        },
+                    },
+                    "0000000000000002" {
+                        apple {
+                            bad_apple {
+                                foo(b"foo contents"),
+                                symlink -> "bad_apple",
+                                more_bad_apple {
+                                    bar(b"bar contents"),
+                                },
+                            },
+                        },
+                        banana {
+                            bread(b"bread contents"),
+                        },
+                    },
+                },
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([
+            "/z/removing/0000000000000001",
+            "/z/removing/0000000000000002",
+        ]);
+    }
+
+    #[test]
+    fn new_with_cachedir() {
+        let mut fixture = Fixture::new(
+            1000,
+            fs! {
+                z {
+                    "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                    removing {
+                        "0000000000000001" { a(b"a contents") },
+                        "0000000000000002"(b"2 contents"),
+                        "0000000000000003" -> "foo",
+                    },
+                    sha256 {
+                        apple {
+                            "0000000000000000000000000000000000000000000000000000000000000001" -> "target",
+                            "0000000000000000000000000000000000000000000000000000000000000002"(b"02"),
+                            "0000000000000000000000000000000000000000000000000000000000000003" {
+                                foo(b"foo contents"),
+                                symlink -> "bad_apple",
+                                more_bad_apple {
+                                    bar(b"bar contents"),
+                                },
+                            },
+                        },
+                        banana {
+                            bread(b"bread contents"),
+                        },
+                    },
+                    garbage {
+                        foo(b"more foo contents"),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(b"more bar contents"),
+                        },
+                    },
+                    foo(b"foo contents"),
+                    symlink -> "garbage",
+                    tmp {
+                        "tmp.1"(b"tmp.1"),
+                    },
+                },
+            },
+        );
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                    "0000000000000002" {
+                        foo(b"more foo contents"),
+                        symlink -> "garbage",
+                        more_garbage {
+                            bar(b"more bar contents"),
+                        },
+                    },
+                    "0000000000000003" {
+                        "0000000000000001" { a(b"a contents") },
+                        "0000000000000002"(b"2 contents"),
+                        "0000000000000003" -> "foo",
+                    },
+                    "0000000000000004" {
+                        "tmp.1"(b"tmp.1"),
+                    },
+                    "0000000000000005" {
+                        bread(b"bread contents"),
+                    },
+                    "0000000000000006" {
+                        foo(b"foo contents"),
+                        symlink -> "bad_apple",
+                        more_bad_apple {
+                            bar(b"bar contents"),
+                        },
+                    },
+                },
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000002"(b"02"),
+                    },
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([
+            "/z/removing/0000000000000002",
+            "/z/removing/0000000000000003",
+            "/z/removing/0000000000000004",
+            "/z/removing/0000000000000005",
+            "/z/removing/0000000000000006",
+        ]);
+
+        fixture.assert_bytes_used(2);
+        fixture.get_artifact(Apple, digest!(2), jid!(1), GetArtifact::Success);
     }
 }
