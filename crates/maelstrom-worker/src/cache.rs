@@ -547,6 +547,9 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         let (file_type, bytes_used) = match artifact {
             GotArtifact::Directory { source, size } => {
                 self.fs.persist_temp_dir(source, &path).unwrap();
+                let mut size_path = path;
+                size_path.set_extension("size");
+                self.fs.create_file(&size_path, &size.to_be_bytes()).unwrap();
                 (FileType::Directory, size)
             }
             GotArtifact::File { source } => {
@@ -692,6 +695,11 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             };
             let cache_path = self.cache_path(key.kind, &key.digest);
             Self::remove_in_background(&self.fs, &self.root, &cache_path, file_type);
+            if file_type == FileType::Directory {
+                let mut size_path = cache_path;
+                size_path.set_extension("size");
+                self.fs.remove(&size_path).unwrap();
+            }
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
                 "key" => ?key,
@@ -1000,6 +1008,7 @@ mod tests {
                         foo(b"bar"),
                         symlink -> "foo",
                     },
+                    "0000000000000000000000000000000000000000000000000000000000000001.size"(&6u64.to_be_bytes()),
                 },
                 orange {},
             },
