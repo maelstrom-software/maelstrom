@@ -5,19 +5,29 @@ weight = 1001
 draft = true
 +++
 
-This is a guide on spawning processes in Linux. Being a job execution engine Maelstrom needs to
-spawn job processes as quickly and efficiently as possible.
+This is an overview of spawning processes on Linux. This summarizes things we found while writing
+[Maelstrom](https://github.com/maelstrom-software/maelstrom). Being a job execution engine Maelstrom
+needs to spawn job processes as quickly and efficiently as possible, so we needed to understand the
+Linux APIs as best as we could. The process spawning API on Linux is also very tied together with its container API. We hope to cover more of the containerization part of Maelstrom in a future blog post.
 
-We are going to talk about the functions available in glibc for doing this sort of thing, but the
-same functions are available in other libc implementations, but some specifics may be different.
+For purposes of this post we are going to talk about the functions available in glibc for doing this
+sort of thing. The same functions are available in other libc implementations, although some
+specifics may be different.
 
-In the code examples I'm going to be writing Rust and using the `maelstrom_linux` which is
-our own wrapper around `libc` and the kernel.
+In the code examples I'm going to be writing Rust (what Maelstrom is written in) and using
+the [`maelstrom_linux`](https://github.com/maelstrom-software/maelstrom/tree/main/crates/maelstrom-linux)
+crate which is our own wrapper around `libc` and the kernel.
+
+The code snippets are taken from some working benchmark code found in
+[xtask/src/clone_benchmark.rs](https://github.com/maelstrom-software/maelstrom/blob/75341a7eaaf59b634120f40026a07530809bfe31/crates/xtask/src/clone_benchmark.rs)
 
 ## `fork` + `exec`
 The classic way to spawn a child in Linux is to use the `fork` call. The fork call creates a copy of
 the current process and returns the `pid` to the caller. The `exec` call loads another binary into
-the program space.
+the program space and restarts execution.
+
+The following code snippet executes `/bin/echo` with no input which just prints a newline. It also
+redirects `stdout` to `/dev/null`. (This does very little in the child program)
 
 ```rust
 use anyhow::Result;
@@ -40,31 +50,40 @@ fn fork_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
 }
 ```
 
-Before we call `exec` in the child, we are able to do some "housekeeping". This allows us to
-do things like call `dup2` to set up stdout. What some refer to as the "elegance" of fork is
-tied directly to this ability to do the "housekeeping" by writing plain code.
+Before we call `exec` in the child, we do some what I will call "housekeeping". This is where we
+redirect `stdout` to `/dev/null` by calling `dup2`. In this snippet we aren't doing much, but there
+are many different things you could do at this point. What some refer to as the "elegance" of fork
+is tied directly to this ability to do the "housekeeping" by writing plain code as we have done in
+this code snippet.
 
-This "housekeeping" code needs to be written with care. The rules that need to be followed can be
+The "housekeeping" code needs to be written with care. The rules that need to be followed can be
 referred to as "fork-safety".
 
-The copy of the calling process created by fork is single threaded. The calling thread is the only
-thread copied. This can cause an unusual programming environment in the child. Taking locks and
-allocating memory can cause things to break. Things like the TLS are not set-up and won't work
-right.
+### Fork Safety
 
-Another thing to consider with "fork-safety" is the state of the signal handlers. If a child gets a
-signal before calling `exec` it will execute an inherited signal handler from the parent,
-which itself could end up doing something unexpected.
+The copy of the calling process created by fork is single threaded. The calling thread is the only
+thread copied. Also now the thread that the current stack was start with has changed. All this can
+create an unusual programming environment in the child where many things don't work right and must
+be avoided.
+
+All of the following (and more) won't work correctly.
+- taking locks
+- allocating memory (on the heap)
+- using TLS
+- calling signal handlers
+
+For the code in Maelstrom that runs during this "housekeeping" we chose to make it "no_std" mainly
+to help avoid calling into code that will break due to the previously stated restrictions.
 
 ## `vfork`
 It turns out a large amount of the time spent in fork is used dealing with copying the virtual
 memory, and the more memory you have mapped, the longer it can take. If we were able to avoid that
 we can speed things up. This is exactly what vfork does.
 
-When using vfork the child process shares the same memory space as the parent. The child process is
-using the same stack memory as the parent. Having two different threads (or in this case process) at
-the same time, doesn't work. So the calling thread in parent process is suspended until the child
-calls `exec` or `_exit`.
+When using vfork the child process shares the same memory space as the parent. The child process
+thread is sharing the same stack memory as the parent calling thread. Having two different threads
+(or in this case processes) use the same stack at the same time simultaneously, doesn't work. So the
+calling thread in the parent process is suspended until the child calls `exec` or `_exit`.
 
 ```ascii-art
 calling thread                  child process
@@ -76,16 +95,20 @@ calling thread                  child process
 ```
 
 The weird thing about this is that the same stack memory will experience the CPU returning from the
+Best to avoid the following things: (and more)
 `vfork` call twice. This can really mess things up in the calling function in a way that your
 compiler is not okay with. Apparently C compilers have a way of dealing with it, but we can't call
-this function from Rust unless we use the unstable `ffi_return_twice` attribute.
+this function from Rust unless we use the unstable
+[`ffi_return_twice`](https://github.com/rust-lang/rust/issues/58314) attribute.
 
 ## `posix_spawn`
 One easier way to use `vfork` is to use `posix_spawn` instead. On the latest glibc
 version it always calls `vfork` (well actually it calls `clone` but we'll get to that
 later).
 
-This function is what Rust's `std::process::Command` uses to spawn processes on Linux.
+This function is what Rust's
+[`std::process::Command`](https://doc.rust-lang.org/std/process/struct.Command.html) uses to spawn
+processes on Linux.
 
 ```rust
 use anyhow::Result;
@@ -114,14 +137,22 @@ ran posix_spawn + wait 10000 times in 2.977589781s (avg. 297.758µs / iteration)
 
 Even for this program using very little memory, we can see a modest speed up.
 
+The downside of using `posix_spawn` is that we are locked to whatever its "housekeeping script"
+provides to control our "housekeeping." This is probably fine for a lot of users, but we want to do
+some unusual things in our "housekeeping". Secondly, suspending the calling thread is maybe just a
+little bit slower.
+
 ## `clone`
 On Linux the underlying syscall that glibc uses to implement the aforementioned functions is
-`clone` glibc provides a wrapper for `clone` so we can call it directly and through it
-we can do everything we have seen up to this point and more.
+`clone`. glibc provides a very helpful wrapper for `clone` so we can use that.
+This is a lower-level function which has a super-set of the functionality seen by `fork` and
+`vfork`.
 
-There is a newer version of the `clone` syscall called `clone3` which tries to have a
+Note: There is a newer version of the `clone` syscall called `clone3` which tries to have a
 more ergonomic API. glibc uses it internally in some places (like `pthread_create`) but
 doesn't yet provide a wrapper to use it directly.
+
+Calling this function can be a bit more involved as you will see from the following code snippet.
 
 ```rust
 use anyhow::Result;
@@ -131,6 +162,7 @@ struct ChildArgs {
     dev_null: linux::Fd,
 }
 
+/// This function executes in the child
 extern "C" fn child_func(arg: *mut std::ffi::c_void) -> i32 {
     let arg: &ChildArgs = unsafe { &*(arg as *mut ChildArgs) };
 
@@ -140,14 +172,20 @@ extern "C" fn child_func(arg: *mut std::ffi::c_void) -> i32 {
 }
 
 fn clone_clone_vm_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
-    const CHILD_STACK_SIZE: usize = 1024;
+    const CHILD_STACK_SIZE: usize = 1024; // 1 KiB of stack should be enough
     let mut stack = vec![0u8; CHILD_STACK_SIZE];
+
+    // We need to pass the file-descriptor for /dev/null through to the child.
     let child_args = ChildArgs {
         dev_null: dev_null.fd(),
     };
+
+    // Clone virtual memory, and give us SIGCHLD when it exits.
     let args = linux::CloneArgs::default()
         .flags(linux::CloneFlags::VM)
         .exit_signal(linux::Signal::CHLD);
+
+    // The function accepts a pointer to the end of the stack.
     let stack_ptr: *mut u8 = stack.as_mut_ptr();
     let child = unsafe {
         linux::clone(
@@ -157,6 +195,7 @@ fn clone_clone_vm_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
             &args,
         )
     }?;
+
     let wait_result = linux::wait()?;
     assert_eq!(wait_result.pid, child);
     assert_eq!(wait_result.status, WaitStatus::Exited(ExitCode::from_u8(0)));
@@ -164,23 +203,40 @@ fn clone_clone_vm_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
 }
 ```
 
-Using `clone` we are able to avoid copying the virtual memory of the parent, but we are also
-able to avoid suspending the parent.
+Using `clone` we are able to avoid copying the virtual memory of the parent by providing the
+`CLONE_VM` flag (via `CloneFlags::VM`) just like `vfork`, but we are also able to avoid suspending
+the parent (that is controlled with the `CLONE_VFORK` flag).
 
 Unlike `vfork` this function executes the child using the provided stack memory instead of
-sharing the same memory as the parent. This avoids the "double return" issue from before.
+sharing the same memory as the parent.
+
+When used this way, the underlying `clone` syscall still has the "double return" but `glibc`
+calls the syscall from assembly so it can manage the stack properly.
+
+Lets see how this approach compares to the other two in the benchmark
+
+```sh
+ran fork + execve + wait 10000 times in 4.135612842s (avg. 413.561µs / iteration)
+ran posix_spawn + wait 10000 times in 2.932509958s (avg. 293.25µs / iteration)
+ran clone(CLONE_VM) + execve + wait 10000 times in 2.906477871s (avg. 290.647µs / iteration)
+```
+
+It performs just a little better than calling `posix_spawn`, we don't have to suspend the calling
+thread, and now we are able to control the "housekeeping script" to be however we want.
 
 ## Making `clone` Usable
 
-The "housekeeping" is written again in plan code, but the whole thing is definitely a bit unwieldy.
-To make a usable API out of this technique for Maelstrom we came up with our own "housekeeping
-script" like `posix_spawn` has.
+Using `clone` the "housekeeping" is written again in plan code, but the whole thing is definitely a
+bit unwieldy. To make a usable API out of this technique for Maelstrom we came up with our own
+"housekeeping script" like `posix_spawn` has.
 
-The "housekeeping" can be thought of a set of syscalls, since making syscalls is basically the only
-thing you are able to do in the "housekeeping". In Maelstrom we create a vector as our script which
+The "housekeeping" can be thought of a set of syscalls, since making syscalls is basically the main
+thing you would want to do in the "housekeeping". In Maelstrom we create a vector as our script which
 we pass through to the child process to execute.
 
 This is from [maelstrom-worker-child/src/lib.rs:69](https://github.com/maelstrom-software/maelstrom/blob/75341a7eaaf59b634120f40026a07530809bfe31/crates/maelstrom-worker-child/src/lib.rs#L69)
+
+(a bunch of variants have been removed for brevity)
 
 ```rust
 pub enum Syscall<'a> {
@@ -225,26 +281,11 @@ pub struct ChildArgs<'a, 'b> {
 }
 ```
 
-This is from [maelstrom-worker/src/executor.rs:362](https://github.com/maelstrom-software/maelstrom/blob/75341a7eaaf59b634120f40026a07530809bfe31/crates/maelstrom-worker/src/executor.rs#L362)
+In the child we do the "housekeeping" by iterating the `syscalls` and calling `.call(..)` on each of
+them.
 
-```rust
-    ...
-    let mut clone_args = CloneArgs::default()
-        .flags(clone_flags)
-        .exit_signal(Signal::CHLD);
-    const CHILD_STACK_SIZE: usize = 1024;
-    let stack = bump.alloc_slice_fill_default(CHILD_STACK_SIZE);
-    let stack_ptr: *mut u8 = stack.as_mut_ptr();
-    let (_, child_pidfd) = unsafe {
-        linux::clone_with_child_pidfd(
-            func,
-            stack_ptr.wrapping_add(CHILD_STACK_SIZE) as *mut _,
-            args as *mut _ as *mut core::ffi::c_void,
-            &mut clone_args,
-        )
-    }?;
-    ...
-```
+Note: The `write_sock` in this code is a socket we opened before forking to communicate with the
+parent process.
 
 ## Addendum: Waiting for Processes
 One thing that tripped me up when writing the benchmarks was that I was using `wait` with `fork` and
@@ -252,6 +293,5 @@ One thing that tripped me up when writing the benchmarks was that I was using `w
 `ECHILD` until I added `.exit_signal(linux::Signal::CHLD)` to the arguments.
 
 In Maelstrom we use a pidfd instead of `wait` or `waitpid`. This is a much better way of waiting for
-child process, but it was easier to use `wait` for these benchmarks.
-
-
+child process that doesn't rely on the signal, but it was easier to use `wait` for these benchmarks.
+You are able to do this with `clone` by passing the `CLONE_PIDFD` flag.
