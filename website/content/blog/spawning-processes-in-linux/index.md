@@ -67,10 +67,10 @@ create an unusual programming environment in the child where many things don't w
 be avoided.
 
 All of the following (and more) won't work correctly.
-- taking locks
-- allocating memory (on the heap)
-- using TLS
-- calling signal handlers
+- Taking locks
+- Allocating memory (on the heap)
+- Using TLS
+- Calling signal handlers
 
 For the code in Maelstrom that runs during this "housekeeping" we chose to make it "no_std" mainly
 to help avoid calling into code that will break due to the previously stated restrictions.
@@ -86,12 +86,28 @@ thread is sharing the same stack memory as the parent calling thread. Having two
 calling thread in the parent process is suspended until the child calls `exec` or `_exit`.
 
 ```ascii-art
-calling thread                  child process
-     vfork        --->
-  <suspended>                <returns from vfork>
-                             <does housekeeping>
-                                  exec
-  <returns from vfork>
++---------+               +---------+         +-------+
+| Parent  |               | Kernel  |         | Child |
++---------+               +---------+         +-------+
+     |                         |                  |
+     | vfork                   |                  |
+     |------------------------>|                  |
+     |                         |                  |
+     |                         | Create child     |
+     |                         |----------------->|
+     |                         |                  | ---------------------\
+     |                         |                  |-| Returns from vfork |
+     |                         |                  | |--------------------|
+     |                         |                  | --------------------\
+     |                         |                  |-| Does housekeeping |
+     |                         |                  | |-------------------|
+     |                         |                  |
+     |                         |             exec |
+     |                         |<-----------------|
+     |                         |                  |
+     |      Returns from vfork |                  |
+     |<------------------------|                  |
+     |                         |                  |
 ```
 
 The weird thing about this is that the same stack memory will experience the CPU returning from the
