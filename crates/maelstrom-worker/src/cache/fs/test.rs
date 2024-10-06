@@ -737,7 +737,9 @@ impl Entry {
                 Err(Error::NoEnt)
             }
             Lookup::FileAncestor => Err(Error::NotDir),
-            Lookup::Found(entry, component_path) => Ok(self.follow_leaf_symlink(entry, component_path)),
+            Lookup::Found(entry, component_path) => {
+                Ok(self.follow_leaf_symlink(entry, component_path))
+            }
         }
     }
 
