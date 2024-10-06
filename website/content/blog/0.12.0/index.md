@@ -54,11 +54,11 @@ Maelstrom 0.12.0 adds the ability to pass arbitrary arguments to the underlying
 test binaries.
 
 For example:
-- `cargo maelstrom -- --force-run-in-process` passes `-\-force-run-in-process`
+- `cargo maelstrom -- --force-run-in-process` passes `--force-run-in-process`
   to the Rust test binaries when running tests.
 - `maelstrom-go-test -- -test.parallel 12` passes `-test.parallel 12` to the Go
   test binaries when running tests.
-- `maelstrom-pytest -- -n1` passes </tt>-n1</tt> to Pytest when running tests.
+- `maelstrom-pytest -- -n1` passes `-n1` to Pytest when running tests.
 
 In addition, the `extra-pytest-collect-args`,
 `extra-pytest-test-args`, and `extra-pytest-args` configuration
@@ -86,8 +86,8 @@ external binaries and their dependencies in test containers.
 ## Better Default Metadata
 
 All of the tests runners in Maelstrom 0.12.0 now have updated default metadata
-configurations. These are now test-runner-specific. For example, <tt>cargo
-maelstrom</tt> now forwards `RUST_BACKTRACE` and `RUST_LIB_BACKTRACE`.
+configurations. These are now test-runner-specific. For example, `cargo maelstrom` now forwards
+`RUST_BACKTRACE` and `RUST_LIB_BACKTRACE`.
 
 With this change, the Python test runner is now significantly easier to use
 out-of-the-box.
