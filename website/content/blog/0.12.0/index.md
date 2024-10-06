@@ -35,9 +35,9 @@ We've found this substantially improves the edit-compile-test loop. We find out
 immediately if our changes work, whether they are newly added tests or fixes to
 broken tests.
 
-## New <tt>stop-after</tt> Configuration Value
+## New `stop-after` Configuration Value
 
-This release introduces the <tt>stop-after</tt> configuration value. When this
+This release introduces the `stop-after` configuration value. When this
 is set, Maelstrom will bail out early if the given number of failures are
 encountered.
 
@@ -54,24 +54,24 @@ Maelstrom 0.12.0 adds the ability to pass arbitrary arguments to the underlying
 test binaries.
 
 For example:
-- `cargo maelstrom -- --force-run-in-process` passes <tt>-\-force-run-in-process</tt>
+- `cargo maelstrom -- --force-run-in-process` passes `-\-force-run-in-process`
   to the Rust test binaries when running tests.
-- `maelstrom-go-test -- -test.parallel 12` passes <tt>-test.parallel 12</tt> to the Go
+- `maelstrom-go-test -- -test.parallel 12` passes `-test.parallel 12` to the Go
   test binaries when running tests.
 - `maelstrom-pytest -- -n1` passes </tt>-n1</tt> to Pytest when running tests.
 
-In addition, the <tt>extra-pytest-collect-args</tt>,
-<tt>extra-pytest-test-args</tt>, and <tt>extra-pytest-args</tt> configuration
-values can be used to tell <tt>maelstrom-pytest</tt> to pass extra arguments to
+In addition, the `extra-pytest-collect-args`,
+`extra-pytest-test-args`, and `extra-pytest-args` configuration
+values can be used to tell `maelstrom-pytest` to pass extra arguments to
 Pytest in the collect phase, in the test-running phase, or both, respectively.
 
-## More Configuration Values for <tt>maelstrom-go-test</tt>
+## More Configuration Values for `maelstrom-go-test`
 
-Maelstrom 0.12.0 updates <tt>maelstrom-go-test</tt> with more configuration
-values that add functionality found in <tt>go test</tt>:
-- <tt>vet</tt>
-- <tt>short</tt>
-- <tt>fullpath</tt>
+Maelstrom 0.12.0 updates `maelstrom-go-test` with more configuration
+values that add functionality found in `go test`:
+- `vet`
+- `short`
+- `fullpath`
 
 Also, `maelstrom-go-test --list-packages` now works, similar to how `cargo
 maelstrom --list-packages` does.
@@ -79,7 +79,7 @@ maelstrom --list-packages` does.
 ## Shared-Library Dependencies
 
 This release of Maelstrom adds a new layer type called
-<tt>shared-library-dependencies</tt>, which includes the closure of shared
+`shared-library-dependencies`, which includes the closure of shared
 libraries required to run a list of binaries. This makes it easier to include
 external binaries and their dependencies in test containers.
 
@@ -87,7 +87,7 @@ external binaries and their dependencies in test containers.
 
 All of the tests runners in Maelstrom 0.12.0 now have updated default metadata
 configurations. These are now test-runner-specific. For example, <tt>cargo
-maelstrom</tt> now forwards <tt>RUST\_BACKTRACE</tt> and <tt>RUST\_LIB\_BACKTRACE</tt>.
+maelstrom</tt> now forwards `RUST\_BACKTRACE` and `RUST\_LIB\_BACKTRACE`.
 
 With this change, the Python test runner is now significantly easier to use
 out-of-the-box.
@@ -95,11 +95,11 @@ out-of-the-box.
 ## UI Improvements
 
 This release features an improved test-runner UI:
-- Both the <tt>fancy</tt> and <tt>simple</tt> UIs now show the counts of tests
+- Both the `fancy` and `simple` UIs now show the counts of tests
   in each various state.
-- The <tt>fancy</tt> UI now includes a listing of failed tests during the test
+- The `fancy` UI now includes a listing of failed tests during the test
   run. Before, this was only shown in a summary at the end of the test run.
-- The <tt>simple</tt> UI now includes a running count of failed tests.
+- The `simple` UI now includes a running count of failed tests.
 
 <img src="maelstrom_failed_tests.png" alt="Failed Tests Dialog" width="90%"/>
 

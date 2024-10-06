@@ -179,7 +179,7 @@ blockquote {
   padding: .2em 0 .2em 2em;
   font-family: courier new;
 }
-code {
+code[class^='language-'] {
   background-color: #f0f0f0;
   font-family: courier new;
   box-sizing: border-box;
@@ -199,9 +199,9 @@ code {
   white-space-collapse: preserve;
   word-break: normal;
 }
-tt {
+code, tt {
   font-family: courier new;
-  padding: 0.1em 0.2em;z
+  padding: 0.1em 0.2em;
 }
 
 p, ul, ol, dl, table {

@@ -11,13 +11,13 @@ spawn job processes as quickly and efficiently as possible.
 We are going to talk about the functions available in glibc for doing this sort of thing, but the
 same functions are available in other libc implementations, but some specifics may be different.
 
-In the code examples I'm going to be writing Rust and using the <tt>maelstrom_linux</tt> which is
-our own wrapper around <tt>libc</tt> and the kernel.
+In the code examples I'm going to be writing Rust and using the `maelstrom_linux` which is
+our own wrapper around `libc` and the kernel.
 
-## <tt>fork</tt> + <tt>exec</tt>
-The classic way to spawn a child in Linux is to use the <tt>fork</tt> call. The fork call creates a
-copy of the current process and returns the <tt>pid</tt> to the caller. The <tt>exec</tt> call loads
-another binary into the program space.
+## `fork` + `exec`
+The classic way to spawn a child in Linux is to use the `fork` call. The fork call creates a copy of
+the current process and returns the `pid` to the caller. The `exec` call loads another binary into
+the program space.
 
 ```rust
 use anyhow::Result;
@@ -40,8 +40,8 @@ fn fork_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
 }
 ```
 
-Before we call <tt>exec</tt> in the child, we are able to do some "housekeeping". This allows us to
-do things like call <tt>dup2</tt> to set up stdout. What some refer to as the "elegance" of fork is
+Before we call `exec` in the child, we are able to do some "housekeeping". This allows us to
+do things like call `dup2` to set up stdout. What some refer to as the "elegance" of fork is
 tied directly to this ability to do the "housekeeping" by writing plain code.
 
 This "housekeeping" code needs to be written with care. The rules that need to be followed can be
@@ -53,10 +53,10 @@ allocating memory can cause things to break. Things like the TLS are not set-up 
 right.
 
 Another thing to consider with "fork-safety" is the state of the signal handlers. If a child gets a
-signal before calling <tt>exec</tt> it will execute an inherited signal handler from the parent,
+signal before calling `exec` it will execute an inherited signal handler from the parent,
 which itself could end up doing something unexpected.
 
-## <tt>vfork</tt>
+## `vfork`
 It turns out a large amount of the time spent in fork is used dealing with copying the virtual
 memory, and the more memory you have mapped, the longer it can take. If we were able to avoid that
 we can speed things up. This is exactly what vfork does.
@@ -64,9 +64,9 @@ we can speed things up. This is exactly what vfork does.
 When using vfork the child process shares the same memory space as the parent. The child process is
 using the same stack memory as the parent. Having two different threads (or in this case process) at
 the same time, doesn't work. So the calling thread in parent process is suspended until the child
-calls <tt>exec</tt> or <tt>_exit</tt>.
+calls `exec` or `_exit`.
 
-```
+```ascii-art
 calling thread                  child process
      vfork        --->
   <suspended>                <returns from vfork>
@@ -76,16 +76,16 @@ calling thread                  child process
 ```
 
 The weird thing about this is that the same stack memory will experience the CPU returning from the
-<tt>vfork</tt> call twice. This can really mess things up in the calling function in a way that your
+`vfork` call twice. This can really mess things up in the calling function in a way that your
 compiler is not okay with. Apparently C compilers have a way of dealing with it, but we can't call
-this function from Rust unless we use the unstable <tt>ffi_return_twice</tt> attribute.
+this function from Rust unless we use the unstable `ffi_return_twice` attribute.
 
-## <tt>posix_spawn</tt>
-One easier way to use <tt>vfork</tt> is to use <tt>posix_spawn</tt> instead. On the latest glibc
-version it always calls <tt>vfork</tt> (well actually it calls <tt>clone</tt> but we'll get to that
+## `posix_spawn`
+One easier way to use `vfork` is to use `posix_spawn` instead. On the latest glibc
+version it always calls `vfork` (well actually it calls `clone` but we'll get to that
 later).
 
-This function is what Rust's <tt>std::process::Command</tt> uses to spawn processes on Linux.
+This function is what Rust's `std::process::Command` uses to spawn processes on Linux.
 
 ```rust
 use anyhow::Result;
@@ -107,20 +107,20 @@ a struct. It is a kind of "housekeeping script" we create which executes after t
 
 Now that we can call it from Rust, lets run a simple benchmark.
 
-```
+```sh
 ran fork + execve + wait 10000 times in 4.087035997s (avg. 408.703µs / iteration)
 ran posix_spawn + wait 10000 times in 2.977589781s (avg. 297.758µs / iteration)
 ```
 
 Even for this program using very little memory, we can see a modest speed up.
 
-## <tt>clone</tt>
+## `clone`
 On Linux the underlying syscall that glibc uses to implement the aforementioned functions is
-<tt>clone</tt> glibc provides a wrapper for <tt>clone</tt> so we can call it directly and through it
+`clone` glibc provides a wrapper for `clone` so we can call it directly and through it
 we can do everything we have seen up to this point and more.
 
-There is a newer version of the <tt>clone</tt> syscall called <tt>clone3</tt> which tries to have a
-more ergonomic API. glibc uses it internally in some places (like <tt>pthread_create</tt>) but
+There is a newer version of the `clone` syscall called `clone3` which tries to have a
+more ergonomic API. glibc uses it internally in some places (like `pthread_create`) but
 doesn't yet provide a wrapper to use it directly.
 
 ```rust
@@ -164,17 +164,17 @@ fn clone_clone_vm_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
 }
 ```
 
-Using <tt>clone</tt> we are able to avoid copying the virtual memory of the parent, but we are also
+Using `clone` we are able to avoid copying the virtual memory of the parent, but we are also
 able to avoid suspending the parent.
 
-Unlike <tt>vfork</tt> this function executes the child using the provided stack memory instead of
+Unlike `vfork` this function executes the child using the provided stack memory instead of
 sharing the same memory as the parent. This avoids the "double return" issue from before.
 
-## Making <tt>clone</tt> Usable
+## Making `clone` Usable
 
 The "housekeeping" is written again in plan code, but the whole thing is definitely a bit unwieldy.
 To make a usable API out of this technique for Maelstrom we came up with our own "housekeeping
-script" like <tt>posix_spawn</tt> has.
+script" like `posix_spawn` has.
 
 The "housekeeping" can be thought of a set of syscalls, since making syscalls is basically the only
 thing you are able to do in the "housekeeping". In Maelstrom we create a vector as our script which
@@ -247,12 +247,11 @@ This is from [maelstrom-worker/src/executor.rs:362](https://github.com/maelstrom
 ```
 
 ## Addendum: Waiting for Processes
-One thing that tripped me up when writing the benchmarks was that I was using <tt>wait</tt> with
-<tt>fork</tt> and <tt>posix_spawn</tt> but when I tried to use it with the <tt>clone</tt> call it
-was immediately failing with <tt>ECHILD</tt> until I added
-<tt>.exit_signal(linux::Signal::CHLD)</tt> to the arguments.
+One thing that tripped me up when writing the benchmarks was that I was using `wait` with `fork` and
+`posix_spawn` but when I tried to use it with the `clone` call it was immediately failing with
+`ECHILD` until I added `.exit_signal(linux::Signal::CHLD)` to the arguments.
 
-In Maelstrom we use a pidfd instead of <tt>wait</tt> or <tt>waitpid</tt>. This is a much better way
-of waiting for child process, but it was easier to use <tt>wait</tt> for these benchmarks.
+In Maelstrom we use a pidfd instead of `wait` or `waitpid`. This is a much better way of waiting for
+child process, but it was easier to use `wait` for these benchmarks.
 
 

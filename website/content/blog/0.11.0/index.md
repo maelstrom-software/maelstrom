@@ -19,7 +19,7 @@ for a complete list of changes. This post will give a tour of the two large chan
 We've overhauled our terminal UI to deliver some features we are very excited about.
 
 These improvements apply to all our test runners, even the new
-<tt>maelstrom-go-test</tt>. Remember, you don't have to use Maelstrom's test
+`maelstrom-go-test`. Remember, you don't have to use Maelstrom's test
 distribution features to get all the goodness. Maelstrom test runners can work
 as drop-in replacements for your existing test runners.
 
@@ -35,8 +35,8 @@ the course of running tests. Let's highlight just a few of these things.
 For a compiled languages, test binaries must be built before the tests can be
 run. In these instances, the the new build-output window will appear to show
 the the output from the language's native tool. In the
-<tt>cargo-maelstrom</tt>example below, we can see the output from
-<tt>cargo</tt>, including its progress bar!
+`cargo-maelstrom`example below, we can see the output from
+`cargo`, including its progress bar!
 
 <img src="maelstrom_ui_build_progress.png" alt="Build Progress" width="90%"/>
 
@@ -64,6 +64,6 @@ uploads and container image downloads.
 ### Go Test Runner
 
 We're also excited to announce a new Go test runner:
-<tt>maelstrom-go-test</tt>. This is a drop-in replacement for <tt>go test</tt>.
+`maelstrom-go-test`. This is a drop-in replacement for `go test`.
 We now have test runners for Go, Pytest, and Rust. [Check out the
 book](/doc/book/latest/go-test.html) for detailed documentation.

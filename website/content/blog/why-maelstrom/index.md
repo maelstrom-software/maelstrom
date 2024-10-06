@@ -106,8 +106,8 @@ arbitrarily large cluster.
 ### How to Use Maelstrom
 
 Maelstrom provides specialized test runners for a variety of test frameworks.
-We currently support Rust (via <tt>cargo test</tt>), Golang (via <tt>go
-test</tt>), and Pytest. We will continue to add more tests runners in the
+We currently support Rust (via `cargo test`), Golang (via `go
+test`), and Pytest. We will continue to add more tests runners in the
 future.
 
 If Maelstrom doesn't currently support a test runner, a developer can write
@@ -117,8 +117,8 @@ be used for ad hoc testing or as a target for scripts.
 
 To get started running their tests using Maelstrom, a developer starts by using
 the Maelstrom test runner as a drop-in replacement for their test runner. For
-example, a developer would type <tt>cargo maelstrom</tt> instead of <tt>cargo
-test</tt>. This will run all tests in a minimal environment to start with. Some
+example, a developer would type `cargo maelstrom` instead of `cargo
+test`. This will run all tests in a minimal environment to start with. Some
 tests may not run properly without more dependencies specified. A developer
 can then opt in to these required dependencies by adding dependencies to tests
 that match certain patterns. It usually only takes a few minutes to get a whole
