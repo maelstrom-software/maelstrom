@@ -1,6 +1,6 @@
 +++
-title = "Spawning Processes in Linux"
-date = 2024-10-02
+title = "Spawning Processes on Linux"
+date = 2024-10-07
 weight = 1001
 draft = true
 +++
