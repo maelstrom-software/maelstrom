@@ -180,6 +180,8 @@ The "housekeeping" can be thought of a set of syscalls, since making syscalls is
 thing you are able to do in the "housekeeping". In Maelstrom we create a vector as our script which
 we pass through to the child process to execute.
 
+This is from [maelstrom-worker-child/src/lib.rs:69](https://github.com/maelstrom-software/maelstrom/blob/75341a7eaaf59b634120f40026a07530809bfe31/crates/maelstrom-worker-child/src/lib.rs#L69)
+
 ```rust
 pub enum Syscall<'a> {
     Bind {
@@ -200,6 +202,48 @@ pub enum Syscall<'a> {
     },
     ...
 }
+
+...
+
+impl<'a> Syscall<'a> {
+    fn call(&mut self, write_sock: &linux::UnixStream) -> result::Result<(), Errno> {
+        match self {
+            Syscall::Bind { fd, addr } => linux::bind(fd, addr),
+            Syscall::Chdir { path } => linux::chdir(path),
+            Syscall::CloseRange { first, last, flags } => linux::close_range(*first, *last, *flags),
+            Syscall::Dup2 { from, to } => linux::dup2(&*from, &*to).map(drop),
+            ...
+        }
+    }
+}
+
+...
+
+pub struct ChildArgs<'a, 'b> {
+    pub write_sock: linux::Fd,
+    pub syscalls: &'a mut [Syscall<'b>],
+}
+```
+
+This is from [maelstrom-worker/src/executor.rs:362](https://github.com/maelstrom-software/maelstrom/blob/75341a7eaaf59b634120f40026a07530809bfe31/crates/maelstrom-worker/src/executor.rs#L362)
+
+```rust
+    ...
+    let mut clone_args = CloneArgs::default()
+        .flags(clone_flags)
+        .exit_signal(Signal::CHLD);
+    const CHILD_STACK_SIZE: usize = 1024;
+    let stack = bump.alloc_slice_fill_default(CHILD_STACK_SIZE);
+    let stack_ptr: *mut u8 = stack.as_mut_ptr();
+    let (_, child_pidfd) = unsafe {
+        linux::clone_with_child_pidfd(
+            func,
+            stack_ptr.wrapping_add(CHILD_STACK_SIZE) as *mut _,
+            args as *mut _ as *mut core::ffi::c_void,
+            &mut clone_args,
+        )
+    }?;
+    ...
 ```
 
 ## Addendum: Waiting for Processes
