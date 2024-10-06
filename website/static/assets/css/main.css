@@ -204,6 +204,10 @@ code, tt {
   padding: 0.1em 0.2em;
 }
 
+pre[class^='language-'] {
+  background-color: white !important;
+}
+
 p, ul, ol, dl, table {
   margin-top: 1.5em;
   margin-bottom: 1.5em;
