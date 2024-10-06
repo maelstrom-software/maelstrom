@@ -87,7 +87,7 @@ external binaries and their dependencies in test containers.
 
 All of the tests runners in Maelstrom 0.12.0 now have updated default metadata
 configurations. These are now test-runner-specific. For example, <tt>cargo
-maelstrom</tt> now forwards `RUST\_BACKTRACE` and `RUST\_LIB\_BACKTRACE`.
+maelstrom</tt> now forwards `RUST_BACKTRACE` and `RUST_LIB_BACKTRACE`.
 
 With this change, the Python test runner is now significantly easier to use
 out-of-the-box.
