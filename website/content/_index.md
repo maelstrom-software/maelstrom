@@ -85,7 +85,7 @@ page](https://github.com/maelstrom-software/maelstrom/releases). If you don't ha
 Check out [the book](https://maelstrom-software.com/doc/book/latest/installation.html) for more ways
 to install Maelstrom.
 
-<p><h3><b>Running `cargo-maelstrom`</b></h3></p>
+<p><h3><b>Running <tt>cargo-maelstrom</tt></b></h3></p>
 
 To run your Rust tests, use `cargo-maelstrom`:
 
@@ -108,7 +108,7 @@ cargo maelstrom --init
 Then edit the created `cargo-maelstrom.toml` file as described [in the
 book](https://maelstrom-software.com/doc/book/latest/cargo-maelstrom/spec.html)
 
-<p><h3><b>Running `maelstrom-go-test`</b></h3></p>
+<p><h3><b>Running <tt>maelstrom-go-test</tt></b></h3></p>
 
 To run your Go tests, use `maelstrom-go-test`:
 
@@ -131,7 +131,7 @@ maelstrom-go-test --init
 Then edit the created `maelstrom-go-test.toml` file as described [in the
 book](https://maelstrom-software.com/doc/book/latest/go-test/spec.html)
 
-<p><h3><b>Running `maelstrom-pytest`</b></h3></p>
+<p><h3><b>Running <tt>maelstrom-pytest</tt></b></h3></p>
 Before running tests, we need to do a little setup.
 
 <p><h4><b>Choosing a Python Image</b></h4></p>
@@ -158,7 +158,7 @@ added_layers = [ { glob = "**.py" } ]
 This example just adds all files with a `.py` extension. You may also need to include
 `.pyi` files or other files.
 
-<p><h4><b>Including `pip` Packages</b></h4></p>
+<p><h4><b>Including <tt>pip</tt> Packages</b></h4></p>
 If you have an image named "python", `maelstrom-pytest` will automatically include pip
 packages for you as part of the container. It expects to read these packages from a
 test-requirements.txt file in your project directory. This needs to at a minimum include the pytest
