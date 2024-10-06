@@ -180,10 +180,24 @@ blockquote {
   font-family: courier new;
 }
 code {
-  background-color: #f0f0f0; 
-  padding: 0.5em 1em;
-  border-radius: 10px; 
+  background-color: #f0f0f0;
   font-family: courier new;
+  box-sizing: border-box;
+  border-radius: 0.35em;
+  display: block;
+  hyphens: none;
+  line-height: 28px;
+  max-width: 100%;
+  min-width: 100px;
+  overflow-wrap: break-word;
+  overflow-x: scroll;
+  padding-bottom: 12px;
+  padding-left: 22px;
+  padding-right: 20px;
+  padding-top: 15px;
+  text-wrap-mode: nowrap;
+  white-space-collapse: preserve;
+  word-break: normal;
 }
 tt {
   font-family: courier new;

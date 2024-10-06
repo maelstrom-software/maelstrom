@@ -67,12 +67,12 @@ the same time, doesn't work. So the calling thread in parent process is suspende
 calls <tt>exec</tt> or <tt>_exit</tt>.
 
 ```
-calling thread                  child process    
-     vfork        --->                           
+calling thread                  child process
+     vfork        --->
   <suspended>                <returns from vfork>
-                             <does housekeeping> 
-                                  exec           
-  <returns from vfork>                           
+                             <does housekeeping>
+                                  exec
+  <returns from vfork>
 ```
 
 The weird thing about this is that the same stack memory will experience the CPU returning from the
