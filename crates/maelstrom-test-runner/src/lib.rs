@@ -200,7 +200,6 @@ where
     let bg_proc = ClientBgProcess::new_from_fork(config_parent.log_level)?;
     let logger = Logger::DefaultLogger(config_parent.log_level);
 
-    let stderr_is_tty = io::stderr().is_terminal();
     let stdout_is_tty = io::stdout().is_terminal();
 
     let ui = ui::factory(config_parent.ui, is_list(&extra_options), stdout_is_tty)?;
@@ -214,6 +213,6 @@ where
             test_metadata_default_contents,
         )
     } else {
-        main(config, extra_options, bg_proc, logger, stderr_is_tty, ui)
+        main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
     }
 }

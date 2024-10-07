@@ -548,7 +548,7 @@ pub fn main(
     extra_options: cli::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
     logger: Logger,
-    stderr_is_tty: bool,
+    stdout_is_tty: bool,
     ui: impl Ui,
 ) -> Result<ExitCode> {
     let get_metadata = || {
@@ -623,7 +623,7 @@ pub fn main(
             list_action,
             config.parent.repeat,
             config.parent.stop_after,
-            stderr_is_tty,
+            stdout_is_tty,
             workspace_dir,
             &state_dir,
             cargo_options,

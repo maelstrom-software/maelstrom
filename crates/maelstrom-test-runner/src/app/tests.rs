@@ -280,7 +280,7 @@ fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
         filter: SimpleFilter::All.into(),
         collector_options: TestOptions,
         timeout_override: None,
-        stderr_color: false,
+        stdout_color: false,
         repeat: Repeat::try_from(1).unwrap(),
         stop_after: None,
         listing: false,
@@ -796,8 +796,8 @@ script_test_with_error_simex! {
 }
 
 script_test! {
-    stderr_color_passed_to_start_collection,
-    @ stderr_color = true,
+    stdout_color_passed_to_start_collection,
+    @ stdout_color = true,
     expected_test_db_out = [],
     Start => {
         SendUiMsg {

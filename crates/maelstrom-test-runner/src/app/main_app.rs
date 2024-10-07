@@ -153,7 +153,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             .collect();
 
         if !self.packages.is_empty() {
-            let color = self.options.stderr_color;
+            let color = self.options.stdout_color;
             let packages: Vec<_> = self.packages.values().collect();
             self.deps
                 .start_collection(color, &self.options.collector_options, packages);

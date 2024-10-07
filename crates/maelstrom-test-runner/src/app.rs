@@ -50,7 +50,7 @@ struct TestingOptions<TestFilterT, CollectOptionsT> {
     filter: TestFilterT,
     collector_options: CollectOptionsT,
     timeout_override: Option<Option<Timeout>>,
-    stderr_color: bool,
+    stdout_color: bool,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
     listing: bool,
@@ -71,7 +71,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
     /// `include_filter`: tests which match any of the patterns in this filter are run
     /// `exclude_filter`: tests which match any of the patterns in this filter are not run
     /// `list_action`: if some, tests aren't run, instead tests or other things are listed
-    /// `stderr_color`: should terminal color codes be written to `stderr` or not
+    /// `stdout_color`: should terminal color codes be written to `stdout` or not
     /// `project_dir`: the path to the root of the project
     /// `broker_addr`: the network address of the broker which we connect to
     /// `client_driver`: an object which drives the background work of the `Client`
@@ -83,7 +83,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         list_action: Option<ListAction>,
         repeat: Repeat,
         stop_after: Option<StopAfter>,
-        stderr_color: bool,
+        stdout_color: bool,
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
         collector_options: super::CollectOptionsM<MainAppDepsT>,
@@ -111,7 +111,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
                 filter,
                 collector_options,
                 timeout_override: None,
-                stderr_color,
+                stdout_color,
                 repeat,
                 stop_after,
                 listing: list_action.is_some(),
