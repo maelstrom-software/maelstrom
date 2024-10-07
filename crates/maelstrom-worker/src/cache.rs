@@ -364,7 +364,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         fs.mkdir(&removing).unwrap();
 
         // Next, remove everything else in the cache directory.
-        Self::remove_all_from_directory_except(&fs, &root, &root, ["removing"]);
+        remove_all_from_directory_except(&fs, &root, &root, ["removing"]);
 
         // Finally, create all of the files all directories that should be there.
         let sha256 = root.join("sha256");
@@ -414,12 +414,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         fs.mkdir(&removing).unwrap();
 
         // Next, remove any garbage in the cache directory.
-        Self::remove_all_from_directory_except(
-            &fs,
-            &root,
-            &root,
-            ["removing", "sha256", CACHEDIR_TAG],
-        );
+        remove_all_from_directory_except(&fs, &root, &root, ["removing", "sha256", CACHEDIR_TAG]);
 
         // Next, create the sha256 and tmp directories.
         let sha256 = root.join("sha256");
@@ -427,7 +422,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         fs.mkdir_recursively(&sha256).unwrap();
 
         // Next, remove any old or garbage sha256 subdirectories and create any missing ones.
-        Self::remove_all_from_directory_except(&fs, &root, &sha256, KeyKindT::iter());
+        remove_all_from_directory_except(&fs, &root, &sha256, KeyKindT::iter());
         for kind in KeyKindT::iter() {
             fs.mkdir_recursively(&sha256.join(kind.to_string()))
                 .unwrap();
@@ -467,7 +462,11 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                     }
                     CacheFileNameType::Other => {
                         let path = kind_dir.join(name);
-                        Self::remove_in_background(&fs, &root, &path, metadata.type_);
+                        if metadata.is_directory() {
+                            rmdir_in_background(&fs, &root, &path);
+                        } else  {
+                            fs.remove(&path).unwrap();
+                        }
                     }
                 }
             }
@@ -494,11 +493,10 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                             .unwrap();
                     }
                     (true, None) => {
-                        Self::remove_in_background(
+                        rmdir_in_background(
                             &fs,
                             &root,
                             &cache_file_name(&kind_dir, &digest),
-                            FileType::Directory,
                         );
                     }
                     _ => {
@@ -680,42 +678,6 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         self.fs.temp_file(&self.root.join("tmp")).unwrap()
     }
 
-    fn remove_all_from_directory_except<S>(
-        fs: &impl Fs,
-        root: &Path,
-        dir: &Path,
-        except: impl IntoIterator<Item = S>,
-    ) where
-        S: ToString,
-    {
-        let except = except
-            .into_iter()
-            .map(|e| OsString::from(e.to_string()))
-            .collect::<HashSet<_>>();
-        for (entry_name, metadata) in fs.read_dir(dir).unwrap().map(Result::unwrap) {
-            if !except.contains(&entry_name) {
-                Self::remove_in_background(fs, root, &dir.join(entry_name), metadata.type_);
-            }
-        }
-    }
-
-    /// Remove all files and directories rooted in `source` in a separate thread.
-    fn remove_in_background(fs: &impl Fs, root: &Path, source: &Path, type_: FileType) {
-        if type_ == FileType::Directory {
-            let removing = root.join("removing");
-            let target = loop {
-                let target = removing.join(format!("{:016x}", fs.rand_u64()));
-                if fs.metadata(&target).unwrap().is_none() {
-                    break target;
-                }
-            };
-            fs.rename(source, &target).unwrap();
-            fs.rmdir_recursively_on_thread(target).unwrap();
-        } else {
-            fs.remove(source).unwrap();
-        }
-    }
-
     /// Check to see if the cache is over its goal size, and if so, try to remove the least
     /// recently used artifacts.
     fn possibly_remove_some(&mut self) {
@@ -732,9 +694,11 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                 panic!("Entry popped off of heap was in unexpected state");
             };
             let cache_path = self.cache_path(key.kind, &key.digest);
-            Self::remove_in_background(&self.fs, &self.root, &cache_path, file_type);
             if file_type == FileType::Directory {
+                rmdir_in_background(&self.fs, &self.root, &cache_path);
                 self.fs.remove(&size_file_name(&cache_path)).unwrap();
+            } else {
+                self.fs.remove(&cache_path).unwrap();
             }
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
@@ -753,6 +717,43 @@ enum CacheFileNameType {
     File(Sha256Digest, u64),
     Directory(Sha256Digest),
     DirectorySize(Sha256Digest, u64),
+}
+
+fn remove_all_from_directory_except<S>(
+    fs: &impl Fs,
+    root: &Path,
+    dir: &Path,
+    except: impl IntoIterator<Item = S>,
+) where
+    S: ToString,
+{
+    let except = except
+        .into_iter()
+        .map(|e| OsString::from(e.to_string()))
+        .collect::<HashSet<_>>();
+    for (entry_name, metadata) in fs.read_dir(dir).unwrap().map(Result::unwrap) {
+        if !except.contains(&entry_name) {
+            let path = dir.join(entry_name);
+            if metadata.is_directory() {
+                rmdir_in_background(fs, root, &path);
+            } else {
+                fs.remove(&path).unwrap();
+            }
+        }
+    }
+}
+
+/// Remove all files and directories rooted in `source` in a separate thread.
+fn rmdir_in_background(fs: &impl Fs, root: &Path, source: &Path) {
+    let removing = root.join("removing");
+    let target = loop {
+        let target = removing.join(format!("{:016x}", fs.rand_u64()));
+        if fs.metadata(&target).unwrap().is_none() {
+            break target;
+        }
+    };
+    fs.rename(source, &target).unwrap();
+    fs.rmdir_recursively_on_thread(target).unwrap();
 }
 
 fn cache_file_name(dir: &Path, digest: &Sha256Digest) -> PathBuf {
