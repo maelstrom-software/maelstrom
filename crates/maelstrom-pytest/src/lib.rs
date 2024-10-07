@@ -655,6 +655,7 @@ pub fn main_with_stderr_and_project_dir(
         list_action,
         config.parent.repeat,
         config.parent.stop_after,
+        extra_options.parent.watch,
         stdout_is_tty,
         project_dir,
         &state_dir,

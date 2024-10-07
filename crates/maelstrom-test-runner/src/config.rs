@@ -169,4 +169,11 @@ pub struct ExtraCommandLineOptions {
 
     #[arg(long, hide(true), help = "Only used for testing purposes.")]
     pub client_bg_proc: bool,
+
+    #[arg(
+        long,
+        hide(true),
+        help = "Keep running tests in a loop waiting for changes in-between"
+    )]
+    pub watch: bool,
 }

@@ -623,6 +623,7 @@ pub fn main(
             list_action,
             config.parent.repeat,
             config.parent.stop_after,
+            extra_options.parent.watch,
             stdout_is_tty,
             workspace_dir,
             &state_dir,

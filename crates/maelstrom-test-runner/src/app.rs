@@ -53,6 +53,8 @@ struct TestingOptions<TestFilterT, CollectOptionsT> {
     stdout_color: bool,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
+    #[expect(dead_code)]
+    watch: bool,
     listing: bool,
 }
 
@@ -83,6 +85,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         list_action: Option<ListAction>,
         repeat: Repeat,
         stop_after: Option<StopAfter>,
+        watch: bool,
         stdout_color: bool,
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
@@ -114,6 +117,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
                 stdout_color,
                 repeat,
                 stop_after,
+                watch,
                 listing: list_action.is_some(),
             },
         })

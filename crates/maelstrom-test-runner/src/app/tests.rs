@@ -283,6 +283,7 @@ fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
         stdout_color: false,
         repeat: Repeat::try_from(1).unwrap(),
         stop_after: None,
+        watch: false,
         listing: false,
     }
 }
