@@ -14,7 +14,7 @@ use slog::{debug, Logger};
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fmt::{self, Debug, Display, Formatter},
     hash::Hash,
     iter::IntoIterator,
@@ -441,29 +441,70 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         // Finally, Go through the sha256 subdirs and decide what to do with the contents.
         for kind in KeyKindT::iter() {
             let kind_dir = sha256.join(kind.to_string());
+            let mut directory_sizes = HashMap::<Sha256Digest, (bool, Option<u64>)>::new();
             for (name, metadata) in fs.read_dir(&kind_dir).unwrap().map(Result::unwrap) {
-                if let Some(name) = name.to_str() {
-                    if let Ok(digest) = Sha256Digest::from_str(name) {
-                        if metadata.is_file() {
-                            let key = Key::new(kind, digest);
-                            entries.insert(
-                                key.clone(),
-                                Entry::InHeap {
-                                    file_type: metadata.type_,
-                                    bytes_used: metadata.size,
-                                    priority: next_priority,
-                                    heap_index: Default::default(),
-                                },
-                            );
-                            heap.push(&mut entries, key);
-                            next_priority = next_priority.checked_add(1).unwrap();
-                            bytes_used = bytes_used.checked_add(metadata.size).unwrap();
-                            continue;
-                        }
+                match cache_file_name_type(&fs, &kind_dir, &name, metadata) {
+                    CacheFileNameType::File(digest, size) => {
+                        let key = Key::new(kind, digest);
+                        entries.insert(
+                            key.clone(),
+                            Entry::InHeap {
+                                file_type: metadata.type_,
+                                bytes_used: metadata.size,
+                                priority: next_priority,
+                                heap_index: Default::default(),
+                            },
+                        );
+                        heap.push(&mut entries, key);
+                        next_priority = next_priority.checked_add(1).unwrap();
+                        bytes_used = bytes_used.checked_add(size).unwrap();
+                    }
+                    CacheFileNameType::Directory(digest) => {
+                        directory_sizes.entry(digest).or_default().0 = true;
+                    }
+                    CacheFileNameType::DirectorySize(digest, size) => {
+                        directory_sizes.entry(digest).or_default().1 = Some(size);
+                    }
+                    CacheFileNameType::Other => {
+                        let path = kind_dir.join(name);
+                        Self::remove_in_background(&fs, &root, &path, metadata.type_);
                     }
                 }
-                let path = kind_dir.join(name);
-                Self::remove_in_background(&fs, &root, &path, metadata.type_);
+            }
+
+            for (digest, entry) in directory_sizes {
+                match entry {
+                    (true, Some(size)) => {
+                        let key = Key::new(kind, digest);
+                        entries.insert(
+                            key.clone(),
+                            Entry::InHeap {
+                                file_type: FileType::Directory,
+                                bytes_used: size,
+                                priority: next_priority,
+                                heap_index: Default::default(),
+                            },
+                        );
+                        heap.push(&mut entries, key);
+                        next_priority = next_priority.checked_add(1).unwrap();
+                        bytes_used = bytes_used.checked_add(size).unwrap();
+                    }
+                    (false, Some(_)) => {
+                        fs.remove(&size_file_name(&cache_file_name(&kind_dir, &digest)))
+                            .unwrap();
+                    }
+                    (true, None) => {
+                        Self::remove_in_background(
+                            &fs,
+                            &root,
+                            &cache_file_name(&kind_dir, &digest),
+                            FileType::Directory,
+                        );
+                    }
+                    _ => {
+                        unreachable!();
+                    }
+                }
             }
         }
 
@@ -546,10 +587,8 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         let path = self.cache_path(kind, digest);
         let (file_type, bytes_used) = match artifact {
             GotArtifact::Directory { source, size } => {
+                write_size_file(&self.fs, &path, size);
                 self.fs.persist_temp_dir(source, &path).unwrap();
-                let mut size_path = path;
-                size_path.set_extension("size");
-                self.fs.create_file(&size_path, &size.to_be_bytes()).unwrap();
                 (FileType::Directory, size)
             }
             GotArtifact::File { source } => {
@@ -630,8 +669,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     pub fn cache_path(&self, kind: KeyKindT, digest: &Sha256Digest) -> PathBuf {
         let mut path = self.root.join("sha256");
         path.push(kind.to_string());
-        path.push(digest.to_string());
-        path
+        cache_file_name(&path, digest)
     }
 
     pub fn temp_dir(&self) -> FsT::TempDir {
@@ -696,9 +734,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             let cache_path = self.cache_path(key.kind, &key.digest);
             Self::remove_in_background(&self.fs, &self.root, &cache_path, file_type);
             if file_type == FileType::Directory {
-                let mut size_path = cache_path;
-                size_path.set_extension("size");
-                self.fs.remove(&size_path).unwrap();
+                self.fs.remove(&size_file_name(&cache_path)).unwrap();
             }
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
@@ -710,6 +746,75 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             );
         }
     }
+}
+
+enum CacheFileNameType {
+    Other,
+    File(Sha256Digest, u64),
+    Directory(Sha256Digest),
+    DirectorySize(Sha256Digest, u64),
+}
+
+fn cache_file_name(dir: &Path, digest: &Sha256Digest) -> PathBuf {
+    dir.join(digest.to_string())
+}
+
+fn size_file_name(base: &Path) -> PathBuf {
+    let mut result = base.to_owned();
+    result.set_extension("size");
+    result
+}
+
+fn read_size_file(
+    fs: &impl Fs,
+    dir: &Path,
+    digest: &Sha256Digest,
+    metadata: Metadata,
+) -> Option<u64> {
+    if metadata.size != 8 {
+        return None;
+    }
+    let mut contents = [0u8; 8];
+    let bytes_read = fs
+        .read_file(
+            &size_file_name(&cache_file_name(dir, digest)),
+            &mut contents,
+        )
+        .ok()?;
+    (bytes_read == 8).then_some(u64::from_be_bytes(contents))
+}
+
+fn cache_file_name_type(
+    fs: &impl Fs,
+    dir: &Path,
+    name: &OsStr,
+    metadata: Metadata,
+) -> CacheFileNameType {
+    if let Some(name) = name.to_str() {
+        if let Ok(digest) = Sha256Digest::from_str(name) {
+            return match metadata.type_ {
+                FileType::File => CacheFileNameType::File(digest, metadata.size),
+                FileType::Directory => CacheFileNameType::Directory(digest),
+                _ => CacheFileNameType::Other,
+            };
+        }
+        if metadata.type_ == FileType::File {
+            if let Some(name) = name.strip_suffix(".size") {
+                if let Ok(digest) = Sha256Digest::from_str(name) {
+                    if let Some(size) = read_size_file(fs, dir, &digest, metadata) {
+                        return CacheFileNameType::DirectorySize(digest, size);
+                    }
+                }
+            }
+        }
+    }
+
+    CacheFileNameType::Other
+}
+
+fn write_size_file(fs: &impl Fs, base: &Path, size: u64) {
+    fs.create_file(&size_file_name(base), &size.to_be_bytes())
+        .unwrap();
 }
 
 /*  _            _
@@ -1496,6 +1601,15 @@ mod tests {
                                     bar(b"bar contents"),
                                 },
                             },
+                            "0000000000000000000000000000000000000000000000000000000000000004.size"(b"ab"),
+                            garbage_file(b"ab"),
+                            garbage_directory {
+                                blah(b"blah contents"),
+                            },
+                            "0000000000000000000000000000000000000000000000000000000000000005" {
+                                keep(b"keep"),
+                            },
+                            "0000000000000000000000000000000000000000000000000000000000000005.size"(b"\0\0\0\0\0\0\0\xff"),
                         },
                         banana {
                             bread(b"bread contents"),
@@ -1539,6 +1653,9 @@ mod tests {
                         bread(b"bread contents"),
                     },
                     "0000000000000006" {
+                        blah(b"blah contents"),
+                    },
+                    "0000000000000007" {
                         foo(b"foo contents"),
                         symlink -> "bad_apple",
                         more_bad_apple {
@@ -1549,6 +1666,10 @@ mod tests {
                 sha256 {
                     apple {
                         "0000000000000000000000000000000000000000000000000000000000000002"(b"02"),
+                        "0000000000000000000000000000000000000000000000000000000000000005" {
+                            keep(b"keep"),
+                        },
+                        "0000000000000000000000000000000000000000000000000000000000000005.size"(b"\0\0\0\0\0\0\0\xff"),
                     },
                     orange {},
                 },
@@ -1561,9 +1682,11 @@ mod tests {
             "/z/removing/0000000000000004",
             "/z/removing/0000000000000005",
             "/z/removing/0000000000000006",
+            "/z/removing/0000000000000007",
         ]);
 
-        fixture.assert_bytes_used(2);
+        fixture.assert_bytes_used(257);
         fixture.get_artifact(Apple, digest!(2), jid!(1), GetArtifact::Success);
+        fixture.get_artifact(Apple, digest!(5), jid!(1), GetArtifact::Success);
     }
 }
