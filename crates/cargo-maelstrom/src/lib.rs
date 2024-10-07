@@ -616,6 +616,7 @@ pub fn main(
             manifest_options: config.cargo_manifest_options,
             extra_test_binary_args: config.extra_test_binary_args,
         };
+        let watch_exclude_paths = vec![target_dir.to_owned().into_path_buf()];
         let deps = MainAppCombinedDeps::new(
             deps,
             extra_options.parent.include,
@@ -627,6 +628,7 @@ pub fn main(
             stdout_is_tty,
             workspace_dir,
             &state_dir,
+            watch_exclude_paths,
             cargo_options,
             log,
         )?;

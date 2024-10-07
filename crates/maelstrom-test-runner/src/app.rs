@@ -11,8 +11,15 @@ use crate::ui::{Ui, UiJobId as JobId, UiMessage};
 use crate::*;
 use maelstrom_base::Timeout;
 use maelstrom_client::{spec::JobSpec, JobStatus, ProjectDir, StateDir};
-use maelstrom_util::{fs::Fs, process::ExitCode, root::Root, sync::Event};
+use maelstrom_util::{
+    fs::Fs,
+    process::ExitCode,
+    root::{Root, RootBuf},
+    sync::Event,
+};
 use main_app::MainApp;
+use notify::Watcher as _;
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -41,6 +48,7 @@ trait Deps {
     fn add_job(&self, job_id: JobId, spec: JobSpec);
     fn list_tests(&self, artifact: ArtifactM<Self>);
     fn start_shutdown(&self);
+    fn start_restart(&self);
     fn send_ui_msg(&self, msg: UiMessage);
 }
 
@@ -53,9 +61,9 @@ struct TestingOptions<TestFilterT, CollectOptionsT> {
     stdout_color: bool,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
-    #[expect(dead_code)]
     watch: bool,
     listing: bool,
+    watch_exclude_paths: Vec<PathBuf>,
 }
 
 pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
@@ -63,6 +71,7 @@ pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
     test_db_store:
         TestDbStore<super::ArtifactKeyM<MainAppDepsT>, super::CaseMetadataM<MainAppDepsT>>,
+    project_dir: RootBuf<ProjectDir>,
     options: TestingOptions<super::TestFilterM<MainAppDepsT>, super::CollectOptionsM<MainAppDepsT>>,
 }
 
@@ -89,12 +98,14 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         stdout_color: bool,
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
+        mut watch_exclude_paths: Vec<PathBuf>,
         collector_options: super::CollectOptionsM<MainAppDepsT>,
         log: slog::Logger,
     ) -> Result<Self> {
+        let project_dir = project_dir.as_ref().to_owned();
         let mut test_metadata = AllMetadata::load(
             log.clone(),
-            project_dir,
+            &project_dir,
             MainAppDepsT::TEST_METADATA_FILE_NAME,
             MainAppDepsT::DEFAULT_TEST_METADATA_CONTENTS,
         )?;
@@ -105,10 +116,18 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
 
         let filter = super::TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
 
+        watch_exclude_paths.push(
+            project_dir
+                .to_path_buf()
+                .join(maelstrom_container::TAG_FILE_NAME),
+        );
+        watch_exclude_paths.push(project_dir.to_path_buf().join(".git"));
+
         Ok(Self {
             abstract_deps,
             log,
             test_db_store,
+            project_dir,
             options: TestingOptions {
                 test_metadata,
                 filter,
@@ -119,6 +138,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
                 stop_after,
                 watch,
                 listing: list_action.is_some(),
+                watch_exclude_paths,
             },
         })
     }
@@ -147,7 +167,11 @@ enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'stati
     CollectionFinished {
         wait_status: WaitStatus,
     },
+    WatchEvents {
+        events: Vec<notify::event::Event>,
+    },
     Shutdown,
+    Restart,
 }
 
 type MainAppMessageM<DepsT> =
@@ -161,7 +185,9 @@ struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
     main_app_sender: Sender<MainAppMessageM<Self>>,
     ui: UiSender,
     collect_killer: Mutex<Option<KillOnDrop<WaitM<Self>>>>,
+    project_dir: &'deps Root<ProjectDir>,
     semaphore: &'deps Semaphore,
+    done: &'deps Event,
 }
 
 const MAX_NUM_BACKGROUND_THREADS: isize = 200;
@@ -172,7 +198,9 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
         scope: &'scope std::thread::Scope<'scope, 'deps>,
         main_app_sender: Sender<MainAppMessageM<Self>>,
         ui: UiSender,
+        project_dir: &'deps Root<ProjectDir>,
         semaphore: &'deps Semaphore,
+        done: &'deps Event,
     ) -> Self {
         Self {
             deps,
@@ -180,7 +208,9 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
             main_app_sender,
             ui,
             collect_killer: Mutex::new(None),
+            project_dir,
             semaphore,
+            done,
         }
     }
 }
@@ -206,8 +236,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
             Ok((build_handle, artifact_stream)) => {
                 let build_handle = Arc::new(build_handle);
                 let killer = KillOnDrop::new(build_handle.clone());
-                let existing_killer = self.collect_killer.lock().unwrap().replace(killer);
-                assert!(existing_killer.is_none());
+                let _ = self.collect_killer.lock().unwrap().replace(killer);
 
                 self.scope.spawn(move || {
                     let _guard = sem.access();
@@ -305,19 +334,66 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
         let _ = self.main_app_sender.send(MainAppMessage::Shutdown);
     }
 
+    fn start_restart(&self) {
+        let _ = self.main_app_sender.send(MainAppMessage::Restart);
+    }
+
     fn send_ui_msg(&self, msg: UiMessage) {
         self.ui.send(msg);
     }
 }
 
+impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope, MainAppDepsT> {
+    fn watch_for_changes(&self) {
+        let sem = self.semaphore;
+        let project_dir = self.project_dir;
+        let done = self.done;
+        let sender = self.main_app_sender.clone();
+        self.scope.spawn(move || {
+            let (event_tx, event_rx) = std::sync::mpsc::channel();
+            let get_watcher = move || {
+                let mut watcher =
+                    notify::RecommendedWatcher::new(event_tx, notify::Config::default())?;
+                watcher.watch(project_dir.as_ref(), notify::RecursiveMode::Recursive)?;
+                Ok(watcher)
+            };
+
+            let _guard = sem.access();
+            let _watcher = match get_watcher() {
+                Ok(watcher) => watcher,
+                Err(error) => {
+                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    return;
+                }
+            };
+
+            // This loop attempts to batch up the events which happen around the same time. This
+            // is acting as a kind of debounce so we don't kick off two back-to-back test
+            // invocations every time we get a flurry of changes.
+            while done.wait_timeout(Duration::from_millis(100)).timed_out() {
+                let mut events = vec![];
+                while let Ok(event_res) = event_rx.try_recv() {
+                    if let Ok(event) = event_res {
+                        events.push(event);
+                    }
+                }
+                if !events.is_empty() {
+                    let _ = sender.send(MainAppMessage::WatchEvents { events });
+                }
+            }
+        });
+    }
+}
+
 fn main_app_channel_reader<DepsT: Deps>(
     mut app: MainApp<DepsT>,
-    main_app_receiver: Receiver<MainAppMessageM<DepsT>>,
-) -> Result<(ExitCode, TestDbM<DepsT>)> {
+    main_app_receiver: &Receiver<MainAppMessageM<DepsT>>,
+) -> Result<(bool, ExitCode, TestDbM<DepsT>)> {
     loop {
         let msg = main_app_receiver.recv()?;
-        if matches!(msg, MainAppMessage::Shutdown) {
-            break app.main_return_value();
+        if matches!(msg, MainAppMessage::Shutdown | MainAppMessage::Restart) {
+            let (exit_code, test_db) = app.main_return_value()?;
+            break Ok((matches!(msg, MainAppMessage::Restart), exit_code, test_db));
         } else {
             app.receive_message(msg);
         }
@@ -363,28 +439,51 @@ where
         .test_collector()
         .build_test_layers(deps.options.test_metadata.get_all_images(), &ui)?;
 
-    let test_db = deps.test_db_store.load()?;
+    let test_db_store = &deps.test_db_store;
+    let project_dir = &deps.project_dir;
 
     let done = Event::new();
     let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
 
     let main_res = std::thread::scope(|scope| {
-        main_app_sender.send(MainAppMessage::Start).unwrap();
-        let deps = MainAppDepsAdapter::new(abs_deps, scope, main_app_sender, ui.clone(), &sem);
+        let deps = MainAppDepsAdapter::new(
+            abs_deps,
+            scope,
+            main_app_sender.clone(),
+            ui.clone(),
+            project_dir,
+            &sem,
+            &done,
+        );
+
+        if options.watch {
+            deps.watch_for_changes();
+        }
 
         scope.spawn(|| introspect_loop(&done, client, ui));
 
-        let app = MainApp::new(&deps, options, test_db);
-        let res = main_app_channel_reader(app, main_app_receiver);
-        done.set();
+        let res = (|| -> Result<_> {
+            loop {
+                main_app_sender.send(MainAppMessage::Start).unwrap();
+                let test_db = test_db_store.load()?;
+                let app = MainApp::new(&deps, options, test_db);
 
+                let (restart, exit_code, test_db) =
+                    main_app_channel_reader(app, &main_app_receiver)?;
+                test_db_store.save(test_db)?;
+
+                if !restart {
+                    break Ok(exit_code);
+                }
+            }
+        })();
+
+        done.set();
         res
     });
 
     ui_handle.join()?;
 
-    let (exit_code, test_db) = main_res?;
-    deps.test_db_store.save(test_db)?;
-
+    let exit_code = main_res?;
     Ok(exit_code)
 }

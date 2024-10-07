@@ -787,6 +787,7 @@ pub fn main_with_stderr_and_project_dir(
         )?;
         let deps = DefaultMainAppDeps::new(&client, project_dir, &cache_dir)?;
 
+        let watch_exclude_paths = vec![];
         let deps = MainAppCombinedDeps::new(
             deps,
             extra_options.parent.include,
@@ -798,6 +799,7 @@ pub fn main_with_stderr_and_project_dir(
             stdout_is_tty,
             project_dir,
             &state_dir,
+            watch_exclude_paths,
             config.go_test_options,
             log,
         )?;

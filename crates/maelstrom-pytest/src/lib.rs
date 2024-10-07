@@ -648,6 +648,7 @@ pub fn main_with_stderr_and_project_dir(
     )?;
     let deps = DefaultMainAppDeps::new(project_dir, build_dir, &cache_dir, &client)?;
 
+    let watch_exclude_paths = vec![build_dir.to_owned().into_path_buf()];
     let deps = MainAppCombinedDeps::new(
         deps,
         extra_options.parent.include,
@@ -659,6 +660,7 @@ pub fn main_with_stderr_and_project_dir(
         stdout_is_tty,
         project_dir,
         &state_dir,
+        watch_exclude_paths,
         config.pytest_options,
         log,
     )?;

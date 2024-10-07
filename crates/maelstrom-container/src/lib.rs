@@ -838,7 +838,7 @@ impl ContainerImageDepot<DefaultContainerImageDepotOps> {
     }
 }
 
-const TAG_FILE_NAME: &str = "maelstrom-container-tags.lock";
+pub const TAG_FILE_NAME: &str = "maelstrom-container-tags.lock";
 
 struct LockedTagsHandle<'a, 'b> {
     locked_tags: LockedContainerImageTags,
