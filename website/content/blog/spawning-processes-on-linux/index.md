@@ -8,7 +8,11 @@ draft = true
 This is an overview of spawning processes on Linux. This summarizes things we found while writing
 [Maelstrom](https://github.com/maelstrom-software/maelstrom). Being a job execution engine Maelstrom
 needs to spawn job processes as quickly and efficiently as possible, so we needed to understand the
-Linux APIs as best as we could. The process spawning API on Linux is also very tied together with its container API. We hope to cover more of the containerization part of Maelstrom in a future blog post.
+Linux APIs as best as we could. The process spawning API on Linux is also very tied together with
+its container API. We hope to cover more of the containerization part of Maelstrom in a future blog
+post.
+
+<!-- more -->
 
 For purposes of this post we are going to talk about the functions available in glibc for spawning
 processes. The same functions are available in other libc implementations, although some specifics
