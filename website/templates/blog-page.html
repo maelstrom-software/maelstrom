@@ -8,6 +8,14 @@
         {{ page.title }}
       </h2>
       <p class="subtitle"><strong>{{ page.date }}</strong></p>
+      {% if page.authors %}
+      <p class="subtitle">
+        by
+        {% for author in page.authors %}
+        <strong>{{ author }}</strong>
+        {% endfor %}
+      </p>
+      {% endif %}
       {{ page.content | safe }}
     </article>
   </div>
