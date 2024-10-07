@@ -149,7 +149,7 @@ impl Cache<cache::fs::std::Fs> for cache::Cache<cache::fs::std::Fs, cache::Entry
     }
 
     fn cache_path(&self, kind: cache::EntryKind, digest: &Sha256Digest) -> PathBuf {
-        self.cache_path(kind, digest)
+        self.cache_path(kind, digest).into_path_buf()
     }
 
     fn temp_file(&self) -> cache::fs::std::TempFile {

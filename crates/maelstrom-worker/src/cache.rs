@@ -8,7 +8,7 @@ use maelstrom_base::{JobId, Sha256Digest};
 use maelstrom_util::{
     config::common::CacheSize,
     heap::{Heap, HeapDeps, HeapIndex},
-    root::RootBuf,
+    root::{Root, RootBuf},
 };
 use slog::{debug, Logger};
 use std::{
@@ -290,12 +290,23 @@ impl<KeyKindT: KeyKind> HeapDeps for Map<KeyKindT> {
 
 pub struct CacheDir;
 
+pub struct EntryPath;
+
+struct CachedirTagPath;
+struct RemovingDir;
+struct TmpDir;
+struct Sha256Dir;
+struct KindDir;
+struct SizeFile;
+
 /// Manage a directory of downloaded, extracted artifacts. Coordinate fetching of these artifacts,
 /// and removing them when they are no longer in use and the amount of space used by the directory
 /// has grown too large.
 pub struct Cache<FsT, KeyKindT: KeyKind> {
     fs: FsT,
-    root: PathBuf,
+    removing: RootBuf<RemovingDir>,
+    tmp: RootBuf<TmpDir>,
+    sha256: RootBuf<Sha256Dir>,
     entries: Map<KeyKindT>,
     heap: Heap<Map<KeyKindT>>,
     next_priority: u64,
@@ -314,7 +325,10 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
     pub fn new(fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: Logger) -> Self {
-        let root = root.into_path_buf();
+        let cachedir_tag = root.join::<CachedirTagPath>(CACHEDIR_TAG);
+        let removing = root.join::<RemovingDir>("removing");
+        let sha256 = root.join::<Sha256Dir>("sha256");
+        let tmp = root.join::<TmpDir>("tmp");
 
         // First, make sure the root directory exists.
         fs.mkdir_recursively(&root).unwrap();
@@ -323,7 +337,6 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         // decide if this is a "new style" cache directory that can be re-used across invocations.
         // In the future, if we change the layout of the cache directory, we may need a proper
         // version file, but for now, we can just use `CACHEDIR.TAG`.
-        let cachedir_tag = root.join(CACHEDIR_TAG);
         let preserve_directory_contents = match fs.metadata(&cachedir_tag).unwrap() {
             Some(Metadata {
                 type_: FileType::File,
@@ -337,48 +350,52 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         };
 
         if preserve_directory_contents {
-            Self::new_preserve_directory_contents(fs, root, size, log)
+            Self::new_preserve_directory_contents(fs, root, removing, tmp, sha256, size, log)
         } else {
-            Self::new_clear_directory_contents(fs, root, size, log)
+            Self::new_clear_directory_contents(
+                fs,
+                root,
+                cachedir_tag,
+                removing,
+                tmp,
+                sha256,
+                size,
+                log,
+            )
         }
     }
 
-    fn new_clear_directory_contents(fs: FsT, root: PathBuf, size: CacheSize, log: Logger) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    fn new_clear_directory_contents(
+        fs: FsT,
+        root: RootBuf<CacheDir>,
+        cachedir_tag: RootBuf<CachedirTagPath>,
+        removing: RootBuf<RemovingDir>,
+        tmp: RootBuf<TmpDir>,
+        sha256: RootBuf<Sha256Dir>,
+        size: CacheSize,
+        log: Logger,
+    ) -> Self {
         // First, make sure the `removing` directory exists and is empty.
-        let removing = root.join("removing");
-        match fs.metadata(&removing).unwrap() {
-            Some(metadata) if metadata.is_directory() => {
-                let removing_tmp = loop {
-                    let target = root.join(format!("removing.{:016x}", fs.rand_u64()));
-                    if fs.metadata(&target).unwrap().is_none() {
-                        break target;
-                    }
-                };
-                fs.rename(&removing, &removing_tmp).unwrap();
-            }
-            Some(_) => {
-                fs.remove(&removing).unwrap();
-            }
-            None => {}
-        }
-        fs.mkdir(&removing).unwrap();
+        ensure_removing_directory(&fs, &root, &removing);
 
         // Next, remove everything else in the cache directory.
-        remove_all_from_directory_except(&fs, &root, &root, ["removing"]);
+        remove_all_from_directory_except(&fs, &removing, &root, ["removing"]);
 
         // Finally, create all of the files all directories that should be there.
-        let sha256 = root.join("sha256");
-        fs.create_file(&root.join(CACHEDIR_TAG), &CACHEDIR_TAG_CONTENTS)
+        fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS)
             .unwrap();
-        fs.mkdir(&root.join("tmp")).unwrap();
+        fs.mkdir(&tmp).unwrap();
         fs.mkdir(&sha256).unwrap();
         for kind in KeyKindT::iter() {
-            fs.mkdir(&sha256.join(kind.to_string())).unwrap();
+            fs.mkdir(&kind_dir(&sha256, kind)).unwrap();
         }
 
         Cache {
             fs,
-            root,
+            removing,
+            tmp,
+            sha256,
             entries: Map::default(),
             heap: Heap::default(),
             next_priority: 0,
@@ -388,44 +405,35 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new_preserve_directory_contents(
         fs: FsT,
-        root: PathBuf,
+        root: RootBuf<CacheDir>,
+        removing: RootBuf<RemovingDir>,
+        tmp: RootBuf<TmpDir>,
+        sha256: RootBuf<Sha256Dir>,
         size: CacheSize,
         log: Logger,
     ) -> Self {
         // First, make sure the `removing` directory exists and is empty.
-        let removing = root.join("removing");
-        match fs.metadata(&removing).unwrap() {
-            Some(metadata) if metadata.is_directory() => {
-                let removing_tmp = loop {
-                    let target = root.join(format!("removing.{:016x}", fs.rand_u64()));
-                    if fs.metadata(&target).unwrap().is_none() {
-                        break target;
-                    }
-                };
-                fs.rename(&removing, &removing_tmp).unwrap();
-            }
-            Some(_) => {
-                fs.remove(&removing).unwrap();
-            }
-            None => {}
-        }
-        fs.mkdir(&removing).unwrap();
+        ensure_removing_directory(&fs, &root, &removing);
 
         // Next, remove any garbage in the cache directory.
-        remove_all_from_directory_except(&fs, &root, &root, ["removing", "sha256", CACHEDIR_TAG]);
+        remove_all_from_directory_except(
+            &fs,
+            &removing,
+            &root,
+            ["removing", "sha256", CACHEDIR_TAG],
+        );
 
         // Next, create the sha256 and tmp directories.
-        let sha256 = root.join("sha256");
-        fs.mkdir(&root.join("tmp")).unwrap();
+        fs.mkdir(&tmp).unwrap();
         fs.mkdir_recursively(&sha256).unwrap();
 
         // Next, remove any old or garbage sha256 subdirectories and create any missing ones.
-        remove_all_from_directory_except(&fs, &root, &sha256, KeyKindT::iter());
+        remove_all_from_directory_except(&fs, &removing, &sha256, KeyKindT::iter());
         for kind in KeyKindT::iter() {
-            fs.mkdir_recursively(&sha256.join(kind.to_string()))
-                .unwrap();
+            fs.mkdir_recursively(&kind_dir(&sha256, kind)).unwrap();
         }
 
         let mut entries = Map::<KeyKindT>::default();
@@ -435,7 +443,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
 
         // Finally, Go through the sha256 subdirs and decide what to do with the contents.
         for kind in KeyKindT::iter() {
-            let kind_dir = sha256.join(kind.to_string());
+            let kind_dir: RootBuf<KindDir> = sha256.join(kind.to_string());
             let mut directory_sizes = HashMap::<Sha256Digest, (bool, Option<u64>)>::new();
             for (name, metadata) in fs.read_dir(&kind_dir).unwrap().map(Result::unwrap) {
                 match cache_file_name_type(&fs, &kind_dir, &name, metadata) {
@@ -461,10 +469,10 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                         directory_sizes.entry(digest).or_default().1 = Some(size);
                     }
                     CacheFileNameType::Other => {
-                        let path = kind_dir.join(name);
+                        let path: RootBuf<EntryPath> = kind_dir.join(name);
                         if metadata.is_directory() {
-                            rmdir_in_background(&fs, &root, &path);
-                        } else  {
+                            rmdir_in_background(&fs, &removing, &path);
+                        } else {
                             fs.remove(&path).unwrap();
                         }
                     }
@@ -493,11 +501,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                             .unwrap();
                     }
                     (true, None) => {
-                        rmdir_in_background(
-                            &fs,
-                            &root,
-                            &cache_file_name(&kind_dir, &digest),
-                        );
+                        rmdir_in_background(&fs, &removing, &cache_file_name(&kind_dir, &digest));
                     }
                     _ => {
                         unreachable!();
@@ -508,7 +512,9 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
 
         let mut cache = Cache {
             fs,
-            root,
+            removing,
+            tmp,
+            sha256,
             entries,
             heap,
             next_priority,
@@ -664,18 +670,17 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     }
 
     /// Return the directory path for the artifact referenced by `digest`.
-    pub fn cache_path(&self, kind: KeyKindT, digest: &Sha256Digest) -> PathBuf {
-        let mut path = self.root.join("sha256");
-        path.push(kind.to_string());
-        cache_file_name(&path, digest)
+    pub fn cache_path(&self, kind: KeyKindT, digest: &Sha256Digest) -> RootBuf<EntryPath> {
+        let kind_dir: RootBuf<KindDir> = self.sha256.join(kind.to_string());
+        cache_file_name(&kind_dir, digest)
     }
 
     pub fn temp_dir(&self) -> FsT::TempDir {
-        self.fs.temp_dir(&self.root.join("tmp")).unwrap()
+        self.fs.temp_dir(&self.tmp).unwrap()
     }
 
     pub fn temp_file(&self) -> FsT::TempFile {
-        self.fs.temp_file(&self.root.join("tmp")).unwrap()
+        self.fs.temp_file(&self.tmp).unwrap()
     }
 
     /// Check to see if the cache is over its goal size, and if so, try to remove the least
@@ -695,7 +700,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             };
             let cache_path = self.cache_path(key.kind, &key.digest);
             if file_type == FileType::Directory {
-                rmdir_in_background(&self.fs, &self.root, &cache_path);
+                rmdir_in_background(&self.fs, &self.removing, &cache_path);
                 self.fs.remove(&size_file_name(&cache_path)).unwrap();
             } else {
                 self.fs.remove(&cache_path).unwrap();
@@ -721,7 +726,7 @@ enum CacheFileNameType {
 
 fn remove_all_from_directory_except<S>(
     fs: &impl Fs,
-    root: &Path,
+    removing: &Root<RemovingDir>,
     dir: &Path,
     except: impl IntoIterator<Item = S>,
 ) where
@@ -735,7 +740,7 @@ fn remove_all_from_directory_except<S>(
         if !except.contains(&entry_name) {
             let path = dir.join(entry_name);
             if metadata.is_directory() {
-                rmdir_in_background(fs, root, &path);
+                rmdir_in_background(fs, removing, &path);
             } else {
                 fs.remove(&path).unwrap();
             }
@@ -744,31 +749,31 @@ fn remove_all_from_directory_except<S>(
 }
 
 /// Remove all files and directories rooted in `source` in a separate thread.
-fn rmdir_in_background(fs: &impl Fs, root: &Path, source: &Path) {
-    let removing = root.join("removing");
+fn rmdir_in_background(fs: &impl Fs, removing: &Root<RemovingDir>, source: &Path) {
     let target = loop {
-        let target = removing.join(format!("{:016x}", fs.rand_u64()));
+        let target: RootBuf<()> = removing.join(format!("{:016x}", fs.rand_u64()));
         if fs.metadata(&target).unwrap().is_none() {
             break target;
         }
     };
     fs.rename(source, &target).unwrap();
-    fs.rmdir_recursively_on_thread(target).unwrap();
+    fs.rmdir_recursively_on_thread(target.into_path_buf())
+        .unwrap();
 }
 
-fn cache_file_name(dir: &Path, digest: &Sha256Digest) -> PathBuf {
+fn cache_file_name(dir: &Root<KindDir>, digest: &Sha256Digest) -> RootBuf<EntryPath> {
     dir.join(digest.to_string())
 }
 
-fn size_file_name(base: &Path) -> PathBuf {
-    let mut result = base.to_owned();
+fn size_file_name(base: &Root<EntryPath>) -> RootBuf<SizeFile> {
+    let mut result = base.to_owned().into_path_buf();
     result.set_extension("size");
-    result
+    RootBuf::new(result)
 }
 
 fn read_size_file(
     fs: &impl Fs,
-    dir: &Path,
+    kind_dir: &Root<KindDir>,
     digest: &Sha256Digest,
     metadata: Metadata,
 ) -> Option<u64> {
@@ -778,7 +783,7 @@ fn read_size_file(
     let mut contents = [0u8; 8];
     let bytes_read = fs
         .read_file(
-            &size_file_name(&cache_file_name(dir, digest)),
+            &size_file_name(&cache_file_name(kind_dir, digest)),
             &mut contents,
         )
         .ok()?;
@@ -787,7 +792,7 @@ fn read_size_file(
 
 fn cache_file_name_type(
     fs: &impl Fs,
-    dir: &Path,
+    dir: &Root<KindDir>,
     name: &OsStr,
     metadata: Metadata,
 ) -> CacheFileNameType {
@@ -813,9 +818,32 @@ fn cache_file_name_type(
     CacheFileNameType::Other
 }
 
-fn write_size_file(fs: &impl Fs, base: &Path, size: u64) {
+fn write_size_file(fs: &impl Fs, base: &Root<EntryPath>, size: u64) {
     fs.create_file(&size_file_name(base), &size.to_be_bytes())
         .unwrap();
+}
+
+fn ensure_removing_directory(fs: &impl Fs, root: &Root<CacheDir>, removing: &Root<RemovingDir>) {
+    match fs.metadata(removing).unwrap() {
+        Some(metadata) if metadata.is_directory() => {
+            let removing_tmp = loop {
+                let target: RootBuf<()> = root.join(format!("removing.{:016x}", fs.rand_u64()));
+                if fs.metadata(&target).unwrap().is_none() {
+                    break target;
+                }
+            };
+            fs.rename(removing, &removing_tmp).unwrap();
+        }
+        Some(_) => {
+            fs.remove(removing).unwrap();
+        }
+        None => {}
+    }
+    fs.mkdir(removing).unwrap();
+}
+
+fn kind_dir(sha256: &Root<Sha256Dir>, kind: impl KeyKind) -> RootBuf<KindDir> {
+    sha256.join(kind.to_string())
 }
 
 /*  _            _
@@ -1329,7 +1357,13 @@ mod tests {
     fn cache_path() {
         let fixture = Fixture::new(10, fs! {});
         let cache_path: PathBuf = long_path!("/z/sha256/apple", 42);
-        assert_eq!(fixture.cache.cache_path(Apple, &digest!(42)), cache_path);
+        assert_eq!(
+            fixture
+                .cache
+                .cache_path(Apple, &digest!(42))
+                .into_path_buf(),
+            cache_path
+        );
     }
 
     #[test]
@@ -1352,6 +1386,24 @@ mod tests {
             fixture.fs.metadata(temp_dir.path()).unwrap().unwrap(),
             Metadata::directory(0)
         );
+    }
+
+    #[test]
+    fn new_with_no_cache_directory() {
+        let fixture = Fixture::new(1000, fs! {});
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                },
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
