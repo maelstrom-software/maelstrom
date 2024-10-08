@@ -2,7 +2,7 @@
 title = "Spawning Processes on Linux"
 authors = ["Remi Bernotavicius <remi@abort.cc>"]
 date = 2024-10-07
-weight = 1001
+weight = 998
 draft = true
 +++
 

@@ -1,6 +1,7 @@
 +++
 title = "Why Maelstrom?"
-date = 2024-09-25
+authors = ["Neal Fachan <neal@fachan.com>"]
+date = 2024-10-08
 weight = 0
 +++
 
