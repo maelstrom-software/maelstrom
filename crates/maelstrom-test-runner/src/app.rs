@@ -523,7 +523,6 @@ where
 
         let res = (|| -> Result<_> {
             loop {
-                generation.fetch_add(1, Ordering::Release);
                 main_app_sender.send(MainAppMessage::Start.into()).unwrap();
 
                 let test_db = test_db_store.load()?;
@@ -533,9 +532,13 @@ where
                     main_app_channel_reader(app, &main_app_receiver, &generation)?;
                 test_db_store.save(test_db)?;
 
-                if !restart {
-                    break Ok(exit_code);
+                if restart {
+                    abs_deps.client().clear_cached_layers()?;
+                    generation.fetch_add(1, Ordering::Release);
+                    continue;
                 }
+
+                break Ok(exit_code);
             }
         })();
 

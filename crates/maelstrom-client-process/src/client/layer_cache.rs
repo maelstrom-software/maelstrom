@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use maelstrom_base::{ArtifactType, Sha256Digest};
 use maelstrom_client_base::spec::LayerSpec;
 use std::collections::HashMap;
@@ -85,6 +85,16 @@ impl LayerCache {
         } else {
             panic!("unexpected cache fill");
         }
+    }
+
+    pub fn clear(&mut self) -> Result<()> {
+        for entry in self.cache.values() {
+            if matches!(entry, CacheEntry::Pending(_)) {
+                bail!("cannot clear cache while it is being used");
+            }
+        }
+        self.cache.clear();
+        Ok(())
     }
 }
 
@@ -223,5 +233,32 @@ mod tests {
 
         r1_task.await.unwrap();
         r2_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cache_clear_error() {
+        let mut cache = LayerCache::new();
+        let layer = paths_layer!(["/a"]);
+        assert_matches!(cache.get(&layer), CacheResult::Build(_));
+
+        assert_eq!(
+            cache.clear().unwrap_err().to_string(),
+            "cannot clear cache while it is being used"
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_clear_success() {
+        let mut cache = LayerCache::new();
+        let layer = paths_layer!(["/a"]);
+        assert_matches!(cache.get(&layer), CacheResult::Build(_));
+        let built = (digest![1], ArtifactType::Manifest);
+
+        cache.fill(&layer, Ok(built.clone()));
+        assert_matches!(cache.get(&layer), CacheResult::Success(ref b) if b == &built);
+
+        cache.clear().unwrap();
+
+        assert_matches!(cache.get(&layer), CacheResult::Build(_));
     }
 }

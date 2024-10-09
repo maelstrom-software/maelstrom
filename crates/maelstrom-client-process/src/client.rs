@@ -194,6 +194,13 @@ impl ClientState {
             .collect())
     }
 
+    async fn clear_cached_layers(&self) -> Result<()> {
+        debug!(self.log, "clear_cached_layers");
+
+        let mut locked = self.locked.lock().await;
+        locked.cached_layers.clear()
+    }
+
     async fn get_container_image(&self, name: &str) -> Result<ContainerImage> {
         let dl_name = name.to_owned();
 
@@ -696,6 +703,11 @@ impl Client {
             artifact_uploads,
             image_downloads,
         })
+    }
+
+    pub async fn clear_cached_layers(&self) -> Result<()> {
+        let state = self.state_machine.active()?;
+        state.clear_cached_layers().await
     }
 
     pub async fn shutdown(&self) {

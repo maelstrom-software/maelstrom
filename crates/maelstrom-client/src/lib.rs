@@ -380,6 +380,12 @@ impl Client {
     pub fn introspect(&self) -> Result<IntrospectResponse> {
         self.send_sync(move |mut client| async move { client.introspect(proto::Void {}).await })
     }
+
+    pub fn clear_cached_layers(&self) -> Result<()> {
+        self.send_sync(
+            move |mut client| async move { client.clear_cached_layers(proto::Void {}).await },
+        )
+    }
 }
 
 pub fn bg_proc_main() -> Result<()> {

@@ -132,4 +132,15 @@ impl ClientProcess for Handler {
             .map(|res| res.into_proto_buf())
             .map_to_tonic()
     }
+
+    async fn clear_cached_layers(
+        &self,
+        _request: Request<proto::Void>,
+    ) -> TonicResponse<proto::Void> {
+        self.client
+            .clear_cached_layers()
+            .await
+            .map(|res| res.into_proto_buf())
+            .map_to_tonic()
+    }
 }
