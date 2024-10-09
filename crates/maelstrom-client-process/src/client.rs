@@ -42,7 +42,7 @@ use std::pin::Pin;
 use std::{
     collections::{HashMap, HashSet},
     mem,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 use tokio::{
@@ -70,7 +70,7 @@ struct ClientState {
 
 struct ClientStateLocked {
     digest_repo: DigestRepository,
-    processed_artifact_paths: HashSet<PathBuf>,
+    processed_artifact_digests: HashSet<Sha256Digest>,
     cached_layers: LayerCache,
     containers: HashMap<String, ContainerSpec>,
 }
@@ -119,8 +119,8 @@ impl Uploader {
                 .await?;
             digest
         };
-        if !locked.processed_artifact_paths.contains(&path) {
-            locked.processed_artifact_paths.insert(path.clone());
+        if !locked.processed_artifact_digests.contains(&digest) {
+            locked.processed_artifact_digests.insert(digest.clone());
             self.local_broker_sender
                 .send(router::Message::AddArtifact(path, digest.clone()))?;
         }
@@ -517,7 +517,7 @@ impl Client {
                     log,
                     locked: Arc::new(Mutex::new(ClientStateLocked {
                         digest_repo,
-                        processed_artifact_paths: HashSet::default(),
+                        processed_artifact_digests: HashSet::default(),
                         cached_layers: LayerCache::new(),
                         containers: HashMap::new(),
                     })),
