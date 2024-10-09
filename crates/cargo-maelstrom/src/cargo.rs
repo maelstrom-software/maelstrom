@@ -25,7 +25,6 @@ use std::{
 };
 
 fn filter_build_output(output: String) -> String {
-    std::fs::write("/tmp/o.txt", output.as_bytes()).unwrap();
     let lines: Vec<_> = output
         .split('\n')
         .filter(|l| {
