@@ -194,23 +194,6 @@ impl ClientState {
             .collect())
     }
 
-    async fn clear_cached_layers(&self) {
-        debug!(self.log, "clear_cached_layers");
-
-        // Wait for any pending layers being built to drain out. This could treadmill forever if
-        // work keeps getting submitted.
-        loop {
-            let mut locked = self.locked.lock().await;
-            if let Some(mut waiter) = locked.cached_layers.waiter_for_all_pending_layers() {
-                drop(locked);
-                waiter.wait().await;
-            } else {
-                locked.cached_layers.clear().expect("no layers being built");
-                break;
-            }
-        }
-    }
-
     async fn get_container_image(&self, name: &str) -> Result<ContainerImage> {
         let dl_name = name.to_owned();
 
@@ -713,12 +696,6 @@ impl Client {
             artifact_uploads,
             image_downloads,
         })
-    }
-
-    pub async fn clear_cached_layers(&self) -> Result<()> {
-        let state = self.state_machine.active()?;
-        state.clear_cached_layers().await;
-        Ok(())
     }
 
     pub async fn shutdown(&self) {

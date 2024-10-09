@@ -389,16 +389,6 @@ impl Client {
         self.send_sync(move |mut client| async move { client.introspect(proto::Void {}).await })
     }
 
-    /// This clears the layers cache in the client so that any layers resubmitted will get
-    /// recomputed.
-    /// Waits for in-flight work to finish, so it should really only be called at some point when
-    /// there are no new jobs being submitted.
-    pub fn clear_cached_layers(&self) -> Result<()> {
-        self.send_sync(
-            move |mut client| async move { client.clear_cached_layers(proto::Void {}).await },
-        )
-    }
-
     /// Kills all running jobs and clears the layer caches.
     pub fn restart(&self) -> Result<()> {
         self.send_sync_unit(move |mut client| async move { client.restart(proto::Void {}).await })?;

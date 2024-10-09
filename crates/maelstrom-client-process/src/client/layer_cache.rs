@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use maelstrom_base::{ArtifactType, Sha256Digest};
 use maelstrom_client_base::spec::LayerSpec;
 use std::collections::HashMap;
@@ -53,18 +53,6 @@ pub enum CacheResult {
     Build(LayerReceiver),
 }
 
-pub struct MultiLayerWaiter {
-    waiters: Vec<LayerReceiver>,
-}
-
-impl MultiLayerWaiter {
-    pub async fn wait(&mut self) {
-        for waiter in &mut self.waiters {
-            let _ = waiter.recv().await;
-        }
-    }
-}
-
 #[derive(Default)]
 pub struct LayerCache {
     cache: HashMap<LayerSpec, CacheEntry>,
@@ -97,27 +85,6 @@ impl LayerCache {
         } else {
             panic!("unexpected cache fill");
         }
-    }
-
-    pub fn waiter_for_all_pending_layers(&self) -> Option<MultiLayerWaiter> {
-        let mut waiters = vec![];
-        for entry in self.cache.values() {
-            if let CacheEntry::Pending(r) = entry {
-                waiters.push(r.subscribe());
-            }
-        }
-
-        (!waiters.is_empty()).then_some(MultiLayerWaiter { waiters })
-    }
-
-    pub fn clear(&mut self) -> Result<()> {
-        for entry in self.cache.values() {
-            if matches!(entry, CacheEntry::Pending(_)) {
-                bail!("cannot clear cache while it is being used");
-            }
-        }
-        self.cache.clear();
-        Ok(())
     }
 }
 
@@ -232,33 +199,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn waiters_for_all_pending_layers() {
-        let mut cache = LayerCache::new();
-        let layer1 = paths_layer!(["/a"]);
-        let layer2 = paths_layer!(["/b"]);
-
-        assert_matches!(cache.get(&layer1), CacheResult::Build(_));
-        assert_matches!(cache.get(&layer2), CacheResult::Build(_));
-
-        let mut all = cache.waiter_for_all_pending_layers().unwrap();
-        let built1 = (digest![1], ArtifactType::Manifest);
-        let built2 = (digest![1], ArtifactType::Manifest);
-
-        let waiting_task = tokio::task::spawn(async move { all.wait().await });
-
-        cache.fill(&layer1, Ok(built1.clone()));
-        assert_matches!(cache.get(&layer1), CacheResult::Success(ref b) if b == &built1);
-        assert!(!waiting_task.is_finished());
-
-        cache.fill(&layer2, Ok(built2.clone()));
-        assert_matches!(cache.get(&layer2), CacheResult::Success(ref b) if b == &built2);
-
-        waiting_task.await.unwrap();
-
-        assert!(cache.waiter_for_all_pending_layers().is_none());
-    }
-
-    #[tokio::test]
     async fn cache_destroyed() {
         let mut cache = LayerCache::new();
         let layer = paths_layer!(["/a"]);
@@ -283,32 +223,5 @@ mod tests {
 
         r1_task.await.unwrap();
         r2_task.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn cache_clear_error() {
-        let mut cache = LayerCache::new();
-        let layer = paths_layer!(["/a"]);
-        assert_matches!(cache.get(&layer), CacheResult::Build(_));
-
-        assert_eq!(
-            cache.clear().unwrap_err().to_string(),
-            "cannot clear cache while it is being used"
-        );
-    }
-
-    #[tokio::test]
-    async fn cache_clear_success() {
-        let mut cache = LayerCache::new();
-        let layer = paths_layer!(["/a"]);
-        assert_matches!(cache.get(&layer), CacheResult::Build(_));
-        let built = (digest![1], ArtifactType::Manifest);
-
-        cache.fill(&layer, Ok(built.clone()));
-        assert_matches!(cache.get(&layer), CacheResult::Success(ref b) if b == &built);
-
-        cache.clear().unwrap();
-
-        assert_matches!(cache.get(&layer), CacheResult::Build(_));
     }
 }

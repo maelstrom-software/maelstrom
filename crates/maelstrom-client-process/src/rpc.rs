@@ -157,19 +157,6 @@ impl ClientProcess for ArcHandler {
             .map_to_tonic()
     }
 
-    async fn clear_cached_layers(
-        &self,
-        _request: Request<proto::Void>,
-    ) -> TonicResponse<proto::Void> {
-        self.client
-            .read()
-            .await
-            .clear_cached_layers()
-            .await
-            .map(|res| res.into_proto_buf())
-            .map_to_tonic()
-    }
-
     async fn restart(&self, _request: Request<proto::Void>) -> TonicResponse<proto::Void> {
         let mut client = self.client.write().await;
         let old_client = std::mem::replace(&mut *client, Client::new());
