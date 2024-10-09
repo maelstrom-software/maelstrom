@@ -3090,6 +3090,11 @@ script_test_with_error_simex! {
         },
         StartShutdown
     };
+    TestsListed {
+        artifact: fake_artifact("bar_test", "foo_pkg"),
+        listing: vec![("test_a".into(), NoCaseMetadata), ("test_b".into(), NoCaseMetadata)],
+        ignored_listing: vec![]
+    } => {}
 }
 
 script_test_with_error_simex! {

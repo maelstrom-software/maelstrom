@@ -354,6 +354,10 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         listing: Vec<(String, CaseMetadataM<DepsT>)>,
         ignored_listing: Vec<String>,
     ) {
+        if self.failure_limit_reached() {
+            return;
+        }
+
         let package = self
             .packages
             .get(&artifact.package())
