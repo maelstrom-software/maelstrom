@@ -1106,6 +1106,14 @@ script_test_with_error_simex! {
         SendUiMsg {
             msg: UiMessage::CollectionOutput("build error".into())
         },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec![],
+                ignored: vec![],
+                not_run: Some(NotRunEstimate::About(0)),
+            })
+        },
         StartShutdown
     };
     ArtifactBuilt {
@@ -3815,6 +3823,14 @@ script_test! {
     CollectionFinished { wait_status: wait_failure() } => {
         SendUiMsg {
             msg: UiMessage::CollectionOutput("build error".into())
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec![],
+                ignored: vec![],
+                not_run: Some(NotRunEstimate::About(0)),
+            })
         },
     };
     ArtifactBuilt {

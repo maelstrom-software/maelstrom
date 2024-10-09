@@ -141,7 +141,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
     fn check_for_done(&mut self) {
         if self.is_done() {
-            if !self.options.listing && !self.collection_failed {
+            if !self.options.listing {
                 let all_pending_stuff_done =
                     self.jobs.is_empty() && self.pending_listings == 0 && self.collection_finished;
                 self.deps
