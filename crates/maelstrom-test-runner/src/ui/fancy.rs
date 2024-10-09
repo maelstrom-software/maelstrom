@@ -324,6 +324,7 @@ pub struct FancyUi {
     remote_progress: Vec<RemoteProgress>,
     collection_output: String,
     blank: bool,
+    height: u16,
 }
 
 impl FancyUi {
@@ -347,11 +348,14 @@ impl FancyUi {
             remote_progress: vec![],
             collection_output: String::new(),
             blank: false,
+            height: 0,
         })
     }
 
     pub fn run_inner(&mut self, recv: &Receiver<UiMessage>) -> Result<bool> {
-        let mut terminal = init_terminal()?;
+        let backend = CrosstermBackend::new(stdout());
+        let height = backend.size()?.height / 4;
+        let mut terminal = init_terminal(backend, height)?;
 
         let log_lines = RefCell::new(SlogLines::default());
         let slog_dec = UiSlogDecorator::new(&log_lines);
@@ -472,6 +476,7 @@ impl FancyUi {
 
         *self = Self::new(false /* list */, true /* stdout_is_tty */).unwrap();
         self.blank = true;
+        self.height = height;
 
         Ok(!done)
     }
@@ -481,18 +486,14 @@ impl Ui for FancyUi {
     fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {
         let hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            let _ = restore_terminal();
+            let _ = restore_terminal(None);
             hook(info)
         }));
 
         while self.run_inner(&recv)? {}
-        Ok(())
-    }
-}
 
-impl Drop for FancyUi {
-    fn drop(&mut self) {
-        let _ = restore_terminal();
+        restore_terminal(Some(self.height))?;
+        Ok(())
     }
 }
 
@@ -503,7 +504,7 @@ impl FancyUi {
         }
 
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            let _ = restore_terminal();
+            let _ = restore_terminal(None);
             linux::raise(linux::Signal::INT).unwrap();
             unreachable!();
         }
@@ -749,21 +750,25 @@ impl Widget for &mut FancyUi {
     }
 }
 
-fn init_terminal() -> Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
+fn init_terminal(
+    backend: CrosstermBackend<std::io::Stdout>,
+    height: u16,
+) -> Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
     enable_raw_mode()?;
-    let backend = CrosstermBackend::new(stdout());
-    let height = backend.size()?.height;
     let terminal = Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: Viewport::Inline(height / 4),
+            viewport: Viewport::Inline(height),
         },
     )?;
     Ok(terminal)
 }
 
-fn restore_terminal() -> Result<()> {
+fn restore_terminal(scroll_up: Option<u16>) -> Result<()> {
     disable_raw_mode()?;
+    if let Some(v) = scroll_up {
+        stdout().execute(cursor::MoveUp(v - 1))?;
+    }
     stdout().execute(Clear(ClearType::FromCursorDown))?;
     stdout().execute(cursor::Show)?;
     println!();
