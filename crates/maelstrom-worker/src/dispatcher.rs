@@ -15,6 +15,7 @@ use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
     path::{Path, PathBuf},
+    result,
     time::Duration,
 };
 use tracker::{FetcherResult, LayerTracker};
@@ -109,7 +110,7 @@ pub trait Cache<FsT: cache::fs::Fs> {
         kind: cache::EntryKind,
         digest: &Sha256Digest,
         artifact: GotArtifact<FsT>,
-    ) -> Vec<JobId>;
+    ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)>;
     fn decrement_ref_count(&mut self, kind: cache::EntryKind, digest: &Sha256Digest);
     fn cache_path(&self, kind: cache::EntryKind, digest: &Sha256Digest) -> PathBuf;
     fn temp_file(&self) -> Result<FsT::TempFile>;
@@ -140,7 +141,7 @@ impl Cache<cache::fs::std::Fs> for cache::Cache<cache::fs::std::Fs, cache::Entry
         kind: cache::EntryKind,
         digest: &Sha256Digest,
         artifact: GotArtifact<cache::fs::std::Fs>,
-    ) -> Vec<JobId> {
+    ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)> {
         self.got_artifact_success(kind, digest, artifact)
     }
 
@@ -674,6 +675,7 @@ where
         kind: cache::EntryKind,
         digest: Sha256Digest,
         artifact: GotArtifact<DepsT::Fs>,
+        err_msg: &str,
         cb: impl Fn(
             &mut LayerTracker,
             &Sha256Digest,
@@ -681,12 +683,20 @@ where
             &mut Fetcher<'_, DepsT, ArtifactFetcherT, CacheT>,
         ),
     ) {
-        let jobs = self.cache.got_artifact_success(kind, &digest, artifact);
-        for jid in jobs {
-            let path = self.cache.cache_path(kind, &digest);
-            self.advance_job(jid, kind, &digest, |tracker, digest, fetcher| {
-                cb(tracker, digest, path, fetcher)
-            });
+        match self.cache.got_artifact_success(kind, &digest, artifact) {
+            Ok(jobs) => {
+                for jid in jobs {
+                    let path = self.cache.cache_path(kind, &digest);
+                    self.advance_job(jid, kind, &digest, |tracker, digest, fetcher| {
+                        cb(tracker, digest, path, fetcher)
+                    });
+                }
+            }
+            Err((err, jobs)) => {
+                for jid in jobs {
+                    self.job_failure(&digest, jid, err_msg, &err)
+                }
+            }
         }
     }
 
@@ -695,6 +705,7 @@ where
             cache::EntryKind::Blob,
             digest,
             artifact,
+            "Failed to save artifact in cache",
             |tracker, digest, path, fetcher| tracker.got_artifact(digest, path, fetcher),
         )
     }
@@ -713,6 +724,7 @@ where
             cache::EntryKind::BottomFsLayer,
             digest,
             artifact,
+            "Failed to save bottom FS layer",
             |tracker, digest, path, fetcher| tracker.got_bottom_fs_layer(digest, path, fetcher),
         )
     }
@@ -731,6 +743,7 @@ where
             cache::EntryKind::UpperFsLayer,
             digest,
             artifact,
+            "Failed to save upper FS layer",
             |tracker, digest, path, fetcher| tracker.got_upper_fs_layer(digest, path, fetcher),
         )
     }
@@ -1070,16 +1083,17 @@ mod tests {
             kind: cache::EntryKind,
             digest: &Sha256Digest,
             artifact: GotArtifact<Rc<RefCell<TestState>>>,
-        ) -> Vec<JobId> {
+        ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)> {
             self.borrow_mut().messages.push(CacheGotArtifactSuccess(
                 kind,
                 digest.clone(),
                 artifact,
             ));
-            self.borrow_mut()
+            Ok(self
+                .borrow_mut()
                 .got_artifact_success_returns
                 .remove(&cache::Key::new(kind, digest.clone()))
-                .unwrap()
+                .unwrap())
         }
 
         fn decrement_ref_count(&mut self, kind: cache::EntryKind, digest: &Sha256Digest) {

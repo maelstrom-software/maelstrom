@@ -2,7 +2,7 @@
 
 pub mod fs;
 
-use anyhow::Result;
+use anyhow::{Error, Result};
 use bytesize::ByteSize;
 use fs::{FileType, Fs, Metadata};
 use maelstrom_base::{JobId, Sha256Digest};
@@ -23,6 +23,7 @@ use std::{
     num::NonZeroU32,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    result,
     str::FromStr as _,
     string::ToString,
 };
@@ -575,7 +576,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     pub fn got_artifact_failure(&mut self, kind: KeyKindT, digest: &Sha256Digest) -> Vec<JobId> {
         let Some(Entry::Getting(jobs)) = self.entries.remove(&Key::new(kind, digest.clone()))
         else {
-            panic!("Got got_artifact in unexpected state");
+            panic!("Got got_artifact_failure in unexpected state");
         };
         jobs
     }
@@ -587,55 +588,65 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         kind: KeyKindT,
         digest: &Sha256Digest,
         artifact: GotArtifact<FsT>,
-    ) -> Vec<JobId> {
-        let path = self.cache_path(kind, digest);
-        let (file_type, bytes_used) = match artifact {
-            GotArtifact::Directory { source, size } => {
-                write_size_file(&self.fs, &path, size).unwrap();
-                self.fs.persist_temp_dir(source, &path).unwrap();
-                (FileType::Directory, size)
+    ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)> {
+        fn update_cache_directory<FsT: Fs>(
+            fs: &FsT,
+            path: &Root<EntryPath>,
+            artifact: GotArtifact<FsT>,
+        ) -> Result<(FileType, u64)> {
+            match artifact {
+                GotArtifact::Directory { source, size } => {
+                    write_size_file(fs, path, size)?;
+                    fs.persist_temp_dir(source, path)?;
+                    Ok((FileType::Directory, size))
+                }
+                GotArtifact::File { source } => {
+                    fs.persist_temp_file(source, path)?;
+                    let metadata = fs.metadata(path)?.unwrap();
+                    assert!(matches!(metadata.type_, FileType::File));
+                    Ok((FileType::File, metadata.size))
+                }
+                GotArtifact::Symlink { target } => {
+                    fs.symlink(&target, path)?;
+                    let metadata = fs.metadata(path)?.unwrap();
+                    assert!(matches!(metadata.type_, FileType::Symlink));
+                    Ok((FileType::Symlink, metadata.size))
+                }
             }
-            GotArtifact::File { source } => {
-                self.fs.persist_temp_file(source, &path).unwrap();
-                let metadata = self.fs.metadata(&path).unwrap().unwrap();
-                assert!(matches!(metadata.type_, FileType::File));
-                (FileType::File, metadata.size)
+        }
+
+        match update_cache_directory(&self.fs, &self.cache_path(kind, digest), artifact) {
+            Err(err) => Err((err, self.got_artifact_failure(kind, digest))),
+            Ok((file_type, bytes_used)) => {
+                let entry = self
+                    .entries
+                    .get_mut(&Key::new(kind, digest.clone()))
+                    .expect("Got got_artifact_success in unexpected state");
+                let Entry::Getting(jobs) = entry else {
+                    panic!("Got got_artifact_success in unexpected state");
+                };
+                let ref_count = jobs.len().try_into().unwrap();
+                let jobs = mem::take(jobs);
+                // Reference count must be > 0 since we don't allow cancellation of gets.
+                *entry = Entry::InUse {
+                    file_type,
+                    bytes_used,
+                    ref_count: NonZeroU32::new(ref_count).unwrap(),
+                };
+                self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
+                debug!(self.log, "cache added artifact";
+                    "kind" => ?kind,
+                    "digest" => %digest,
+                    "artifact_bytes_used" => %ByteSize::b(bytes_used),
+                    "entries" => %self.entries.len(),
+                    "file_type" => %file_type,
+                    "bytes_used" => %ByteSize::b(self.bytes_used),
+                    "byte_used_target" => %ByteSize::b(self.bytes_used_target)
+                );
+                self.possibly_remove_some_ignore_error();
+                Ok(jobs)
             }
-            GotArtifact::Symlink { target } => {
-                self.fs.symlink(&target, &path).unwrap();
-                let metadata = self.fs.metadata(&path).unwrap().unwrap();
-                assert!(matches!(metadata.type_, FileType::Symlink));
-                (FileType::Symlink, metadata.size)
-            }
-        };
-        let key = Key::new(kind, digest.clone());
-        let entry = self
-            .entries
-            .get_mut(&key)
-            .expect("Got DownloadingAndExtracting in unexpected state");
-        let Entry::Getting(jobs) = entry else {
-            panic!("Got DownloadingAndExtracting in unexpected state");
-        };
-        let ref_count = jobs.len().try_into().unwrap();
-        let jobs = mem::take(jobs);
-        // Reference count must be > 0 since we don't allow cancellation of gets.
-        *entry = Entry::InUse {
-            file_type,
-            bytes_used,
-            ref_count: NonZeroU32::new(ref_count).unwrap(),
-        };
-        self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
-        debug!(self.log, "cache added artifact";
-            "kind" => ?kind,
-            "digest" => %digest,
-            "artifact_bytes_used" => %ByteSize::b(bytes_used),
-            "entries" => %self.entries.len(),
-            "file_type" => %file_type,
-            "bytes_used" => %ByteSize::b(self.bytes_used),
-            "byte_used_target" => %ByteSize::b(self.bytes_used_target)
-        );
-        self.possibly_remove_some_ignore_error();
-        jobs
+        }
     }
 
     /// Notify the cache that a reference to an artifact is no longer needed.
@@ -1024,7 +1035,10 @@ mod tests {
             artifact: GotArtifact<Rc<test::Fs>>,
             expected: Vec<JobId>,
         ) {
-            let result = self.cache.got_artifact_success(kind, &digest, artifact);
+            let result = self
+                .cache
+                .got_artifact_success(kind, &digest, artifact)
+                .unwrap();
             assert_eq!(result, expected);
         }
 
@@ -1174,6 +1188,42 @@ mod tests {
         fixture.assert_bytes_used(0);
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
+    }
+
+    #[test]
+    fn success_flow_with_failure_persisting() {
+        let mut fixture = Fixture::new(1, fs! {});
+        fixture.assert_bytes_used(0);
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
+        fixture.assert_bytes_used(0);
+        fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        let source = fixture.cache.temp_dir().unwrap();
+        fixture.fs.graft(source.path(), fs! { foo(b"bar") });
+        fixture.fs.set_failure(true);
+        let (err, jids) = fixture
+            .cache
+            .got_artifact_success(
+                Apple,
+                &digest!(1),
+                GotArtifact::Directory { source, size: 6 },
+            )
+            .unwrap_err();
+        assert_eq!(jids, vec![jid!(1), jid!(2)]);
+        assert_eq!(err.to_string(), "Test");
+
+        fixture.assert_bytes_used(0);
+        fixture.assert_fs_entry(
+            "/z/sha256",
+            fs! {
+                apple {},
+                orange {},
+            },
+        );
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
