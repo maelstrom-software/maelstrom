@@ -1086,7 +1086,7 @@ script_test_with_error_simex! {
 }
 
 script_test_with_error_simex! {
-    collection_error,
+    collection_error_with_pending_listing,
     test_db_in = [],
     expected_exit_code = ExitCode::FAILURE,
     expected_test_db_out = [],
@@ -1111,6 +1111,51 @@ script_test_with_error_simex! {
         }
     };
     CollectionFinished { wait_status: wait_failure() } => {
+        SendUiMsg {
+            msg: UiMessage::CollectionOutput("build error".into())
+        },
+        SendUiMsg {
+            msg: UiMessage::AllJobsFinished(UiJobSummary {
+                succeeded: 0,
+                failed: vec![],
+                ignored: vec![],
+                not_run: Some(NotRunEstimate::About(0)),
+            })
+        },
+        StartShutdown
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("bar_test", "foo_pkg"),
+    } => {};
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![],
+        ignored_listing: vec![]
+    } => {};
+}
+
+script_test_with_error_simex! {
+    collection_error,
+    test_db_in = [],
+    expected_exit_code = ExitCode::FAILURE,
+    expected_test_db_out = [],
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])]
+        }
+    };
+    CollectionFinished { wait_status: wait_failure() } => {
+        SendUiMsg {
+            msg: UiMessage::DoneQueuingJobs,
+        },
         SendUiMsg {
             msg: UiMessage::CollectionOutput("build error".into())
         },

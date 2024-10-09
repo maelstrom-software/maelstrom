@@ -116,7 +116,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     fn not_run_estimate(&self) -> NotRunEstimate {
         let completed = self.test_results.len() as u64;
 
-        if self.collection_finished && self.pending_listings == 0 {
+        if self.collection_finished && !self.collection_failed && self.pending_listings == 0 {
             // If we queued everything, we know exactly how many tests didn't run
             NotRunEstimate::Exactly(self.jobs_queued - completed)
         } else if self.expected_job_count >= self.jobs_queued {
@@ -144,12 +144,13 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             if !self.options.listing {
                 let all_pending_stuff_done =
                     self.jobs.is_empty() && self.pending_listings == 0 && self.collection_finished;
+                let stuff_not_run = !all_pending_stuff_done || self.collection_failed;
                 self.deps
                     .send_ui_msg(UiMessage::AllJobsFinished(UiJobSummary {
                         succeeded: self.test_count(TestResult::Succeeded),
                         failed: self.test_listing(TestResult::Failed),
                         ignored: self.test_listing(TestResult::Ignored),
-                        not_run: (!all_pending_stuff_done).then(|| self.not_run_estimate()),
+                        not_run: stuff_not_run.then(|| self.not_run_estimate()),
                     }));
             }
 
