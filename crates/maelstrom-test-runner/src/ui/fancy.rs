@@ -323,7 +323,7 @@ pub struct FancyUi {
     throbber_state: throbber_widgets_tui::ThrobberState,
     remote_progress: Vec<RemoteProgress>,
     collection_output: String,
-    all_done: bool,
+    blank: bool,
 }
 
 impl FancyUi {
@@ -346,25 +346,18 @@ impl FancyUi {
             throbber_state: Default::default(),
             remote_progress: vec![],
             collection_output: String::new(),
-            all_done: false,
+            blank: false,
         })
     }
-}
 
-impl Ui for FancyUi {
-    fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {
-        let hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            let _ = restore_terminal();
-            hook(info)
-        }));
-
+    pub fn run_inner(&mut self, recv: &Receiver<UiMessage>) -> Result<bool> {
         let mut terminal = init_terminal()?;
 
         let log_lines = RefCell::new(SlogLines::default());
         let slog_dec = UiSlogDecorator::new(&log_lines);
         let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
 
+        let mut done = false;
         let mut last_tick = Instant::now();
         terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
         loop {
@@ -429,6 +422,7 @@ impl Ui for FancyUi {
                     }
                     UiMessage::UpdateEnqueueStatus(msg) => {
                         self.enqueue_status = Some(msg);
+                        self.blank = false;
                     }
                     UiMessage::DoneBuilding => {
                         self.producing_build_output = false;
@@ -438,13 +432,17 @@ impl Ui for FancyUi {
                     }
                     UiMessage::AllJobsFinished(summary) => {
                         self.render_summary(summary);
+                        break;
                     }
                     UiMessage::CollectionOutput(output) => {
                         self.collection_output += &output;
                     }
                 },
                 Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Disconnected) => {
+                    done = true;
+                    break;
+                }
             }
         }
 
@@ -458,7 +456,7 @@ impl Ui for FancyUi {
         }
 
         // Clear away some of the temporal UI elements before we update the screen one last time.
-        self.all_done = true;
+        self.blank = true;
         terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
 
         if !self.collection_output.is_empty() {
@@ -467,11 +465,27 @@ impl Ui for FancyUi {
                     .centered()
                     .render(buf.area, buf)
             })?;
-
-            disable_raw_mode()?;
-            stdout().write_all(self.collection_output.as_bytes())?;
         }
 
+        disable_raw_mode()?;
+        stdout().write_all(self.collection_output.as_bytes())?;
+
+        *self = Self::new(false /* list */, true /* stdout_is_tty */).unwrap();
+        self.blank = true;
+
+        Ok(!done)
+    }
+}
+
+impl Ui for FancyUi {
+    fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let _ = restore_terminal();
+            hook(info)
+        }));
+
+        while self.run_inner(&recv)? {}
         Ok(())
     }
 }
@@ -696,7 +710,7 @@ impl Widget for &mut FancyUi {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut sections = vec![];
 
-        if !self.all_done {
+        if !self.blank {
             sections.push((
                 Constraint::Fill(1),
                 FancyUi::render_running_tests as SectionFnPtr,
