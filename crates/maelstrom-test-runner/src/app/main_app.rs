@@ -158,6 +158,9 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
                     self.deps.start_restart();
                 } else {
                     self.waiting_for_changes = true;
+                    self.deps.send_ui_msg(UiMessage::UpdateEnqueueStatus(
+                        "waiting for changes...".into(),
+                    ));
                 }
             } else {
                 self.deps.start_shutdown();

@@ -731,8 +731,16 @@ macro_rules! watch_simex_test_inner {
 
                     // if this is the last message and we received a watch event, it may trigger a
                     // restart
-                    if index == script_length - 1 && watch_event_received && triggers_restart {
-                        messages.push(StartRestart);
+                    if index == script_length - 1 {
+                        if watch_event_received && triggers_restart {
+                            messages.push(StartRestart);
+                        } else {
+                            messages.push(SendUiMsg {
+                                msg: UiMessage::UpdateEnqueueStatus(
+                                    "waiting for changes...".into()
+                                )
+                            });
+                        }
                     }
 
                     fixture.expect_messages_in_any_order(messages);
@@ -3832,6 +3840,11 @@ script_test! {
                 not_run: Some(NotRunEstimate::About(0)),
             })
         },
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus(
+                "waiting for changes...".into()
+            )
+        }
     };
     ArtifactBuilt {
         artifact: fake_artifact("bar_test", "foo_pkg"),
