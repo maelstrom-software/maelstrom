@@ -24,6 +24,8 @@ use std::{
     thread,
 };
 
+const LINE_PREFIXES: [&str; 5] = ["[1m[32m", "[1m[36m", "[K[1m[32m", "[K[1m[36m", ""];
+
 fn filter_build_output(output: String) -> String {
     let lines: Vec<_> = output
         .split('\n')
@@ -32,15 +34,19 @@ fn filter_build_output(output: String) -> String {
             _ => l,
         })
         .filter(|l| {
-            !(l.starts_with("[1m[32m   Compiling")
-                || l.starts_with("[K[1m[32m   Compiling")
-                || l.starts_with("   Compiling")
-                || l.starts_with("[1m[36m    Building")
-                || l.starts_with("[K[1m[36m    Building")
-                || l.starts_with("    Building")
-                || l.starts_with("[1m[32m    Finished")
-                || l.starts_with("[K[1m[32m    Finished")
-                || l.starts_with("    Finished"))
+            for p in LINE_PREFIXES {
+                for w in [
+                    "   Compiling",
+                    "    Building",
+                    "    Blocking",
+                    "    Finished",
+                ] {
+                    if l.starts_with(&format!("{p}{w}")) {
+                        return false;
+                    }
+                }
+            }
+            true
         })
         .collect();
     lines.join("\n")
