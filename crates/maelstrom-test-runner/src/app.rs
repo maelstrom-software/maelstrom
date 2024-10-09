@@ -170,19 +170,35 @@ enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'stati
     WatchEvents {
         events: Vec<notify::event::Event>,
     },
-    Shutdown,
-    Restart,
 }
 
 type MainAppMessageM<DepsT> =
     MainAppMessage<PackageM<DepsT>, ArtifactM<DepsT>, CaseMetadataM<DepsT>>;
+
+enum ControlMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static> {
+    Shutdown,
+    Restart,
+    App(MainAppMessage<PackageT, ArtifactT, CaseMetadataT>),
+}
+
+impl<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static>
+    From<MainAppMessage<PackageT, ArtifactT, CaseMetadataT>>
+    for ControlMessage<PackageT, ArtifactT, CaseMetadataT>
+{
+    fn from(msg: MainAppMessage<PackageT, ArtifactT, CaseMetadataT>) -> Self {
+        Self::App(msg)
+    }
+}
+
+type ControlMessageM<DepsT> =
+    ControlMessage<PackageM<DepsT>, ArtifactM<DepsT>, CaseMetadataM<DepsT>>;
 
 type WaitM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::BuildHandle;
 
 struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
     deps: &'deps MainAppDepsT,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
-    main_app_sender: Sender<MainAppMessageM<Self>>,
+    main_app_sender: Sender<ControlMessageM<Self>>,
     ui: UiSender,
     collect_killer: Mutex<Option<KillOnDrop<WaitM<Self>>>>,
     project_dir: &'deps Root<ProjectDir>,
@@ -196,7 +212,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
     fn new(
         deps: &'deps MainAppDepsT,
         scope: &'scope std::thread::Scope<'scope, 'deps>,
-        main_app_sender: Sender<MainAppMessageM<Self>>,
+        main_app_sender: Sender<ControlMessageM<Self>>,
         ui: UiSender,
         project_dir: &'deps Root<ProjectDir>,
         semaphore: &'deps Semaphore,
@@ -244,30 +260,31 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
                         match artifact {
                             Ok(artifact) => {
                                 if sender
-                                    .send(MainAppMessage::ArtifactBuilt { artifact })
+                                    .send(MainAppMessage::ArtifactBuilt { artifact }.into())
                                     .is_err()
                                 {
                                     break;
                                 }
                             }
                             Err(error) => {
-                                let _ = sender.send(MainAppMessage::FatalError { error });
+                                let _ = sender.send(MainAppMessage::FatalError { error }.into());
                                 break;
                             }
                         }
                     }
                     match build_handle.wait() {
                         Ok(wait_status) => {
-                            let _ = sender.send(MainAppMessage::CollectionFinished { wait_status });
+                            let _ = sender
+                                .send(MainAppMessage::CollectionFinished { wait_status }.into());
                         }
                         Err(error) => {
-                            let _ = sender.send(MainAppMessage::FatalError { error });
+                            let _ = sender.send(MainAppMessage::FatalError { error }.into());
                         }
                     }
                 });
             }
             Err(error) => {
-                let _ = sender.send(MainAppMessage::FatalError { error });
+                let _ = sender.send(MainAppMessage::FatalError { error }.into());
             }
         }
     }
@@ -281,10 +298,10 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
             let _guard = sem.access();
             match deps.test_collector().get_packages(&ui) {
                 Ok(packages) => {
-                    let _ = sender.send(MainAppMessage::Packages { packages });
+                    let _ = sender.send(MainAppMessage::Packages { packages }.into());
                 }
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
                 }
             }
         });
@@ -293,12 +310,12 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
     fn add_job(&self, job_id: JobId, spec: JobSpec) {
         let sender = self.main_app_sender.clone();
         let res = self.deps.client().add_job(spec, move |result| {
-            let _ = sender.send(MainAppMessage::JobUpdate { job_id, result });
+            let _ = sender.send(MainAppMessage::JobUpdate { job_id, result }.into());
         });
         if let Err(error) = res {
             let _ = self
                 .main_app_sender
-                .send(MainAppMessage::FatalError { error });
+                .send(MainAppMessage::FatalError { error }.into());
         }
     }
 
@@ -310,32 +327,35 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
             let listing = match artifact.list_tests() {
                 Ok(listing) => listing,
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
                     return;
                 }
             };
             let ignored_listing = match artifact.list_ignored_tests() {
                 Ok(listing) => listing,
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
                     return;
                 }
             };
 
-            let _ = sender.send(MainAppMessage::TestsListed {
-                artifact,
-                listing,
-                ignored_listing,
-            });
+            let _ = sender.send(
+                MainAppMessage::TestsListed {
+                    artifact,
+                    listing,
+                    ignored_listing,
+                }
+                .into(),
+            );
         });
     }
 
     fn start_shutdown(&self) {
-        let _ = self.main_app_sender.send(MainAppMessage::Shutdown);
+        let _ = self.main_app_sender.send(ControlMessage::Shutdown);
     }
 
     fn start_restart(&self) {
-        let _ = self.main_app_sender.send(MainAppMessage::Restart);
+        let _ = self.main_app_sender.send(ControlMessage::Restart);
     }
 
     fn send_ui_msg(&self, msg: UiMessage) {
@@ -362,7 +382,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
             let _watcher = match get_watcher() {
                 Ok(watcher) => watcher,
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
                     return;
                 }
             };
@@ -378,7 +398,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
                     }
                 }
                 if !events.is_empty() {
-                    let _ = sender.send(MainAppMessage::WatchEvents { events });
+                    let _ = sender.send(MainAppMessage::WatchEvents { events }.into());
                 }
             }
         });
@@ -387,15 +407,17 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
 
 fn main_app_channel_reader<DepsT: Deps>(
     mut app: MainApp<DepsT>,
-    main_app_receiver: &Receiver<MainAppMessageM<DepsT>>,
+    main_app_receiver: &Receiver<ControlMessageM<DepsT>>,
 ) -> Result<(bool, ExitCode, TestDbM<DepsT>)> {
     loop {
-        let msg = main_app_receiver.recv()?;
-        if matches!(msg, MainAppMessage::Shutdown | MainAppMessage::Restart) {
-            let (exit_code, test_db) = app.main_return_value()?;
-            break Ok((matches!(msg, MainAppMessage::Restart), exit_code, test_db));
-        } else {
-            app.receive_message(msg);
+        match main_app_receiver.recv()? {
+            msg @ ControlMessage::Shutdown | msg @ ControlMessage::Restart => {
+                let (exit_code, test_db) = app.main_return_value()?;
+                break Ok((matches!(msg, ControlMessage::Restart), exit_code, test_db));
+            }
+            ControlMessage::App(msg) => {
+                app.receive_message(msg);
+            }
         }
     }
 }
@@ -464,7 +486,7 @@ where
 
         let res = (|| -> Result<_> {
             loop {
-                main_app_sender.send(MainAppMessage::Start).unwrap();
+                main_app_sender.send(MainAppMessage::Start.into()).unwrap();
                 let test_db = test_db_store.load()?;
                 let app = MainApp::new(&deps, options, test_db);
 

@@ -489,8 +489,6 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
                 self.receive_collection_finished(wait_status)
             }
             MainAppMessage::WatchEvents { events } => self.receive_watch_events(events),
-            MainAppMessage::Restart => unimplemented!(),
-            MainAppMessage::Shutdown => unimplemented!(),
         }
     }
 }
