@@ -315,7 +315,6 @@ impl Widget for PrintAbove {
 pub struct FancyUi {
     jobs: JobStatuses,
     expected_total_jobs: u64,
-    summary: Option<UiJobSummary>,
     producing_build_output: bool,
 
     build_output: vt100::Parser,
@@ -339,7 +338,6 @@ impl FancyUi {
         Ok(Self {
             jobs: JobStatuses::default(),
             expected_total_jobs: 0,
-            summary: None,
             producing_build_output: false,
 
             build_output: vt100::Parser::new(3, u16::MAX, 0),
@@ -439,7 +437,7 @@ impl Ui for FancyUi {
                         self.enqueue_status = None;
                     }
                     UiMessage::AllJobsFinished(summary) => {
-                        self.summary = Some(summary);
+                        self.render_summary(summary);
                     }
                     UiMessage::CollectionOutput(output) => {
                         self.collection_output += &output;
@@ -448,11 +446,6 @@ impl Ui for FancyUi {
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => break,
             }
-        }
-
-        // Spit out the summary
-        if self.summary.is_some() {
-            self.render_summary();
         }
 
         drop(slog_drain);
@@ -596,11 +589,10 @@ impl FancyUi {
             .render(area, buf);
     }
 
-    fn render_summary(&mut self) {
+    fn render_summary(&mut self, summary: UiJobSummary) {
         self.print_above
             .push(Line::from("Test Summary").centered().into());
 
-        let summary = self.summary.as_ref().unwrap();
         let num_failed = summary.failed.len();
         let num_ignored = summary.ignored.len();
         let num_succeeded = summary.succeeded;
