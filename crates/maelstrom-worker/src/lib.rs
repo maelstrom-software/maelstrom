@@ -399,7 +399,7 @@ impl dispatcher::ArtifactFetcher<StdFs> for ArtifactFetcher {
             "digest" => digest.to_string(),
             "broker_addr" => broker_addr.inner().to_string()
         ));
-        let temp_file = cache.temp_file();
+        let temp_file = cache.temp_file().unwrap();
         let sem = self.sem.clone();
         debug!(log, "artifact fetcher starting");
         thread::spawn(move || {
@@ -506,7 +506,13 @@ async fn dispatcher_main(
     let blob_dir = cache_root.join::<BlobDir>("sha256/blob");
 
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
-    let cache = Cache::new(StdFs, cache_root, config.cache_size, log.clone());
+    let cache = match Cache::new(StdFs, cache_root, config.cache_size, log.clone()) {
+        Err(err) => {
+            error!(log, "could not start cache"; "err" => ?err);
+            return;
+        }
+        Ok(cache) => cache,
+    };
     let artifact_fetcher =
         ArtifactFetcher::new(dispatcher_sender.clone(), config.broker, log.clone());
     match DispatcherAdapter::new(

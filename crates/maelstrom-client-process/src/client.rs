@@ -395,8 +395,12 @@ impl Client {
 
                 // Create the local_worker's cache. This is the same cache as the "real" worker
                 // uses.
-                let local_worker_cache =
-                    local_worker::Cache::new(local_worker::Fs, cache_root, cache_size, log.clone());
+                let local_worker_cache = local_worker::Cache::new(
+                    local_worker::Fs,
+                    cache_root,
+                    cache_size,
+                    log.clone(),
+                )?;
 
                 // Create the local_worker's deps. This the same adapter as the "real" worker uses.
                 let local_worker_dispatcher_adapter = local_worker::DispatcherAdapter::new(

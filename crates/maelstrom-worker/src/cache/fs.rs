@@ -14,7 +14,7 @@ use strum::Display;
 /// Dependencies that [`Cache`] has on the file system.
 pub trait Fs {
     /// Error type for methods.
-    type Error: error::Error;
+    type Error: error::Error + Send + Sync + 'static;
 
     /// Return a random u64. This is used for creating unique path names.
     fn rand_u64(&self) -> u64;

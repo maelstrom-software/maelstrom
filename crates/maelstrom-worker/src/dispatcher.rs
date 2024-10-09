@@ -112,8 +112,8 @@ pub trait Cache<FsT: cache::fs::Fs> {
     ) -> Vec<JobId>;
     fn decrement_ref_count(&mut self, kind: cache::EntryKind, digest: &Sha256Digest);
     fn cache_path(&self, kind: cache::EntryKind, digest: &Sha256Digest) -> PathBuf;
-    fn temp_file(&self) -> FsT::TempFile;
-    fn temp_dir(&self) -> FsT::TempDir;
+    fn temp_file(&self) -> Result<FsT::TempFile>;
+    fn temp_dir(&self) -> Result<FsT::TempDir>;
 }
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
@@ -152,11 +152,11 @@ impl Cache<cache::fs::std::Fs> for cache::Cache<cache::fs::std::Fs, cache::Entry
         self.cache_path(kind, digest).into_path_buf()
     }
 
-    fn temp_file(&self) -> cache::fs::std::TempFile {
+    fn temp_file(&self) -> Result<cache::fs::std::TempFile> {
         self.temp_file()
     }
 
-    fn temp_dir(&self) -> cache::fs::std::TempDir {
+    fn temp_dir(&self) -> Result<cache::fs::std::TempDir> {
         self.temp_dir()
     }
 }
@@ -393,7 +393,7 @@ where
             ),
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
-                let path = self.cache.temp_dir();
+                let path = self.cache.temp_dir().unwrap();
                 self.deps.build_bottom_fs_layer(
                     digest.clone(),
                     path,
@@ -421,7 +421,7 @@ where
             ),
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
-                let path = self.cache.temp_dir();
+                let path = self.cache.temp_dir().unwrap();
                 self.deps.build_upper_fs_layer(
                     digest.clone(),
                     path,
@@ -1099,12 +1099,12 @@ mod tests {
                 .clone()
         }
 
-        fn temp_file(&self) -> TestTempFile {
-            TestTempFile("tmp".into())
+        fn temp_file(&self) -> Result<TestTempFile> {
+            Ok(TestTempFile("tmp".into()))
         }
 
-        fn temp_dir(&self) -> TestTempDir {
-            TestTempDir("tmp".into())
+        fn temp_dir(&self) -> Result<TestTempDir> {
+            Ok(TestTempDir("tmp".into()))
         }
     }
 

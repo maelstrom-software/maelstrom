@@ -2,6 +2,7 @@
 
 pub mod fs;
 
+use anyhow::Result;
 use bytesize::ByteSize;
 use fs::{FileType, Fs, Metadata};
 use maelstrom_base::{JobId, Sha256Digest};
@@ -10,7 +11,7 @@ use maelstrom_util::{
     heap::{Heap, HeapDeps, HeapIndex},
     root::{Root, RootBuf},
 };
-use slog::{debug, Logger};
+use slog::{debug, warn, Logger};
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
@@ -324,26 +325,26 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     /// `bytes_used_target` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: Logger) -> Self {
+    pub fn new(fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: Logger) -> Result<Self> {
         let cachedir_tag = root.join::<CachedirTagPath>(CACHEDIR_TAG);
         let removing = root.join::<RemovingDir>("removing");
         let sha256 = root.join::<Sha256Dir>("sha256");
         let tmp = root.join::<TmpDir>("tmp");
 
         // First, make sure the root directory exists.
-        fs.mkdir_recursively(&root).unwrap();
+        fs.mkdir_recursively(&root)?;
 
         // Next, see if the `CACHEDIR.TAG` file exists and is correctly formed. We use this to
         // decide if this is a "new style" cache directory that can be re-used across invocations.
         // In the future, if we change the layout of the cache directory, we may need a proper
         // version file, but for now, we can just use `CACHEDIR.TAG`.
-        let preserve_directory_contents = match fs.metadata(&cachedir_tag).unwrap() {
+        let preserve_directory_contents = match fs.metadata(&cachedir_tag)? {
             Some(Metadata {
                 type_: FileType::File,
                 size: CACHEDIR_TAG_CONTENTS_LEN_U64,
             }) => {
                 let mut contents = [0u8; CACHEDIR_TAG_CONTENTS_LEN];
-                fs.read_file(&cachedir_tag, &mut contents[..]).unwrap();
+                fs.read_file(&cachedir_tag, &mut contents[..])?;
                 contents == CACHEDIR_TAG_CONTENTS
             }
             _ => false,
@@ -375,23 +376,22 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         sha256: RootBuf<Sha256Dir>,
         size: CacheSize,
         log: Logger,
-    ) -> Self {
+    ) -> Result<Self> {
         // First, make sure the `removing` directory exists and is empty.
-        ensure_removing_directory(&fs, &root, &removing);
+        ensure_removing_directory(&fs, &root, &removing)?;
 
         // Next, remove everything else in the cache directory.
-        remove_all_from_directory_except(&fs, &removing, &root, ["removing"]);
+        remove_all_from_directory_except(&fs, &removing, &root, ["removing"])?;
 
         // Finally, create all of the files all directories that should be there.
-        fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS)
-            .unwrap();
-        fs.mkdir(&tmp).unwrap();
-        fs.mkdir(&sha256).unwrap();
+        fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS)?;
+        fs.mkdir(&tmp)?;
+        fs.mkdir(&sha256)?;
         for kind in KeyKindT::iter() {
-            fs.mkdir(&kind_dir(&sha256, kind)).unwrap();
+            fs.mkdir(&kind_dir(&sha256, kind))?;
         }
 
-        Cache {
+        Ok(Cache {
             fs,
             removing,
             tmp,
@@ -402,7 +402,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             bytes_used: 0,
             bytes_used_target: size.into(),
             log,
-        }
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -414,9 +414,9 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         sha256: RootBuf<Sha256Dir>,
         size: CacheSize,
         log: Logger,
-    ) -> Self {
+    ) -> Result<Self> {
         // First, make sure the `removing` directory exists and is empty.
-        ensure_removing_directory(&fs, &root, &removing);
+        ensure_removing_directory(&fs, &root, &removing)?;
 
         // Next, remove any garbage in the cache directory.
         remove_all_from_directory_except(
@@ -424,16 +424,16 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             &removing,
             &root,
             ["removing", "sha256", CACHEDIR_TAG],
-        );
+        )?;
 
         // Next, create the sha256 and tmp directories.
-        fs.mkdir(&tmp).unwrap();
-        fs.mkdir_recursively(&sha256).unwrap();
+        fs.mkdir(&tmp)?;
+        fs.mkdir_recursively(&sha256)?;
 
         // Next, remove any old or garbage sha256 subdirectories and create any missing ones.
-        remove_all_from_directory_except(&fs, &removing, &sha256, KeyKindT::iter());
+        remove_all_from_directory_except(&fs, &removing, &sha256, KeyKindT::iter())?;
         for kind in KeyKindT::iter() {
-            fs.mkdir_recursively(&kind_dir(&sha256, kind)).unwrap();
+            fs.mkdir_recursively(&kind_dir(&sha256, kind))?;
         }
 
         let mut entries = Map::<KeyKindT>::default();
@@ -445,7 +445,8 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         for kind in KeyKindT::iter() {
             let kind_dir: RootBuf<KindDir> = sha256.join(kind.to_string());
             let mut directory_sizes = HashMap::<Sha256Digest, (bool, Option<u64>)>::new();
-            for (name, metadata) in fs.read_dir(&kind_dir).unwrap().map(Result::unwrap) {
+            for entry in fs.read_dir(&kind_dir)? {
+                let (name, metadata) = entry?;
                 match cache_file_name_type(&fs, &kind_dir, &name, metadata) {
                     CacheFileNameType::File(digest, size) => {
                         let key = Key::new(kind, digest);
@@ -471,9 +472,9 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                     CacheFileNameType::Other => {
                         let path: RootBuf<EntryPath> = kind_dir.join(name);
                         if metadata.is_directory() {
-                            rmdir_in_background(&fs, &removing, &path);
+                            rmdir_in_background(&fs, &removing, &path)?;
                         } else {
-                            fs.remove(&path).unwrap();
+                            fs.remove(&path)?;
                         }
                     }
                 }
@@ -497,11 +498,10 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                         bytes_used = bytes_used.checked_add(size).unwrap();
                     }
                     (false, Some(_)) => {
-                        fs.remove(&size_file_name(&cache_file_name(&kind_dir, &digest)))
-                            .unwrap();
+                        fs.remove(&size_file_name(&cache_file_name(&kind_dir, &digest)))?;
                     }
                     (true, None) => {
-                        rmdir_in_background(&fs, &removing, &cache_file_name(&kind_dir, &digest));
+                        rmdir_in_background(&fs, &removing, &cache_file_name(&kind_dir, &digest))?;
                     }
                     _ => {
                         unreachable!();
@@ -522,8 +522,8 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             bytes_used_target: size.into(),
             log,
         };
-        cache.possibly_remove_some();
-        cache
+        cache.possibly_remove_some_can_error()?;
+        Ok(cache)
     }
 
     /// Attempt to fetch `artifact` from the cache. See [`GetArtifact`] for the meaning of the
@@ -591,7 +591,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         let path = self.cache_path(kind, digest);
         let (file_type, bytes_used) = match artifact {
             GotArtifact::Directory { source, size } => {
-                write_size_file(&self.fs, &path, size);
+                write_size_file(&self.fs, &path, size).unwrap();
                 self.fs.persist_temp_dir(source, &path).unwrap();
                 (FileType::Directory, size)
             }
@@ -634,7 +634,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             "bytes_used" => %ByteSize::b(self.bytes_used),
             "byte_used_target" => %ByteSize::b(self.bytes_used_target)
         );
-        self.possibly_remove_some();
+        self.possibly_remove_some_ignore_error();
         jobs
     }
 
@@ -664,7 +664,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                 };
                 self.heap.push(&mut self.entries, key.clone());
                 self.next_priority = self.next_priority.checked_add(1).unwrap();
-                self.possibly_remove_some();
+                self.possibly_remove_some_ignore_error();
             }
         }
     }
@@ -675,17 +675,28 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         cache_file_name(&kind_dir, digest)
     }
 
-    pub fn temp_dir(&self) -> FsT::TempDir {
-        self.fs.temp_dir(&self.tmp).unwrap()
+    pub fn temp_dir(&self) -> Result<FsT::TempDir> {
+        Ok(self.fs.temp_dir(&self.tmp)?)
     }
 
-    pub fn temp_file(&self) -> FsT::TempFile {
-        self.fs.temp_file(&self.tmp).unwrap()
+    pub fn temp_file(&self) -> Result<FsT::TempFile> {
+        Ok(self.fs.temp_file(&self.tmp)?)
     }
 
     /// Check to see if the cache is over its goal size, and if so, try to remove the least
     /// recently used artifacts.
-    fn possibly_remove_some(&mut self) {
+    fn possibly_remove_some_ignore_error(&mut self) {
+        if let Err(err) = self.possibly_remove_some_can_error() {
+            warn!(self.log, "error removing unused entries from cache to reclaim space";
+                "err" => %err,
+                "entries" => %self.entries.len(),
+                "bytes_used" => %ByteSize::b(self.bytes_used),
+                "byte_used_target" => %ByteSize::b(self.bytes_used_target)
+            );
+        }
+    }
+
+    fn possibly_remove_some_can_error(&mut self) -> Result<()> {
         while self.bytes_used > self.bytes_used_target {
             let Some(key) = self.heap.pop(&mut self.entries) else {
                 break;
@@ -700,10 +711,10 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             };
             let cache_path = self.cache_path(key.kind, &key.digest);
             if file_type == FileType::Directory {
-                rmdir_in_background(&self.fs, &self.removing, &cache_path);
-                self.fs.remove(&size_file_name(&cache_path)).unwrap();
+                rmdir_in_background(&self.fs, &self.removing, &cache_path)?;
+                self.fs.remove(&size_file_name(&cache_path))?;
             } else {
-                self.fs.remove(&cache_path).unwrap();
+                self.fs.remove(&cache_path)?;
             }
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
@@ -714,6 +725,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                 "byte_used_target" => %ByteSize::b(self.bytes_used_target)
             );
         }
+        Ok(())
     }
 }
 
@@ -729,36 +741,39 @@ fn remove_all_from_directory_except<S>(
     removing: &Root<RemovingDir>,
     dir: &Path,
     except: impl IntoIterator<Item = S>,
-) where
+) -> Result<()>
+where
     S: ToString,
 {
     let except = except
         .into_iter()
         .map(|e| OsString::from(e.to_string()))
         .collect::<HashSet<_>>();
-    for (entry_name, metadata) in fs.read_dir(dir).unwrap().map(Result::unwrap) {
+    for entry in fs.read_dir(dir)? {
+        let (entry_name, metadata) = entry?;
         if !except.contains(&entry_name) {
             let path = dir.join(entry_name);
             if metadata.is_directory() {
-                rmdir_in_background(fs, removing, &path);
+                rmdir_in_background(fs, removing, &path)?;
             } else {
-                fs.remove(&path).unwrap();
+                fs.remove(&path)?;
             }
         }
     }
+    Ok(())
 }
 
 /// Remove all files and directories rooted in `source` in a separate thread.
-fn rmdir_in_background(fs: &impl Fs, removing: &Root<RemovingDir>, source: &Path) {
+fn rmdir_in_background(fs: &impl Fs, removing: &Root<RemovingDir>, source: &Path) -> Result<()> {
     let target = loop {
         let target: RootBuf<()> = removing.join(format!("{:016x}", fs.rand_u64()));
-        if fs.metadata(&target).unwrap().is_none() {
+        if fs.metadata(&target)?.is_none() {
             break target;
         }
     };
-    fs.rename(source, &target).unwrap();
-    fs.rmdir_recursively_on_thread(target.into_path_buf())
-        .unwrap();
+    fs.rename(source, &target)?;
+    fs.rmdir_recursively_on_thread(target.into_path_buf())?;
+    Ok(())
 }
 
 fn cache_file_name(dir: &Root<KindDir>, digest: &Sha256Digest) -> RootBuf<EntryPath> {
@@ -818,28 +833,32 @@ fn cache_file_name_type(
     CacheFileNameType::Other
 }
 
-fn write_size_file(fs: &impl Fs, base: &Root<EntryPath>, size: u64) {
-    fs.create_file(&size_file_name(base), &size.to_be_bytes())
-        .unwrap();
+fn write_size_file(fs: &impl Fs, base: &Root<EntryPath>, size: u64) -> Result<()> {
+    Ok(fs.create_file(&size_file_name(base), &size.to_be_bytes())?)
 }
 
-fn ensure_removing_directory(fs: &impl Fs, root: &Root<CacheDir>, removing: &Root<RemovingDir>) {
-    match fs.metadata(removing).unwrap() {
+fn ensure_removing_directory(
+    fs: &impl Fs,
+    root: &Root<CacheDir>,
+    removing: &Root<RemovingDir>,
+) -> Result<()> {
+    match fs.metadata(removing)? {
         Some(metadata) if metadata.is_directory() => {
             let removing_tmp = loop {
                 let target: RootBuf<()> = root.join(format!("removing.{:016x}", fs.rand_u64()));
-                if fs.metadata(&target).unwrap().is_none() {
+                if fs.metadata(&target)?.is_none() {
                     break target;
                 }
             };
-            fs.rename(removing, &removing_tmp).unwrap();
+            fs.rename(removing, &removing_tmp)?;
         }
         Some(_) => {
-            fs.remove(removing).unwrap();
+            fs.remove(removing)?;
         }
         None => {}
     }
-    fs.mkdir(removing).unwrap();
+    fs.mkdir(removing)?;
+    Ok(())
 }
 
 fn kind_dir(sha256: &Root<Sha256Dir>, kind: impl KeyKind) -> RootBuf<KindDir> {
@@ -894,7 +913,8 @@ mod tests {
                 "/z".parse().unwrap(),
                 ByteSize::b(bytes_used_target).into(),
                 Logger::root(Discard, o!()),
-            );
+            )
+            .unwrap();
             Fixture { fs, cache }
         }
 
@@ -961,7 +981,7 @@ mod tests {
             size: u64,
             expected: Vec<JobId>,
         ) {
-            let source = self.cache.temp_dir();
+            let source = self.cache.temp_dir().unwrap();
             self.fs.graft(source.path(), contents);
             self.got_artifact_success(
                 kind,
@@ -979,7 +999,7 @@ mod tests {
             contents: &[u8],
             expected: Vec<JobId>,
         ) {
-            let source = self.cache.temp_file();
+            let source = self.cache.temp_file().unwrap();
             self.fs.graft(source.path(), Entry::file(contents));
             self.got_artifact_success(kind, digest, GotArtifact::File { source }, expected)
         }
@@ -1369,7 +1389,7 @@ mod tests {
     #[test]
     fn temp_file() {
         let fixture = Fixture::new(10, fs! {});
-        let temp_file = fixture.cache.temp_file();
+        let temp_file = fixture.cache.temp_file().unwrap();
         assert_eq!(temp_file.path(), Path::new("/z/tmp/000"));
         assert_eq!(
             fixture.fs.metadata(temp_file.path()).unwrap().unwrap(),
@@ -1380,7 +1400,7 @@ mod tests {
     #[test]
     fn temp_dir() {
         let fixture = Fixture::new(10, fs! {});
-        let temp_dir = fixture.cache.temp_dir();
+        let temp_dir = fixture.cache.temp_dir().unwrap();
         assert_eq!(temp_dir.path(), Path::new("/z/tmp/000"));
         assert_eq!(
             fixture.fs.metadata(temp_dir.path()).unwrap().unwrap(),
