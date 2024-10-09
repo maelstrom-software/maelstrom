@@ -211,7 +211,7 @@ pub enum JobStatus {
 // |_|  \___|\__, |\__,_|\___||___/\__/_/ |_|  \___||___/ .__/ \___/|_| |_|___/\___|
 //              |_|                                     |_|
 
-#[derive(Debug, IntoProtoBuf, TryFromProtoBuf)]
+#[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::StartRequest")]
 pub struct StartRequest {
     pub broker_addr: Option<BrokerAddr>,

@@ -10,12 +10,11 @@ mod stream_wrapper;
 pub use maelstrom_worker::clone_into_pid_and_user_namespace;
 
 use anyhow::Result;
-use client::Client;
 use futures::stream::{self, StreamExt as _};
 use maelstrom_base::Sha256Digest;
 use maelstrom_client_base::proto::client_process_server::ClientProcessServer;
 use maelstrom_util::{async_fs, config::common::LogLevel, io::Sha256Stream};
-use rpc::Handler;
+use rpc::{ArcHandler, Handler};
 use std::{error, os::unix::net::UnixStream as StdUnixStream, path::Path, time::SystemTime};
 use stream_wrapper::StreamWrapper;
 use tokio::net::UnixStream as TokioUnixStream;
@@ -43,22 +42,18 @@ pub async fn main_after_clone(
     log: Option<slog::Logger>,
     rpc_log_level: LogLevel,
 ) -> Result<()> {
-    let client = Client::new();
+    let handler = ArcHandler::new(Handler::new(log, rpc_log_level));
 
     sock.set_nonblocking(true)?;
     let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
     let res = Server::builder()
-        .add_service(ClientProcessServer::new(Handler::new(
-            client.clone(),
-            log,
-            rpc_log_level,
-        )))
+        .add_service(ClientProcessServer::new(handler.clone()))
         .serve_with_incoming_shutdown(
             stream::once(async move { TokioError::<_>::Ok(sock) }).chain(stream::pending()),
             receiver,
         )
         .await;
-    client.shutdown().await;
+    handler.client.read().await.shutdown().await;
 
     res?;
     Ok(())

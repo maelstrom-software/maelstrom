@@ -165,6 +165,7 @@ pub struct Client {
     process_handle: ClientBgProcess,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
     log: slog::Logger,
+    start_req: StartRequest,
 }
 
 fn map_tonic_error(error: tonic::Status) -> anyhow::Error {
@@ -226,11 +227,24 @@ impl Client {
 
         let sock = process_handle.take_socket();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
+
+        let start_req = StartRequest {
+            broker_addr,
+            project_dir: project_dir.as_ref().to_owned(),
+            state_dir: state_dir.as_ref().to_owned(),
+            cache_dir: cache_dir.as_ref().to_owned(),
+            container_image_depot_dir: container_image_depot_dir.as_ref().to_owned(),
+            cache_size,
+            inline_limit,
+            slots,
+            accept_invalid_remote_container_tls_certs,
+        };
         let s = Self {
             requester: Some(send),
             process_handle,
             dispatcher_handle: Some(dispatcher_handle),
             log,
+            start_req,
         };
 
         slog::debug!(s.log, "opening log stream");
@@ -246,24 +260,18 @@ impl Client {
             Ok(tonic::Response::new(proto::Void {}))
         })?;
 
-        let req = StartRequest {
-            broker_addr,
-            project_dir: project_dir.as_ref().to_owned(),
-            state_dir: state_dir.as_ref().to_owned(),
-            cache_dir: cache_dir.as_ref().to_owned(),
-            container_image_depot_dir: container_image_depot_dir.as_ref().to_owned(),
-            cache_size,
-            inline_limit,
-            slots,
-            accept_invalid_remote_container_tls_certs,
-        };
-        slog::debug!(s.log, "client sending start"; "request" => ?req);
-
-        let req = req.into_proto_buf();
-        s.send_sync_unit(|mut client| async move { client.start(req).await })?;
-        slog::debug!(s.log, "client completed start");
+        s.send_start()?;
 
         Ok(s)
+    }
+
+    fn send_start(&self) -> Result<()> {
+        slog::debug!(self.log, "client sending start"; "request" => ?self.start_req);
+
+        let req = self.start_req.clone().into_proto_buf();
+        self.send_sync_unit(|mut client| async move { client.start(req).await })?;
+        slog::debug!(self.log, "client completed start");
+        Ok(())
     }
 
     fn send_async<BuilderT, FutureT, RetT>(
@@ -389,6 +397,13 @@ impl Client {
         self.send_sync(
             move |mut client| async move { client.clear_cached_layers(proto::Void {}).await },
         )
+    }
+
+    /// Kills all running jobs and clears the layer caches.
+    pub fn restart(&self) -> Result<()> {
+        self.send_sync_unit(move |mut client| async move { client.restart(proto::Void {}).await })?;
+        self.send_start()?;
+        Ok(())
     }
 }
 

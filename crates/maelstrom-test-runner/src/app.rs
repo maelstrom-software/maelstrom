@@ -533,7 +533,7 @@ where
                 test_db_store.save(test_db)?;
 
                 if restart {
-                    abs_deps.client().clear_cached_layers()?;
+                    abs_deps.client().restart()?;
                     generation.fetch_add(1, Ordering::Release);
                     continue;
                 }
