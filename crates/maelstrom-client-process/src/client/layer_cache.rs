@@ -53,6 +53,18 @@ pub enum CacheResult {
     Build(LayerReceiver),
 }
 
+pub struct MultiLayerWaiter {
+    waiters: Vec<LayerReceiver>,
+}
+
+impl MultiLayerWaiter {
+    pub async fn wait(&mut self) {
+        for waiter in &mut self.waiters {
+            let _ = waiter.recv().await;
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct LayerCache {
     cache: HashMap<LayerSpec, CacheEntry>,
@@ -85,6 +97,17 @@ impl LayerCache {
         } else {
             panic!("unexpected cache fill");
         }
+    }
+
+    pub fn waiter_for_all_pending_layers(&self) -> Option<MultiLayerWaiter> {
+        let mut waiters = vec![];
+        for entry in self.cache.values() {
+            if let CacheEntry::Pending(r) = entry {
+                waiters.push(r.subscribe());
+            }
+        }
+
+        (!waiters.is_empty()).then_some(MultiLayerWaiter { waiters })
     }
 
     pub fn clear(&mut self) -> Result<()> {
@@ -206,6 +229,33 @@ mod tests {
 
         r1_task.await.unwrap();
         r2_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn waiters_for_all_pending_layers() {
+        let mut cache = LayerCache::new();
+        let layer1 = paths_layer!(["/a"]);
+        let layer2 = paths_layer!(["/b"]);
+
+        assert_matches!(cache.get(&layer1), CacheResult::Build(_));
+        assert_matches!(cache.get(&layer2), CacheResult::Build(_));
+
+        let mut all = cache.waiter_for_all_pending_layers().unwrap();
+        let built1 = (digest![1], ArtifactType::Manifest);
+        let built2 = (digest![1], ArtifactType::Manifest);
+
+        let waiting_task = tokio::task::spawn(async move { all.wait().await });
+
+        cache.fill(&layer1, Ok(built1.clone()));
+        assert_matches!(cache.get(&layer1), CacheResult::Success(ref b) if b == &built1);
+        assert!(!waiting_task.is_finished());
+
+        cache.fill(&layer2, Ok(built2.clone()));
+        assert_matches!(cache.get(&layer2), CacheResult::Success(ref b) if b == &built2);
+
+        waiting_task.await.unwrap();
+
+        assert!(cache.waiter_for_all_pending_layers().is_none());
     }
 
     #[tokio::test]
