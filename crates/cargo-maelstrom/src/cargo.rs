@@ -27,12 +27,19 @@ use std::{
 fn filter_build_output(output: String) -> String {
     let lines: Vec<_> = output
         .split('\n')
+        .map(|l| match l.find('\r') {
+            Some(p) if p != l.len() - 1 => &l[(p + 1)..],
+            _ => l,
+        })
         .filter(|l| {
             !(l.starts_with("[1m[32m   Compiling")
+                || l.starts_with("[K[1m[32m   Compiling")
                 || l.starts_with("   Compiling")
                 || l.starts_with("[1m[36m    Building")
+                || l.starts_with("[K[1m[36m    Building")
                 || l.starts_with("    Building")
                 || l.starts_with("[1m[32m    Finished")
+                || l.starts_with("[K[1m[32m    Finished")
                 || l.starts_with("    Finished"))
         })
         .collect();
