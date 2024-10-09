@@ -1088,11 +1088,11 @@ script_test_with_error_simex! {
         },
         GetPackages
     };
-    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])] } => {
         StartCollection {
             color: false,
             options: TestOptions,
-            packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
+            packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])]
         }
     };
     ArtifactBuilt {
@@ -1108,6 +1108,14 @@ script_test_with_error_simex! {
         },
         StartShutdown
     };
+    ArtifactBuilt {
+        artifact: fake_artifact("bar_test", "foo_pkg"),
+    } => {};
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![],
+        ignored_listing: vec![]
+    } => {};
 }
 
 script_test_with_error_simex! {
@@ -3776,4 +3784,52 @@ watch_simex_test! {
             attrs: EventAttributes::new()
         }
     ] }
+}
+
+script_test! {
+    watch_with_collection_error,
+    @ watch = true,
+    test_db_in = [],
+    expected_exit_code = ExitCode::FAILURE,
+    expected_test_db_out = [],
+    Start => {
+        SendUiMsg {
+            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
+        },
+        GetPackages
+    };
+    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])] } => {
+        StartCollection {
+            color: false,
+            options: TestOptions,
+            packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])]
+        }
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+    } => {
+        ListTests {
+            artifact: fake_artifact("foo_test", "foo_pkg"),
+        }
+    };
+    CollectionFinished { wait_status: wait_failure() } => {
+        SendUiMsg {
+            msg: UiMessage::CollectionOutput("build error".into())
+        },
+    };
+    ArtifactBuilt {
+        artifact: fake_artifact("bar_test", "foo_pkg"),
+    } => {};
+    TestsListed {
+        artifact: fake_artifact("foo_test", "foo_pkg"),
+        listing: vec![],
+        ignored_listing: vec![]
+    } => {};
+    WatchEvents { events: vec![Event {
+        kind: EventKind::Modify(ModifyKind::Any),
+        paths: vec!["src/foo.rs".into()],
+        attrs: EventAttributes::new()
+    }] } => {
+        StartRestart
+    }
 }

@@ -55,6 +55,7 @@ pub struct MainApp<'deps, DepsT: Deps> {
     test_db: TestDbM<DepsT>,
     waiting_for_changes: bool,
     recollection_needed: bool,
+    collection_failed: bool,
 }
 
 impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
@@ -79,6 +80,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             exit_code: ExitCode::SUCCESS,
             waiting_for_changes: false,
             recollection_needed: true,
+            collection_failed: false,
         }
     }
 
@@ -129,13 +131,19 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         }
     }
 
-    fn check_for_done(&mut self) {
+    fn is_done(&self) -> bool {
         let all_pending_stuff_done =
             self.jobs.is_empty() && self.pending_listings == 0 && self.collection_finished;
         let failure_limit_reached = self.failure_limit_reached();
 
-        if all_pending_stuff_done || failure_limit_reached {
-            if !self.options.listing {
+        all_pending_stuff_done || failure_limit_reached || self.collection_failed
+    }
+
+    fn check_for_done(&mut self) {
+        if self.is_done() {
+            if !self.options.listing && !self.collection_failed {
+                let all_pending_stuff_done =
+                    self.jobs.is_empty() && self.pending_listings == 0 && self.collection_finished;
                 self.deps
                     .send_ui_msg(UiMessage::AllJobsFinished(UiJobSummary {
                         succeeded: self.test_count(TestResult::Succeeded),
@@ -194,7 +202,9 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
     fn receive_artifact_built(&mut self, artifact: ArtifactM<DepsT>) {
         self.pending_listings += 1;
-        self.deps.list_tests(artifact)
+        if !self.is_done() {
+            self.deps.list_tests(artifact)
+        }
     }
 
     fn vend_job_id(&mut self) -> JobId {
@@ -354,7 +364,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         listing: Vec<(String, CaseMetadataM<DepsT>)>,
         ignored_listing: Vec<String>,
     ) {
-        if self.failure_limit_reached() {
+        if self.is_done() {
             return;
         }
 
@@ -416,7 +426,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     }
 
     fn receive_job_update(&mut self, job_id: JobId, result: Result<JobStatus>) {
-        if self.failure_limit_reached() {
+        if self.is_done() {
             return;
         }
 
@@ -445,8 +455,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
         if wait_status.exit_code != ExitCode::SUCCESS {
             self.exit_code = wait_status.exit_code;
-            self.deps.start_shutdown();
-            return;
+            self.collection_failed = true;
         }
 
         self.check_for_done();
