@@ -29,6 +29,7 @@ impl super::TempDir for TempDir {
 }
 
 /// The standard implementation of CacheFs that uses [std] and [rand].
+#[derive(Clone)]
 pub struct Fs;
 
 impl super::Fs for Fs {

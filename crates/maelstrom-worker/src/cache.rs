@@ -893,7 +893,6 @@ mod tests {
     };
     use maelstrom_test::*;
     use slog::{o, Discard};
-    use std::rc::Rc;
     use TestKeyKind::*;
 
     #[derive(Clone, Copy, Debug, strum::Display, strum::EnumIter, Eq, Hash, PartialEq)]
@@ -912,13 +911,13 @@ mod tests {
     }
 
     struct Fixture {
-        cache: Cache<Rc<test::Fs>, TestKeyKind>,
-        fs: Rc<test::Fs>,
+        cache: Cache<test::Fs, TestKeyKind>,
+        fs: test::Fs,
     }
 
     impl Fixture {
         fn new(bytes_used_target: u64, root: Entry) -> Self {
-            let fs = Rc::new(test::Fs::new(root));
+            let fs = test::Fs::new(root);
             let cache = Cache::new(
                 fs.clone(),
                 "/z".parse().unwrap(),
@@ -1032,7 +1031,7 @@ mod tests {
             &mut self,
             kind: TestKeyKind,
             digest: Sha256Digest,
-            artifact: GotArtifact<Rc<test::Fs>>,
+            artifact: GotArtifact<test::Fs>,
             expected: Vec<JobId>,
         ) {
             let result = self

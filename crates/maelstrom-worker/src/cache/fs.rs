@@ -12,7 +12,7 @@ use ::std::{
 use strum::Display;
 
 /// Dependencies that [`Cache`] has on the file system.
-pub trait Fs {
+pub trait Fs: Clone {
     /// Error type for methods.
     type Error: error::Error + Send + Sync + 'static;
 

@@ -107,15 +107,15 @@ macro_rules! fs {
 
 pub(crate) use fs;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Fs {
-    state: RefCell<State>,
+    state: Rc<RefCell<State>>,
 }
 
 impl Fs {
     pub fn new(root: Entry) -> Self {
         Self {
-            state: RefCell::new(State::new(root)),
+            state: Rc::new(RefCell::new(State::new(root))),
         }
     }
 
@@ -916,57 +916,6 @@ impl<'a> IntoIterator for &'a ComponentPath {
     type IntoIter = slice::Iter<'a, String>;
     fn into_iter(self) -> Self::IntoIter {
         (&self.0).into_iter()
-    }
-}
-
-impl super::Fs for Rc<Fs> {
-    type Error = <Fs as super::Fs>::Error;
-    fn rand_u64(&self) -> u64 {
-        (**self).rand_u64()
-    }
-    fn metadata(&self, path: &Path) -> Result<Option<Metadata>> {
-        (**self).metadata(path)
-    }
-    fn read_file(&self, path: &Path, contents: &mut [u8]) -> Result<usize> {
-        (**self).read_file(path, contents)
-    }
-    fn read_dir(&self, path: &Path) -> Result<impl Iterator<Item = Result<(OsString, Metadata)>>> {
-        (**self).read_dir(path)
-    }
-    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<()> {
-        (**self).create_file(path, contents)
-    }
-    fn symlink(&self, target: &Path, link: &Path) -> Result<()> {
-        (**self).symlink(target, link)
-    }
-    fn mkdir(&self, path: &Path) -> Result<()> {
-        (**self).mkdir(path)
-    }
-    fn mkdir_recursively(&self, path: &Path) -> Result<()> {
-        (**self).mkdir_recursively(path)
-    }
-    fn remove(&self, path: &Path) -> Result<()> {
-        (**self).remove(path)
-    }
-    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<()> {
-        (**self).rmdir_recursively_on_thread(path)
-    }
-    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<()> {
-        (**self).rename(source_path, dest_path)
-    }
-    type TempFile = <Fs as super::Fs>::TempFile;
-    fn temp_file(&self, parent: &Path) -> Result<Self::TempFile> {
-        (**self).temp_file(parent)
-    }
-    fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> Result<()> {
-        (**self).persist_temp_file(temp_file, target)
-    }
-    type TempDir = <Fs as super::Fs>::TempDir;
-    fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir> {
-        (**self).temp_dir(parent)
-    }
-    fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<()> {
-        (**self).persist_temp_dir(temp_dir, target)
     }
 }
 
