@@ -20,6 +20,7 @@ use maelstrom_util::{
 use main_app::MainApp;
 use notify::Watcher as _;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -175,33 +176,65 @@ enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'stati
 type MainAppMessageM<DepsT> =
     MainAppMessage<PackageM<DepsT>, ArtifactM<DepsT>, CaseMetadataM<DepsT>>;
 
-enum ControlMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static> {
+enum ControlMessage<MessageT> {
     Shutdown,
     Restart,
-    App(MainAppMessage<PackageT, ArtifactT, CaseMetadataT>),
+    App {
+        generation: Option<u64>,
+        msg: MessageT,
+    },
 }
 
-impl<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static>
-    From<MainAppMessage<PackageT, ArtifactT, CaseMetadataT>>
-    for ControlMessage<PackageT, ArtifactT, CaseMetadataT>
-{
-    fn from(msg: MainAppMessage<PackageT, ArtifactT, CaseMetadataT>) -> Self {
-        Self::App(msg)
+impl<MessageT> From<MessageT> for ControlMessage<MessageT> {
+    fn from(msg: MessageT) -> Self {
+        Self::App {
+            generation: None,
+            msg,
+        }
     }
 }
 
-type ControlMessageM<DepsT> =
-    ControlMessage<PackageM<DepsT>, ArtifactM<DepsT>, CaseMetadataM<DepsT>>;
-
 type WaitM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::BuildHandle;
+
+struct GenerationSender<MessageT> {
+    generation: u64,
+    sender: Sender<ControlMessage<MessageT>>,
+}
+
+impl<MessageT> Clone for GenerationSender<MessageT> {
+    fn clone(&self) -> Self {
+        Self {
+            generation: self.generation,
+            sender: self.sender.clone(),
+        }
+    }
+}
+
+impl<MessageT: Send + Sync + 'static> GenerationSender<MessageT> {
+    fn new(generation: &AtomicU64, sender: &Sender<ControlMessage<MessageT>>) -> Self {
+        Self {
+            generation: generation.load(Ordering::Acquire),
+            sender: sender.clone(),
+        }
+    }
+
+    fn send(&self, msg: MessageT) -> Result<()> {
+        self.sender.send(ControlMessage::App {
+            generation: Some(self.generation),
+            msg,
+        })?;
+        Ok(())
+    }
+}
 
 struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
     deps: &'deps MainAppDepsT,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
-    main_app_sender: Sender<ControlMessageM<Self>>,
+    main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
     ui: UiSender,
     collect_killer: Mutex<Option<KillOnDrop<WaitM<Self>>>>,
     project_dir: &'deps Root<ProjectDir>,
+    generation: &'deps AtomicU64,
     semaphore: &'deps Semaphore,
     done: &'deps Event,
 }
@@ -209,12 +242,14 @@ struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
 const MAX_NUM_BACKGROUND_THREADS: isize = 200;
 
 impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope, MainAppDepsT> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         deps: &'deps MainAppDepsT,
         scope: &'scope std::thread::Scope<'scope, 'deps>,
-        main_app_sender: Sender<ControlMessageM<Self>>,
+        main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
         ui: UiSender,
         project_dir: &'deps Root<ProjectDir>,
+        generation: &'deps AtomicU64,
         semaphore: &'deps Semaphore,
         done: &'deps Event,
     ) -> Self {
@@ -225,6 +260,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
             ui,
             collect_killer: Mutex::new(None),
             project_dir,
+            generation,
             semaphore,
             done,
         }
@@ -243,7 +279,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
         packages: Vec<&PackageM<Self>>,
     ) {
         let sem = self.semaphore;
-        let sender = self.main_app_sender.clone();
+        let sender = GenerationSender::new(self.generation, &self.main_app_sender);
         match self
             .deps
             .test_collector()
@@ -260,31 +296,30 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
                         match artifact {
                             Ok(artifact) => {
                                 if sender
-                                    .send(MainAppMessage::ArtifactBuilt { artifact }.into())
+                                    .send(MainAppMessage::ArtifactBuilt { artifact })
                                     .is_err()
                                 {
                                     break;
                                 }
                             }
                             Err(error) => {
-                                let _ = sender.send(MainAppMessage::FatalError { error }.into());
+                                let _ = sender.send(MainAppMessage::FatalError { error });
                                 break;
                             }
                         }
                     }
                     match build_handle.wait() {
                         Ok(wait_status) => {
-                            let _ = sender
-                                .send(MainAppMessage::CollectionFinished { wait_status }.into());
+                            let _ = sender.send(MainAppMessage::CollectionFinished { wait_status });
                         }
                         Err(error) => {
-                            let _ = sender.send(MainAppMessage::FatalError { error }.into());
+                            let _ = sender.send(MainAppMessage::FatalError { error });
                         }
                     }
                 });
             }
             Err(error) => {
-                let _ = sender.send(MainAppMessage::FatalError { error }.into());
+                let _ = sender.send(MainAppMessage::FatalError { error });
             }
         }
     }
@@ -292,61 +327,58 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
     fn get_packages(&self) {
         let sem = self.semaphore;
         let deps = self.deps;
-        let sender = self.main_app_sender.clone();
+        let sender = GenerationSender::new(self.generation, &self.main_app_sender);
         let ui = self.ui.clone();
         self.scope.spawn(move || {
             let _guard = sem.access();
             match deps.test_collector().get_packages(&ui) {
                 Ok(packages) => {
-                    let _ = sender.send(MainAppMessage::Packages { packages }.into());
+                    let _ = sender.send(MainAppMessage::Packages { packages });
                 }
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
+                    let _ = sender.send(MainAppMessage::FatalError { error });
                 }
             }
         });
     }
 
     fn add_job(&self, job_id: JobId, spec: JobSpec) {
-        let sender = self.main_app_sender.clone();
+        let sender = GenerationSender::new(self.generation, &self.main_app_sender);
+
+        let cb_sender = sender.clone();
         let res = self.deps.client().add_job(spec, move |result| {
-            let _ = sender.send(MainAppMessage::JobUpdate { job_id, result }.into());
+            let _ = cb_sender.send(MainAppMessage::JobUpdate { job_id, result });
         });
         if let Err(error) = res {
-            let _ = self
-                .main_app_sender
-                .send(MainAppMessage::FatalError { error }.into());
+            let _ = sender.send(MainAppMessage::FatalError { error });
         }
     }
 
     fn list_tests(&self, artifact: ArtifactM<Self>) {
         let sem = self.semaphore;
-        let sender = self.main_app_sender.clone();
+        let sender = GenerationSender::new(self.generation, &self.main_app_sender);
         self.scope.spawn(move || {
             let _guard = sem.access();
             let listing = match artifact.list_tests() {
                 Ok(listing) => listing,
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
+                    let _ = sender.send(MainAppMessage::FatalError { error });
                     return;
                 }
             };
             let ignored_listing = match artifact.list_ignored_tests() {
                 Ok(listing) => listing,
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
+                    let _ = sender.send(MainAppMessage::FatalError { error });
                     return;
                 }
             };
 
-            let _ = sender.send(
-                MainAppMessage::TestsListed {
-                    artifact,
-                    listing,
-                    ignored_listing,
-                }
-                .into(),
-            );
+            let _ = sender.send(MainAppMessage::TestsListed {
+                artifact,
+                listing,
+                ignored_listing,
+            });
         });
     }
 
@@ -407,17 +439,20 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
 
 fn main_app_channel_reader<DepsT: Deps>(
     mut app: MainApp<DepsT>,
-    main_app_receiver: &Receiver<ControlMessageM<DepsT>>,
+    main_app_receiver: &Receiver<ControlMessage<MainAppMessageM<DepsT>>>,
+    generation: &AtomicU64,
 ) -> Result<(bool, ExitCode, TestDbM<DepsT>)> {
+    let c = generation.load(Ordering::Acquire);
     loop {
         match main_app_receiver.recv()? {
             msg @ ControlMessage::Shutdown | msg @ ControlMessage::Restart => {
                 let (exit_code, test_db) = app.main_return_value()?;
                 break Ok((matches!(msg, ControlMessage::Restart), exit_code, test_db));
             }
-            ControlMessage::App(msg) => {
+            ControlMessage::App { generation, msg } if !generation.is_some_and(|g| g < c) => {
                 app.receive_message(msg);
             }
+            _ => {}
         }
     }
 }
@@ -466,6 +501,7 @@ where
 
     let done = Event::new();
     let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
+    let generation = AtomicU64::new(0);
 
     let main_res = std::thread::scope(|scope| {
         let deps = MainAppDepsAdapter::new(
@@ -474,6 +510,7 @@ where
             main_app_sender.clone(),
             ui.clone(),
             project_dir,
+            &generation,
             &sem,
             &done,
         );
@@ -486,12 +523,14 @@ where
 
         let res = (|| -> Result<_> {
             loop {
+                generation.fetch_add(1, Ordering::Release);
                 main_app_sender.send(MainAppMessage::Start.into()).unwrap();
+
                 let test_db = test_db_store.load()?;
                 let app = MainApp::new(&deps, options, test_db);
 
                 let (restart, exit_code, test_db) =
-                    main_app_channel_reader(app, &main_app_receiver)?;
+                    main_app_channel_reader(app, &main_app_receiver, &generation)?;
                 test_db_store.save(test_db)?;
 
                 if !restart {
