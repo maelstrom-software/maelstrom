@@ -35,7 +35,7 @@ use maelstrom_util::{
     root::RootBuf,
 };
 use maelstrom_worker::local_worker;
-use slog::{debug, info, warn, Logger};
+use slog::{debug, warn, Logger};
 use state_machine::StateMachine;
 use std::future::Future;
 use std::pin::Pin;
@@ -489,13 +489,13 @@ impl Client {
                         }
                     };
 
-                    info!(
+                    debug!(
                         log_clone,
                         "shutting down local worker due to {shutdown_error}"
                     );
                     worker_dispatcher
                         .receive_message(local_worker::Message::Shutdown(shutdown_error));
-                    info!(
+                    debug!(
                         log_clone,
                         "canceling {} running jobs",
                         worker_dispatcher.num_executing()
@@ -509,7 +509,7 @@ impl Client {
                         let _ = handle_worker_message(msg, &mut worker_dispatcher);
                     }
 
-                    info!(log_clone, "local worker exiting");
+                    debug!(log_clone, "local worker exiting");
                 })
             };
 
