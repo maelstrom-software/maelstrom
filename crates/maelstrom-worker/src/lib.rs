@@ -399,20 +399,30 @@ impl dispatcher::ArtifactFetcher<StdFs> for ArtifactFetcher {
             "digest" => digest.to_string(),
             "broker_addr" => broker_addr.inner().to_string()
         ));
-        let temp_file = cache.temp_file().unwrap();
-        let sem = self.sem.clone();
-        debug!(log, "artifact fetcher starting");
-        thread::spawn(move || {
-            let _permit = sem.access();
-            let result = fetcher::main(&digest, temp_file.path().to_owned(), broker_addr, &mut log);
-            debug!(log, "artifact fetcher completed"; "result" => ?result);
-            sender
-                .send(Message::ArtifactFetchCompleted(
-                    digest,
-                    result.map(|_| GotArtifact::File { source: temp_file }),
-                ))
-                .ok();
-        });
+        match cache.temp_file() {
+            Err(err) => {
+                debug!(log, "artifact fetcher failed to get a temporary file"; "err" => ?err);
+                sender
+                    .send(Message::ArtifactFetchCompleted(digest, Err(err)))
+                    .ok();
+            }
+            Ok(temp_file) => {
+                let sem = self.sem.clone();
+                debug!(log, "artifact fetcher starting");
+                thread::spawn(move || {
+                    let _permit = sem.access();
+                    let result =
+                        fetcher::main(&digest, temp_file.path().to_owned(), broker_addr, &mut log);
+                    debug!(log, "artifact fetcher completed"; "result" => ?result);
+                    sender
+                        .send(Message::ArtifactFetchCompleted(
+                            digest,
+                            result.map(|_| GotArtifact::File { source: temp_file }),
+                        ))
+                        .ok();
+                });
+            }
+        }
     }
 }
 
