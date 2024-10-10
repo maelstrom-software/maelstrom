@@ -70,12 +70,30 @@ impl Event {
             .unwrap();
     }
 
+    pub fn wait_and_unset(&self) {
+        let _guard = self
+            .condvar
+            .wait_while(self.completed.lock().unwrap(), |completed| {
+                if *completed {
+                    *completed = false;
+                    false
+                } else {
+                    true
+                }
+            })
+            .unwrap();
+    }
+
     pub fn wait_timeout(&self, dur: std::time::Duration) -> std::sync::WaitTimeoutResult {
         let (_guard, result) = self
             .condvar
             .wait_timeout_while(self.completed.lock().unwrap(), dur, |completed| !*completed)
             .unwrap();
         result
+    }
+
+    pub fn is_set(&self) -> bool {
+        *self.completed.lock().unwrap()
     }
 }
 
@@ -176,9 +194,12 @@ mod tests {
             assert!(!t1.is_finished());
             assert!(!t2.is_finished());
 
+            assert!(!event.is_set());
             event.set();
+
             t1.join().unwrap();
             t2.join().unwrap();
+            assert!(event.is_set());
         });
     }
 
@@ -189,5 +210,27 @@ mod tests {
         assert!(event.wait_timeout(Duration::from_millis(5)).timed_out());
         event.set();
         assert!(!event.wait_timeout(Duration::from_millis(5)).timed_out());
+    }
+
+    #[test]
+    fn sync_event_wait_and_unset() {
+        let event = Event::new();
+
+        std::thread::scope(|scope| {
+            let t1 = scope.spawn(|| event.wait_and_unset());
+            let t2 = scope.spawn(|| event.wait_and_unset());
+
+            event.set();
+            while !t1.is_finished() && !t2.is_finished() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(!event.is_set());
+
+            event.set();
+            t1.join().unwrap();
+            t2.join().unwrap();
+
+            assert!(!event.is_set());
+        });
     }
 }
