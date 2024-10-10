@@ -232,8 +232,14 @@ impl error::Error for Error {}
 
 pub type Result<T> = result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct TempFile(PathBuf);
+
+impl TempFile {
+    pub fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
+}
 
 impl super::TempFile for TempFile {
     fn path(&self) -> &Path {
@@ -241,8 +247,14 @@ impl super::TempFile for TempFile {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct TempDir(PathBuf);
+
+impl TempDir {
+    pub fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
+}
 
 impl super::TempDir for TempDir {
     fn path(&self) -> &Path {

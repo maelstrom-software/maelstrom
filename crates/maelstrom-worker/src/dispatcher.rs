@@ -771,15 +771,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use crate::cache::{fs::TempDir, fs::TempFile, EntryKind::*};
+    use crate::cache::{fs::test, EntryKind::*};
     use anyhow::anyhow;
     use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;
-    use std::{cell::RefCell, error, ffi::OsString, rc::Rc, time::Duration};
-    use strum::Display;
+    use std::{cell::RefCell, rc::Rc, time::Duration};
     use BrokerToWorker::*;
 
-    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
     enum TestMessage {
         StartJob(JobId, JobSpec, PathBuf),
         SendMessageToBroker(WorkerToBroker),
@@ -788,15 +787,13 @@ mod tests {
         BuildUpperFsLayer(Sha256Digest, PathBuf, PathBuf),
         ReadManifestDigests(Sha256Digest, PathBuf, JobId),
         CacheGetArtifact(EntryKind, Sha256Digest, JobId),
-        CacheGotArtifactSuccess(EntryKind, Sha256Digest, GotArtifact<Rc<RefCell<TestState>>>),
+        CacheGotArtifactSuccess(EntryKind, Sha256Digest, GotArtifact<test::Fs>),
         CacheGotArtifactFailure(EntryKind, Sha256Digest),
         CacheDecrementRefCount(EntryKind, Sha256Digest),
         CachePath(EntryKind, Sha256Digest),
         JobHandleDropped(JobId),
         StartTimer(JobId, Duration),
         TimerHandleDropped(JobId),
-        TempFile(PathBuf),
-        TempDir(PathBuf),
     }
 
     use TestMessage::*;
@@ -808,14 +805,13 @@ mod tests {
         got_artifact_failure_returns: HashMap<Key<EntryKind>, Vec<JobId>>,
         cache_path_returns: HashMap<Key<EntryKind>, PathBuf>,
         closed: bool,
-        last_random_number: u64,
     }
 
-    struct TestHandle(TestMessage, Rc<RefCell<TestState>>);
+    struct TestHandle(Option<TestMessage>, Rc<RefCell<TestState>>);
 
     impl Drop for TestHandle {
         fn drop(&mut self) {
-            self.1.borrow_mut().messages.push(self.0.clone());
+            self.1.borrow_mut().messages.push(self.0.take().unwrap());
         }
     }
 
@@ -825,14 +821,14 @@ mod tests {
         fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle {
             let mut mut_ref = self.borrow_mut();
             mut_ref.messages.push(StartJob(jid, spec, path));
-            TestHandle(TestMessage::JobHandleDropped(jid), self.clone())
+            TestHandle(Some(TestMessage::JobHandleDropped(jid)), self.clone())
         }
 
         type TimerHandle = TestHandle;
 
         fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle {
             self.borrow_mut().messages.push(StartTimer(jid, duration));
-            TestHandle(TestMessage::TimerHandleDropped(jid), self.clone())
+            TestHandle(Some(TestMessage::TimerHandleDropped(jid)), self.clone())
         }
 
         fn build_bottom_fs_layer(
@@ -888,117 +884,8 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-    struct TestTempFile(PathBuf);
-
-    impl TempFile for TestTempFile {
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-    struct TestTempDir(PathBuf);
-
-    impl TempDir for TestTempDir {
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    #[derive(Debug, Display)]
-    enum TestFsError {}
-
-    impl error::Error for TestFsError {}
-
-    impl fs::Fs for Rc<RefCell<TestState>> {
-        type Error = TestFsError;
-
-        fn rand_u64(&self) -> u64 {
-            let mut state = self.borrow_mut();
-            state.last_random_number += 1;
-            state.last_random_number
-        }
-
-        fn metadata(&self, _path: &Path) -> Result<Option<fs::Metadata>, TestFsError> {
-            unimplemented!()
-        }
-
-        fn read_file(&self, _path: &Path, _contents: &mut [u8]) -> Result<usize, TestFsError> {
-            unimplemented!()
-        }
-
-        fn read_dir(
-            &self,
-            _path: &Path,
-        ) -> Result<impl Iterator<Item = Result<(OsString, fs::Metadata), TestFsError>>, TestFsError>
-        {
-            Ok([].into_iter())
-        }
-
-        fn create_file(&self, _path: &Path, _contents: &[u8]) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn symlink(&self, _target: &Path, _link: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn mkdir(&self, _path: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn mkdir_recursively(&self, _path: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn remove(&self, _path: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn rmdir_recursively_on_thread(&self, _path: PathBuf) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        fn rename(&self, _source: &Path, _destination: &Path) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        type TempFile = TestTempFile;
-
-        fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, TestFsError> {
-            let path = parent.join(format!("{:0>16x}", self.rand_u64()));
-            self.borrow_mut().messages.push(TempFile(path.clone()));
-            Ok(TestTempFile(path))
-        }
-
-        fn persist_temp_file(
-            &self,
-            _temp_file: Self::TempFile,
-            _target: &Path,
-        ) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-
-        type TempDir = TestTempDir;
-
-        fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, TestFsError> {
-            let path = parent.join(format!("{:0>16x}", self.rand_u64()));
-            self.borrow_mut().messages.push(TempDir(path.clone()));
-            Ok(TestTempDir(path))
-        }
-
-        fn persist_temp_dir(
-            &self,
-            _temp_dir: Self::TempDir,
-            _target: &Path,
-        ) -> Result<(), TestFsError> {
-            unimplemented!()
-        }
-    }
-
     impl Cache for Rc<RefCell<TestState>> {
-        type Fs = Rc<RefCell<TestState>>;
+        type Fs = test::Fs;
 
         fn get_artifact(
             &mut self,
@@ -1086,7 +973,6 @@ mod tests {
                 got_artifact_failure_returns: HashMap::from(got_artifact_failure_returns),
                 cache_path_returns: HashMap::from(cache_path_returns),
                 closed: false,
-                last_random_number: 0,
             }));
             let dispatcher = Dispatcher::new(
                 test_state.clone(),
@@ -2102,9 +1988,9 @@ mod tests {
             CacheGetArtifact(Blob, digest!(44), jid!(1)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::WaitingForLayers)),
         };
-        ArtifactFetchCompleted(digest!(41), Ok(GotArtifact::File { source: TestTempFile(path_buf!("/tmp/foo"))})) => {
+        ArtifactFetchCompleted(digest!(41), Ok(GotArtifact::File { source: test::TempFile::new(path_buf!("/tmp/foo"))})) => {
             CachePath(Blob, digest!(41)),
-            CacheGotArtifactSuccess(Blob, digest!(41), GotArtifact::File { source: TestTempFile(path_buf!("/tmp/foo")) }),
+            CacheGotArtifactSuccess(Blob, digest!(41), GotArtifact::File { source: test::TempFile::new(path_buf!("/tmp/foo")) }),
             CacheGetArtifact(BottomFsLayer, digest!(41), jid!(1)),
         };
         ArtifactFetchCompleted(digest!(42), Err(anyhow!("foo"))) => {
@@ -2113,9 +1999,9 @@ mod tests {
                 string!("Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a: foo"))))),
             CacheDecrementRefCount(Blob, digest!(41))
         };
-        ArtifactFetchCompleted(digest!(43), Ok(GotArtifact::File { source: TestTempFile(path_buf!("/tmp/bar"))})) => {
+        ArtifactFetchCompleted(digest!(43), Ok(GotArtifact::File { source: test::TempFile::new(path_buf!("/tmp/bar"))})) => {
             CachePath(Blob, digest!(43)),
-            CacheGotArtifactSuccess(Blob, digest!(43), GotArtifact::File { source: TestTempFile(path_buf!("/tmp/bar"))}),
+            CacheGotArtifactSuccess(Blob, digest!(43), GotArtifact::File { source: test::TempFile::new(path_buf!("/tmp/bar"))}),
             CacheDecrementRefCount(Blob, digest!(43))
         };
         ArtifactFetchCompleted(digest!(44), Err(anyhow!("foo"))) => {
