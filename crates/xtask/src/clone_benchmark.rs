@@ -32,6 +32,17 @@ fn posix_spawn_wait(dev_null: &impl linux::AsFd) -> Result<()> {
     Ok(())
 }
 
+fn std_command_spawn_wait() -> Result<()> {
+    let mut child = std::process::Command::new("/bin/echo")
+        .stdout(std::process::Stdio::null())
+        .spawn()?;
+
+    let status = child.wait()?;
+    assert!(status.success());
+
+    Ok(())
+}
+
 struct ChildArgs {
     dev_null: linux::Fd,
 }
@@ -89,6 +100,11 @@ pub fn main(args: CliArgs) -> Result<()> {
     let dev_null = linux::OwnedFd::from(std::os::fd::OwnedFd::from(
         std::fs::File::options().write(true).open("/dev/null")?,
     ));
+    run_benchmark(
+        "std::process::Command::{spawn + wait}",
+        args.iterations,
+        std_command_spawn_wait,
+    )?;
     run_benchmark("fork + execve + wait", args.iterations, || {
         fork_execve_wait(&dev_null)
     })?;
