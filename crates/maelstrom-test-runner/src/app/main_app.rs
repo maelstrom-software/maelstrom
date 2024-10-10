@@ -12,8 +12,7 @@ use crate::*;
 use maelstrom_base::{ClientJobId, JobOutcomeResult, JobRootOverlay};
 use maelstrom_client::{spec::JobSpec, ContainerSpec, JobStatus};
 use maelstrom_util::{ext::OptionExt as _, process::ExitCode};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
 
 struct JobInfo<ArtifactKeyT> {
     case_name: String,
@@ -46,6 +45,7 @@ pub struct MainApp<'deps, DepsT: Deps> {
     next_job_id: u32,
     jobs: HashMap<JobId, JobInfo<ArtifactKeyM<DepsT>>>,
     collection_finished: bool,
+    collection_failed: bool,
     pending_listings: u64,
     jobs_queued: u64,
     expected_job_count: u64,
@@ -53,9 +53,6 @@ pub struct MainApp<'deps, DepsT: Deps> {
     fatal_error: Result<()>,
     exit_code: ExitCode,
     test_db: TestDbM<DepsT>,
-    waiting_for_changes: bool,
-    recollection_needed: bool,
-    collection_failed: bool,
 }
 
 impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
@@ -72,15 +69,13 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             test_db,
             jobs: HashMap::new(),
             collection_finished: false,
+            collection_failed: false,
             pending_listings: 0,
             jobs_queued: 0,
             expected_job_count: 0,
             test_results: vec![],
             fatal_error: Ok(()),
             exit_code: ExitCode::SUCCESS,
-            waiting_for_changes: false,
-            recollection_needed: true,
-            collection_failed: false,
         }
     }
 
@@ -89,7 +84,6 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             DepsT::TestCollector::ENQUEUE_MESSAGE.into(),
         ));
         self.deps.get_packages();
-        self.recollection_needed = false;
     }
 
     fn test_count(&self, result: TestResult) -> usize {
@@ -154,18 +148,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
                     }));
             }
 
-            if self.options.watch {
-                if self.recollection_needed {
-                    self.deps.start_restart();
-                } else {
-                    self.waiting_for_changes = true;
-                    self.deps.send_ui_msg(UiMessage::UpdateEnqueueStatus(
-                        "waiting for changes...".into(),
-                    ));
-                }
-            } else {
-                self.deps.start_shutdown();
-            }
+            self.deps.start_shutdown();
         }
     }
 
@@ -465,26 +448,6 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         self.check_for_done();
     }
 
-    fn receive_watch_events(&mut self, events: Vec<notify::event::Event>) {
-        let path_excluded = |p: &PathBuf| {
-            self.options
-                .watch_exclude_paths
-                .iter()
-                .any(|pre| p.starts_with(pre))
-        };
-        let event_paths = events.into_iter().flat_map(|e| e.paths.into_iter());
-        let included_event_paths: BTreeSet<PathBuf> =
-            event_paths.filter(|p| !path_excluded(p)).collect();
-
-        if !included_event_paths.is_empty() {
-            self.recollection_needed = true;
-            if self.waiting_for_changes {
-                self.waiting_for_changes = false;
-                self.deps.start_restart();
-            }
-        }
-    }
-
     pub fn main_return_value(self) -> Result<(ExitCode, TestDbM<DepsT>)> {
         self.fatal_error?;
         Ok((self.exit_code, self.test_db))
@@ -505,7 +468,6 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             MainAppMessage::CollectionFinished { wait_status } => {
                 self.receive_collection_finished(wait_status)
             }
-            MainAppMessage::WatchEvents { events } => self.receive_watch_events(events),
         }
     }
 }

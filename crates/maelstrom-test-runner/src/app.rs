@@ -1,5 +1,6 @@
 mod job_output;
 mod main_app;
+mod watch;
 
 #[cfg(test)]
 mod tests;
@@ -18,13 +19,12 @@ use maelstrom_util::{
     sync::Event,
 };
 use main_app::MainApp;
-use notify::Watcher as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
 use std_semaphore::Semaphore;
+use watch::Watcher;
 
 type ArtifactM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Artifact;
 type ArtifactKeyM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::ArtifactKey;
@@ -49,7 +49,6 @@ trait Deps {
     fn add_job(&self, job_id: JobId, spec: JobSpec);
     fn list_tests(&self, artifact: ArtifactM<Self>);
     fn start_shutdown(&self);
-    fn start_restart(&self);
     fn send_ui_msg(&self, msg: UiMessage);
 }
 
@@ -62,9 +61,7 @@ struct TestingOptions<TestFilterT, CollectOptionsT> {
     stdout_color: bool,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
-    watch: bool,
     listing: bool,
-    watch_exclude_paths: Vec<PathBuf>,
 }
 
 pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
@@ -74,6 +71,8 @@ pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
         TestDbStore<super::ArtifactKeyM<MainAppDepsT>, super::CaseMetadataM<MainAppDepsT>>,
     project_dir: RootBuf<ProjectDir>,
     options: TestingOptions<super::TestFilterM<MainAppDepsT>, super::CollectOptionsM<MainAppDepsT>>,
+    watch: bool,
+    watch_exclude_paths: Vec<PathBuf>,
 }
 
 impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
@@ -137,10 +136,10 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
                 stdout_color,
                 repeat,
                 stop_after,
-                watch,
                 listing: list_action.is_some(),
-                watch_exclude_paths,
             },
+            watch,
+            watch_exclude_paths,
         })
     }
 }
@@ -168,9 +167,6 @@ enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'stati
     CollectionFinished {
         wait_status: WaitStatus,
     },
-    WatchEvents {
-        events: Vec<notify::event::Event>,
-    },
 }
 
 type MainAppMessageM<DepsT> =
@@ -178,54 +174,16 @@ type MainAppMessageM<DepsT> =
 
 enum ControlMessage<MessageT> {
     Shutdown,
-    Restart,
-    App {
-        generation: Option<u64>,
-        msg: MessageT,
-    },
+    App { msg: MessageT },
 }
 
 impl<MessageT> From<MessageT> for ControlMessage<MessageT> {
     fn from(msg: MessageT) -> Self {
-        Self::App {
-            generation: None,
-            msg,
-        }
+        Self::App { msg }
     }
 }
 
 type WaitM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::BuildHandle;
-
-struct GenerationSender<MessageT> {
-    generation: u64,
-    sender: Sender<ControlMessage<MessageT>>,
-}
-
-impl<MessageT> Clone for GenerationSender<MessageT> {
-    fn clone(&self) -> Self {
-        Self {
-            generation: self.generation,
-            sender: self.sender.clone(),
-        }
-    }
-}
-
-impl<MessageT: Send + Sync + 'static> GenerationSender<MessageT> {
-    fn new(generation: &AtomicU64, sender: &Sender<ControlMessage<MessageT>>) -> Self {
-        Self {
-            generation: generation.load(Ordering::Acquire),
-            sender: sender.clone(),
-        }
-    }
-
-    fn send(&self, msg: MessageT) -> Result<()> {
-        self.sender.send(ControlMessage::App {
-            generation: Some(self.generation),
-            msg,
-        })?;
-        Ok(())
-    }
-}
 
 struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
     deps: &'deps MainAppDepsT,
@@ -233,25 +191,18 @@ struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
     main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
     ui: UiSender,
     collect_killer: Mutex<Option<KillOnDrop<WaitM<Self>>>>,
-    project_dir: &'deps Root<ProjectDir>,
-    generation: &'deps AtomicU64,
     semaphore: &'deps Semaphore,
-    done: &'deps Event,
 }
 
 const MAX_NUM_BACKGROUND_THREADS: isize = 200;
 
 impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope, MainAppDepsT> {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         deps: &'deps MainAppDepsT,
         scope: &'scope std::thread::Scope<'scope, 'deps>,
         main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
         ui: UiSender,
-        project_dir: &'deps Root<ProjectDir>,
-        generation: &'deps AtomicU64,
         semaphore: &'deps Semaphore,
-        done: &'deps Event,
     ) -> Self {
         Self {
             deps,
@@ -259,10 +210,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
             main_app_sender,
             ui,
             collect_killer: Mutex::new(None),
-            project_dir,
-            generation,
             semaphore,
-            done,
         }
     }
 }
@@ -279,7 +227,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
         packages: Vec<&PackageM<Self>>,
     ) {
         let sem = self.semaphore;
-        let sender = GenerationSender::new(self.generation, &self.main_app_sender);
+        let sender = self.main_app_sender.clone();
         match self
             .deps
             .test_collector()
@@ -296,30 +244,31 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
                         match artifact {
                             Ok(artifact) => {
                                 if sender
-                                    .send(MainAppMessage::ArtifactBuilt { artifact })
+                                    .send(MainAppMessage::ArtifactBuilt { artifact }.into())
                                     .is_err()
                                 {
                                     break;
                                 }
                             }
                             Err(error) => {
-                                let _ = sender.send(MainAppMessage::FatalError { error });
+                                let _ = sender.send(MainAppMessage::FatalError { error }.into());
                                 break;
                             }
                         }
                     }
                     match build_handle.wait() {
                         Ok(wait_status) => {
-                            let _ = sender.send(MainAppMessage::CollectionFinished { wait_status });
+                            let _ = sender
+                                .send(MainAppMessage::CollectionFinished { wait_status }.into());
                         }
                         Err(error) => {
-                            let _ = sender.send(MainAppMessage::FatalError { error });
+                            let _ = sender.send(MainAppMessage::FatalError { error }.into());
                         }
                     }
                 });
             }
             Err(error) => {
-                let _ = sender.send(MainAppMessage::FatalError { error });
+                let _ = sender.send(MainAppMessage::FatalError { error }.into());
             }
         }
     }
@@ -327,58 +276,61 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
     fn get_packages(&self) {
         let sem = self.semaphore;
         let deps = self.deps;
-        let sender = GenerationSender::new(self.generation, &self.main_app_sender);
+        let sender = self.main_app_sender.clone();
         let ui = self.ui.clone();
         self.scope.spawn(move || {
             let _guard = sem.access();
             match deps.test_collector().get_packages(&ui) {
                 Ok(packages) => {
-                    let _ = sender.send(MainAppMessage::Packages { packages });
+                    let _ = sender.send(MainAppMessage::Packages { packages }.into());
                 }
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
                 }
             }
         });
     }
 
     fn add_job(&self, job_id: JobId, spec: JobSpec) {
-        let sender = GenerationSender::new(self.generation, &self.main_app_sender);
+        let sender = self.main_app_sender.clone();
 
         let cb_sender = sender.clone();
         let res = self.deps.client().add_job(spec, move |result| {
-            let _ = cb_sender.send(MainAppMessage::JobUpdate { job_id, result });
+            let _ = cb_sender.send(MainAppMessage::JobUpdate { job_id, result }.into());
         });
         if let Err(error) = res {
-            let _ = sender.send(MainAppMessage::FatalError { error });
+            let _ = sender.send(MainAppMessage::FatalError { error }.into());
         }
     }
 
     fn list_tests(&self, artifact: ArtifactM<Self>) {
         let sem = self.semaphore;
-        let sender = GenerationSender::new(self.generation, &self.main_app_sender);
+        let sender = self.main_app_sender.clone();
         self.scope.spawn(move || {
             let _guard = sem.access();
             let listing = match artifact.list_tests() {
                 Ok(listing) => listing,
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
                     return;
                 }
             };
             let ignored_listing = match artifact.list_ignored_tests() {
                 Ok(listing) => listing,
                 Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error });
+                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
                     return;
                 }
             };
 
-            let _ = sender.send(MainAppMessage::TestsListed {
-                artifact,
-                listing,
-                ignored_listing,
-            });
+            let _ = sender.send(
+                MainAppMessage::TestsListed {
+                    artifact,
+                    listing,
+                    ignored_listing,
+                }
+                .into(),
+            );
         });
     }
 
@@ -386,73 +338,24 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
         let _ = self.main_app_sender.send(ControlMessage::Shutdown);
     }
 
-    fn start_restart(&self) {
-        let _ = self.main_app_sender.send(ControlMessage::Restart);
-    }
-
     fn send_ui_msg(&self, msg: UiMessage) {
         self.ui.send(msg);
-    }
-}
-
-impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope, MainAppDepsT> {
-    fn watch_for_changes(&self) {
-        let sem = self.semaphore;
-        let project_dir = self.project_dir;
-        let done = self.done;
-        let sender = self.main_app_sender.clone();
-        self.scope.spawn(move || {
-            let (event_tx, event_rx) = std::sync::mpsc::channel();
-            let get_watcher = move || {
-                let mut watcher =
-                    notify::RecommendedWatcher::new(event_tx, notify::Config::default())?;
-                watcher.watch(project_dir.as_ref(), notify::RecursiveMode::Recursive)?;
-                Ok(watcher)
-            };
-
-            let _guard = sem.access();
-            let _watcher = match get_watcher() {
-                Ok(watcher) => watcher,
-                Err(error) => {
-                    let _ = sender.send(MainAppMessage::FatalError { error }.into());
-                    return;
-                }
-            };
-
-            // This loop attempts to batch up the events which happen around the same time. This
-            // is acting as a kind of debounce so we don't kick off two back-to-back test
-            // invocations every time we get a flurry of changes.
-            while done.wait_timeout(Duration::from_millis(100)).timed_out() {
-                let mut events = vec![];
-                while let Ok(event_res) = event_rx.try_recv() {
-                    if let Ok(event) = event_res {
-                        events.push(event);
-                    }
-                }
-                if !events.is_empty() {
-                    let _ = sender.send(MainAppMessage::WatchEvents { events }.into());
-                }
-            }
-        });
     }
 }
 
 fn main_app_channel_reader<DepsT: Deps>(
     mut app: MainApp<DepsT>,
     main_app_receiver: &Receiver<ControlMessage<MainAppMessageM<DepsT>>>,
-    generation: &AtomicU64,
-) -> Result<(bool, ExitCode, TestDbM<DepsT>)> {
-    let c = generation.load(Ordering::Acquire);
+) -> Result<(ExitCode, TestDbM<DepsT>)> {
     loop {
         match main_app_receiver.recv()? {
-            msg @ ControlMessage::Shutdown | msg @ ControlMessage::Restart => {
+            ControlMessage::Shutdown => {
                 let (exit_code, test_db) = app.main_return_value()?;
-                break Ok((matches!(msg, ControlMessage::Restart), exit_code, test_db));
+                break Ok((exit_code, test_db));
             }
-            ControlMessage::App { generation, msg } if !generation.is_some_and(|g| g < c) => {
+            ControlMessage::App { msg } => {
                 app.receive_message(msg);
             }
-            _ => {}
         }
     }
 }
@@ -483,12 +386,12 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT>(
 where
     MainAppDepsT: MainAppDeps,
 {
-    let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
     let (ui_handle, ui) = ui.start_ui_thread(logging_output, deps.log.clone());
 
     deps.options.timeout_override = timeout_override;
     let abs_deps = &deps.abstract_deps;
     let options = &deps.options;
+    let watch = deps.watch;
     let client = abs_deps.client();
 
     // This is where the pytest runner builds pip packages.
@@ -501,40 +404,54 @@ where
 
     let done = Event::new();
     let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
-    let generation = AtomicU64::new(0);
+    let files_changed = Event::new();
 
     let main_res = std::thread::scope(|scope| {
-        let deps = MainAppDepsAdapter::new(
-            abs_deps,
-            scope,
-            main_app_sender.clone(),
-            ui.clone(),
-            project_dir,
-            &generation,
-            &sem,
-            &done,
-        );
-
-        if options.watch {
-            deps.watch_for_changes();
-        }
-
-        scope.spawn(|| introspect_loop(&done, client, ui));
+        let ui_clone = ui.clone();
+        scope.spawn(|| introspect_loop(&done, client, ui_clone));
 
         let res = (|| -> Result<_> {
+            let watcher = Watcher::new(
+                scope,
+                deps.log.clone(),
+                project_dir,
+                &deps.watch_exclude_paths,
+                &sem,
+                &done,
+                &files_changed,
+            );
+            if watch {
+                watcher.watch_for_changes()?;
+            }
+
             loop {
+                let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
+
+                let deps = MainAppDepsAdapter::new(
+                    abs_deps,
+                    scope,
+                    main_app_sender.clone(),
+                    ui.clone(),
+                    &sem,
+                );
+
                 main_app_sender.send(MainAppMessage::Start.into()).unwrap();
 
                 let test_db = test_db_store.load()?;
                 let app = MainApp::new(&deps, options, test_db);
 
-                let (restart, exit_code, test_db) =
-                    main_app_channel_reader(app, &main_app_receiver, &generation)?;
+                let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
                 test_db_store.save(test_db)?;
 
-                if restart {
-                    abs_deps.client().restart()?;
-                    generation.fetch_add(1, Ordering::Release);
+                if watch {
+                    client.restart()?;
+                    drop(deps);
+
+                    ui.send(UiMessage::UpdateEnqueueStatus(
+                        "waiting for changes...".into(),
+                    ));
+                    watcher.wait_for_changes();
+
                     continue;
                 }
 
@@ -546,6 +463,7 @@ where
         res
     });
 
+    drop(ui);
     ui_handle.join()?;
 
     let exit_code = main_res?;

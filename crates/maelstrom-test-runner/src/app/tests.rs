@@ -23,7 +23,6 @@ use maelstrom_client::{
 };
 use maelstrom_simex::SimulationExplorer;
 use maelstrom_util::process::ExitCode;
-use notify::event::{Event, EventAttributes, EventKind, ModifyKind};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::str::FromStr as _;
@@ -48,7 +47,6 @@ enum TestMessage {
     SendUiMsg {
         msg: UiMessage,
     },
-    StartRestart,
     StartShutdown,
 }
 
@@ -100,11 +98,6 @@ impl Deps for TestDeps {
     fn send_ui_msg(&self, msg: UiMessage) {
         let mut self_ = self.0.borrow_mut();
         self_.messages.push(TestMessage::SendUiMsg { msg });
-    }
-
-    fn start_restart(&self) {
-        let mut self_ = self.0.borrow_mut();
-        self_.messages.push(TestMessage::StartRestart);
     }
 }
 
@@ -290,9 +283,7 @@ fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
         stdout_color: false,
         repeat: Repeat::try_from(1).unwrap(),
         stop_after: None,
-        watch: false,
         listing: false,
-        watch_exclude_paths: vec![],
     }
 }
 
@@ -683,162 +674,6 @@ macro_rules! test_db_test {
                     })
                 },
                 StartShutdown
-            };
-        }
-    }
-}
-
-macro_rules! watch_simex_test_inner {
-    (
-        $test_name:ident,
-        expected_test_db_out = [$($db_entry_out:expr),*],
-        watch_events = $watch_events:expr,
-        triggers_restart = $triggers_restart:expr,
-        watch_exclude_paths = $watch_exclude_paths:expr,
-        $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?
-    ) => {
-        #[test]
-        fn $test_name() {
-            let triggers_restart = $triggers_restart;
-            let watch_exclude_paths = $watch_exclude_paths;
-
-            let mut simex = SimulationExplorer::default();
-            while let Some(mut simulation) = simex.next_simulation() {
-                let deps = TestDeps::default();
-                let options = TestingOptions {
-                    watch: true,
-                    watch_exclude_paths: watch_exclude_paths.clone(),
-                    ..default_testing_options()
-                };
-                let test_db = test_db_from_entries([]);
-                let mut fixture = Fixture::new(&deps, &options, test_db);
-                let script_length = [$(stringify!($in_msg)),+].len();
-
-                let mut index = 0;
-                let mut watch_event_received = false;
-                $(
-                    if simulation.choose_bool() {
-                        fixture.receive_message($watch_events);
-                        fixture.expect_messages_in_any_order(vec![]);
-                        if index != 0 {
-                            // if the watch event comes before "start" it is ignored
-                            watch_event_received = true;
-                        }
-                    }
-
-                    fixture.receive_message($in_msg);
-                    let mut messages = vec![$($out_msg,)*];
-
-                    // if this is the last message and we received a watch event, it may trigger a
-                    // restart
-                    if index == script_length - 1 {
-                        if watch_event_received && triggers_restart {
-                            messages.push(StartRestart);
-                        } else {
-                            messages.push(SendUiMsg {
-                                msg: UiMessage::UpdateEnqueueStatus(
-                                    "waiting for changes...".into()
-                                )
-                            });
-                        }
-                    }
-
-                    fixture.expect_messages_in_any_order(messages);
-
-                    index += 1;
-                )+
-
-                assert!(index > 0);
-
-                // If choose for the watch event to come at the end
-                if simulation.choose_bool() {
-                    fixture.receive_message($watch_events);
-                    if !watch_event_received && triggers_restart {
-                        fixture.expect_messages_in_any_order(vec![StartRestart]);
-                    }
-                }
-
-                let test_db = test_db_from_entries([$($db_entry_out),*]);
-                fixture.assert_return_value(ExitCode::SUCCESS, test_db);
-            }
-        }
-    }
-}
-
-macro_rules! watch_simex_test {
-    (
-        $name:ident,
-        triggers_restart = $triggers_restart:expr,
-        watch_exclude_paths = $watch_exclude_paths:expr,
-        $watch_events:expr
-    ) => {
-        watch_simex_test_inner! {
-            $name,
-            expected_test_db_out = [
-                TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)])
-            ],
-            watch_events = $watch_events,
-            triggers_restart = $triggers_restart,
-            watch_exclude_paths = $watch_exclude_paths,
-            Start => {
-                SendUiMsg {
-                    msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
-                },
-                GetPackages
-            };
-            Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
-                StartCollection {
-                    color: false,
-                    options: TestOptions,
-                    packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
-                }
-            };
-            ArtifactBuilt {
-                artifact: fake_artifact("foo_test", "foo_pkg"),
-            } => {
-                ListTests {
-                    artifact: fake_artifact("foo_test", "foo_pkg"),
-                }
-            };
-            TestsListed {
-                artifact: fake_artifact("foo_test", "foo_pkg"),
-                listing: vec![("test_a".into(), NoCaseMetadata)],
-                ignored_listing: vec![]
-            } => {
-                AddJob {
-                    job_id: JobId::from(1),
-                    spec: test_spec("foo_test", "test_a"),
-                },
-                SendUiMsg {
-                    msg: UiMessage::JobEnqueued(UiJobEnqueued {
-                        job_id: JobId::from(1),
-                        name: "foo_pkg test_a".into()
-                    })
-                },
-                SendUiMsg {
-                    msg: UiMessage::UpdatePendingJobsCount(1)
-                },
-            };
-            CollectionFinished { wait_status: wait_success() } => {
-                SendUiMsg {
-                    msg: UiMessage::DoneQueuingJobs,
-                }
-            };
-            JobUpdate {
-                job_id: JobId::from(1),
-                result: job_status_complete(0),
-            } => {
-                SendUiMsg {
-                    msg: ui_job_result("foo_pkg test_a", 1, UiJobStatus::Ok),
-                },
-                SendUiMsg {
-                    msg: UiMessage::AllJobsFinished(UiJobSummary {
-                        succeeded: 1,
-                        failed: vec![],
-                        ignored: vec![],
-                        not_run: None,
-                    })
-                }
             };
         }
     }
@@ -3752,158 +3587,4 @@ script_test_with_error_simex! {
         },
         StartShutdown
     };
-}
-
-//                _       _
-// __      ____ _| |_ ___| |__
-// \ \ /\ / / _` | __/ __| '_ \
-//  \ V  V / (_| | || (__| | | |
-//   \_/\_/ \__,_|\__\___|_| |_|
-
-watch_simex_test! {
-    watch_single_file_modify,
-    triggers_restart = true,
-    watch_exclude_paths = vec![],
-    WatchEvents { events: vec![Event {
-        kind: EventKind::Modify(ModifyKind::Any),
-        paths: vec!["src/foo.rs".into()],
-        attrs: EventAttributes::new()
-    }] }
-}
-
-watch_simex_test! {
-    watch_multiple_files_modified,
-    triggers_restart = true,
-    watch_exclude_paths = vec![],
-    WatchEvents { events: vec![
-        Event {
-            kind: EventKind::Modify(ModifyKind::Any),
-            paths: vec!["src/foo.rs".into()],
-            attrs: EventAttributes::new()
-        },
-        Event {
-            kind: EventKind::Modify(ModifyKind::Any),
-            paths: vec!["src/bar.rs".into()],
-            attrs: EventAttributes::new()
-        }
-    ] }
-}
-
-watch_simex_test! {
-    watch_single_file_modify_ignored,
-    triggers_restart = false,
-    watch_exclude_paths = vec!["target".into()],
-    WatchEvents { events: vec![Event {
-        kind: EventKind::Modify(ModifyKind::Any),
-        paths: vec!["target/foo_bin".into()],
-        attrs: EventAttributes::new()
-    }] }
-}
-
-watch_simex_test! {
-    watch_multiple_files_modified_ignored,
-    triggers_restart = false,
-    watch_exclude_paths = vec!["target".into()],
-    WatchEvents { events: vec![
-        Event {
-            kind: EventKind::Modify(ModifyKind::Any),
-            paths: vec!["target/foo_bin".into()],
-            attrs: EventAttributes::new()
-        },
-        Event {
-            kind: EventKind::Modify(ModifyKind::Any),
-            paths: vec!["target/bar_bin".into()],
-            attrs: EventAttributes::new()
-        },
-    ] }
-}
-
-watch_simex_test! {
-    watch_single_modify_one_path_ignored,
-    triggers_restart = true,
-    watch_exclude_paths = vec!["target".into()],
-    WatchEvents { events: vec![Event {
-        kind: EventKind::Modify(ModifyKind::Any),
-        paths: vec!["src/foo.rs".into(), "target/foo_bin".into()],
-        attrs: EventAttributes::new()
-    }] }
-}
-
-watch_simex_test! {
-    watch_multiple_file_modify_one_path_ignored,
-    triggers_restart = true,
-    watch_exclude_paths = vec!["target".into()],
-    WatchEvents { events: vec![
-        Event {
-            kind: EventKind::Modify(ModifyKind::Any),
-            paths: vec!["src/foo.rs".into()],
-            attrs: EventAttributes::new()
-        },
-        Event {
-            kind: EventKind::Modify(ModifyKind::Any),
-            paths: vec!["target/foo_bin".into()],
-            attrs: EventAttributes::new()
-        }
-    ] }
-}
-
-script_test! {
-    watch_with_collection_error,
-    @ watch = true,
-    test_db_in = [],
-    expected_exit_code = ExitCode::FAILURE,
-    expected_test_db_out = [],
-    Start => {
-        SendUiMsg {
-            msg: UiMessage::UpdateEnqueueStatus("building artifacts...".into()),
-        },
-        GetPackages
-    };
-    Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])] } => {
-        StartCollection {
-            color: false,
-            options: TestOptions,
-            packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])]
-        }
-    };
-    ArtifactBuilt {
-        artifact: fake_artifact("foo_test", "foo_pkg"),
-    } => {
-        ListTests {
-            artifact: fake_artifact("foo_test", "foo_pkg"),
-        }
-    };
-    CollectionFinished { wait_status: wait_failure() } => {
-        SendUiMsg {
-            msg: UiMessage::CollectionOutput("build error".into())
-        },
-        SendUiMsg {
-            msg: UiMessage::AllJobsFinished(UiJobSummary {
-                succeeded: 0,
-                failed: vec![],
-                ignored: vec![],
-                not_run: Some(NotRunEstimate::About(0)),
-            })
-        },
-        SendUiMsg {
-            msg: UiMessage::UpdateEnqueueStatus(
-                "waiting for changes...".into()
-            )
-        }
-    };
-    ArtifactBuilt {
-        artifact: fake_artifact("bar_test", "foo_pkg"),
-    } => {};
-    TestsListed {
-        artifact: fake_artifact("foo_test", "foo_pkg"),
-        listing: vec![],
-        ignored_listing: vec![]
-    } => {};
-    WatchEvents { events: vec![Event {
-        kind: EventKind::Modify(ModifyKind::Any),
-        paths: vec!["src/foo.rs".into()],
-        attrs: EventAttributes::new()
-    }] } => {
-        StartRestart
-    }
 }
