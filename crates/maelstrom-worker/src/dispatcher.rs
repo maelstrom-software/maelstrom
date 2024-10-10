@@ -57,7 +57,6 @@ pub trait Deps {
     fn build_bottom_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: <Self::Fs as cache::fs::Fs>::TempDir,
         artifact_type: ArtifactType,
         artifact_path: PathBuf,
     );
@@ -66,7 +65,6 @@ pub trait Deps {
     fn build_upper_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: <Self::Fs as cache::fs::Fs>::TempDir,
         lower_layer_path: PathBuf,
         upper_layer_path: PathBuf,
     );
@@ -77,9 +75,9 @@ pub trait Deps {
 
 /// The artifact fetcher is split out of [`Deps`] for convenience. The rest of [`Deps`] can stay
 /// the same for "real" and local workers, but the artifact fetching is different
-pub trait ArtifactFetcher<FsT: cache::fs::Fs> {
+pub trait ArtifactFetcher {
     /// Start a thread that will download an artifact from the broker.
-    fn start_artifact_fetch(&mut self, cache: &impl Cache<FsT>, digest: Sha256Digest);
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest);
 }
 
 /// The broker sender is split out of [`Deps`] for convenience. The rest of [`Deps`] can stay
@@ -113,8 +111,6 @@ pub trait Cache<FsT: cache::fs::Fs> {
     ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)>;
     fn decrement_ref_count(&mut self, kind: cache::EntryKind, digest: &Sha256Digest);
     fn cache_path(&self, kind: cache::EntryKind, digest: &Sha256Digest) -> PathBuf;
-    fn temp_file(&self) -> Result<FsT::TempFile>;
-    fn temp_dir(&self) -> Result<FsT::TempDir>;
 }
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
@@ -152,14 +148,6 @@ impl Cache<cache::fs::std::Fs> for cache::Cache<cache::fs::std::Fs, cache::Entry
     fn cache_path(&self, kind: cache::EntryKind, digest: &Sha256Digest) -> PathBuf {
         self.cache_path(kind, digest).into_path_buf()
     }
-
-    fn temp_file(&self) -> Result<cache::fs::std::TempFile> {
-        self.temp_file()
-    }
-
-    fn temp_dir(&self) -> Result<cache::fs::std::TempDir> {
-        self.temp_dir()
-    }
 }
 
 /// An input message for the dispatcher. These come from the broker, an executor, or an artifact
@@ -180,7 +168,7 @@ impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
     Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
 where
     DepsT: Deps,
-    ArtifactFetcherT: ArtifactFetcher<DepsT::Fs>,
+    ArtifactFetcherT: ArtifactFetcher,
     BrokerSenderT: BrokerSender,
     CacheT: Cache<DepsT::Fs>,
 {
@@ -358,7 +346,7 @@ impl<'dispatcher, DepsT, ArtifactFetcherT, CacheT> tracker::Fetcher
     for Fetcher<'dispatcher, DepsT, ArtifactFetcherT, CacheT>
 where
     DepsT: Deps,
-    ArtifactFetcherT: ArtifactFetcher<DepsT::Fs>,
+    ArtifactFetcherT: ArtifactFetcher,
     CacheT: Cache<DepsT::Fs>,
 {
     fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult {
@@ -371,8 +359,7 @@ where
             }
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
-                self.artifact_fetcher
-                    .start_artifact_fetch(self.cache, digest.clone());
+                self.artifact_fetcher.start_artifact_fetch(digest.clone());
                 FetcherResult::Pending
             }
         }
@@ -394,10 +381,8 @@ where
             ),
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
-                let path = self.cache.temp_dir().unwrap();
                 self.deps.build_bottom_fs_layer(
                     digest.clone(),
-                    path,
                     artifact_type,
                     artifact_path.into(),
                 );
@@ -422,10 +407,8 @@ where
             ),
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
-                let path = self.cache.temp_dir().unwrap();
                 self.deps.build_upper_fs_layer(
                     digest.clone(),
-                    path,
                     lower_layer_path.into(),
                     upper_layer_path.into(),
                 );
@@ -444,7 +427,7 @@ impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
     Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
 where
     DepsT: Deps,
-    ArtifactFetcherT: ArtifactFetcher<DepsT::Fs>,
+    ArtifactFetcherT: ArtifactFetcher,
     BrokerSenderT: BrokerSender,
     CacheT: Cache<DepsT::Fs>,
 {
@@ -819,8 +802,8 @@ mod tests {
         StartJob(JobId, JobSpec, PathBuf),
         SendMessageToBroker(WorkerToBroker),
         StartArtifactFetch(Sha256Digest),
-        BuildBottomFsLayer(Sha256Digest, PathBuf, ArtifactType, PathBuf),
-        BuildUpperFsLayer(Sha256Digest, PathBuf, PathBuf, PathBuf),
+        BuildBottomFsLayer(Sha256Digest, ArtifactType, PathBuf),
+        BuildUpperFsLayer(Sha256Digest, PathBuf, PathBuf),
         ReadManifestDigests(Sha256Digest, PathBuf, JobId),
         CacheGetArtifact(cache::EntryKind, Sha256Digest, JobId),
         CacheGotArtifactSuccess(
@@ -879,13 +862,11 @@ mod tests {
         fn build_bottom_fs_layer(
             &mut self,
             digest: Sha256Digest,
-            layer_path: TestTempDir,
             artifact_type: ArtifactType,
             artifact_path: PathBuf,
         ) {
             self.borrow_mut().messages.push(BuildBottomFsLayer(
                 digest,
-                layer_path.path().to_owned(),
                 artifact_type,
                 artifact_path,
             ));
@@ -894,13 +875,11 @@ mod tests {
         fn build_upper_fs_layer(
             &mut self,
             digest: Sha256Digest,
-            layer_path: TestTempDir,
             lower_layer_path: PathBuf,
             upper_layer_path: PathBuf,
         ) {
             self.borrow_mut().messages.push(BuildUpperFsLayer(
                 digest,
-                layer_path.path().to_owned(),
                 lower_layer_path,
                 upper_layer_path,
             ));
@@ -913,12 +892,8 @@ mod tests {
         }
     }
 
-    impl ArtifactFetcher<Rc<RefCell<TestState>>> for Rc<RefCell<TestState>> {
-        fn start_artifact_fetch(
-            &mut self,
-            _cache: &impl Cache<Rc<RefCell<TestState>>>,
-            digest: Sha256Digest,
-        ) {
+    impl ArtifactFetcher for Rc<RefCell<TestState>> {
+        fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
             self.borrow_mut().messages.push(StartArtifactFetch(digest));
         }
     }
@@ -1111,14 +1086,6 @@ mod tests {
                 .get(&cache::Key::new(kind, digest.clone()))
                 .unwrap()
                 .clone()
-        }
-
-        fn temp_file(&self) -> Result<TestTempFile> {
-            Ok(TestTempFile("tmp".into()))
-        }
-
-        fn temp_dir(&self) -> Result<TestTempDir> {
-            Ok(TestTempDir("tmp".into()))
         }
     }
 

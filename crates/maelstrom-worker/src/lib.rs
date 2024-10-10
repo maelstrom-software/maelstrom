@@ -11,10 +11,7 @@ pub mod signals;
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use cache::{
-    fs::{
-        std::{Fs as StdFs, TempDir},
-        TempDir as _, TempFile as _,
-    },
+    fs::{std::Fs as StdFs, TempFile as _},
     Cache, CacheDir, EntryKind, GotArtifact,
 };
 use config::Config;
@@ -171,6 +168,7 @@ pub struct DispatcherAdapter {
     layer_fs_cache: Arc<tokio::sync::Mutex<ReaderCache>>,
     manifest_digest_cache: ManifestDigestCache,
     layer_building_semaphore: Arc<tokio::sync::Semaphore>,
+    temp_file_factory: cache::TempFileFactory<StdFs>,
 }
 
 pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
@@ -184,6 +182,7 @@ impl DispatcherAdapter {
         mount_dir: RootBuf<MountDir>,
         tmpfs_dir: RootBuf<TmpfsDir>,
         blob_dir: RootBuf<BlobDir>,
+        temp_file_factory: cache::TempFileFactory<StdFs>,
     ) -> Result<Self> {
         let fs = Fs::new();
         fs.create_dir_all(&mount_dir)?;
@@ -203,6 +202,7 @@ impl DispatcherAdapter {
             layer_building_semaphore: Arc::new(tokio::sync::Semaphore::new(
                 MAX_IN_FLIGHT_LAYERS_BUILDS,
             )),
+            temp_file_factory,
         })
     }
 
@@ -292,7 +292,6 @@ impl Deps for DispatcherAdapter {
     fn build_bottom_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: TempDir,
         artifact_type: ArtifactType,
         artifact_path: PathBuf,
     ) {
@@ -300,13 +299,14 @@ impl Deps for DispatcherAdapter {
         let log = self.log.clone();
         let blob_dir = self.blob_dir.clone();
         let sem = self.layer_building_semaphore.clone();
+        let temp_file_factory = self.temp_file_factory.clone();
         task::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
 
-            debug!(log, "building bottom FS layer"; "layer_path" => ?layer_path);
+            debug!(log, "building bottom FS layer");
             let result = layer_fs::build_bottom_layer(
                 log.clone(),
-                layer_path.path().to_owned(),
+                temp_file_factory,
                 blob_dir.as_root(),
                 digest.clone(),
                 artifact_type,
@@ -317,10 +317,7 @@ impl Deps for DispatcherAdapter {
             sender
                 .send(Message::BuiltBottomFsLayer(
                     digest,
-                    result.map(|size| GotArtifact::Directory {
-                        source: layer_path,
-                        size,
-                    }),
+                    result.map(|(source, size)| GotArtifact::Directory { source, size }),
                 ))
                 .ok();
         });
@@ -329,7 +326,6 @@ impl Deps for DispatcherAdapter {
     fn build_upper_fs_layer(
         &mut self,
         digest: Sha256Digest,
-        layer_path: TempDir,
         lower_layer_path: PathBuf,
         upper_layer_path: PathBuf,
     ) {
@@ -337,13 +333,14 @@ impl Deps for DispatcherAdapter {
         let log = self.log.clone();
         let blob_dir = self.blob_dir.clone();
         let sem = self.layer_building_semaphore.clone();
+        let temp_file_factory = self.temp_file_factory.clone();
         task::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
 
-            debug!(log, "building upper FS layer"; "layer_path" => ?layer_path);
+            debug!(log, "building upper FS layer");
             let result = layer_fs::build_upper_layer(
                 log.clone(),
-                layer_path.path().to_owned(),
+                temp_file_factory,
                 blob_dir.as_root(),
                 lower_layer_path,
                 upper_layer_path,
@@ -353,10 +350,7 @@ impl Deps for DispatcherAdapter {
             sender
                 .send(Message::BuiltUpperFsLayer(
                     digest,
-                    result.map(|size| GotArtifact::Directory {
-                        source: layer_path,
-                        size,
-                    }),
+                    result.map(|(source, size)| GotArtifact::Directory { source, size }),
                 ))
                 .ok();
         });
@@ -374,32 +368,35 @@ struct ArtifactFetcher {
     dispatcher_sender: DispatcherSender,
     log: Logger,
     sem: Arc<Semaphore>,
+    temp_file_factory: cache::TempFileFactory<StdFs>,
 }
 
 impl ArtifactFetcher {
-    fn new(dispatcher_sender: DispatcherSender, broker_addr: BrokerAddr, log: Logger) -> Self {
+    fn new(
+        dispatcher_sender: DispatcherSender,
+        broker_addr: BrokerAddr,
+        log: Logger,
+        temp_file_factory: cache::TempFileFactory<StdFs>,
+    ) -> Self {
         ArtifactFetcher {
             broker_addr,
             dispatcher_sender,
             log,
             sem: Arc::new(Semaphore::new(MAX_ARTIFACT_FETCHES as isize)),
+            temp_file_factory,
         }
     }
 }
 
-impl dispatcher::ArtifactFetcher<StdFs> for ArtifactFetcher {
-    fn start_artifact_fetch(
-        &mut self,
-        cache: &impl dispatcher::Cache<StdFs>,
-        digest: Sha256Digest,
-    ) {
+impl dispatcher::ArtifactFetcher for ArtifactFetcher {
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
         let sender = self.dispatcher_sender.clone();
         let broker_addr = self.broker_addr;
         let mut log = self.log.new(o!(
             "digest" => digest.to_string(),
             "broker_addr" => broker_addr.inner().to_string()
         ));
-        match cache.temp_file() {
+        match self.temp_file_factory.temp_file() {
             Err(err) => {
                 debug!(log, "artifact fetcher failed to get a temporary file"; "err" => ?err);
                 sender
@@ -516,15 +513,20 @@ async fn dispatcher_main(
     let blob_dir = cache_root.join::<BlobDir>("sha256/blob");
 
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
-    let cache = match Cache::new(StdFs, cache_root, config.cache_size, log.clone()) {
-        Err(err) => {
-            error!(log, "could not start cache"; "err" => ?err);
-            return;
-        }
-        Ok(cache) => cache,
-    };
-    let artifact_fetcher =
-        ArtifactFetcher::new(dispatcher_sender.clone(), config.broker, log.clone());
+    let (cache, temp_file_factory) =
+        match Cache::new(StdFs, cache_root, config.cache_size, log.clone()) {
+            Err(err) => {
+                error!(log, "could not start cache"; "err" => ?err);
+                return;
+            }
+            Ok((cache, temp_file_factory)) => (cache, temp_file_factory),
+        };
+    let artifact_fetcher = ArtifactFetcher::new(
+        dispatcher_sender.clone(),
+        config.broker,
+        log.clone(),
+        temp_file_factory.clone(),
+    );
     match DispatcherAdapter::new(
         dispatcher_sender,
         config.inline_limit,
@@ -532,6 +534,7 @@ async fn dispatcher_main(
         mount_dir,
         tmpfs_dir,
         blob_dir,
+        temp_file_factory,
     ) {
         Err(err) => {
             error!(log, "could not start executor"; "err" => ?err);

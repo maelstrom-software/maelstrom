@@ -290,6 +290,22 @@ impl<KeyKindT: KeyKind> HeapDeps for Map<KeyKindT> {
     }
 }
 
+#[derive(Clone)]
+pub struct TempFileFactory<FsT> {
+    fs: FsT,
+    tmp: RootBuf<TmpDir>,
+}
+
+impl<FsT: Fs> TempFileFactory<FsT> {
+    pub fn temp_dir(&self) -> Result<FsT::TempDir> {
+        Ok(self.fs.temp_dir(&self.tmp)?)
+    }
+
+    pub fn temp_file(&self) -> Result<FsT::TempFile> {
+        Ok(self.fs.temp_file(&self.tmp)?)
+    }
+}
+
 pub struct CacheDir;
 
 pub struct EntryPath;
@@ -307,7 +323,6 @@ struct SizeFile;
 pub struct Cache<FsT, KeyKindT: KeyKind> {
     fs: FsT,
     removing: RootBuf<RemovingDir>,
-    tmp: RootBuf<TmpDir>,
     sha256: RootBuf<Sha256Dir>,
     entries: Map<KeyKindT>,
     heap: Heap<Map<KeyKindT>>,
@@ -326,7 +341,12 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     /// `bytes_used_target` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: Logger) -> Result<Self> {
+    pub fn new(
+        fs: FsT,
+        root: RootBuf<CacheDir>,
+        size: CacheSize,
+        log: Logger,
+    ) -> Result<(Self, TempFileFactory<FsT>)> {
         let cachedir_tag = root.join::<CachedirTagPath>(CACHEDIR_TAG);
         let removing = root.join::<RemovingDir>("removing");
         let sha256 = root.join::<Sha256Dir>("sha256");
@@ -377,7 +397,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         sha256: RootBuf<Sha256Dir>,
         size: CacheSize,
         log: Logger,
-    ) -> Result<Self> {
+    ) -> Result<(Self, TempFileFactory<FsT>)> {
         // First, make sure the `removing` directory exists and is empty.
         ensure_removing_directory(&fs, &root, &removing)?;
 
@@ -392,10 +412,9 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             fs.mkdir(&kind_dir(&sha256, kind))?;
         }
 
-        Ok(Cache {
-            fs,
+        let cache = Cache {
+            fs: fs.clone(),
             removing,
-            tmp,
             sha256,
             entries: Map::default(),
             heap: Heap::default(),
@@ -403,7 +422,9 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             bytes_used: 0,
             bytes_used_target: size.into(),
             log,
-        })
+        };
+        let temp_file_factory = TempFileFactory { fs, tmp };
+        Ok((cache, temp_file_factory))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -415,7 +436,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         sha256: RootBuf<Sha256Dir>,
         size: CacheSize,
         log: Logger,
-    ) -> Result<Self> {
+    ) -> Result<(Self, TempFileFactory<FsT>)> {
         // First, make sure the `removing` directory exists and is empty.
         ensure_removing_directory(&fs, &root, &removing)?;
 
@@ -512,9 +533,8 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         }
 
         let mut cache = Cache {
-            fs,
+            fs: fs.clone(),
             removing,
-            tmp,
             sha256,
             entries,
             heap,
@@ -524,7 +544,8 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             log,
         };
         cache.possibly_remove_some_can_error()?;
-        Ok(cache)
+        let temp_file_factory = TempFileFactory { fs, tmp };
+        Ok((cache, temp_file_factory))
     }
 
     /// Attempt to fetch `artifact` from the cache. See [`GetArtifact`] for the meaning of the
@@ -684,14 +705,6 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     pub fn cache_path(&self, kind: KeyKindT, digest: &Sha256Digest) -> RootBuf<EntryPath> {
         let kind_dir: RootBuf<KindDir> = self.sha256.join(kind.to_string());
         cache_file_name(&kind_dir, digest)
-    }
-
-    pub fn temp_dir(&self) -> Result<FsT::TempDir> {
-        Ok(self.fs.temp_dir(&self.tmp)?)
-    }
-
-    pub fn temp_file(&self) -> Result<FsT::TempFile> {
-        Ok(self.fs.temp_file(&self.tmp)?)
     }
 
     /// Check to see if the cache is over its goal size, and if so, try to remove the least
@@ -911,21 +924,26 @@ mod tests {
     }
 
     struct Fixture {
-        cache: Cache<test::Fs, TestKeyKind>,
         fs: test::Fs,
+        cache: Cache<test::Fs, TestKeyKind>,
+        temp_file_factory: TempFileFactory<test::Fs>,
     }
 
     impl Fixture {
         fn new(bytes_used_target: u64, root: Entry) -> Self {
             let fs = test::Fs::new(root);
-            let cache = Cache::new(
+            let (cache, temp_file_factory) = Cache::new(
                 fs.clone(),
                 "/z".parse().unwrap(),
                 ByteSize::b(bytes_used_target).into(),
                 Logger::root(Discard, o!()),
             )
             .unwrap();
-            Fixture { fs, cache }
+            Fixture {
+                fs,
+                cache,
+                temp_file_factory,
+            }
         }
 
         #[track_caller]
@@ -991,7 +1009,7 @@ mod tests {
             size: u64,
             expected: Vec<JobId>,
         ) {
-            let source = self.cache.temp_dir().unwrap();
+            let source = self.temp_file_factory.temp_dir().unwrap();
             self.fs.graft(source.path(), contents);
             self.got_artifact_success(
                 kind,
@@ -1009,7 +1027,7 @@ mod tests {
             contents: &[u8],
             expected: Vec<JobId>,
         ) {
-            let source = self.cache.temp_file().unwrap();
+            let source = self.temp_file_factory.temp_file().unwrap();
             self.fs.graft(source.path(), Entry::file(contents));
             self.got_artifact_success(kind, digest, GotArtifact::File { source }, expected)
         }
@@ -1200,7 +1218,7 @@ mod tests {
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
 
-        let source = fixture.cache.temp_dir().unwrap();
+        let source = fixture.temp_file_factory.temp_dir().unwrap();
         fixture.fs.graft(source.path(), fs! { foo(b"bar") });
         fixture.fs.set_failure(true);
         let (err, jids) = fixture
@@ -1438,7 +1456,7 @@ mod tests {
     #[test]
     fn temp_file() {
         let fixture = Fixture::new(10, fs! {});
-        let temp_file = fixture.cache.temp_file().unwrap();
+        let temp_file = fixture.temp_file_factory.temp_file().unwrap();
         assert_eq!(temp_file.path(), Path::new("/z/tmp/000"));
         assert_eq!(
             fixture.fs.metadata(temp_file.path()).unwrap().unwrap(),
@@ -1449,7 +1467,7 @@ mod tests {
     #[test]
     fn temp_dir() {
         let fixture = Fixture::new(10, fs! {});
-        let temp_dir = fixture.cache.temp_dir().unwrap();
+        let temp_dir = fixture.temp_file_factory.temp_dir().unwrap();
         assert_eq!(temp_dir.path(), Path::new("/z/tmp/000"));
         assert_eq!(
             fixture.fs.metadata(temp_dir.path()).unwrap().unwrap(),

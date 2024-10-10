@@ -395,12 +395,13 @@ impl Client {
 
                 // Create the local_worker's cache. This is the same cache as the "real" worker
                 // uses.
-                let local_worker_cache = local_worker::Cache::new(
-                    local_worker::Fs,
-                    cache_root,
-                    cache_size,
-                    log.clone(),
-                )?;
+                let (local_worker_cache, local_worker_temp_file_factory) =
+                    local_worker::Cache::new(
+                        local_worker::Fs,
+                        cache_root,
+                        cache_size,
+                        log.clone(),
+                    )?;
 
                 // Create the local_worker's deps. This the same adapter as the "real" worker uses.
                 let local_worker_dispatcher_adapter = local_worker::DispatcherAdapter::new(
@@ -410,17 +411,14 @@ impl Client {
                     mount_dir,
                     tmpfs_dir,
                     blob_dir,
+                    local_worker_temp_file_factory,
                 )?;
 
                 // Create an ArtifactFetcher for the local_worker that just forwards requests to
                 // the router.
                 struct ArtifactFetcher(router::Sender);
-                impl local_worker::ArtifactFetcher<local_worker::Fs> for ArtifactFetcher {
-                    fn start_artifact_fetch(
-                        &mut self,
-                        _cache: &impl local_worker::CacheTrait<local_worker::Fs>,
-                        digest: Sha256Digest,
-                    ) {
+                impl local_worker::ArtifactFetcher for ArtifactFetcher {
+                    fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
                         self.0
                             .send(router::Message::LocalWorkerStartArtifactFetch(digest))
                             .ok();
