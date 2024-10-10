@@ -266,8 +266,6 @@ impl Drop for TimerHandle {
 impl Deps for DispatcherAdapter {
     type JobHandle = EventSender;
 
-    type Fs = StdFs;
-
     fn start_job(&mut self, jid: JobId, spec: JobSpec, layer_fs_path: PathBuf) -> Self::JobHandle {
         let (kill_event_sender, kill_event_receiver) = sync::event();
         if let Err(e) = self.start_job_inner(jid, spec, layer_fs_path, kill_event_receiver) {

@@ -37,8 +37,6 @@ pub trait Deps {
     /// safe to drop this handle after the job has completed.
     type JobHandle;
 
-    type Fs: fs::Fs;
-
     /// Start a new job. The dispatcher expects a [`Message::JobCompleted`] message when the job
     /// completes.
     fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle;
@@ -94,21 +92,24 @@ pub trait BrokerSender {
 
 /// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
 /// public interface. We have this so we can isolate [`Dispatcher`] when testing.
-pub trait Cache<FsT: fs::Fs> {
+pub trait Cache {
+    type Fs: fs::Fs;
     fn get_artifact(&mut self, kind: EntryKind, artifact: Sha256Digest, jid: JobId) -> GetArtifact;
     fn got_artifact_failure(&mut self, kind: EntryKind, digest: &Sha256Digest) -> Vec<JobId>;
     fn got_artifact_success(
         &mut self,
         kind: EntryKind,
         digest: &Sha256Digest,
-        artifact: GotArtifact<FsT>,
+        artifact: GotArtifact<Self::Fs>,
     ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)>;
     fn decrement_ref_count(&mut self, kind: EntryKind, digest: &Sha256Digest);
     fn cache_path(&self, kind: EntryKind, digest: &Sha256Digest) -> PathBuf;
 }
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
-impl Cache<fs::std::Fs> for cache::Cache<fs::std::Fs, EntryKind> {
+impl Cache for cache::Cache<fs::std::Fs, EntryKind> {
+    type Fs = fs::std::Fs;
+
     fn get_artifact(&mut self, kind: EntryKind, artifact: Sha256Digest, jid: JobId) -> GetArtifact {
         self.get_artifact(kind, artifact, jid)
     }
@@ -155,7 +156,7 @@ where
     DepsT: Deps,
     ArtifactFetcherT: ArtifactFetcher,
     BrokerSenderT: BrokerSender,
-    CacheT: Cache<DepsT::Fs>,
+    CacheT: Cache,
 {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
@@ -180,7 +181,7 @@ where
 
     /// Process an incoming message. Messages come from the broker and from executors. See
     /// [Message] for more information.
-    pub fn receive_message(&mut self, msg: Message<DepsT::Fs>) {
+    pub fn receive_message(&mut self, msg: Message<CacheT::Fs>) {
         match msg {
             Message::Broker(BrokerToWorker::EnqueueJob(jid, spec)) => {
                 self.receive_enqueue_job(jid, spec)
@@ -332,7 +333,7 @@ impl<'dispatcher, DepsT, ArtifactFetcherT, CacheT> tracker::Fetcher
 where
     DepsT: Deps,
     ArtifactFetcherT: ArtifactFetcher,
-    CacheT: Cache<DepsT::Fs>,
+    CacheT: Cache,
 {
     fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult {
         match self
@@ -412,7 +413,7 @@ where
     DepsT: Deps,
     ArtifactFetcherT: ArtifactFetcher,
     BrokerSenderT: BrokerSender,
-    CacheT: Cache<DepsT::Fs>,
+    CacheT: Cache,
 {
     /// Start at most one job, depending on whether there are any queued jobs and if there are any
     /// available slots.
@@ -634,7 +635,7 @@ where
         &mut self,
         kind: EntryKind,
         digest: Sha256Digest,
-        artifact: GotArtifact<DepsT::Fs>,
+        artifact: GotArtifact<CacheT::Fs>,
         err_msg: &str,
         cb: impl Fn(
             &mut LayerTracker,
@@ -660,7 +661,11 @@ where
         }
     }
 
-    fn receive_artifact_success(&mut self, digest: Sha256Digest, artifact: GotArtifact<DepsT::Fs>) {
+    fn receive_artifact_success(
+        &mut self,
+        digest: Sha256Digest,
+        artifact: GotArtifact<CacheT::Fs>,
+    ) {
         self.cache_fill_success(
             EntryKind::Blob,
             digest,
@@ -678,7 +683,7 @@ where
     fn receive_build_bottom_fs_layer_success(
         &mut self,
         digest: Sha256Digest,
-        artifact: GotArtifact<DepsT::Fs>,
+        artifact: GotArtifact<CacheT::Fs>,
     ) {
         self.cache_fill_success(
             EntryKind::BottomFsLayer,
@@ -697,7 +702,7 @@ where
     fn receive_build_upper_fs_layer_success(
         &mut self,
         digest: Sha256Digest,
-        artifact: GotArtifact<DepsT::Fs>,
+        artifact: GotArtifact<CacheT::Fs>,
     ) {
         self.cache_fill_success(
             EntryKind::UpperFsLayer,
@@ -815,8 +820,6 @@ mod tests {
     }
 
     impl Deps for Rc<RefCell<TestState>> {
-        type Fs = Rc<RefCell<TestState>>;
-
         type JobHandle = TestHandle;
 
         fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle {
@@ -994,7 +997,9 @@ mod tests {
         }
     }
 
-    impl Cache<Rc<RefCell<TestState>>> for Rc<RefCell<TestState>> {
+    impl Cache for Rc<RefCell<TestState>> {
+        type Fs = Rc<RefCell<TestState>>;
+
         fn get_artifact(
             &mut self,
             kind: EntryKind,
@@ -1024,7 +1029,7 @@ mod tests {
             &mut self,
             kind: EntryKind,
             digest: &Sha256Digest,
-            artifact: GotArtifact<Rc<RefCell<TestState>>>,
+            artifact: GotArtifact<Self::Fs>,
         ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)> {
             self.borrow_mut().messages.push(CacheGotArtifactSuccess(
                 kind,
