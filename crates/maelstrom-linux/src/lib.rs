@@ -1925,7 +1925,7 @@ impl MapFlags {
 }
 
 // N.B. From the man page description I don't think the kernel actually dereferences the pointer, so we
-// don't have to worry about this being "unsafe".
+// don't have to worry about marking this function "unsafe".
 //
 // TODO: We should return some type which will provides a safe way to get a reference and will call
 // `unmap` for us when it is dropped.

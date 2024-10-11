@@ -1,12 +1,26 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use maelstrom_linux::{self as linux, ExitCode, WaitStatus};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Parser)]
-pub struct CliArgs {
+pub struct BenchmarkCliArgs {
     #[clap(long, default_value_t = 1_000)]
     iterations: u32,
+}
+
+#[derive(Debug, Parser)]
+pub struct CliArgs {
+    #[clap(subcommand)]
+    command: CliCommand,
+}
+
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug, Subcommand)]
+enum CliCommand {
+    ComparisonBenchmark(BenchmarkCliArgs),
+    CloneMappingBenchmark(BenchmarkCliArgs),
+    ForkMappingBenchmark(BenchmarkCliArgs),
 }
 
 fn fork_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
@@ -85,7 +99,12 @@ fn clone_clone_vm_execve_wait(dev_null: &impl linux::AsFd, vfork: bool) -> Resul
     Ok(())
 }
 
-fn run_benchmark(name: &str, iterations: u32, mut body: impl FnMut() -> Result<()>) -> Result<()> {
+fn run_benchmark(
+    name: &str,
+    iterations: u32,
+    print: impl FnOnce(&str, u32, Duration, Duration),
+    mut body: impl FnMut() -> Result<()>,
+) -> Result<()> {
     let mut times = vec![];
     for _ in 0..iterations {
         let start = Instant::now();
@@ -95,34 +114,103 @@ fn run_benchmark(name: &str, iterations: u32, mut body: impl FnMut() -> Result<(
 
     let total: Duration = times.iter().sum();
     let average = total / iterations;
-    println!("ran {name} {iterations} times in {total:?} (avg. {average:?} / iteration)");
+    print(name, iterations, total, average);
 
     Ok(())
 }
 
-pub fn main(args: CliArgs) -> Result<()> {
+fn print_result(name: &str, iterations: u32, total: Duration, average: Duration) {
+    println!("ran {name} {iterations} times in {total:?} (avg. {average:?} / iteration)");
+}
+
+fn run_mapping_benchmark(
+    args: BenchmarkCliArgs,
+    mut body: impl FnMut() -> Result<()>,
+) -> Result<()> {
+    let mut total_mappings = 0;
+    for _ in 0..100 {
+        for _ in 0..300 {
+            let m = linux::mmap(
+                std::ptr::null_mut(),
+                4096,
+                linux::MemoryProtection::READ | linux::MemoryProtection::WRITE,
+                linux::MapFlags::ANONYMOUS | linux::MapFlags::PRIVATE,
+                None,
+                0,
+            )?;
+
+            // Write to the page to make the mapping used.
+            let m = unsafe { &mut *(m as *mut [u8; 4096]) };
+            m[1024] = 123;
+
+            total_mappings += 1;
+        }
+
+        run_benchmark(
+            &format!("{total_mappings}"),
+            args.iterations,
+            |name, _iterations, _total, average| println!("{name} {}", average.as_micros()),
+            &mut body,
+        )?;
+    }
+    Ok(())
+}
+
+fn clone_mapping_benchmark(args: BenchmarkCliArgs) -> Result<()> {
+    let dev_null = linux::OwnedFd::from(std::os::fd::OwnedFd::from(
+        std::fs::File::options().write(true).open("/dev/null")?,
+    ));
+    run_mapping_benchmark(args, || clone_clone_vm_execve_wait(&dev_null, true))?;
+    Ok(())
+}
+
+fn fork_mapping_benchmark(args: BenchmarkCliArgs) -> Result<()> {
+    let dev_null = linux::OwnedFd::from(std::os::fd::OwnedFd::from(
+        std::fs::File::options().write(true).open("/dev/null")?,
+    ));
+    run_mapping_benchmark(args, || fork_execve_wait(&dev_null))?;
+    Ok(())
+}
+
+fn comparison_benchmark(args: BenchmarkCliArgs) -> Result<()> {
     let dev_null = linux::OwnedFd::from(std::os::fd::OwnedFd::from(
         std::fs::File::options().write(true).open("/dev/null")?,
     ));
     run_benchmark(
         "std::process::Command::{spawn + wait}",
         args.iterations,
+        print_result,
         std_command_spawn_wait,
     )?;
-    run_benchmark("fork + execve + wait", args.iterations, || {
-        fork_execve_wait(&dev_null)
-    })?;
-    run_benchmark("posix_spawn + wait", args.iterations, || {
+    run_benchmark(
+        "fork + execve + wait",
+        args.iterations,
+        print_result,
+        || fork_execve_wait(&dev_null),
+    )?;
+    run_benchmark("posix_spawn + wait", args.iterations, print_result, || {
         posix_spawn_wait(&dev_null)
     })?;
-    run_benchmark("clone(CLONE_VM) + execve + wait", args.iterations, || {
-        clone_clone_vm_execve_wait(&dev_null, false)
-    })?;
+    run_benchmark(
+        "clone(CLONE_VM) + execve + wait",
+        args.iterations,
+        print_result,
+        || clone_clone_vm_execve_wait(&dev_null, false),
+    )?;
     run_benchmark(
         "clone(CLONE_VM | CLONE_VFORK) + execve + wait",
         args.iterations,
+        print_result,
         || clone_clone_vm_execve_wait(&dev_null, true),
     )?;
 
     Ok(())
+}
+
+pub fn main(args: CliArgs) -> Result<()> {
+    match args.command {
+        CliCommand::ComparisonBenchmark(args) => comparison_benchmark(args),
+        CliCommand::CloneMappingBenchmark(args) => clone_mapping_benchmark(args),
+        CliCommand::ForkMappingBenchmark(args) => fork_mapping_benchmark(args),
+    }
 }
