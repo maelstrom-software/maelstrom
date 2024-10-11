@@ -37,3 +37,4 @@ enum-map.workspace = true
 itertools.workspace = true
 maplit.workspace = true
 maelstrom-test.workspace = true
+strum.workspace = true

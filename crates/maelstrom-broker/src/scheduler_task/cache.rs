@@ -10,7 +10,6 @@ use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::{
     config::common::CacheSize,
     heap::{Heap, HeapDeps, HeapIndex},
-    manifest::ManifestReader,
     root::RootBuf,
 };
 use slog::debug;
@@ -18,7 +17,6 @@ use std::{
     collections::{hash_map, HashMap, HashSet},
     error::Error,
     fmt::{self, Debug, Display, Formatter},
-    io,
     num::NonZeroU32,
     path::{Path, PathBuf},
 };
@@ -46,12 +44,6 @@ pub trait CacheFs {
     /// Return the size, in bytes, of the file (or directory) at `path`. Panic on file system error
     /// or if `path` doesn't exist.
     fn file_size(&mut self, path: &Path) -> u64;
-
-    type File: io::Read + io::Seek + 'static;
-
-    /// Return an object that can be used to read a file. Panic on file system error or if `path`
-    /// doesn't exist
-    fn open_file(&mut self, path: &Path) -> Self::File;
 }
 
 /// Implement [`CacheFs`] using `std::fs`.
@@ -82,12 +74,6 @@ impl CacheFs for StdCacheFs {
 
     fn file_size(&mut self, path: &Path) -> u64 {
         self.0.metadata(path).unwrap().len()
-    }
-
-    type File = std::fs::File;
-
-    fn open_file(&mut self, path: &Path) -> Self::File {
-        self.0.open_file(path).unwrap().into_inner()
     }
 }
 
@@ -390,14 +376,6 @@ impl<FsT: CacheFs> Cache<FsT> {
         result
     }
 
-    pub fn read_manifest(
-        &mut self,
-        digest: Sha256Digest,
-    ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>> {
-        let path = self.cache_path(&digest);
-        Ok(ManifestReader::new(self.fs.open_file(&path))?)
-    }
-
     /// Decrement the refcount for a digest. Once the refcount for an artifact reaches zero, the
     /// cache is free to remove that artifact as it attempts to keep the cache below the target
     /// size. On the other hand, as long as the refcount is non-zero, the holder of a refcount can
@@ -477,7 +455,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     /// Return the path of a cached artifact.
-    fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
+    pub fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
         let mut path = self.root.clone();
         path.push("sha256");
         path.push(format!("{digest}.bin"));
@@ -509,12 +487,7 @@ impl<FsT: CacheFs> Cache<FsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::manifest::{
-        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestFileData, Mode,
-        UnixTimestamp,
-    };
     use maelstrom_test::*;
-    use maelstrom_util::manifest::ManifestWriter;
     use std::{cell::RefCell, rc::Rc};
     use TestMessage::*;
 
@@ -525,7 +498,6 @@ mod tests {
         MkdirRecursively(PathBuf),
         ReadDir(PathBuf),
         FileSize(PathBuf),
-        OpenFile(PathBuf),
     }
 
     #[derive(Default)]
@@ -567,13 +539,6 @@ mod tests {
         fn file_size(&mut self, path: &Path) -> u64 {
             self.borrow_mut().messages.push(FileSize(path.to_owned()));
             self.borrow().files.get(path).unwrap().len() as u64
-        }
-
-        type File = std::io::Cursor<Vec<u8>>;
-
-        fn open_file(&mut self, path: &Path) -> Self::File {
-            self.borrow_mut().messages.push(OpenFile(path.to_owned()));
-            std::io::Cursor::new(self.borrow().files.get(path).unwrap().clone())
         }
     }
 
@@ -671,16 +636,6 @@ mod tests {
             expected: Result<(PathBuf, u64), GetArtifactForWorkerError>,
         ) {
             assert_eq!(self.cache.get_artifact_for_worker(&digest), expected);
-        }
-
-        fn read_manifest(
-            &mut self,
-            digest: Sha256Digest,
-            expected_fs_operations: Vec<TestMessage>,
-        ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>> {
-            let reader = self.cache.read_manifest(digest);
-            self.expect_fs_operations(expected_fs_operations);
-            reader
         }
     }
 
@@ -1200,38 +1155,5 @@ mod tests {
     fn tmp_path() {
         let fixture = Fixture::new(TestCacheFs::default(), 0);
         assert_eq!(fixture.cache.tmp_path(), PathBuf::from("/z/tmp"));
-    }
-
-    #[test]
-    fn read_manifest() {
-        let mut manifest_data = vec![];
-        let mut writer = ManifestWriter::new(&mut manifest_data).unwrap();
-        let entries = vec![ManifestEntry {
-            path: "foobar.txt".into(),
-            metadata: ManifestEntryMetadata {
-                size: 11,
-                mode: Mode(0o0555),
-                mtime: UnixTimestamp(1705538554),
-            },
-            data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
-        }];
-        writer.write_entries(&entries).unwrap();
-
-        let fs = TestCacheFs {
-            directories: HashMap::from([(
-                path_buf!("/z/sha256"),
-                vec![long_path!("/z/sha256", 1, "bin")],
-            )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, "bin"), manifest_data)]),
-            ..Default::default()
-        };
-        let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1000);
-        let reader = fixture
-            .read_manifest(
-                digest![1],
-                vec![OpenFile(long_path!("/z/sha256", 1, "bin"))],
-            )
-            .unwrap();
-        assert_eq!(reader.map(|e| e.unwrap()).collect::<Vec<_>>(), entries);
     }
 }

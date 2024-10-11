@@ -4,7 +4,7 @@
 use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
 use anyhow::Result;
 use maelstrom_base::{
-    manifest::{ManifestEntryData, ManifestFileData},
+    manifest::{ManifestEntry, ManifestEntryData, ManifestFileData},
     proto::{
         BrokerToClient, BrokerToMonitor, BrokerToWorker, ClientToBroker, MonitorToBroker,
         WorkerToBroker,
@@ -20,13 +20,12 @@ use maelstrom_util::{
     duration,
     ext::{BoolExt as _, OptionExt as _},
     heap::{Heap, HeapDeps, HeapIndex},
-    manifest::ManifestReader,
 };
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap, HashSet},
+    error,
     fmt::{self, Debug, Formatter},
-    io,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -47,6 +46,8 @@ pub trait SchedulerDeps {
     type WorkerSender;
     type MonitorSender;
     type WorkerArtifactFetcherSender;
+    type ManifestError: error::Error + Send + Sync + 'static;
+    type ManifestIterator: Iterator<Item = Result<ManifestEntry, Self::ManifestError>>;
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
     fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker);
     fn send_message_to_monitor(
@@ -59,6 +60,8 @@ pub trait SchedulerDeps {
         sender: &mut Self::WorkerArtifactFetcherSender,
         message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
     );
+    fn read_manifest(&mut self, path: &Path)
+        -> Result<Self::ManifestIterator, Self::ManifestError>;
 }
 
 /// The required interface for the cache that is provided to the [`Scheduler`]. This mirrors the API
@@ -76,12 +79,6 @@ pub trait SchedulerCache {
     /// See [`super::cache::Cache::got_artifact`].
     fn got_artifact(&mut self, digest: Sha256Digest, size: u64, path: &Path) -> Vec<JobId>;
 
-    /// See [`super::cache::Cache::read_manifest`].
-    fn read_manifest(
-        &mut self,
-        digest: Sha256Digest,
-    ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>>;
-
     /// See [`super::cache::Cache::decrement_refcount`].
     fn decrement_refcount(&mut self, digest: Sha256Digest);
 
@@ -93,6 +90,9 @@ pub trait SchedulerCache {
         &mut self,
         digest: &Sha256Digest,
     ) -> Result<(PathBuf, u64), GetArtifactForWorkerError>;
+
+    /// See [`super::cache::Cache::cache_path`].
+    fn cache_path(&self, digest: &Sha256Digest) -> PathBuf;
 }
 
 impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
@@ -102,13 +102,6 @@ impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
 
     fn got_artifact(&mut self, digest: Sha256Digest, size: u64, path: &Path) -> Vec<JobId> {
         self.got_artifact(digest, size, path)
-    }
-
-    fn read_manifest(
-        &mut self,
-        digest: Sha256Digest,
-    ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>> {
-        self.read_manifest(digest)
     }
 
     fn decrement_refcount(&mut self, digest: Sha256Digest) {
@@ -124,6 +117,10 @@ impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
         digest: &Sha256Digest,
     ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
         self.get_artifact_for_worker(digest)
+    }
+
+    fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
+        self.cache_path(digest)
     }
 }
 
@@ -690,7 +687,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         jid: JobId,
         digest: Sha256Digest,
     ) -> Result<()> {
-        for entry in self.cache.read_manifest(digest)? {
+        for entry in deps.read_manifest(&self.cache.cache_path(&digest))? {
             let entry = entry?;
             if let ManifestEntryData::File(ManifestFileData::Digest(digest)) = entry.data {
                 self.ensure_artifact_for_job(deps, digest, jid, IsManifest::NotManifest);
@@ -809,9 +806,9 @@ mod tests {
         proto::BrokerToWorker::{self, *},
     };
     use maelstrom_test::*;
-    use maelstrom_util::manifest::ManifestWriter;
     use maplit::hashmap;
-    use std::{cell::RefCell, rc::Rc};
+    use std::{cell::RefCell, error, rc::Rc, str::FromStr as _};
+    use strum::Display;
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
@@ -867,22 +864,6 @@ mod tests {
                 .unwrap()
                 .remove(0)
         }
-        fn read_manifest(
-            &mut self,
-            digest: Sha256Digest,
-        ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>> {
-            let mut manifest_data = vec![];
-            let mut writer = ManifestWriter::new(&mut manifest_data).unwrap();
-            writer
-                .write_entries(
-                    self.borrow_mut()
-                        .read_manifest_returns
-                        .get(&digest)
-                        .unwrap(),
-                )
-                .unwrap();
-            Ok(ManifestReader::new(io::Cursor::new(manifest_data))?)
-        }
         fn decrement_refcount(&mut self, digest: Sha256Digest) {
             self.borrow_mut()
                 .messages
@@ -906,13 +887,23 @@ mod tests {
                 .unwrap()
                 .remove(0)
         }
+        fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
+            Path::new("/").join(digest.to_string())
+        }
     }
+
+    #[derive(Debug, Display)]
+    enum NoError {}
+
+    impl error::Error for NoError {}
 
     impl SchedulerDeps for Rc<RefCell<TestState>> {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
         type MonitorSender = TestMonitorSender;
         type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
+        type ManifestError = NoError;
+        type ManifestIterator = <Vec<Result<ManifestEntry, NoError>> as IntoIterator>::IntoIter;
 
         fn send_message_to_client(
             &mut self,
@@ -948,6 +939,20 @@ mod tests {
             self.borrow_mut()
                 .messages
                 .push(ToWorkerArtifactFetcher(sender.0, message));
+        }
+
+        fn read_manifest(&mut self, path: &Path) -> Result<Self::ManifestIterator, NoError> {
+            let digest =
+                Sha256Digest::from_str(path.file_name().unwrap().to_str().unwrap()).unwrap();
+            Ok(self
+                .borrow_mut()
+                .read_manifest_returns
+                .get(&digest)
+                .unwrap()
+                .iter()
+                .map(|e| Ok(e.clone()))
+                .collect_vec()
+                .into_iter())
         }
     }
 

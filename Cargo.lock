@@ -3119,6 +3119,7 @@ dependencies = [
  "maplit",
  "serde",
  "slog",
+ "strum 0.25.0",
  "tar",
  "tempfile",
  "tokio",

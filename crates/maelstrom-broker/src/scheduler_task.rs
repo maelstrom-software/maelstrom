@@ -5,10 +5,11 @@ pub use cache::CacheDir;
 
 use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
 use maelstrom_base::proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker};
-use maelstrom_util::{config::common::CacheSize, root::RootBuf, sync};
+use maelstrom_util::{config::common::CacheSize, manifest::ManifestReader, root::RootBuf, sync};
 use scheduler::{Message, Scheduler, SchedulerDeps};
 use slog::Logger;
 use std::{
+    fs, io,
     path::{Path, PathBuf},
     sync::mpsc as std_mpsc,
 };
@@ -25,6 +26,8 @@ impl SchedulerDeps for PassThroughDeps {
     type MonitorSender = tokio_mpsc::UnboundedSender<BrokerToMonitor>;
     type WorkerArtifactFetcherSender =
         std_mpsc::Sender<Result<(PathBuf, u64), GetArtifactForWorkerError>>;
+    type ManifestError = io::Error;
+    type ManifestIterator = ManifestReader<fs::File>;
 
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient) {
         sender.send(message).ok();
@@ -48,6 +51,10 @@ impl SchedulerDeps for PassThroughDeps {
         message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
     ) {
         sender.send(message).ok();
+    }
+
+    fn read_manifest(&mut self, path: &Path) -> io::Result<ManifestReader<fs::File>> {
+        ManifestReader::new(fs::File::open(path)?)
     }
 }
 
