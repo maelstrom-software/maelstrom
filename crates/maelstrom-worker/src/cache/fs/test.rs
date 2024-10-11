@@ -9,7 +9,7 @@ use std::{
     fmt::Debug,
     path::{Component, Path, PathBuf},
     rc::Rc,
-    slice, vec,
+    result, slice, vec,
 };
 use strum::Display;
 
@@ -141,6 +141,10 @@ impl Fs {
     pub fn graft(&self, path: impl AsRef<Path>, entry: Entry) {
         self.state.borrow_mut().graft(path.as_ref(), entry)
     }
+
+    pub fn set_failure(&self, fail: bool) {
+        self.state.borrow_mut().set_failure(fail)
+    }
 }
 
 impl super::Fs for Fs {
@@ -150,66 +154,63 @@ impl super::Fs for Fs {
         self.state.borrow_mut().rand_u64()
     }
 
-    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>> {
         self.state.borrow().metadata(path)
     }
 
-    fn read_file(&self, path: &Path, contents_out: &mut [u8]) -> Result<usize, Error> {
+    fn read_file(&self, path: &Path, contents_out: &mut [u8]) -> Result<usize> {
         self.state.borrow().read_file(path, contents_out)
     }
 
-    fn read_dir(
-        &self,
-        path: &Path,
-    ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
+    fn read_dir(&self, path: &Path) -> Result<impl Iterator<Item = Result<(OsString, Metadata)>>> {
         self.state.borrow().read_dir(path)
     }
 
-    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<()> {
         self.state.borrow_mut().create_file(path, contents)
     }
 
-    fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
+    fn symlink(&self, target: &Path, link: &Path) -> Result<()> {
         self.state.borrow_mut().symlink(target, link)
     }
 
-    fn mkdir(&self, path: &Path) -> Result<(), Error> {
+    fn mkdir(&self, path: &Path) -> Result<()> {
         self.state.borrow_mut().mkdir(path)
     }
 
-    fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
+    fn mkdir_recursively(&self, path: &Path) -> Result<()> {
         self.state.borrow_mut().mkdir_recursively(path)
     }
 
-    fn remove(&self, path: &Path) -> Result<(), Error> {
+    fn remove(&self, path: &Path) -> Result<()> {
         self.state.borrow_mut().remove(path)
     }
 
-    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Error> {
+    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<()> {
         self.state.borrow_mut().rmdir_recursively_on_thread(path)
     }
 
-    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
+    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<()> {
         self.state.borrow_mut().rename(source_path, dest_path)
     }
 
     type TempFile = TempFile;
 
-    fn temp_file(&self, parent: &Path) -> Result<TempFile, Error> {
+    fn temp_file(&self, parent: &Path) -> Result<TempFile> {
         self.state.borrow_mut().temp_file(parent)
     }
 
-    fn persist_temp_file(&self, temp_file: TempFile, target: &Path) -> Result<(), Error> {
+    fn persist_temp_file(&self, temp_file: TempFile, target: &Path) -> Result<()> {
         self.state.borrow_mut().persist_temp_file(temp_file, target)
     }
 
     type TempDir = TempDir;
 
-    fn temp_dir(&self, parent: &Path) -> Result<TempDir, Error> {
+    fn temp_dir(&self, parent: &Path) -> Result<TempDir> {
         self.state.borrow_mut().temp_dir(parent)
     }
 
-    fn persist_temp_dir(&self, temp_dir: TempDir, target: &Path) -> Result<(), Error> {
+    fn persist_temp_dir(&self, temp_dir: TempDir, target: &Path) -> Result<()> {
         self.state.borrow_mut().persist_temp_dir(temp_dir, target)
     }
 }
@@ -224,9 +225,12 @@ pub enum Error {
     NoEnt,
     NotDir,
     NotEmpty,
+    Test,
 }
 
 impl error::Error for Error {}
+
+pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct TempFile(PathBuf);
@@ -251,6 +255,7 @@ struct State {
     root: Entry,
     last_random_number: u64,
     recursive_rmdirs: HashSet<String>,
+    fail: bool,
 }
 
 impl State {
@@ -260,6 +265,7 @@ impl State {
             root,
             last_random_number: 0,
             recursive_rmdirs: Default::default(),
+            fail: false,
         }
     }
 
@@ -318,12 +324,25 @@ impl State {
         );
     }
 
+    pub fn set_failure(&mut self, fail: bool) {
+        self.fail = fail;
+    }
+
+    fn check_failure(&self) -> Result<()> {
+        if self.fail {
+            Err(Error::Test)
+        } else {
+            Ok(())
+        }
+    }
+
     fn rand_u64(&mut self) -> u64 {
         self.last_random_number += 1;
         self.last_random_number
     }
 
-    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>> {
+        self.check_failure()?;
         match self.root.lookup(path) {
             Lookup::Found(entry, _) => Ok(Some(entry.metadata())),
             Lookup::FoundParent(_) | Lookup::NotFound => Ok(None),
@@ -332,7 +351,8 @@ impl State {
         }
     }
 
-    fn read_file(&self, path: &Path, contents_out: &mut [u8]) -> Result<usize, Error> {
+    fn read_file(&self, path: &Path, contents_out: &mut [u8]) -> Result<usize> {
+        self.check_failure()?;
         match self.root.lookup_leaf(path)? {
             FollowSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
             FollowSymlinks::DanglingSymlink => Err(Error::NoEnt),
@@ -345,10 +365,8 @@ impl State {
         }
     }
 
-    fn read_dir(
-        &self,
-        path: &Path,
-    ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
+    fn read_dir(&self, path: &Path) -> Result<impl Iterator<Item = Result<(OsString, Metadata)>>> {
+        self.check_failure()?;
         match self.root.lookup_leaf(path)? {
             FollowSymlinks::FoundFile(_) | FollowSymlinks::FileAncestor => Err(Error::NotDir),
             FollowSymlinks::DanglingSymlink => Err(Error::NoEnt),
@@ -360,7 +378,8 @@ impl State {
         }
     }
 
-    fn create_file(&mut self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+    fn create_file(&mut self, path: &Path, contents: &[u8]) -> Result<()> {
+        self.check_failure()?;
         let parent_component_path = self.root.lookup_parent(path)?;
         self.root.append_entry_to_directory(
             &parent_component_path,
@@ -370,7 +389,8 @@ impl State {
         Ok(())
     }
 
-    fn symlink(&mut self, target: &Path, link: &Path) -> Result<(), Error> {
+    fn symlink(&mut self, target: &Path, link: &Path) -> Result<()> {
+        self.check_failure()?;
         let parent_component_path = self.root.lookup_parent(link)?;
         self.root.append_entry_to_directory(
             &parent_component_path,
@@ -380,7 +400,8 @@ impl State {
         Ok(())
     }
 
-    fn mkdir(&mut self, path: &Path) -> Result<(), Error> {
+    fn mkdir(&mut self, path: &Path) -> Result<()> {
+        self.check_failure()?;
         let parent_component_path = self.root.lookup_parent(path)?;
         self.root.append_entry_to_directory(
             &parent_component_path,
@@ -390,7 +411,8 @@ impl State {
         Ok(())
     }
 
-    fn mkdir_recursively(&mut self, path: &Path) -> Result<(), Error> {
+    fn mkdir_recursively(&mut self, path: &Path) -> Result<()> {
+        self.check_failure()?;
         match self.root.lookup(path) {
             Lookup::Found(Entry::Directory { .. }, _) => Ok(()),
             Lookup::Found(_, _) => Err(Error::Exists),
@@ -404,7 +426,8 @@ impl State {
         }
     }
 
-    fn remove(&mut self, path: &Path) -> Result<(), Error> {
+    fn remove(&mut self, path: &Path) -> Result<()> {
+        self.check_failure()?;
         match self.root.lookup(path) {
             Lookup::Found(Entry::Directory { .. }, _) => Err(Error::IsDir),
             Lookup::FoundParent(_) | Lookup::NotFound | Lookup::DanglingSymlink => {
@@ -418,7 +441,8 @@ impl State {
         }
     }
 
-    fn rmdir_recursively_on_thread(&mut self, path: PathBuf) -> Result<(), Error> {
+    fn rmdir_recursively_on_thread(&mut self, path: PathBuf) -> Result<()> {
+        self.check_failure()?;
         match self.root.lookup(&path) {
             Lookup::Found(Entry::File { .. } | Entry::Symlink { .. }, _) => Err(Error::NotDir),
             Lookup::FoundParent(_) | Lookup::NotFound | Lookup::DanglingSymlink => {
@@ -439,7 +463,9 @@ impl State {
         }
     }
 
-    fn rename(&mut self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
+    fn rename(&mut self, source_path: &Path, dest_path: &Path) -> Result<()> {
+        self.check_failure()?;
+
         let (source_entry, source_component_path) = match self.root.lookup(source_path) {
             Lookup::FoundParent(_) | Lookup::NotFound | Lookup::DanglingSymlink => {
                 Err(Error::NoEnt)
@@ -510,7 +536,7 @@ impl State {
         Ok(())
     }
 
-    fn temp_file(&mut self, parent: &Path) -> Result<TempFile, Error> {
+    fn temp_file(&mut self, parent: &Path) -> Result<TempFile> {
         for i in 0.. {
             let path = parent.join(format!("{i:03}"));
             match self.create_file(&path, b"") {
@@ -528,11 +554,11 @@ impl State {
         unreachable!();
     }
 
-    fn persist_temp_file(&mut self, temp_file: TempFile, target: &Path) -> Result<(), Error> {
+    fn persist_temp_file(&mut self, temp_file: TempFile, target: &Path) -> Result<()> {
         self.rename(&temp_file.0, target)
     }
 
-    fn temp_dir(&mut self, parent: &Path) -> Result<TempDir, Error> {
+    fn temp_dir(&mut self, parent: &Path) -> Result<TempDir> {
         for i in 0.. {
             let path = parent.join(format!("{i:03}"));
             match self.mkdir(&path) {
@@ -550,7 +576,7 @@ impl State {
         unreachable!();
     }
 
-    fn persist_temp_dir(&mut self, temp_dir: TempDir, target: &Path) -> Result<(), Error> {
+    fn persist_temp_dir(&mut self, temp_dir: TempDir, target: &Path) -> Result<()> {
         self.rename(&temp_dir.0, target)
     }
 }
@@ -719,7 +745,7 @@ impl Entry {
     /// the entry itself, only the component path. This is because this method is only called when
     /// we're going to want to modify the parent, which means we're going to have to re-resolve the
     /// component path again as mutable.
-    fn lookup_parent(&self, path: &Path) -> Result<ComponentPath, Error> {
+    fn lookup_parent(&self, path: &Path) -> Result<ComponentPath> {
         match self.lookup(path) {
             Lookup::FileAncestor => Err(Error::NotDir),
             Lookup::DanglingSymlink => Err(Error::NoEnt),
@@ -731,7 +757,7 @@ impl Entry {
 
     /// Treating `self` as the root of the file system, resolve `path`. If `path` resolves to a
     /// symlink, follow symlinks until a non-symlink is found.
-    fn lookup_leaf(&self, path: &Path) -> Result<FollowSymlinks, Error> {
+    fn lookup_leaf(&self, path: &Path) -> Result<FollowSymlinks> {
         match self.lookup(path) {
             Lookup::FoundParent(_) | Lookup::NotFound | Lookup::DanglingSymlink => {
                 Err(Error::NoEnt)
@@ -898,51 +924,48 @@ impl super::Fs for Rc<Fs> {
     fn rand_u64(&self) -> u64 {
         (**self).rand_u64()
     }
-    fn metadata(&self, path: &Path) -> Result<Option<Metadata>, Error> {
+    fn metadata(&self, path: &Path) -> Result<Option<Metadata>> {
         (**self).metadata(path)
     }
-    fn read_file(&self, path: &Path, contents: &mut [u8]) -> Result<usize, Error> {
+    fn read_file(&self, path: &Path, contents: &mut [u8]) -> Result<usize> {
         (**self).read_file(path, contents)
     }
-    fn read_dir(
-        &self,
-        path: &Path,
-    ) -> Result<impl Iterator<Item = Result<(OsString, Metadata), Error>>, Error> {
+    fn read_dir(&self, path: &Path) -> Result<impl Iterator<Item = Result<(OsString, Metadata)>>> {
         (**self).read_dir(path)
     }
-    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+    fn create_file(&self, path: &Path, contents: &[u8]) -> Result<()> {
         (**self).create_file(path, contents)
     }
-    fn symlink(&self, target: &Path, link: &Path) -> Result<(), Error> {
+    fn symlink(&self, target: &Path, link: &Path) -> Result<()> {
         (**self).symlink(target, link)
     }
-    fn mkdir(&self, path: &Path) -> Result<(), Error> {
+    fn mkdir(&self, path: &Path) -> Result<()> {
         (**self).mkdir(path)
     }
-    fn mkdir_recursively(&self, path: &Path) -> Result<(), Error> {
+    fn mkdir_recursively(&self, path: &Path) -> Result<()> {
         (**self).mkdir_recursively(path)
     }
-    fn remove(&self, path: &Path) -> Result<(), Error> {
+    fn remove(&self, path: &Path) -> Result<()> {
         (**self).remove(path)
     }
-    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<(), Error> {
+    fn rmdir_recursively_on_thread(&self, path: PathBuf) -> Result<()> {
         (**self).rmdir_recursively_on_thread(path)
     }
-    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<(), Error> {
+    fn rename(&self, source_path: &Path, dest_path: &Path) -> Result<()> {
         (**self).rename(source_path, dest_path)
     }
     type TempFile = <Fs as super::Fs>::TempFile;
-    fn temp_file(&self, parent: &Path) -> Result<Self::TempFile, Error> {
+    fn temp_file(&self, parent: &Path) -> Result<Self::TempFile> {
         (**self).temp_file(parent)
     }
-    fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> Result<(), Error> {
+    fn persist_temp_file(&self, temp_file: Self::TempFile, target: &Path) -> Result<()> {
         (**self).persist_temp_file(temp_file, target)
     }
     type TempDir = <Fs as super::Fs>::TempDir;
-    fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir, Error> {
+    fn temp_dir(&self, parent: &Path) -> Result<Self::TempDir> {
         (**self).temp_dir(parent)
     }
-    fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<(), Error> {
+    fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> Result<()> {
         (**self).persist_temp_dir(temp_dir, target)
     }
 }
@@ -1150,6 +1173,13 @@ mod tests {
     }
 
     #[test]
+    fn metadata_forced_failure() {
+        let fs = Fs::new(fs! {});
+        fs.set_failure(true);
+        assert_eq!(fs.metadata(Path::new("/")), Err(Error::Test));
+    }
+
+    #[test]
     fn read_file() {
         let fs = Fs::new(fs! {
             foo(b"foo"),
@@ -1211,6 +1241,17 @@ mod tests {
         assert_eq!(
             fs.read_file(Path::new("/bad_symlink"), &mut buf[..]),
             Err(Error::NoEnt)
+        );
+    }
+
+    #[test]
+    fn read_file_forced_failure() {
+        let fs = Fs::new(fs! { foo(b"contents")});
+        fs.set_failure(true);
+        let mut buf = [0u8; 10];
+        assert_eq!(
+            fs.read_file(Path::new("/foo"), &mut buf[..]),
+            Err(Error::Test)
         );
     }
 
@@ -1284,6 +1325,13 @@ mod tests {
     }
 
     #[test]
+    fn read_dir_forced_failure() {
+        let fs = Fs::new(fs! {});
+        fs.set_failure(true);
+        assert!(matches!(fs.read_dir(Path::new("/")), Err(Error::Test)));
+    }
+
+    #[test]
     fn create_file() {
         let fs = Fs::new(fs! {
             foo(b"abcd"),
@@ -1331,6 +1379,16 @@ mod tests {
         assert_eq!(
             fs.create_file(Path::new("/bar/baz/new_file"), b"contents-3"),
             Err(Error::NoEnt)
+        );
+    }
+
+    #[test]
+    fn create_file_forced_failure() {
+        let fs = Fs::new(fs! {});
+        fs.set_failure(true);
+        assert_eq!(
+            fs.create_file(Path::new("/foo"), b"contents"),
+            Err(Error::Test)
         );
     }
 
@@ -1392,6 +1450,16 @@ mod tests {
     }
 
     #[test]
+    fn symlink_forced_failure() {
+        let fs = Fs::new(fs! {});
+        fs.set_failure(true);
+        assert_eq!(
+            fs.symlink(Path::new("target"), Path::new("/symlink")),
+            Err(Error::Test)
+        );
+    }
+
+    #[test]
     fn mkdir() {
         let fs = Fs::new(fs! {
             foo(b"abcd"),
@@ -1422,6 +1490,13 @@ mod tests {
                 dir2 {},
             },
         });
+    }
+
+    #[test]
+    fn mkdir_forced_failure() {
+        let fs = Fs::new(fs! {});
+        fs.set_failure(true);
+        assert_eq!(fs.mkdir(Path::new("/foo")), Err(Error::Test));
     }
 
     #[test]
@@ -1487,6 +1562,22 @@ mod tests {
     }
 
     #[test]
+    fn mkdir_recursively_forced_failure() {
+        let fs = Fs::new(fs! {bar{}});
+        fs.set_failure(true);
+        assert_eq!(fs.mkdir_recursively(Path::new("/foo")), Err(Error::Test));
+        assert_eq!(fs.mkdir_recursively(Path::new("/bar")), Err(Error::Test));
+        assert_eq!(
+            fs.mkdir_recursively(Path::new("/foo/bar")),
+            Err(Error::Test)
+        );
+        assert_eq!(
+            fs.mkdir_recursively(Path::new("/bar/foo")),
+            Err(Error::Test)
+        );
+    }
+
+    #[test]
     fn remove() {
         let fs = Fs::new(fs! {
             foo(b"abcd"),
@@ -1517,6 +1608,13 @@ mod tests {
 
         assert_eq!(fs.remove(Path::new("/foo")), Ok(()));
         assert_eq!(fs.metadata(Path::new("/foo")), Ok(None));
+    }
+
+    #[test]
+    fn remove_forced_failure() {
+        let fs = Fs::new(fs! {foo(b"contents")});
+        fs.set_failure(true);
+        assert_eq!(fs.remove(Path::new("/foo")), Err(Error::Test));
     }
 
     #[test]
@@ -1597,6 +1695,16 @@ mod tests {
         assert_eq!(
             fs.rmdir_recursively_on_thread("/bar/baz/blah".into()),
             Err(Error::NoEnt)
+        );
+    }
+
+    #[test]
+    fn rmdir_forced_failure() {
+        let fs = Fs::new(fs! {foo{}});
+        fs.set_failure(true);
+        assert_eq!(
+            fs.rmdir_recursively_on_thread("/foo".into()),
+            Err(Error::Test)
         );
     }
 
@@ -1995,6 +2103,16 @@ mod tests {
     }
 
     #[test]
+    fn rename_forced_failure() {
+        let fs = Fs::new(fs! {foo(b"contents")});
+        fs.set_failure(true);
+        assert_eq!(
+            fs.rename(Path::new("/foo"), Path::new("/bar")),
+            Err(Error::Test)
+        );
+    }
+
+    #[test]
     fn temp_file() {
         let fs = Fs::new(fs! {
             "000"(b"a"),
@@ -2089,6 +2207,13 @@ mod tests {
     }
 
     #[test]
+    fn temp_file_forced_failure() {
+        let fs = Fs::new(fs! {});
+        fs.set_failure(true);
+        assert!(matches!(fs.temp_file(Path::new("/")), Err(Error::Test)));
+    }
+
+    #[test]
     fn persist_temp_file_error() {
         let fs = Fs::new(fs! {
             tmp {},
@@ -2111,6 +2236,17 @@ mod tests {
         assert_eq!(
             fs.persist_temp_file(temp_file_3, Path::new("/bad_symlink/bar")),
             Err(Error::NoEnt)
+        );
+    }
+
+    #[test]
+    fn persist_temp_file_forced_failure() {
+        let fs = Fs::new(fs! {});
+        let temp_file = fs.temp_file(Path::new("/")).unwrap();
+        fs.set_failure(true);
+        assert_eq!(
+            fs.persist_temp_file(temp_file, Path::new("/")),
+            Err(Error::Test)
         );
     }
 
@@ -2209,6 +2345,13 @@ mod tests {
     }
 
     #[test]
+    fn temp_dir_forced_failure() {
+        let fs = Fs::new(fs! {});
+        fs.set_failure(true);
+        assert!(matches!(fs.temp_dir(Path::new("/")), Err(Error::Test)));
+    }
+
+    #[test]
     fn persist_temp_dir_error() {
         let fs = Fs::new(fs! {
             tmp {},
@@ -2231,6 +2374,17 @@ mod tests {
         assert_eq!(
             fs.persist_temp_dir(temp_dir_3, Path::new("/bad_symlink/bar")),
             Err(Error::NoEnt)
+        );
+    }
+
+    #[test]
+    fn persist_temp_dir_forced_failure() {
+        let fs = Fs::new(fs! {});
+        let temp_dir = fs.temp_dir(Path::new("/")).unwrap();
+        fs.set_failure(true);
+        assert_eq!(
+            fs.persist_temp_dir(temp_dir, Path::new("/")),
+            Err(Error::Test)
         );
     }
 
