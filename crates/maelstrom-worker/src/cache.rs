@@ -670,6 +670,19 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
         }
     }
 
+    /// Assuming that a reference count is already is already held for the artifact, increment it
+    /// by one and return true. If no reference count is already held, return false.
+    #[must_use]
+    pub fn try_increment_ref_count(&mut self, kind: KeyKindT, digest: &Sha256Digest) -> bool {
+        let key = Key::new(kind, digest.clone());
+        if let Some(Entry::InUse { ref_count, .. }) = self.entries.get_mut(&key) {
+            *ref_count = ref_count.checked_add(1).unwrap();
+            true
+        } else {
+            false
+        }
+    }
+
     /// Notify the cache that a reference to an artifact is no longer needed.
     pub fn decrement_ref_count(&mut self, kind: KeyKindT, digest: &Sha256Digest) {
         let key = Key::new(kind, digest.clone());
@@ -1070,6 +1083,10 @@ mod tests {
             assert_eq!(result, expected);
         }
 
+        fn try_increment_ref_count(&mut self, kind: TestKeyKind, digest: Sha256Digest, expected: bool) {
+            assert_eq!(self.cache.try_increment_ref_count(kind, &digest), expected);
+        }
+
         fn decrement_ref_count(&mut self, kind: TestKeyKind, digest: Sha256Digest) {
             self.cache.decrement_ref_count(kind, &digest);
         }
@@ -1438,6 +1455,50 @@ mod tests {
         );
         fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
+    }
+
+    #[test]
+    fn try_increment_ref_count() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.get_artifact(Apple, digest!(2), jid!(1), GetArtifact::Get);
+
+        fixture.get_artifact(Apple, digest!(3), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(
+            Apple,
+            digest!(3),
+            b"abc",
+            vec![jid!(1)],
+        );
+        fixture.decrement_ref_count(Apple, digest!(3));
+
+        fixture.get_artifact(Apple, digest!(4), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(
+            Apple,
+            digest!(4),
+            b"def",
+            vec![jid!(1)],
+        );
+
+        fixture.try_increment_ref_count(Apple, digest!(1), false);
+        fixture.try_increment_ref_count(Apple, digest!(2), false);
+        fixture.try_increment_ref_count(Apple, digest!(3), false);
+        fixture.try_increment_ref_count(Apple, digest!(4), true);
+
+        fixture.get_artifact(Apple, digest!(5), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(
+            Apple,
+            digest!(5),
+            b"0123456789",
+            vec![jid!(1)],
+        );
+        fixture.assert_bytes_used(13);
+
+        fixture.decrement_ref_count(Apple, digest!(4));
+        fixture.assert_bytes_used(13);
+
+        fixture.decrement_ref_count(Apple, digest!(4));
+        fixture.assert_bytes_used(10);
     }
 
     #[test]
