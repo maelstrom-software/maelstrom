@@ -25,11 +25,11 @@ fn std_command_spawn_wait() -> Result<()> {
 }
 ```
 
-These APIs make it really easy to get things right and absolutely should be used. Sometimes though,
-as with our software project Maelstrom, you maybe find yourself needing to do things that just
-aren't supported by these simple APIs. For example maybe you want to use a `pidfd`, or do something
-with namespaces. Then you might need to dig deeper and discover what the underlying APIs are capable
-of.
+These APIs make it really easy to get things right and are the first thing someone might reach for
+(rightly so!). Sometimes though you maybe find yourself needing to do things that just aren't
+supported by these simple APIs (we found ourselves in this position working on Maelstrom). For
+example maybe you want to use a `pidfd`, or do something with namespaces. Then you might need to dig
+deeper and discover what the underlying APIs are capable of.
 
 Of course, once you dig deeper, you might quickly find yourself confused. On Linux there are several
 APIs that all spawn a child process. We have `fork`, `vfork`, `posix_spawn` and `clone`. So which
@@ -49,8 +49,9 @@ The classic way of spawning a child process on Linux and Unix is to use two sysc
 program in the current process.
 
 Splitting it up into two different syscalls allows the developer to do a bunch of
-set-up in the child process just by regular writing code. This way of doing things is sometimes
-referred to as the "elegance" of `fork`.
+set-up in the child process just by writing regular code. (Having this be separated as two calls
+which each do one thing, and the ability to write this set-up as plain code is sometimes referred to
+as the "elegance" of `fork`)
 
 ```rust
 use anyhow::Result;
@@ -123,6 +124,10 @@ our zygote via IPC to spawn any further children we want.
      |                   |                    |           |
 ```
 
+The zygote remains single-threaded so we can write the housekeeping as before. Having to communicate
+with the zygote is a little annoying, but makes things easy to get right at least from a fork-safety
+perspective.
+
 ## `fork` is Too Slow!
 It turns out that `fork` can be pretty slow in some contexts. A large part of the time is spent
 copying the virtual memory mappings of the parent, and the time it takes scales linearly with the
@@ -131,6 +136,10 @@ amount of memory mapped. One way around this is the aforementioned "zygote" patt
 avoid the problem though, because copying the virtual memory of a small process is still slow.
 
 <img src="fork graph.png" alt="Graph of Fork Calls" width="60%"/>
+
+The graph is meant to show how the time of the fork call increases linearly with the amount of
+memory mapped. It would be great to avoid this slow process of copying the virtual memory mappings
+altogether which is slow even if your program is not using much memory (like the zygote is.)
 
 ## `vfork` to the Rescue
 The `vfork` syscall is like fork except it doesn't copy the parent's virtual memory mappings and
@@ -277,9 +286,11 @@ pipe or socket.
 
 <img src="clone graph.png" alt="Graph of Fork Calls" width="60%"/>
 
-## Benchmarking
-Lets run a simple benchmark, running a version of our examples in a loop many times to see how they
-fair.
+This graph looks much better than the one for `fork`. It is a pretty constant speed and faster than
+the fastest `fork`!. About the same performance is found with `posix_spawn`.
+
+Finally, lets compare all the options (minus vfork because we can't call it) for a program without
+much memory mapped.
 
 ```shell
 ran std::process::Command::{spawn + wait} 10000 times in 5.400743724s (avg. 540.074µs / iteration)
@@ -288,6 +299,10 @@ ran posix_spawn + wait 10000 times in 2.918496041s (avg. 291.849µs / iteration)
 ran clone(CLONE_VM) + execve + wait 10000 times in 2.907074411s (avg. 290.707µs / iteration)
 ran clone(CLONE_VM | CLONE_VFORK) + execve + wait 10000 times in 2.883697173s (avg. 288.369µs / iteration)
 ```
+
+Rust's `std::process::Command` comes in at the slowest even though it should be comparable to
+`posix_spawn`, this could be due to differences in the housekeeping or other things the code is
+doing.
 
 ## Conclusion
 Lets tie it all together with a flow graph about what to use.
@@ -329,3 +344,7 @@ Lets tie it all together with a flow graph about what to use.
                                  |clone |
                                  +------+
 ```
+
+## Addendum
+You can check out working code for the snippets and benchmarks
+[here](https://github.com/maelstrom-software/maelstrom/blob/main/crates/xtask/src/clone_benchmark.rs)
