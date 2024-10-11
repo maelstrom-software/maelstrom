@@ -1905,3 +1905,51 @@ pub fn getrlimit(resource: RlimitResource) -> Result<Rlimit, Errno> {
         max: rlimit.rlim_max,
     })
 }
+
+#[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
+pub struct MemoryProtection(c_int);
+
+impl MemoryProtection {
+    pub const EXEC: Self = Self(libc::PROT_EXEC);
+    pub const READ: Self = Self(libc::PROT_READ);
+    pub const WRITE: Self = Self(libc::PROT_WRITE);
+    pub const NONE: Self = Self(libc::PROT_NONE);
+}
+
+#[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
+pub struct MapFlags(c_int);
+
+impl MapFlags {
+    pub const ANONYMOUS: Self = Self(libc::MAP_ANONYMOUS);
+    pub const PRIVATE: Self = Self(libc::MAP_PRIVATE);
+}
+
+// N.B. From the man page description I don't think the kernel actually dereferences the pointer, so we
+// don't have to worry about this being "unsafe".
+//
+// TODO: We should return some type which will provides a safe way to get a reference and will call
+// `unmap` for us when it is dropped.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn mmap(
+    addr: *mut c_void,
+    len: usize,
+    prot: MemoryProtection,
+    flags: MapFlags,
+    fd: Option<Fd>,
+    offset: i64,
+) -> Result<*mut c_void, Errno> {
+    let addr = unsafe {
+        libc::mmap(
+            addr,
+            len,
+            prot.0,
+            flags.0,
+            fd.map(|fd| fd.0).unwrap_or(0),
+            offset,
+        )
+    };
+    if addr == libc::MAP_FAILED {
+        return Err(Errno(unsafe { *libc::__errno_location() }));
+    }
+    Ok(addr)
+}
