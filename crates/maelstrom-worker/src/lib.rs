@@ -494,8 +494,19 @@ async fn handle_incoming_messages(
     }
 }
 
-type DefaultDispatcher =
-    Dispatcher<DispatcherAdapter, ArtifactFetcher, BrokerSender, Cache<StdFs, EntryKind>>;
+pub struct WorkerGetStrategy;
+
+impl cache::GetStrategy for WorkerGetStrategy {
+    type Getter = ();
+    fn getter_from_job_id(_job_id: JobId) -> Self::Getter {}
+}
+
+type DefaultDispatcher = Dispatcher<
+    DispatcherAdapter,
+    ArtifactFetcher,
+    BrokerSender,
+    Cache<StdFs, EntryKind, WorkerGetStrategy>,
+>;
 
 async fn dispatcher_main(
     config: Config,

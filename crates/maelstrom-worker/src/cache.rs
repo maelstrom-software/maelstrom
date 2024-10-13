@@ -187,6 +187,11 @@ pub trait KeyKind: Clone + Copy + Debug + Display + Eq + Hash + PartialEq {
     fn iter() -> Self::Iterator;
 }
 
+pub trait GetStrategy {
+    type Getter: Eq + Hash;
+    fn getter_from_job_id(job_id: JobId) -> Self::Getter;
+}
+
 #[derive(
     Clone, Copy, Debug, strum::Display, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter,
 )]
@@ -220,9 +225,12 @@ impl<KeyKindT> Key<KeyKindT> {
 /// An entry for a specific [`Key`] in the [`Cache`]'s hash table. There is one of these for every
 /// entry in the per-kind subdirectories of the `sha256` subdirectory of the [`Cache`]'s root
 /// directory.
-enum Entry {
+enum Entry<GetStrategyT: GetStrategy> {
     /// The artifact is being gotten by one of the clients.
-    Getting(Vec<JobId>),
+    Getting {
+        jobs: Vec<JobId>,
+        getters: HashSet<GetStrategyT::Getter>,
+    },
 
     /// The artifact has been successfully gotten, and is currently being used by at least one job.
     /// We reference count this state since there may be multiple jobs using the same artifact.
@@ -245,29 +253,31 @@ enum Entry {
 
 /// An implementation of the "newtype" pattern so that we can implement [`HeapDeps`] on a
 /// [`HashMap`].
-struct Map<KeyKindT: KeyKind>(HashMap<Key<KeyKindT>, Entry>);
+struct Map<KeyKindT: KeyKind, GetStrategyT: GetStrategy>(
+    HashMap<Key<KeyKindT>, Entry<GetStrategyT>>,
+);
 
-impl<KeyKindT: KeyKind> Default for Map<KeyKindT> {
+impl<KeyKindT: KeyKind, GetStrategyT: GetStrategy> Default for Map<KeyKindT, GetStrategyT> {
     fn default() -> Self {
         Self(HashMap::default())
     }
 }
 
-impl<KeyKindT: KeyKind> Deref for Map<KeyKindT> {
-    type Target = HashMap<Key<KeyKindT>, Entry>;
+impl<KeyKindT: KeyKind, GetStrategyT: GetStrategy> Deref for Map<KeyKindT, GetStrategyT> {
+    type Target = HashMap<Key<KeyKindT>, Entry<GetStrategyT>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<KeyKindT: KeyKind> DerefMut for Map<KeyKindT> {
+impl<KeyKindT: KeyKind, GetStrategyT: GetStrategy> DerefMut for Map<KeyKindT, GetStrategyT> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<KeyKindT: KeyKind> HeapDeps for Map<KeyKindT> {
+impl<KeyKindT: KeyKind, GetStrategyT: GetStrategy> HeapDeps for Map<KeyKindT, GetStrategyT> {
     type Element = Key<KeyKindT>;
 
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
@@ -320,19 +330,19 @@ struct SizeFile;
 /// Manage a directory of downloaded, extracted artifacts. Coordinate fetching of these artifacts,
 /// and removing them when they are no longer in use and the amount of space used by the directory
 /// has grown too large.
-pub struct Cache<FsT, KeyKindT: KeyKind> {
+pub struct Cache<FsT, KeyKindT: KeyKind, GetStrategyT: GetStrategy> {
     fs: FsT,
     removing: RootBuf<RemovingDir>,
     sha256: RootBuf<Sha256Dir>,
-    entries: Map<KeyKindT>,
-    heap: Heap<Map<KeyKindT>>,
+    entries: Map<KeyKindT, GetStrategyT>,
+    heap: Heap<Map<KeyKindT, GetStrategyT>>,
     next_priority: u64,
     bytes_used: u64,
     bytes_used_target: u64,
     log: Logger,
 }
 
-impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
+impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT, GetStrategyT> {
     /// Create a new [Cache] rooted at `root`. The directory `root` and all necessary ancestors
     /// will be created, along with `{root}/removing` and `{root}/{kind}/sha256`. Any pre-existing
     /// entries in `{root}/removing` and `{root}/{kind}/sha256` will be removed. That implies that
@@ -458,8 +468,8 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
             fs.mkdir_recursively(&kind_dir(&sha256, kind))?;
         }
 
-        let mut entries = Map::<KeyKindT>::default();
-        let mut heap = Heap::<Map<KeyKindT>>::default();
+        let mut entries = Map::<KeyKindT, GetStrategyT>::default();
+        let mut heap = Heap::<Map<KeyKindT, GetStrategyT>>::default();
         let mut next_priority = 0u64;
         let mut bytes_used = 0u64;
 
@@ -558,15 +568,23 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     ) -> GetArtifact {
         match self.entries.entry(Key::new(kind, digest)) {
             HashEntry::Vacant(entry) => {
-                entry.insert(Entry::Getting(vec![jid]));
+                entry.insert(Entry::Getting {
+                    jobs: vec![jid],
+                    getters: HashSet::from([GetStrategyT::getter_from_job_id(jid)]),
+                });
                 GetArtifact::Get
             }
             HashEntry::Occupied(entry) => {
                 let entry = entry.into_mut();
                 match entry {
-                    Entry::Getting(jobs) => {
+                    Entry::Getting { jobs, getters } => {
                         jobs.push(jid);
-                        GetArtifact::Wait
+                        let getter = GetStrategyT::getter_from_job_id(jid);
+                        if getters.insert(getter) {
+                            GetArtifact::Get
+                        } else {
+                            GetArtifact::Wait
+                        }
                     }
                     Entry::InUse { ref_count, .. } => {
                         *ref_count = ref_count.checked_add(1).unwrap();
@@ -595,7 +613,8 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
     /// Notify the cache that an artifact fetch has failed. The returned vector lists the jobs that
     /// are affected and that need to be canceled.
     pub fn got_artifact_failure(&mut self, kind: KeyKindT, digest: &Sha256Digest) -> Vec<JobId> {
-        let Some(Entry::Getting(jobs)) = self.entries.remove(&Key::new(kind, digest.clone()))
+        let Some(Entry::Getting { jobs, .. }) =
+            self.entries.remove(&Key::new(kind, digest.clone()))
         else {
             panic!("Got got_artifact_failure in unexpected state");
         };
@@ -643,7 +662,7 @@ impl<FsT: Fs, KeyKindT: KeyKind> Cache<FsT, KeyKindT> {
                     .entries
                     .get_mut(&Key::new(kind, digest.clone()))
                     .expect("Got got_artifact_success in unexpected state");
-                let Entry::Getting(jobs) = entry else {
+                let Entry::Getting { jobs, .. } = entry else {
                     panic!("Got got_artifact_success in unexpected state");
                 };
                 let ref_count = jobs.len().try_into().unwrap();
@@ -923,7 +942,7 @@ mod tests {
 
     #[derive(Clone, Copy, Debug, strum::Display, strum::EnumIter, Eq, Hash, PartialEq)]
     #[strum(serialize_all = "snake_case")]
-    pub enum TestKeyKind {
+    enum TestKeyKind {
         Apple,
         Orange,
     }
@@ -936,9 +955,29 @@ mod tests {
         }
     }
 
+    #[derive(Eq, Hash, PartialEq)]
+    enum TestGetter {
+        Small,
+        Large,
+    }
+
+    struct TestGetStrategy;
+
+    impl GetStrategy for TestGetStrategy {
+        type Getter = TestGetter;
+
+        fn getter_from_job_id(job_id: JobId) -> Self::Getter {
+            if job_id.cid.as_u32() < 100 {
+                TestGetter::Small
+            } else {
+                TestGetter::Large
+            }
+        }
+    }
+
     struct Fixture {
         fs: test::Fs,
-        cache: Cache<test::Fs, TestKeyKind>,
+        cache: Cache<test::Fs, TestKeyKind, TestGetStrategy>,
         temp_file_factory: TempFileFactory<test::Fs>,
     }
 
@@ -1083,7 +1122,12 @@ mod tests {
             assert_eq!(result, expected);
         }
 
-        fn try_increment_ref_count(&mut self, kind: TestKeyKind, digest: Sha256Digest, expected: bool) {
+        fn try_increment_ref_count(
+            &mut self,
+            kind: TestKeyKind,
+            digest: Sha256Digest,
+            expected: bool,
+        ) {
             assert_eq!(self.cache.try_increment_ref_count(kind, &digest), expected);
         }
 
@@ -1093,7 +1137,7 @@ mod tests {
     }
 
     #[test]
-    fn success_flow() {
+    fn success_flow_with_single_getter() {
         let mut fixture = Fixture::new(10, fs! {});
         fixture.assert_bytes_used(0);
 
@@ -1108,6 +1152,33 @@ mod tests {
             digest!(42),
             b"a",
             vec![jid!(1), jid!(2), jid!(3)],
+        );
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.assert_bytes_used(1);
+
+        fixture.get_artifact(Apple, digest!(42), jid!(4), GetArtifact::Success);
+        fixture.get_artifact(Apple, digest!(42), jid!(5), GetArtifact::Success);
+        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.assert_bytes_used(1);
+    }
+
+    #[test]
+    fn success_flow_with_multiple_getters() {
+        let mut fixture = Fixture::new(10, fs! {});
+        fixture.assert_bytes_used(0);
+
+        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(Apple, digest!(42), jid!(100), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(42), jid!(101), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_bytes_used(0);
+
+        fixture.got_artifact_success_file(
+            Apple,
+            digest!(42),
+            b"a",
+            vec![jid!(1), jid!(2), jid!(100), jid!(101)],
         );
         fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
@@ -1464,21 +1535,11 @@ mod tests {
         fixture.get_artifact(Apple, digest!(2), jid!(1), GetArtifact::Get);
 
         fixture.get_artifact(Apple, digest!(3), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(
-            Apple,
-            digest!(3),
-            b"abc",
-            vec![jid!(1)],
-        );
+        fixture.got_artifact_success_file(Apple, digest!(3), b"abc", vec![jid!(1)]);
         fixture.decrement_ref_count(Apple, digest!(3));
 
         fixture.get_artifact(Apple, digest!(4), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(
-            Apple,
-            digest!(4),
-            b"def",
-            vec![jid!(1)],
-        );
+        fixture.got_artifact_success_file(Apple, digest!(4), b"def", vec![jid!(1)]);
 
         fixture.try_increment_ref_count(Apple, digest!(1), false);
         fixture.try_increment_ref_count(Apple, digest!(2), false);
@@ -1486,12 +1547,7 @@ mod tests {
         fixture.try_increment_ref_count(Apple, digest!(4), true);
 
         fixture.get_artifact(Apple, digest!(5), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(
-            Apple,
-            digest!(5),
-            b"0123456789",
-            vec![jid!(1)],
-        );
+        fixture.got_artifact_success_file(Apple, digest!(5), b"0123456789", vec![jid!(1)]);
         fixture.assert_bytes_used(13);
 
         fixture.decrement_ref_count(Apple, digest!(4));

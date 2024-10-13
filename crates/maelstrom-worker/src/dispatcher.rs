@@ -3,7 +3,10 @@
 
 mod tracker;
 
-use crate::cache::{self, fs, EntryKind, GetArtifact, GotArtifact, Key};
+use crate::{
+    cache::{self, fs, EntryKind, GetArtifact, GotArtifact, Key},
+    WorkerGetStrategy,
+};
 use anyhow::{Error, Result};
 use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
@@ -107,7 +110,7 @@ pub trait Cache {
 }
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
-impl Cache for cache::Cache<fs::std::Fs, EntryKind> {
+impl Cache for cache::Cache<fs::std::Fs, EntryKind, WorkerGetStrategy> {
     type Fs = fs::std::Fs;
 
     fn get_artifact(&mut self, kind: EntryKind, artifact: Sha256Digest, jid: JobId) -> GetArtifact {
