@@ -321,7 +321,8 @@ pub struct CacheDir;
 pub struct EntryPath;
 
 struct CachedirTagPath;
-struct RemovingDir;
+struct RemovingRoot;
+struct RemovingPath;
 struct TmpDir;
 struct Sha256Dir;
 struct KindDir;
@@ -332,7 +333,7 @@ struct SizeFile;
 /// has grown too large.
 pub struct Cache<FsT, KeyKindT: KeyKind, GetStrategyT: GetStrategy> {
     fs: FsT,
-    removing: RootBuf<RemovingDir>,
+    removing: RootBuf<RemovingRoot>,
     sha256: RootBuf<Sha256Dir>,
     entries: Map<KeyKindT, GetStrategyT>,
     heap: Heap<Map<KeyKindT, GetStrategyT>>,
@@ -358,7 +359,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         log: Logger,
     ) -> Result<(Self, TempFileFactory<FsT>)> {
         let cachedir_tag = root.join::<CachedirTagPath>(CACHEDIR_TAG);
-        let removing = root.join::<RemovingDir>("removing");
+        let removing = root.join::<RemovingRoot>("removing");
         let sha256 = root.join::<Sha256Dir>("sha256");
         let tmp = root.join::<TmpDir>("tmp");
 
@@ -402,7 +403,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         fs: FsT,
         root: RootBuf<CacheDir>,
         cachedir_tag: RootBuf<CachedirTagPath>,
-        removing: RootBuf<RemovingDir>,
+        removing: RootBuf<RemovingRoot>,
         tmp: RootBuf<TmpDir>,
         sha256: RootBuf<Sha256Dir>,
         size: CacheSize,
@@ -441,7 +442,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     fn new_preserve_directory_contents(
         fs: FsT,
         root: RootBuf<CacheDir>,
-        removing: RootBuf<RemovingDir>,
+        removing: RootBuf<RemovingRoot>,
         tmp: RootBuf<TmpDir>,
         sha256: RootBuf<Sha256Dir>,
         size: CacheSize,
@@ -613,12 +614,13 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     /// Notify the cache that an artifact fetch has failed. The returned vector lists the jobs that
     /// are affected and that need to be canceled.
     pub fn got_artifact_failure(&mut self, kind: KeyKindT, digest: &Sha256Digest) -> Vec<JobId> {
-        let Some(Entry::Getting { jobs, .. }) =
+        if let Some(Entry::Getting { jobs, .. }) =
             self.entries.remove(&Key::new(kind, digest.clone()))
-        else {
-            panic!("Got got_artifact_failure in unexpected state");
-        };
-        jobs
+        {
+            jobs
+        } else {
+            vec![]
+        }
     }
 
     /// Notify the cache that an artifact fetch has successfully completed. The returned vector
@@ -655,38 +657,78 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             }
         }
 
-        match update_cache_directory(&self.fs, &self.cache_path(kind, digest), artifact) {
-            Err(err) => Err((err, self.got_artifact_failure(kind, digest))),
-            Ok((file_type, bytes_used)) => {
-                let entry = self
-                    .entries
-                    .get_mut(&Key::new(kind, digest.clone()))
-                    .expect("Got got_artifact_success in unexpected state");
-                let Entry::Getting { jobs, .. } = entry else {
-                    panic!("Got got_artifact_success in unexpected state");
-                };
-                let ref_count = jobs.len().try_into().unwrap();
-                let jobs = mem::take(jobs);
-                // Reference count must be > 0 since we don't allow cancellation of gets.
-                *entry = Entry::InUse {
-                    file_type,
-                    bytes_used,
-                    ref_count: NonZeroU32::new(ref_count).unwrap(),
-                };
-                self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
-                debug!(self.log, "cache added artifact";
-                    "kind" => ?kind,
-                    "digest" => %digest,
-                    "artifact_bytes_used" => %ByteSize::b(bytes_used),
-                    "entries" => %self.entries.len(),
-                    "file_type" => %file_type,
-                    "bytes_used" => %ByteSize::b(self.bytes_used),
-                    "byte_used_target" => %ByteSize::b(self.bytes_used_target)
-                );
-                self.possibly_remove_some_ignore_error();
-                Ok(jobs)
+        fn dispose_of_artifact<FsT: Fs>(
+            fs: &FsT,
+            removing: &Root<RemovingRoot>,
+            artifact: GotArtifact<FsT>,
+        ) -> result::Result<(), FsT::Error> {
+            match artifact {
+                GotArtifact::Directory { source, .. } => {
+                    let target = get_unused_removing_path(fs, removing)?;
+                    fs.persist_temp_dir(source, &target)?;
+                    fs.rmdir_recursively_on_thread(target.into_path_buf())?;
+                }
+                GotArtifact::File { source } => {
+                    let target = get_unused_removing_path(fs, removing)?;
+                    fs.persist_temp_file(source, &target)?;
+                    fs.remove(&target)?;
+                }
+                GotArtifact::Symlink { .. } => {}
+            }
+            Ok(())
+        }
+
+        fn dispose_of_artifact_or_warn<FsT: Fs>(
+            fs: &FsT,
+            log: &Logger,
+            removing: &Root<RemovingRoot>,
+            artifact: GotArtifact<FsT>,
+        ) {
+            if let Err(err) = dispose_of_artifact(fs, removing, artifact) {
+                warn!(log, "error encountered disposing of unnecessary artifact"; "err" => %err);
             }
         }
+
+        let cache_path = self.cache_path(kind, digest);
+
+        let Some(entry) = self.entries.get_mut(&Key::new(kind, digest.clone())) else {
+            dispose_of_artifact_or_warn(&self.fs, &self.log, &self.removing, artifact);
+            return Ok(vec![]);
+        };
+
+        let Entry::Getting { jobs, .. } = entry else {
+            dispose_of_artifact_or_warn(&self.fs, &self.log, &self.removing, artifact);
+            return Ok(vec![]);
+        };
+
+        let (file_type, bytes_used) = match update_cache_directory(&self.fs, &cache_path, artifact)
+        {
+            Err(err) => {
+                return Err((err, self.got_artifact_failure(kind, digest)));
+            }
+            Ok((file_type, bytes_used)) => (file_type, bytes_used),
+        };
+
+        // Reference count must be > 0 since we don't allow cancellation of gets.
+        let ref_count = NonZeroU32::new(jobs.len().try_into().unwrap()).unwrap();
+        let jobs = mem::take(jobs);
+        *entry = Entry::InUse {
+            file_type,
+            bytes_used,
+            ref_count,
+        };
+        self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
+        debug!(self.log, "cache added artifact";
+            "kind" => ?kind,
+            "digest" => %digest,
+            "artifact_bytes_used" => %ByteSize::b(bytes_used),
+            "entries" => %self.entries.len(),
+            "file_type" => %file_type,
+            "bytes_used" => %ByteSize::b(self.bytes_used),
+            "byte_used_target" => %ByteSize::b(self.bytes_used_target)
+        );
+        self.possibly_remove_some_ignore_error();
+        Ok(jobs)
     }
 
     /// Assuming that a reference count is already is already held for the artifact, increment it
@@ -794,7 +836,7 @@ enum CacheFileNameType {
 
 fn remove_all_from_directory_except<S>(
     fs: &impl Fs,
-    removing: &Root<RemovingDir>,
+    removing: &Root<RemovingRoot>,
     dir: &Path,
     except: impl IntoIterator<Item = S>,
 ) -> Result<()>
@@ -819,14 +861,22 @@ where
     Ok(())
 }
 
-/// Remove all files and directories rooted in `source` in a separate thread.
-fn rmdir_in_background(fs: &impl Fs, removing: &Root<RemovingDir>, source: &Path) -> Result<()> {
-    let target = loop {
-        let target: RootBuf<()> = removing.join(format!("{:016x}", fs.rand_u64()));
+/// Return an unused path in the provided directory.
+fn get_unused_removing_path<FsT: Fs>(
+    fs: &FsT,
+    removing: &Root<RemovingRoot>,
+) -> result::Result<RootBuf<RemovingPath>, FsT::Error> {
+    loop {
+        let target = removing.join(format!("{:016x}", fs.rand_u64()));
         if fs.metadata(&target)?.is_none() {
-            break target;
+            break Ok(target);
         }
-    };
+    }
+}
+
+/// Remove all files and directories rooted in `source` in a separate thread.
+fn rmdir_in_background(fs: &impl Fs, removing: &Root<RemovingRoot>, source: &Path) -> Result<()> {
+    let target = get_unused_removing_path(fs, removing)?;
     fs.rename(source, &target)?;
     fs.rmdir_recursively_on_thread(target.into_path_buf())?;
     Ok(())
@@ -896,7 +946,7 @@ fn write_size_file(fs: &impl Fs, base: &Root<EntryPath>, size: u64) -> Result<()
 fn ensure_removing_directory(
     fs: &impl Fs,
     root: &Root<CacheDir>,
-    removing: &Root<RemovingDir>,
+    removing: &Root<RemovingRoot>,
 ) -> Result<()> {
     match fs.metadata(removing)? {
         Some(metadata) if metadata.is_directory() => {
@@ -1555,6 +1605,277 @@ mod tests {
 
         fixture.decrement_ref_count(Apple, digest!(4));
         fixture.assert_bytes_used(10);
+    }
+
+    #[test]
+    fn got_artifact_failure_no_entry() {
+        let mut fixture = Fixture::new(1, fs! {});
+
+        fixture.got_artifact_failure(Apple, digest!(1), vec![]);
+    }
+
+    #[test]
+    fn got_artifact_failure_in_use() {
+        let mut fixture = Fixture::new(1, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(Apple, digest!(1), b"abc", vec![jid!(1)]);
+
+        fixture.got_artifact_failure(Apple, digest!(1), vec![]);
+    }
+
+    #[test]
+    fn got_artifact_failure_in_cache() {
+        let mut fixture = Fixture::new(100, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(Apple, digest!(1), b"abc", vec![jid!(1)]);
+        fixture.decrement_ref_count(Apple, digest!(1));
+
+        fixture.got_artifact_failure(Apple, digest!(1), vec![]);
+    }
+
+    #[test]
+    fn got_artifact_success_directory_no_entry() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.got_artifact_success_directory(Apple, digest!(1), fs! { foo(b"foo") }, 1, vec![]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                    "0000000000000001" {
+                        foo(b"foo"),
+                    },
+                },
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
+    }
+
+    #[test]
+    fn got_artifact_success_file_no_entry() {
+        let mut fixture = Fixture::new(1, fs! {});
+
+        fixture.got_artifact_success_file(Apple, digest!(1), b"abc", vec![]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                },
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+    }
+
+    #[test]
+    fn got_artifact_success_symlink_no_entry() {
+        let mut fixture = Fixture::new(1, fs! {});
+
+        fixture.got_artifact_success_symlink(Apple, digest!(1), "/target", vec![]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                },
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+    }
+
+    #[test]
+    fn got_artifact_success_directory_in_use() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_directory(
+            Apple,
+            digest!(1),
+            fs! { foo(b"foo") },
+            1,
+            vec![jid!(1), jid!(100)],
+        );
+        fixture.got_artifact_success_directory(Apple, digest!(1), fs! { foo(b"bar") }, 1, vec![]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                    "0000000000000001" {
+                        foo(b"bar"),
+                    },
+                },
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000001" {
+                            foo(b"foo"),
+                        },
+                        "0000000000000000000000000000000000000000000000000000000000000001.size"(b"\0\0\0\0\0\0\0\x01"),
+                    },
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
+    }
+
+    #[test]
+    fn got_artifact_success_file_in_use() {
+        let mut fixture = Fixture::new(1, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_file(Apple, digest!(1), b"foo", vec![jid!(1), jid!(100)]);
+        fixture.got_artifact_success_file(Apple, digest!(1), b"bar", vec![]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                },
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000001"(b"foo"),
+                    },
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+    }
+
+    #[test]
+    fn got_artifact_success_symlink_in_use() {
+        let mut fixture = Fixture::new(1, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_symlink(Apple, digest!(1), "/foo", vec![jid!(1), jid!(100)]);
+        fixture.got_artifact_success_symlink(Apple, digest!(1), "/bar", vec![]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                },
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000001" -> "/foo",
+                    },
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+    }
+
+    #[test]
+    fn got_artifact_success_directory_in_cache() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_directory(
+            Apple,
+            digest!(1),
+            fs! { foo(b"foo") },
+            1,
+            vec![jid!(1), jid!(100)],
+        );
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.got_artifact_success_directory(Apple, digest!(1), fs! { foo(b"bar") }, 1, vec![]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                    "0000000000000001" {
+                        foo(b"bar"),
+                    },
+                },
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000001" {
+                            foo(b"foo"),
+                        },
+                        "0000000000000000000000000000000000000000000000000000000000000001.size"(b"\0\0\0\0\0\0\0\x01"),
+                    },
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
+    }
+
+    #[test]
+    fn got_artifact_success_file_in_cache() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_file(Apple, digest!(1), b"foo", vec![jid!(1), jid!(100)]);
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.got_artifact_success_file(Apple, digest!(1), b"bar", vec![]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                },
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000001"(b"foo"),
+                    },
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+    }
+
+    #[test]
+    fn got_artifact_success_symlink_in_cache() {
+        let mut fixture = Fixture::new(10, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_symlink(Apple, digest!(1), "/foo", vec![jid!(1), jid!(100)]);
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.got_artifact_success_symlink(Apple, digest!(1), "/bar", vec![]);
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                removing {
+                },
+                sha256 {
+                    apple {
+                        "0000000000000000000000000000000000000000000000000000000000000001" -> "/foo",
+                    },
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
     }
 
     #[test]
