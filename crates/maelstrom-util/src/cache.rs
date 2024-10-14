@@ -714,15 +714,16 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     }
 
     /// Assuming that a reference count is already is already held for the artifact, increment it
-    /// by one and return true. If no reference count is already held, return false.
+    /// by one and return the size of the artifact. If no reference count is already held, return
+    /// None.
     #[must_use]
-    pub fn try_increment_ref_count(&mut self, kind: KeyKindT, digest: &Sha256Digest) -> bool {
+    pub fn try_increment_ref_count(&mut self, kind: KeyKindT, digest: &Sha256Digest) -> Option<u64> {
         let key = Key::new(kind, digest.clone());
-        if let Some(Entry::InUse { ref_count, .. }) = self.entries.get_mut(&key) {
+        if let Some(Entry::InUse { ref_count, bytes_used, .. }) = self.entries.get_mut(&key) {
             *ref_count = ref_count.checked_add(1).unwrap();
-            true
+            Some(*bytes_used)
         } else {
-            false
+            None
         }
     }
 
@@ -1172,7 +1173,7 @@ mod tests {
             &mut self,
             kind: TestKeyKind,
             digest: Sha256Digest,
-            expected: bool,
+            expected: Option<u64>,
         ) {
             assert_eq!(self.cache.try_increment_ref_count(kind, &digest), expected);
         }
@@ -1587,10 +1588,10 @@ mod tests {
         fixture.get_artifact(Apple, digest!(4), jid!(1), GetArtifact::Get);
         fixture.got_artifact_success_file(Apple, digest!(4), b"def", vec![jid!(1)]);
 
-        fixture.try_increment_ref_count(Apple, digest!(1), false);
-        fixture.try_increment_ref_count(Apple, digest!(2), false);
-        fixture.try_increment_ref_count(Apple, digest!(3), false);
-        fixture.try_increment_ref_count(Apple, digest!(4), true);
+        fixture.try_increment_ref_count(Apple, digest!(1), None);
+        fixture.try_increment_ref_count(Apple, digest!(2), None);
+        fixture.try_increment_ref_count(Apple, digest!(3), None);
+        fixture.try_increment_ref_count(Apple, digest!(4), Some(3));
 
         fixture.get_artifact(Apple, digest!(5), jid!(1), GetArtifact::Get);
         fixture.got_artifact_success_file(Apple, digest!(5), b"0123456789", vec![jid!(1)]);
