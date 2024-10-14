@@ -1,15 +1,18 @@
-use crate::cache::{
-    fs::{
-        std::{Fs as StdFs, TempDir as StdTempDir},
-        TempDir as _,
-    },
-    TempFileFactory,
-};
 use anyhow::Result;
 use futures::StreamExt as _;
 use maelstrom_base::{manifest::UnixTimestamp, ArtifactType, Sha256Digest};
 use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, UpperLayerBuilder};
-use maelstrom_util::{async_fs::Fs, root::Root};
+use maelstrom_util::{
+    async_fs::Fs,
+    cache::{
+        fs::{
+            std::{Fs as StdFs, TempDir as StdTempDir},
+            TempDir as _,
+        },
+        TempFileFactory,
+    },
+    root::Root,
+};
 use slog::Logger;
 use std::path::{Path, PathBuf};
 use tokio::io::BufReader;

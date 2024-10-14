@@ -1,6 +1,5 @@
 //! Code for the worker binary.
 
-mod cache;
 pub mod config;
 mod dispatcher;
 mod executor;
@@ -10,10 +9,6 @@ pub mod local_worker;
 pub mod signals;
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use cache::{
-    fs::{std::Fs as StdFs, TempFile as _},
-    Cache, CacheDir, GotArtifact,
-};
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
 use executor::{Executor, MountDir, TmpfsDir};
@@ -30,6 +25,11 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{
     async_fs,
+    cache::{
+        self,
+        fs::{std::Fs as StdFs, TempFile as _},
+        Cache, CacheDir, GotArtifact,
+    },
     config::common::{BrokerAddr, InlineLimit, Slots},
     fs::Fs,
     manifest::AsyncManifestReader,

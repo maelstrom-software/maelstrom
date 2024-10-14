@@ -24,6 +24,7 @@ futures-lite.workspace = true
 futures.workspace = true
 globset.workspace = true
 heck.workspace = true
+itertools.workspace = true
 lddtree.workspace = true
 lru.workspace = true
 maelstrom-base.workspace = true
@@ -31,6 +32,7 @@ maelstrom-linux = { workspace = true, features = ["std"] }
 maelstrom-macro.workspace = true
 num_cpus.workspace = true
 pin-project.workspace = true
+rand.workspace = true
 regex.workspace = true
 serde.workspace = true
 sha2.workspace = true
@@ -48,7 +50,7 @@ xdg.workspace = true
 concat-idents.workspace = true
 indoc.workspace = true
 maelstrom-simex.workspace = true
-rand.workspace = true
+maelstrom-test.workspace = true
 serde_test.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "time"] }
 

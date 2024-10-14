@@ -3,17 +3,19 @@
 
 mod tracker;
 
-use crate::{
-    cache::{self, fs, GetArtifact, GotArtifact, Key},
-    WorkerGetStrategy, WorkerKeyKind,
-};
+use crate::{WorkerGetStrategy, WorkerKeyKind};
 use anyhow::{Error, Result};
 use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
     ArtifactType, JobCompleted, JobError, JobId, JobOutcome, JobResult, JobSpec, JobWorkerStatus,
     Sha256Digest,
 };
-use maelstrom_util::{config::common::Slots, duration, ext::OptionExt as _};
+use maelstrom_util::{
+    cache::{self, fs, GetArtifact, GotArtifact, Key},
+    config::common::Slots,
+    duration,
+    ext::OptionExt as _,
+};
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
@@ -790,10 +792,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use crate::{cache::fs::test, WorkerKeyKind::*};
+    use crate::WorkerKeyKind::*;
     use anyhow::anyhow;
     use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;
+    use maelstrom_util::cache::fs::test;
     use std::{cell::RefCell, rc::Rc, time::Duration};
     use BrokerToWorker::*;
 

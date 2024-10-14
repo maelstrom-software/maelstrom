@@ -4,6 +4,7 @@
 
 pub mod r#async;
 pub mod async_fs;
+pub mod cache;
 pub mod clap;
 pub mod config;
 pub mod duration;

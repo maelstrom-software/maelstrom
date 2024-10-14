@@ -2,15 +2,15 @@
 
 pub mod fs;
 
-use anyhow::{Error, Result};
-use bytesize::ByteSize;
-use fs::{FileType, Fs, Metadata};
-use maelstrom_base::{JobId, Sha256Digest};
-use maelstrom_util::{
+use crate::{
     config::common::CacheSize,
     heap::{Heap, HeapDeps, HeapIndex},
     root::{Root, RootBuf},
 };
+use anyhow::{Error, Result};
+use bytesize::ByteSize;
+use fs::{FileType, Fs, Metadata};
+use maelstrom_base::{JobId, Sha256Digest};
 use slog::{debug, warn, Logger};
 use std::{
     cmp::Ordering,
@@ -974,11 +974,14 @@ fn kind_dir(sha256: &Root<Sha256Dir>, kind: impl KeyKind) -> RootBuf<KindDir> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use fs::{
-        test::{self, fs, Entry},
-        Metadata, TempDir as _, TempFile as _,
+    use super::{
+        fs::{
+            test::{self, Entry},
+            Metadata, TempDir as _, TempFile as _,
+        },
+        *,
     };
+    use crate::fs;
     use maelstrom_test::*;
     use slog::{o, Discard};
     use TestKeyKind::*;

@@ -1,6 +1,6 @@
-use crate::{cache::Key, WorkerKeyKind};
+use crate::WorkerKeyKind;
 use maelstrom_base::{ArtifactType, NonEmpty, Sha256Digest};
-use maelstrom_util::ext::OptionExt as _;
+use maelstrom_util::{cache::Key, ext::OptionExt as _};
 use sha2::{Digest as _, Sha256};
 use std::{
     collections::{HashMap, HashSet},

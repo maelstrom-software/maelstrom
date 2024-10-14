@@ -1,9 +1,11 @@
-use super::Metadata;
+use crate::{
+    cache::{self, fs::Metadata},
+    ext::{BoolExt as _, OptionExt as _},
+};
 use itertools::{Itertools, Position};
-use maelstrom_util::ext::{BoolExt as _, OptionExt as _};
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     error,
     ffi::{OsStr, OsString},
     fmt::Debug,
@@ -44,6 +46,7 @@ use strum::Display;
 ///   - A directory entry, which consists of the directory name, plus an entry list enclosed in
 ///     curly braces. The directory name can either be a bare word, if it's a valid identifier, or
 ///     a quoted string.
+#[macro_export]
 macro_rules! fs {
     (@expand [] -> [$($expanded:tt)*]) => {
         [$($expanded)*]
@@ -104,8 +107,6 @@ macro_rules! fs {
     };
     ($($body:tt)*) => ($crate::cache::fs::test::Entry::directory(fs!(@expand [$($body)*] -> [])));
 }
-
-pub(crate) use fs;
 
 #[derive(Clone, Debug)]
 pub struct Fs {
@@ -241,7 +242,7 @@ impl TempFile {
     }
 }
 
-impl super::TempFile for TempFile {
+impl cache::fs::TempFile for TempFile {
     fn path(&self) -> &Path {
         &self.0
     }
@@ -256,7 +257,7 @@ impl TempDir {
     }
 }
 
-impl super::TempDir for TempDir {
+impl cache::fs::TempDir for TempDir {
     fn path(&self) -> &Path {
         &self.0
     }
@@ -662,16 +663,16 @@ impl Entry {
     }
 
     /// Treating `self` as the root of the file system, attempt to resolve `path`.
-    fn lookup<'state, 'path>(&'state self, path: &'path Path) -> Lookup<'state> {
+    fn lookup<'state>(&'state self, path: &Path) -> Lookup<'state> {
         self.lookup_helper(path, self, Default::default())
     }
 
     /// Treating `self` as the root of the file system, attempt to resolve `path`. `cur` indicates
     /// the directory the resolution should be done relative to, while `component_path` represents
     /// the component path to `cur`.
-    fn lookup_helper<'state, 'path>(
+    fn lookup_helper<'state>(
         &'state self,
-        path: &'path Path,
+        path: &Path,
         mut cur: &'state Self,
         mut component_path: ComponentPath,
     ) -> Lookup<'state> {
@@ -852,7 +853,7 @@ enum Lookup<'state> {
 
 enum FollowSymlinks<'state> {
     /// The symlink resolved to a file entry. This contains the entry and the path to it.
-    FoundFile(&'state Box<[u8]>),
+    FoundFile(&'state [u8]),
 
     /// The symlink resolved to a directory entry. This contains the entry and the path to it.
     FoundDirectory(&'state BTreeMap<String, Entry>, ComponentPath),
@@ -927,14 +928,17 @@ impl<'a> IntoIterator for &'a ComponentPath {
     type Item = &'a String;
     type IntoIter = slice::Iter<'a, String>;
     fn into_iter(self) -> Self::IntoIter {
-        (&self.0).into_iter()
+        self.0.iter()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Fs as _, TempDir as _, TempFile as _};
-    use super::*;
+    use super::{
+        super::{Fs as _, TempDir as _, TempFile as _},
+        *,
+    };
+    use std::collections::HashMap;
 
     mod fs_macro {
         use super::*;
