@@ -82,7 +82,7 @@ async fn main_inner_inner(
         listener,
         scheduler_task.scheduler_sender().clone(),
         id_vendor,
-        scheduler_task.cache_tmp_path().to_owned(),
+        scheduler_task.temp_file_factory().clone(),
         log.clone(),
     ));
     join_set.spawn(stats_heartbeat(scheduler_task.scheduler_sender().clone()));

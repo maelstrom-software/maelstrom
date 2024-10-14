@@ -1,5 +1,5 @@
 use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use maelstrom_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
     Sha256Digest,
@@ -22,7 +22,9 @@ fn get_file<'fs>(
         channel_sender,
     ))?;
 
-    let (path, size) = channel_receiver.recv()??;
+    let (path, size) = channel_receiver
+        .recv()?
+        .ok_or_else(|| anyhow!("couldn't get reference count on artifact"))?;
     let f = fs.open_file(path)?;
     Ok((f, size))
 }

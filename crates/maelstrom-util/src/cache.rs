@@ -182,14 +182,14 @@ where
     }
 }
 
-pub trait KeyKind: Clone + Copy + Debug + Display + Eq + Hash + PartialEq {
+pub trait KeyKind: Clone + Copy + Debug + Display + Eq + Hash {
     type Iterator: Iterator<Item = Self>;
     fn iter() -> Self::Iterator;
 }
 
 pub trait GetStrategy {
     type Getter: Eq + Hash;
-    fn getter_from_job_id(job_id: JobId) -> Self::Getter;
+    fn getter_from_job_id(jid: JobId) -> Self::Getter;
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -717,9 +717,18 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     /// by one and return the size of the artifact. If no reference count is already held, return
     /// None.
     #[must_use]
-    pub fn try_increment_ref_count(&mut self, kind: KeyKindT, digest: &Sha256Digest) -> Option<u64> {
+    pub fn try_increment_ref_count(
+        &mut self,
+        kind: KeyKindT,
+        digest: &Sha256Digest,
+    ) -> Option<u64> {
         let key = Key::new(kind, digest.clone());
-        if let Some(Entry::InUse { ref_count, bytes_used, .. }) = self.entries.get_mut(&key) {
+        if let Some(Entry::InUse {
+            ref_count,
+            bytes_used,
+            ..
+        }) = self.entries.get_mut(&key)
+        {
             *ref_count = ref_count.checked_add(1).unwrap();
             Some(*bytes_used)
         } else {

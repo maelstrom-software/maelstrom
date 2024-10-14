@@ -8,10 +8,13 @@ use maelstrom_base::{
     proto::{ClientToBroker, Hello},
     ClientId, MonitorId, WorkerId,
 };
-use maelstrom_util::net;
+use maelstrom_util::{
+    cache::{fs::std::Fs, TempFileFactory},
+    net,
+};
 use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};
-use std::{future::Future, path::PathBuf, sync::Arc, thread};
+use std::{future::Future, sync::Arc, thread};
 use tokio::{
     io::BufReader,
     net::{TcpListener, TcpStream},
@@ -103,7 +106,7 @@ async fn unassigned_connection_main(
     mut socket: TcpStream,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
-    cache_tmp_path: PathBuf,
+    temp_file_factory: TempFileFactory<Fs>,
     log: Logger,
 ) {
     match net::read_message_from_async_socket(&mut socket).await {
@@ -229,7 +232,7 @@ async fn unassigned_connection_main(
             let socket = socket.into_std().unwrap();
             socket.set_nonblocking(false).unwrap();
             thread::spawn(move || -> Result<()> {
-                artifact_pusher::connection_main(socket, scheduler_sender, cache_tmp_path, log)
+                artifact_pusher::connection_main(socket, scheduler_sender, temp_file_factory, log)
             });
         }
         Err(err) => {
@@ -245,7 +248,7 @@ pub async fn listener_main(
     listener: TcpListener,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
-    cache_tmp_path: PathBuf,
+    temp_file_factory: TempFileFactory<Fs>,
     log: Logger,
 ) {
     loop {
@@ -257,7 +260,7 @@ pub async fn listener_main(
                     socket,
                     scheduler_sender.clone(),
                     id_vendor.clone(),
-                    cache_tmp_path.clone(),
+                    temp_file_factory.clone(),
                     log,
                 ));
             }

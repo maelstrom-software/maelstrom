@@ -512,11 +512,11 @@ impl cache::KeyKind for WorkerKeyKind {
     }
 }
 
-pub struct WorkerGetStrategy;
+pub enum WorkerGetStrategy {}
 
 impl cache::GetStrategy for WorkerGetStrategy {
     type Getter = ();
-    fn getter_from_job_id(_job_id: JobId) -> Self::Getter {}
+    fn getter_from_job_id(_jid: JobId) -> Self::Getter {}
 }
 
 type DefaultDispatcher = Dispatcher<

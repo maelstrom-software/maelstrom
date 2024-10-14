@@ -234,12 +234,18 @@ impl error::Error for Error {}
 
 pub type Result<T> = result::Result<T, Error>;
 
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct TempFile(PathBuf);
 
 impl TempFile {
     pub fn new(path: PathBuf) -> Self {
         Self(path)
+    }
+}
+
+impl From<&str> for TempFile {
+    fn from(temp_file: &str) -> Self {
+        Self::new(temp_file.into())
     }
 }
 
@@ -249,12 +255,18 @@ impl cache::fs::TempFile for TempFile {
     }
 }
 
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct TempDir(PathBuf);
 
 impl TempDir {
     pub fn new(path: PathBuf) -> Self {
         Self(path)
+    }
+}
+
+impl From<&str> for TempDir {
+    fn from(temp_dir: &str) -> Self {
+        Self::new(temp_dir.into())
     }
 }
 

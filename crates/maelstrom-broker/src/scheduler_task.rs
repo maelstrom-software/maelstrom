@@ -1,11 +1,15 @@
-mod cache;
 mod scheduler;
 
-pub use cache::CacheDir;
+pub use maelstrom_util::cache::CacheDir;
 
-use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
 use maelstrom_base::proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker};
-use maelstrom_util::{config::common::CacheSize, manifest::ManifestReader, root::RootBuf, sync};
+use maelstrom_util::{
+    cache::{self, Cache, TempFileFactory},
+    config::common::CacheSize,
+    manifest::ManifestReader,
+    root::RootBuf,
+    sync,
+};
 use scheduler::{Message, Scheduler, SchedulerDeps};
 use slog::Logger;
 use std::{
@@ -24,8 +28,7 @@ impl SchedulerDeps for PassThroughDeps {
     type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
     type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
     type MonitorSender = tokio_mpsc::UnboundedSender<BrokerToMonitor>;
-    type WorkerArtifactFetcherSender =
-        std_mpsc::Sender<Result<(PathBuf, u64), GetArtifactForWorkerError>>;
+    type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
     type ManifestError = io::Error;
     type ManifestIterator = ManifestReader<fs::File>;
 
@@ -48,7 +51,7 @@ impl SchedulerDeps for PassThroughDeps {
     fn send_message_to_worker_artifact_fetcher(
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
-        message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
+        message: Option<(PathBuf, u64)>,
     ) {
         sender.send(message).ok();
     }
@@ -61,28 +64,31 @@ impl SchedulerDeps for PassThroughDeps {
 /// The production scheduler message type. Some [Message] arms contain a
 /// [SchedulerDeps], so it's defined as a generic type. But in this module, we only use
 /// one implementation of [SchedulerDeps].
-pub type SchedulerMessage = Message<PassThroughDeps>;
+pub type SchedulerMessage = Message<PassThroughDeps, cache::fs::std::TempFile>;
 
 /// This type is used often enough to warrant an alias.
 pub type SchedulerSender = tokio_mpsc::UnboundedSender<SchedulerMessage>;
 
 pub struct SchedulerTask {
-    scheduler: Scheduler<Cache<StdCacheFs>, PassThroughDeps>,
+    scheduler: Scheduler<
+        Cache<cache::fs::std::Fs, scheduler::BrokerKeyKind, scheduler::BrokerGetStrategy>,
+        PassThroughDeps,
+    >,
     sender: SchedulerSender,
     receiver: tokio_mpsc::UnboundedReceiver<SchedulerMessage>,
-    cache_tmp_path: PathBuf,
+    temp_file_factory: TempFileFactory<cache::fs::std::Fs>,
 }
 
 impl SchedulerTask {
     pub fn new(cache_root: RootBuf<CacheDir>, cache_size: CacheSize, log: Logger) -> Self {
         let (sender, receiver) = tokio_mpsc::unbounded_channel();
-        let cache = Cache::new(StdCacheFs::new(), cache_root, cache_size, log);
-        let cache_tmp_path = cache.tmp_path();
+        let (cache, temp_file_factory) =
+            Cache::new(cache::fs::std::Fs, cache_root, cache_size, log).unwrap();
         SchedulerTask {
             scheduler: Scheduler::new(cache),
             sender,
             receiver,
-            cache_tmp_path,
+            temp_file_factory,
         }
     }
 
@@ -90,8 +96,8 @@ impl SchedulerTask {
         &self.sender
     }
 
-    pub fn cache_tmp_path(&self) -> &Path {
-        &self.cache_tmp_path
+    pub fn temp_file_factory(&self) -> &TempFileFactory<cache::fs::std::Fs> {
+        &self.temp_file_factory
     }
 
     /// Main loop for the scheduler. This should be run on a task of its own. There should be

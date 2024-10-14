@@ -1,7 +1,6 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
 use anyhow::Result;
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestFileData},
@@ -17,6 +16,7 @@ use maelstrom_base::{
     JobWorkerStatus, MonitorId, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
+    cache::{self, Cache, GetArtifact, GotArtifact},
     duration,
     ext::{BoolExt as _, OptionExt as _},
     heap::{Heap, HeapDeps, HeapIndex},
@@ -58,10 +58,33 @@ pub trait SchedulerDeps {
     fn send_message_to_worker_artifact_fetcher(
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
-        message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
+        message: Option<(PathBuf, u64)>,
     );
     fn read_manifest(&mut self, path: &Path)
         -> Result<Self::ManifestIterator, Self::ManifestError>;
+}
+
+#[derive(Clone, Copy, Debug, strum::Display, Eq, Hash, PartialEq, strum::EnumIter)]
+#[strum(serialize_all = "snake_case")]
+pub enum BrokerKeyKind {
+    Blob,
+}
+
+impl cache::KeyKind for BrokerKeyKind {
+    type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
+
+    fn iter() -> Self::Iterator {
+        <Self as strum::IntoEnumIterator>::iter()
+    }
+}
+
+pub enum BrokerGetStrategy {}
+
+impl cache::GetStrategy for BrokerGetStrategy {
+    type Getter = ClientId;
+    fn getter_from_job_id(jid: JobId) -> Self::Getter {
+        jid.cid
+    }
 }
 
 /// The required interface for the cache that is provided to the [`Scheduler`]. This mirrors the API
@@ -73,11 +96,13 @@ pub trait SchedulerDeps {
 /// these methods sometimes return actual values which can be handled immediately, unlike
 /// [`SchedulerDeps`].
 pub trait SchedulerCache {
+    type TempFile: cache::fs::TempFile;
+
     /// See [`super::cache::Cache::get_artifact`].
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact;
 
     /// See [`super::cache::Cache::got_artifact`].
-    fn got_artifact(&mut self, digest: Sha256Digest, size: u64, path: &Path) -> Vec<JobId>;
+    fn got_artifact(&mut self, digest: Sha256Digest, file: Self::TempFile) -> Vec<JobId>;
 
     /// See [`super::cache::Cache::decrement_refcount`].
     fn decrement_refcount(&mut self, digest: Sha256Digest);
@@ -86,48 +111,52 @@ pub trait SchedulerCache {
     fn client_disconnected(&mut self, cid: ClientId);
 
     /// See [`super::cache::Cache::get_artifact_for_worker`].
-    fn get_artifact_for_worker(
-        &mut self,
-        digest: &Sha256Digest,
-    ) -> Result<(PathBuf, u64), GetArtifactForWorkerError>;
+    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)>;
 
     /// See [`super::cache::Cache::cache_path`].
     fn cache_path(&self, digest: &Sha256Digest) -> PathBuf;
 }
 
-impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
+impl<FsT: cache::fs::Fs> SchedulerCache for Cache<FsT, BrokerKeyKind, BrokerGetStrategy> {
+    type TempFile = FsT::TempFile;
+
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
-        self.get_artifact(jid, digest)
+        self.get_artifact(BrokerKeyKind::Blob, digest, jid)
     }
 
-    fn got_artifact(&mut self, digest: Sha256Digest, size: u64, path: &Path) -> Vec<JobId> {
-        self.got_artifact(digest, size, path)
+    fn got_artifact(&mut self, digest: Sha256Digest, file: FsT::TempFile) -> Vec<JobId> {
+        self.got_artifact_success(
+            BrokerKeyKind::Blob,
+            &digest,
+            GotArtifact::File { source: file },
+        )
+        .map_err(|(err, _)| err)
+        .unwrap()
     }
 
     fn decrement_refcount(&mut self, digest: Sha256Digest) {
-        self.decrement_refcount(digest)
+        self.decrement_ref_count(BrokerKeyKind::Blob, &digest)
     }
 
     fn client_disconnected(&mut self, cid: ClientId) {
-        self.client_disconnected(cid)
+        self.getter_disconnected(cid)
     }
 
-    fn get_artifact_for_worker(
-        &mut self,
-        digest: &Sha256Digest,
-    ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
-        self.get_artifact_for_worker(digest)
+    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
+        let cache_path = self.cache_path(BrokerKeyKind::Blob, digest).into_path_buf();
+        self.try_increment_ref_count(BrokerKeyKind::Blob, digest)
+            .map(|size| (cache_path, size))
     }
 
     fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
-        self.cache_path(digest)
+        self.cache_path(BrokerKeyKind::Blob, digest).into_path_buf()
     }
 }
 
 /// The incoming messages, or events, for [`Scheduler`].
 ///
 /// If [`Scheduler`] weren't implement as an async state machine, these would be its methods.
-pub enum Message<DepsT: SchedulerDeps> {
+pub enum Message<DepsT: SchedulerDeps, TempFileT: cache::fs::TempFile> {
     /// The given client connected, and messages can be sent to it on the given sender.
     ClientConnected(ClientId, DepsT::ClientSender),
 
@@ -158,7 +187,7 @@ pub enum Message<DepsT: SchedulerDeps> {
 
     /// An artifact has been pushed to us. The artifact has the given digest and length. It is
     /// temporarily stored at the given path.
-    GotArtifact(Sha256Digest, u64, PathBuf),
+    GotArtifact(Sha256Digest, TempFileT),
 
     /// A worker has requested the given artifact be sent to it over the given sender. After the
     /// contents are sent to the worker, the refcount needs to be decremented with a
@@ -173,7 +202,7 @@ pub enum Message<DepsT: SchedulerDeps> {
     StatisticsHeartbeat,
 }
 
-impl<DepsT: SchedulerDeps> Debug for Message<DepsT> {
+impl<DepsT: SchedulerDeps, TempFileT: cache::fs::TempFile> Debug for Message<DepsT, TempFileT> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Message::ClientConnected(cid, _sender) => {
@@ -205,11 +234,10 @@ impl<DepsT: SchedulerDeps> Debug for Message<DepsT> {
             Message::FromMonitor(mid, msg) => {
                 f.debug_tuple("FromMonitor").field(mid).field(msg).finish()
             }
-            Message::GotArtifact(digest, size, path) => f
+            Message::GotArtifact(digest, file) => f
                 .debug_tuple("GotArtifact")
                 .field(digest)
-                .field(size)
-                .field(path)
+                .field(file)
                 .finish(),
             Message::GetArtifactForWorker(digest, _sender) => {
                 f.debug_tuple("GetArtifactForWorker").field(digest).finish()
@@ -239,7 +267,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
 
     /// Process an individual [`Message`]. This function doesn't block as the scheduler is
     /// implemented as an async state machine.
-    pub fn receive_message(&mut self, deps: &mut DepsT, msg: Message<DepsT>) {
+    pub fn receive_message(&mut self, deps: &mut DepsT, msg: Message<DepsT, CacheT::TempFile>) {
         match msg {
             Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
             Message::ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
@@ -261,9 +289,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::FromMonitor(mid, MonitorToBroker::StatisticsRequest) => {
                 self.receive_monitor_statistics_request(deps, mid)
             }
-            Message::GotArtifact(digest, size, path) => {
-                self.receive_got_artifact(deps, digest, size, path)
-            }
+            Message::GotArtifact(digest, file) => self.receive_got_artifact(deps, digest, file),
             Message::GetArtifactForWorker(digest, sender) => {
                 self.receive_get_artifact_for_worker(deps, digest, sender)
             }
@@ -700,11 +726,10 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         &mut self,
         deps: &mut DepsT,
         digest: Sha256Digest,
-        size: u64,
-        path: PathBuf,
+        file: CacheT::TempFile,
     ) {
         let mut just_enqueued = HashSet::default();
-        for jid in self.cache.got_artifact(digest.clone(), size, &path) {
+        for jid in self.cache.got_artifact(digest.clone(), file) {
             let client = self.clients.0.get_mut(&jid.cid).unwrap();
             let job = client.jobs.get_mut(&jid.cjid).unwrap();
             job.acquired_artifacts
@@ -815,9 +840,9 @@ mod tests {
         ToClient(ClientId, BrokerToClient),
         ToWorker(WorkerId, BrokerToWorker),
         ToMonitor(MonitorId, BrokerToMonitor),
-        ToWorkerArtifactFetcher(u32, Result<(PathBuf, u64), GetArtifactForWorkerError>),
+        ToWorkerArtifactFetcher(u32, Option<(PathBuf, u64)>),
         CacheGetArtifact(JobId, Sha256Digest),
-        CacheGotArtifact(Sha256Digest, u64, PathBuf),
+        CacheGotArtifact(Sha256Digest, cache::fs::test::TempFile),
         CacheDecrementRefcount(Sha256Digest),
         CacheClientDisconnected(ClientId),
         CacheGetArtifactForWorker(Sha256Digest),
@@ -837,11 +862,13 @@ mod tests {
         got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<JobId>>>,
         #[allow(clippy::type_complexity)]
         get_artifact_for_worker_returns:
-            HashMap<Sha256Digest, Vec<Result<(PathBuf, u64), GetArtifactForWorkerError>>>,
+            HashMap<Sha256Digest, Vec<Option<(PathBuf, u64)>>>,
         read_manifest_returns: HashMap<Sha256Digest, Vec<ManifestEntry>>,
     }
 
     impl SchedulerCache for Rc<RefCell<TestState>> {
+        type TempFile = cache::fs::test::TempFile;
+
         fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
             self.borrow_mut()
                 .messages
@@ -852,11 +879,11 @@ mod tests {
                 .unwrap()
                 .remove(0)
         }
-        fn got_artifact(&mut self, digest: Sha256Digest, size: u64, path: &Path) -> Vec<JobId> {
+
+        fn got_artifact(&mut self, digest: Sha256Digest, file: Self::TempFile) -> Vec<JobId> {
             self.borrow_mut().messages.push(CacheGotArtifact(
                 digest.clone(),
-                size,
-                path.to_owned(),
+                file,
             ));
             self.borrow_mut()
                 .got_artifact_returns
@@ -864,20 +891,23 @@ mod tests {
                 .unwrap()
                 .remove(0)
         }
+
         fn decrement_refcount(&mut self, digest: Sha256Digest) {
             self.borrow_mut()
                 .messages
                 .push(CacheDecrementRefcount(digest));
         }
+
         fn client_disconnected(&mut self, cid: ClientId) {
             self.borrow_mut()
                 .messages
                 .push(CacheClientDisconnected(cid));
         }
+
         fn get_artifact_for_worker(
             &mut self,
             digest: &Sha256Digest,
-        ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
+        ) -> Option<(PathBuf, u64)> {
             self.borrow_mut()
                 .messages
                 .push(CacheGetArtifactForWorker(digest.clone()));
@@ -887,6 +917,7 @@ mod tests {
                 .unwrap()
                 .remove(0)
         }
+
         fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
             Path::new("/").join(digest.to_string())
         }
@@ -934,7 +965,7 @@ mod tests {
         fn send_message_to_worker_artifact_fetcher(
             &mut self,
             sender: &mut TestWorkerArtifactFetcherSender,
-            message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
+            message: Option<(PathBuf, u64)>,
         ) {
             self.borrow_mut()
                 .messages
@@ -978,7 +1009,7 @@ mod tests {
             got_artifact_returns: [(Sha256Digest, Vec<Vec<JobId>>); M],
             get_artifact_for_worker_returns: [(
                 Sha256Digest,
-                Vec<Result<(PathBuf, u64), GetArtifactForWorkerError>>,
+                Vec<Option<(PathBuf, u64)>>,
             ); N],
             read_manifest_returns: [(Sha256Digest, Vec<ManifestEntry>); O],
         ) -> Self {
@@ -1013,7 +1044,7 @@ mod tests {
             );
         }
 
-        fn receive_message(&mut self, msg: Message<Rc<RefCell<TestState>>>) {
+        fn receive_message(&mut self, msg: Message<Rc<RefCell<TestState>>, cache::fs::test::TempFile>) {
             self.scheduler.receive_message(&mut self.test_state, msg);
         }
     }
@@ -1792,11 +1823,11 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![43], 100, "/z/tmp/foo".into()) => {
-            CacheGotArtifact(digest![43], 100, "/z/tmp/foo".into()),
+        GotArtifact(digest![43], "/z/tmp/foo".into()) => {
+            CacheGotArtifact(digest![43], "/z/tmp/foo".into()),
         };
-        GotArtifact(digest![44], 100, "/z/tmp/bar".into()) => {
-            CacheGotArtifact(digest![44], 100, "/z/tmp/bar".into()),
+        GotArtifact(digest![44], "/z/tmp/bar".into()) => {
+            CacheGotArtifact(digest![44], "/z/tmp/bar".into()),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Tar), (43, Tar), (44, Tar)]])),
         };
 
@@ -1853,8 +1884,8 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![42], 100, "/z/tmp/bar".into()) => {
-            CacheGotArtifact(digest![42], 100, "/z/tmp/bar".into()),
+        GotArtifact(digest![42], "/z/tmp/bar".into()) => {
+            CacheGotArtifact(digest![42], "/z/tmp/bar".into()),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Tar), (42, Tar)]])),
         };
 
@@ -1895,14 +1926,14 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![42], 100, "/z/tmp/foo".into()) => {
-            CacheGotArtifact(digest![42], 100, "/z/tmp/foo".into()),
+        GotArtifact(digest![42], "/z/tmp/foo".into()) => {
+            CacheGotArtifact(digest![42], "/z/tmp/foo".into()),
             CacheGetArtifact(jid![1, 2], digest![43]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
         };
 
-        GotArtifact(digest![43], 100, "/z/tmp/bar".into()) => {
-            CacheGotArtifact(digest![43], 100, "/z/tmp/bar".into()),
+        GotArtifact(digest![43], "/z/tmp/bar".into()) => {
+            CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Manifest)]])),
         };
 
@@ -1955,14 +1986,14 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![42], 100, "/z/tmp/foo".into()) => {
-            CacheGotArtifact(digest![42], 100, "/z/tmp/foo".into()),
+        GotArtifact(digest![42], "/z/tmp/foo".into()) => {
+            CacheGotArtifact(digest![42], "/z/tmp/foo".into()),
             CacheGetArtifact(jid![1, 2], digest![43]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
         };
 
-        GotArtifact(digest![43], 100, "/z/tmp/bar".into()) => {
-            CacheGotArtifact(digest![43], 100, "/z/tmp/bar".into()),
+        GotArtifact(digest![43], "/z/tmp/bar".into()) => {
+            CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Manifest)]])),
         };
 
@@ -2005,8 +2036,8 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![43], 100, "/z/tmp/bar".into()) => {
-            CacheGotArtifact(digest![43], 100, "/z/tmp/bar".into()),
+        GotArtifact(digest![43], "/z/tmp/bar".into()) => {
+            CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Manifest)]])),
         };
 
@@ -2049,8 +2080,8 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![43], 100, "/z/tmp/bar".into()) => {
-            CacheGotArtifact(digest![43], 100, "/z/tmp/bar".into()),
+        GotArtifact(digest![43], "/z/tmp/bar".into()) => {
+            CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Manifest)]])),
         };
 
@@ -2155,13 +2186,13 @@ mod tests {
             Fixture::new([], [], [
                 (
                     digest![42],
-                    vec![Ok(("/a/good/path".into(), 42))],
+                    vec![Some(("/a/good/path".into(), 42))],
                 ),
             ], [])
         },
         GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
             CacheGetArtifactForWorker(digest![42]),
-            ToWorkerArtifactFetcher(1, Ok(("/a/good/path".into(), 42))),
+            ToWorkerArtifactFetcher(1, Some(("/a/good/path".into(), 42))),
         }
     }
 
@@ -2171,13 +2202,13 @@ mod tests {
             Fixture::new([], [], [
                 (
                     digest![42],
-                    vec![Ok(("/a/good/path".into(), 42))]
+                    vec![Some(("/a/good/path".into(), 42))]
                 ),
             ], [])
         },
         GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
             CacheGetArtifactForWorker(digest![42]),
-            ToWorkerArtifactFetcher(1, Ok(("/a/good/path".into(), 42)))
+            ToWorkerArtifactFetcher(1, Some(("/a/good/path".into(), 42)))
         }
     }
 
