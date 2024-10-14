@@ -775,6 +775,17 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         }
     }
 
+    pub fn getter_disconnected(&mut self, getter: GetStrategyT::Getter) {
+        self.entries.retain(|_, e| {
+            let Entry::Getting { jobs, getters } = e else {
+                return true;
+            };
+            jobs.retain(|jid| GetStrategyT::getter_from_job_id(*jid) != getter);
+            getters.remove(&getter);
+            !jobs.is_empty()
+        });
+    }
+
     /// Return the directory path for the artifact referenced by `digest`.
     pub fn cache_path(&self, kind: KeyKindT, digest: &Sha256Digest) -> RootBuf<EntryPath> {
         let kind_dir: RootBuf<KindDir> = self.sha256.join(kind.to_string());
@@ -1876,6 +1887,42 @@ mod tests {
             },
         });
         fixture.assert_pending_recursive_rmdirs([]);
+    }
+
+    #[test]
+    fn getter_disconnected_getting() {
+        let mut fixture = Fixture::new(1, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+
+        fixture.cache.getter_disconnected(TestGetter::Large);
+
+        // Only jid!(1) is returned.
+        fixture.got_artifact_success_file(Apple, digest!(1), b"foo", vec![jid!(1)]);
+
+        fixture.assert_bytes_used(3);
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.assert_bytes_used(0);
+    }
+
+    #[test]
+    fn getter_disconnected_in_use() {
+        let mut fixture = Fixture::new(1, fs! {});
+
+        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+
+        fixture.got_artifact_success_file(Apple, digest!(1), b"foo", vec![jid!(1), jid!(100)]);
+
+        // No effect since the cache has already turned the jid into a refcount.
+        fixture.cache.getter_disconnected(TestGetter::Large);
+
+        fixture.assert_bytes_used(3);
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.assert_bytes_used(3);
+        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.assert_bytes_used(0);
     }
 
     #[test]
