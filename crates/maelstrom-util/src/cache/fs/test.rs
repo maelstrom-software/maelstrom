@@ -20,18 +20,19 @@ use strum::Display;
 ///
 /// Here is an example that illustrates most of the features:
 /// ```
-/// fs! {
+/// use maelstrom_util::fs;
+/// let entry = fs! {
 ///     subdir {
 ///         file_in_subdir(b"123"),
 ///         symlink_in_subdir -> "../subdir2",
 ///         nested_subdir {
-///             file_in_nested_subdir(43),
+///             file_in_nested_subdir(b"contents"),
 ///         },
 ///     },
 ///     "subdir2" {},
 ///     "file"(b"456"),
 ///     "symlink" -> "subdir",
-/// }
+/// };
 /// ```
 ///
 /// More specifically, this macro expects an "entry list". An entry list consists of zero or more
