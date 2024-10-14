@@ -5,7 +5,7 @@ mod tracker;
 
 use crate::{
     cache::{self, fs, GetArtifact, GotArtifact, Key},
-    EntryKind, WorkerGetStrategy,
+    WorkerGetStrategy, WorkerKeyKind,
 };
 use anyhow::{Error, Result};
 use maelstrom_base::{
@@ -97,44 +97,54 @@ pub trait BrokerSender {
 /// public interface. We have this so we can isolate [`Dispatcher`] when testing.
 pub trait Cache {
     type Fs: fs::Fs;
-    fn get_artifact(&mut self, kind: EntryKind, artifact: Sha256Digest, jid: JobId) -> GetArtifact;
-    fn got_artifact_failure(&mut self, kind: EntryKind, digest: &Sha256Digest) -> Vec<JobId>;
+    fn get_artifact(
+        &mut self,
+        kind: WorkerKeyKind,
+        artifact: Sha256Digest,
+        jid: JobId,
+    ) -> GetArtifact;
+    fn got_artifact_failure(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest) -> Vec<JobId>;
     fn got_artifact_success(
         &mut self,
-        kind: EntryKind,
+        kind: WorkerKeyKind,
         digest: &Sha256Digest,
         artifact: GotArtifact<Self::Fs>,
     ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)>;
-    fn decrement_ref_count(&mut self, kind: EntryKind, digest: &Sha256Digest);
-    fn cache_path(&self, kind: EntryKind, digest: &Sha256Digest) -> PathBuf;
+    fn decrement_ref_count(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest);
+    fn cache_path(&self, kind: WorkerKeyKind, digest: &Sha256Digest) -> PathBuf;
 }
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
-impl Cache for cache::Cache<fs::std::Fs, EntryKind, WorkerGetStrategy> {
+impl Cache for cache::Cache<fs::std::Fs, WorkerKeyKind, WorkerGetStrategy> {
     type Fs = fs::std::Fs;
 
-    fn get_artifact(&mut self, kind: EntryKind, artifact: Sha256Digest, jid: JobId) -> GetArtifact {
+    fn get_artifact(
+        &mut self,
+        kind: WorkerKeyKind,
+        artifact: Sha256Digest,
+        jid: JobId,
+    ) -> GetArtifact {
         self.get_artifact(kind, artifact, jid)
     }
 
-    fn got_artifact_failure(&mut self, kind: EntryKind, digest: &Sha256Digest) -> Vec<JobId> {
+    fn got_artifact_failure(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest) -> Vec<JobId> {
         self.got_artifact_failure(kind, digest)
     }
 
     fn got_artifact_success(
         &mut self,
-        kind: EntryKind,
+        kind: WorkerKeyKind,
         digest: &Sha256Digest,
         artifact: GotArtifact<fs::std::Fs>,
     ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)> {
         self.got_artifact_success(kind, digest, artifact)
     }
 
-    fn decrement_ref_count(&mut self, kind: EntryKind, digest: &Sha256Digest) {
+    fn decrement_ref_count(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest) {
         self.decrement_ref_count(kind, digest)
     }
 
-    fn cache_path(&self, kind: EntryKind, digest: &Sha256Digest) -> PathBuf {
+    fn cache_path(&self, kind: WorkerKeyKind, digest: &Sha256Digest) -> PathBuf {
         self.cache_path(kind, digest).into_path_buf()
     }
 }
@@ -246,7 +256,7 @@ struct AvailableJob {
     jid: JobId,
     spec: JobSpec,
     path: PathBuf,
-    cache_keys: HashSet<Key<EntryKind>>,
+    cache_keys: HashSet<Key<WorkerKeyKind>>,
 }
 
 impl PartialEq for AvailableJob {
@@ -305,7 +315,7 @@ enum ExecutingJobState<DepsT: Deps> {
 /// and destroyed when we get a `Message::JobCompleted`.
 struct ExecutingJob<DepsT: Deps> {
     state: ExecutingJobState<DepsT>,
-    cache_keys: HashSet<Key<EntryKind>>,
+    cache_keys: HashSet<Key<WorkerKeyKind>>,
 }
 
 /// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
@@ -341,10 +351,10 @@ where
     fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult {
         match self
             .cache
-            .get_artifact(EntryKind::Blob, digest.clone(), self.jid)
+            .get_artifact(WorkerKeyKind::Blob, digest.clone(), self.jid)
         {
             GetArtifact::Success => {
-                FetcherResult::Got(self.cache.cache_path(EntryKind::Blob, digest))
+                FetcherResult::Got(self.cache.cache_path(WorkerKeyKind::Blob, digest))
             }
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
@@ -362,10 +372,10 @@ where
     ) -> FetcherResult {
         match self
             .cache
-            .get_artifact(EntryKind::BottomFsLayer, digest.clone(), self.jid)
+            .get_artifact(WorkerKeyKind::BottomFsLayer, digest.clone(), self.jid)
         {
             GetArtifact::Success => {
-                FetcherResult::Got(self.cache.cache_path(EntryKind::BottomFsLayer, digest))
+                FetcherResult::Got(self.cache.cache_path(WorkerKeyKind::BottomFsLayer, digest))
             }
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
@@ -387,10 +397,10 @@ where
     ) -> FetcherResult {
         match self
             .cache
-            .get_artifact(EntryKind::UpperFsLayer, digest.clone(), self.jid)
+            .get_artifact(WorkerKeyKind::UpperFsLayer, digest.clone(), self.jid)
         {
             GetArtifact::Success => {
-                FetcherResult::Got(self.cache.cache_path(EntryKind::UpperFsLayer, digest))
+                FetcherResult::Got(self.cache.cache_path(WorkerKeyKind::UpperFsLayer, digest))
             }
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get => {
@@ -507,7 +517,7 @@ where
             *state = ExecutingJobState::Canceled;
         } else {
             // It may be the queue.
-            let mut keys_to_drop: Vec<Key<EntryKind>> = vec![];
+            let mut keys_to_drop: Vec<Key<WorkerKeyKind>> = vec![];
             let keys_to_drop_ref = &mut keys_to_drop;
             self.available.retain(|entry| {
                 if entry.jid != jid {
@@ -593,7 +603,13 @@ where
         }
     }
 
-    fn cache_fill_failure(&mut self, kind: EntryKind, digest: Sha256Digest, msg: &str, err: Error) {
+    fn cache_fill_failure(
+        &mut self,
+        kind: WorkerKeyKind,
+        digest: Sha256Digest,
+        msg: &str,
+        err: Error,
+    ) {
         for jid in self.cache.got_artifact_failure(kind, &digest) {
             self.job_failure(&digest, jid, msg, &err)
         }
@@ -602,7 +618,7 @@ where
     fn advance_job(
         &mut self,
         jid: JobId,
-        kind: EntryKind,
+        kind: WorkerKeyKind,
         digest: &Sha256Digest,
         cb: impl FnOnce(
             &mut LayerTracker,
@@ -636,7 +652,7 @@ where
 
     fn cache_fill_success(
         &mut self,
-        kind: EntryKind,
+        kind: WorkerKeyKind,
         digest: Sha256Digest,
         artifact: GotArtifact<CacheT::Fs>,
         err_msg: &str,
@@ -670,7 +686,7 @@ where
         artifact: GotArtifact<CacheT::Fs>,
     ) {
         self.cache_fill_success(
-            EntryKind::Blob,
+            WorkerKeyKind::Blob,
             digest,
             artifact,
             "Failed to save artifact in cache",
@@ -680,7 +696,7 @@ where
 
     fn receive_artifact_failure(&mut self, digest: Sha256Digest, err: Error) {
         let msg = "Failed to download and extract layer artifact";
-        self.cache_fill_failure(EntryKind::Blob, digest, msg, err)
+        self.cache_fill_failure(WorkerKeyKind::Blob, digest, msg, err)
     }
 
     fn receive_build_bottom_fs_layer_success(
@@ -689,7 +705,7 @@ where
         artifact: GotArtifact<CacheT::Fs>,
     ) {
         self.cache_fill_success(
-            EntryKind::BottomFsLayer,
+            WorkerKeyKind::BottomFsLayer,
             digest,
             artifact,
             "Failed to save bottom FS layer",
@@ -699,7 +715,7 @@ where
 
     fn receive_build_bottom_fs_layer_failure(&mut self, digest: Sha256Digest, err: Error) {
         let msg = "Failed to build bottom FS layer";
-        self.cache_fill_failure(EntryKind::BottomFsLayer, digest, msg, err)
+        self.cache_fill_failure(WorkerKeyKind::BottomFsLayer, digest, msg, err)
     }
 
     fn receive_build_upper_fs_layer_success(
@@ -708,7 +724,7 @@ where
         artifact: GotArtifact<CacheT::Fs>,
     ) {
         self.cache_fill_success(
-            EntryKind::UpperFsLayer,
+            WorkerKeyKind::UpperFsLayer,
             digest,
             artifact,
             "Failed to save upper FS layer",
@@ -718,7 +734,7 @@ where
 
     fn receive_build_upper_fs_layer_failure(&mut self, digest: Sha256Digest, err: Error) {
         let msg = "Failed to build upper FS layer";
-        self.cache_fill_failure(EntryKind::UpperFsLayer, digest, msg, err)
+        self.cache_fill_failure(WorkerKeyKind::UpperFsLayer, digest, msg, err)
     }
 
     fn receive_read_manifest_digests_success(
@@ -729,7 +745,7 @@ where
     ) {
         self.advance_job(
             jid,
-            EntryKind::Blob,
+            WorkerKeyKind::Blob,
             &digest,
             move |tracker, digest, fetcher| {
                 tracker.got_manifest_digests(digest, digests, fetcher);
@@ -774,7 +790,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use crate::{cache::fs::test, EntryKind::*};
+    use crate::{cache::fs::test, WorkerKeyKind::*};
     use anyhow::anyhow;
     use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;
@@ -789,11 +805,11 @@ mod tests {
         BuildBottomFsLayer(Sha256Digest, ArtifactType, PathBuf),
         BuildUpperFsLayer(Sha256Digest, PathBuf, PathBuf),
         ReadManifestDigests(Sha256Digest, PathBuf, JobId),
-        CacheGetArtifact(EntryKind, Sha256Digest, JobId),
-        CacheGotArtifactSuccess(EntryKind, Sha256Digest, GotArtifact<test::Fs>),
-        CacheGotArtifactFailure(EntryKind, Sha256Digest),
-        CacheDecrementRefCount(EntryKind, Sha256Digest),
-        CachePath(EntryKind, Sha256Digest),
+        CacheGetArtifact(WorkerKeyKind, Sha256Digest, JobId),
+        CacheGotArtifactSuccess(WorkerKeyKind, Sha256Digest, GotArtifact<test::Fs>),
+        CacheGotArtifactFailure(WorkerKeyKind, Sha256Digest),
+        CacheDecrementRefCount(WorkerKeyKind, Sha256Digest),
+        CachePath(WorkerKeyKind, Sha256Digest),
         JobHandleDropped(JobId),
         StartTimer(JobId, Duration),
         TimerHandleDropped(JobId),
@@ -803,10 +819,10 @@ mod tests {
 
     struct TestState {
         messages: Vec<TestMessage>,
-        get_artifact_returns: HashMap<Key<EntryKind>, GetArtifact>,
-        got_artifact_success_returns: HashMap<Key<EntryKind>, Vec<JobId>>,
-        got_artifact_failure_returns: HashMap<Key<EntryKind>, Vec<JobId>>,
-        cache_path_returns: HashMap<Key<EntryKind>, PathBuf>,
+        get_artifact_returns: HashMap<Key<WorkerKeyKind>, GetArtifact>,
+        got_artifact_success_returns: HashMap<Key<WorkerKeyKind>, Vec<JobId>>,
+        got_artifact_failure_returns: HashMap<Key<WorkerKeyKind>, Vec<JobId>>,
+        cache_path_returns: HashMap<Key<WorkerKeyKind>, PathBuf>,
         closed: bool,
     }
 
@@ -892,7 +908,7 @@ mod tests {
 
         fn get_artifact(
             &mut self,
-            kind: EntryKind,
+            kind: WorkerKeyKind,
             digest: Sha256Digest,
             jid: JobId,
         ) -> GetArtifact {
@@ -905,7 +921,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("unexpected get_artifact of {kind:?} {digest}"))
         }
 
-        fn got_artifact_failure(&mut self, kind: EntryKind, digest: &Sha256Digest) -> Vec<JobId> {
+        fn got_artifact_failure(
+            &mut self,
+            kind: WorkerKeyKind,
+            digest: &Sha256Digest,
+        ) -> Vec<JobId> {
             self.borrow_mut()
                 .messages
                 .push(CacheGotArtifactFailure(kind, digest.clone()));
@@ -917,7 +937,7 @@ mod tests {
 
         fn got_artifact_success(
             &mut self,
-            kind: EntryKind,
+            kind: WorkerKeyKind,
             digest: &Sha256Digest,
             artifact: GotArtifact<Self::Fs>,
         ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)> {
@@ -933,13 +953,13 @@ mod tests {
                 .unwrap())
         }
 
-        fn decrement_ref_count(&mut self, kind: EntryKind, digest: &Sha256Digest) {
+        fn decrement_ref_count(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest) {
             self.borrow_mut()
                 .messages
                 .push(CacheDecrementRefCount(kind, digest.clone()))
         }
 
-        fn cache_path(&self, kind: EntryKind, digest: &Sha256Digest) -> PathBuf {
+        fn cache_path(&self, kind: WorkerKeyKind, digest: &Sha256Digest) -> PathBuf {
             self.borrow_mut()
                 .messages
                 .push(CachePath(kind, digest.clone()));
@@ -964,10 +984,10 @@ mod tests {
     impl Fixture {
         fn new<const L: usize, const M: usize, const N: usize, const O: usize>(
             slots: u16,
-            get_artifact_returns: [(Key<EntryKind>, GetArtifact); L],
-            got_artifact_success_returns: [(Key<EntryKind>, Vec<JobId>); M],
-            got_artifact_failure_returns: [(Key<EntryKind>, Vec<JobId>); N],
-            cache_path_returns: [(Key<EntryKind>, PathBuf); O],
+            get_artifact_returns: [(Key<WorkerKeyKind>, GetArtifact); L],
+            got_artifact_success_returns: [(Key<WorkerKeyKind>, Vec<JobId>); M],
+            got_artifact_failure_returns: [(Key<WorkerKeyKind>, Vec<JobId>); N],
+            cache_path_returns: [(Key<WorkerKeyKind>, PathBuf); O],
         ) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
                 messages: Vec::default(),

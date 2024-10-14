@@ -498,13 +498,13 @@ async fn handle_incoming_messages(
     Clone, Copy, Debug, strum::Display, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter,
 )]
 #[strum(serialize_all = "snake_case")]
-pub enum EntryKind {
+pub enum WorkerKeyKind {
     Blob,
     BottomFsLayer,
     UpperFsLayer,
 }
 
-impl cache::KeyKind for EntryKind {
+impl cache::KeyKind for WorkerKeyKind {
     type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
 
     fn iter() -> Self::Iterator {
@@ -523,7 +523,7 @@ type DefaultDispatcher = Dispatcher<
     DispatcherAdapter,
     ArtifactFetcher,
     BrokerSender,
-    Cache<StdFs, EntryKind, WorkerGetStrategy>,
+    Cache<StdFs, WorkerKeyKind, WorkerGetStrategy>,
 >;
 
 async fn dispatcher_main(
