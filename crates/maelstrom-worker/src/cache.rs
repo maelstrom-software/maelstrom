@@ -192,24 +192,6 @@ pub trait GetStrategy {
     fn getter_from_job_id(job_id: JobId) -> Self::Getter;
 }
 
-#[derive(
-    Clone, Copy, Debug, strum::Display, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum EntryKind {
-    Blob,
-    BottomFsLayer,
-    UpperFsLayer,
-}
-
-impl KeyKind for EntryKind {
-    type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
-
-    fn iter() -> Self::Iterator {
-        <Self as strum::IntoEnumIterator>::iter()
-    }
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Key<KeyKindT> {
     pub kind: KeyKindT,

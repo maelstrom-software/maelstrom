@@ -1,4 +1,4 @@
-use crate::cache::{EntryKind, Key};
+use crate::{cache::Key, EntryKind};
 use maelstrom_base::{ArtifactType, NonEmpty, Sha256Digest};
 use maelstrom_util::ext::OptionExt as _;
 use sha2::{Digest as _, Sha256};

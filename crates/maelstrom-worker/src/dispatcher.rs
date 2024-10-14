@@ -4,8 +4,8 @@
 mod tracker;
 
 use crate::{
-    cache::{self, fs, EntryKind, GetArtifact, GotArtifact, Key},
-    WorkerGetStrategy,
+    cache::{self, fs, GetArtifact, GotArtifact, Key},
+    EntryKind, WorkerGetStrategy,
 };
 use anyhow::{Error, Result};
 use maelstrom_base::{
@@ -774,7 +774,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use crate::cache::{fs::test, EntryKind::*};
+    use crate::{cache::fs::test, EntryKind::*};
     use anyhow::anyhow;
     use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;

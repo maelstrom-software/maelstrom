@@ -12,7 +12,7 @@ pub mod signals;
 use anyhow::{anyhow, bail, Context as _, Result};
 use cache::{
     fs::{std::Fs as StdFs, TempFile as _},
-    Cache, CacheDir, EntryKind, GotArtifact,
+    Cache, CacheDir, GotArtifact,
 };
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
@@ -491,6 +491,24 @@ async fn handle_incoming_messages(
     while dispatcher.num_executing() > 0 {
         let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
         let _ = handle_dispatcher_message(msg, &mut dispatcher);
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, strum::Display, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum EntryKind {
+    Blob,
+    BottomFsLayer,
+    UpperFsLayer,
+}
+
+impl cache::KeyKind for EntryKind {
+    type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
+
+    fn iter() -> Self::Iterator {
+        <Self as strum::IntoEnumIterator>::iter()
     }
 }
 
