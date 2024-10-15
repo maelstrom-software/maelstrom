@@ -1,8 +1,7 @@
 use crate::{
     dispatcher::{self, Message},
     fetcher,
-    types::TempFileFactory,
-    DispatcherSender,
+    types::{DispatcherSender, TempFileFactory},
 };
 use maelstrom_base::Sha256Digest;
 use maelstrom_util::{

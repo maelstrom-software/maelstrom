@@ -23,7 +23,7 @@ use futures::StreamExt as _;
 use lru::LruCache;
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
-    proto::{BrokerToWorker, Hello, WorkerToBroker},
+    proto::{Hello, WorkerToBroker},
     JobId, Sha256Digest,
 };
 use maelstrom_layer_fs::BlobDir;
@@ -49,13 +49,11 @@ use std::{
     sync::Arc,
     {path::PathBuf, process, time::Duration},
 };
-use tokio::{
-    io::BufReader,
-    net::TcpStream,
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    task::{self},
+use tokio::{io::BufReader, net::TcpStream, sync::mpsc, task};
+use types::{
+    BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache, DispatcherReceiver,
+    DispatcherSender,
 };
-use types::Cache;
 
 pub struct WorkerCacheDir;
 
@@ -150,11 +148,6 @@ impl ManifestDigestCache {
         }
     }
 }
-
-type DispatcherReceiver = UnboundedReceiver<Message<StdFs>>;
-pub type DispatcherSender = UnboundedSender<Message<StdFs>>;
-type BrokerSocketOutgoingSender = UnboundedSender<WorkerToBroker>;
-type BrokerSocketIncomingReceiver = UnboundedReceiver<BrokerToWorker>;
 
 pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
 

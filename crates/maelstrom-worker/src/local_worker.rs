@@ -3,6 +3,7 @@ pub use crate::{
     dispatcher::{ArtifactFetcher, BrokerSender, Cache as CacheTrait, Deps, Dispatcher, Message},
     dispatcher_adapter::DispatcherAdapter,
     executor::{MountDir, TmpfsDir},
+    types::DispatcherSender,
     WorkerCacheDir,
 };
 pub use maelstrom_layer_fs::BlobDir;
