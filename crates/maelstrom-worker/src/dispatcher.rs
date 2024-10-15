@@ -34,12 +34,130 @@ use tracker::{FetcherResult, LayerTracker};
  *  FIGLET: public
  */
 
-/// The external dependencies for [`Dispatcher`]. All of these methods must be asynchronous: they
-/// must not block the current task or thread.
+/// An input message for the dispatcher. These come from various sources.
+#[derive(Debug)]
+pub enum Message<FsT: fs::Fs> {
+    /// A message from the broker. These messages enqueue and cancel jobs.
+    Broker(BrokerToWorker),
+
+    /// A message notifying the dispatcher that a job has completed. The dispatcher starts jobs by
+    /// calling [`Deps::start_job`], and expects each call to eventually result in one of these
+    /// messages.
+    JobCompleted(JobId, JobResult<JobCompleted, String>),
+
+    /// A message notifying the dispatcher that a job has timed out. The dispatcher starts timers
+    /// by calling [`Deps::start_timer`], and expects each call to eventually result in one of
+    /// these messages, unless the timer is explicitly canceled by dropping the corresponding
+    /// [`Deps::TimerHandle`].
+    JobTimer(JobId),
+
+    /// A message notifying the dispatcher that an artifact fetch has completed. The dispatcher
+    /// starts artifact fetches by calling [`ArtifactFetcher::start_artifact_fetch`], and expects
+    /// each call to eventually result in one of these messages.
+    ArtifactFetchCompleted(Sha256Digest, Result<GotArtifact<FsT>>),
+
+    /// A message notifying the dispatcher that the building of a bottom FS layer has completed.
+    /// The dispatcher starts building of bottom FS layers by calling
+    /// [`Deps::build_bottom_fs_layer`], and expects each call to eventually result in one of these
+    /// messages.
+    BuiltBottomFsLayer(Sha256Digest, Result<GotArtifact<FsT>>),
+
+    /// A message notifying the dispatcher that the building of an upper FS layer has completed.
+    /// The dispatcher starts building of upper FS layers by calling
+    /// [`Deps::build_upper_fs_layer`], and expects each call to eventually result in one of these
+    /// messages.
+    BuiltUpperFsLayer(Sha256Digest, Result<GotArtifact<FsT>>),
+
+    /// A message notifying the dispatcher that the reading of digests from a manifest has
+    /// completed. The dispatcher starts reading digetss from a manifest by calling
+    /// [`Deps::read_manifest_digests`], and expects each call to eventually result in one of these
+    /// messages.
+    ReadManifestDigests(Sha256Digest, JobId, Result<HashSet<Sha256Digest>>),
+
+    /// A message notifying the dispatcher that it must enter the shutdown state. In this state,
+    /// the dispatcher will schedule no new work, but will continue to process job completions. The
+    /// sender can check [`Dispatcher::num_executing`] to know when all jobs have completed.
+    Shutdown(Error),
+}
+
+impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
+    Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
+where
+    DepsT: Deps,
+    ArtifactFetcherT: ArtifactFetcher,
+    BrokerSenderT: BrokerSender,
+    CacheT: Cache,
+{
+    /// Create a new [`Dispatcher`] with the provided slot count. The slot count must be a positive
+    /// number.
+    pub fn new(
+        deps: DepsT,
+        artifact_fetcher: ArtifactFetcherT,
+        broker_sender: BrokerSenderT,
+        cache: CacheT,
+        slots: Slots,
+    ) -> Self {
+        Dispatcher {
+            deps,
+            artifact_fetcher,
+            broker_sender,
+            cache,
+            slots: slots.into_inner().into(),
+            awaiting_layers: HashMap::default(),
+            available: BinaryHeap::default(),
+            executing: HashMap::default(),
+        }
+    }
+
+    /// Process an incoming message. Messages come from the broker and from executors. See
+    /// [`Message`] for more information.
+    pub fn receive_message(&mut self, msg: Message<CacheT::Fs>) {
+        match msg {
+            Message::Broker(BrokerToWorker::EnqueueJob(jid, spec)) => {
+                self.receive_enqueue_job(jid, spec)
+            }
+            Message::Broker(BrokerToWorker::CancelJob(jid)) => self.receive_cancel_job(jid),
+            Message::JobCompleted(jid, result) => self.receive_job_completed(jid, result),
+            Message::JobTimer(jid) => self.receive_job_timer(jid),
+            Message::ArtifactFetchCompleted(digest, Ok(artifact)) => {
+                self.receive_artifact_success(digest, artifact)
+            }
+            Message::ArtifactFetchCompleted(digest, Err(err)) => {
+                self.receive_artifact_failure(digest, err)
+            }
+            Message::BuiltBottomFsLayer(digest, Ok(artifact)) => {
+                self.receive_build_bottom_fs_layer_success(digest, artifact)
+            }
+            Message::BuiltBottomFsLayer(digest, Err(err)) => {
+                self.receive_build_bottom_fs_layer_failure(digest, err)
+            }
+            Message::BuiltUpperFsLayer(digest, Ok(artifact)) => {
+                self.receive_build_upper_fs_layer_success(digest, artifact)
+            }
+            Message::BuiltUpperFsLayer(digest, Err(err)) => {
+                self.receive_build_upper_fs_layer_failure(digest, err)
+            }
+            Message::ReadManifestDigests(digest, jid, Ok(digests)) => {
+                self.receive_read_manifest_digests_success(digest, jid, digests)
+            }
+            Message::ReadManifestDigests(digest, jid, Err(err)) => {
+                self.receive_read_manifest_digests_failure(digest, jid, err)
+            }
+            Message::Shutdown(_) => self.receive_shutdown(),
+        }
+    }
+
+    /// Returns the number of executing jobs
+    pub fn num_executing(&self) -> usize {
+        self.executing.len()
+    }
+}
+
+/// The external dependencies for [`Dispatcher`]. These methods must not block the current thread.
 pub trait Deps {
     /// The job handle should kill an outstanding job when it is dropped. Even if the job is
-    /// killed, the `Dispatcher` should always be called with [`Message::JobCompleted`]. It must be
-    /// safe to drop this handle after the job has completed.
+    /// killed, the [`Dispatcher`] should always be called with [`Message::JobCompleted`]. It must
+    /// be safe to drop this handle after the job has completed.
     type JobHandle;
 
     /// Start a new job. The dispatcher expects a [`Message::JobCompleted`] message when the job
@@ -48,7 +166,7 @@ pub trait Deps {
 
     /// The timer handle should cancel an outstanding timer when it is dropped. It must be safe to
     /// drop this handle after the timer has completed. Dropping this handle may or may not result
-    /// in no [`Message::JobTimer`] message. The dispatcher must be prepared to handle the case
+    /// in a [`Message::JobTimer`] message. The dispatcher must be prepared to handle the case
     /// where the message arrives even after this handle has been dropped.
     type TimerHandle;
 
@@ -56,7 +174,7 @@ pub trait Deps {
     /// canceled beforehand.
     fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle;
 
-    /// Start a task that will build a layer-fs bottom layer out of an artifact
+    /// Start a task that will build a layer-fs bottom layer out of an artifact.
     fn build_bottom_fs_layer(
         &mut self,
         digest: Sha256Digest,
@@ -64,7 +182,7 @@ pub trait Deps {
         artifact_path: PathBuf,
     );
 
-    /// Start a task that will build a layer-fs upper layer by stacking a bottom layer
+    /// Start a task that will build a layer-fs upper layer by stacking a bottom layer.
     fn build_upper_fs_layer(
         &mut self,
         digest: Sha256Digest,
@@ -76,17 +194,17 @@ pub trait Deps {
     fn read_manifest_digests(&mut self, digest: Sha256Digest, path: PathBuf, jid: JobId);
 }
 
-/// The artifact fetcher is split out of [`Deps`] for convenience. The rest of [`Deps`] can stay
-/// the same for "real" and local workers, but the artifact fetching is different
+/// The artifact fetcher is split out of [`Deps`] for convenience. Artifact fetching is different
+/// for "real" and local workers, but the rest of [`Deps`] is the same.
 pub trait ArtifactFetcher {
     /// Start a thread that will download an artifact from the broker.
     fn start_artifact_fetch(&mut self, digest: Sha256Digest);
 }
 
-/// The broker sender is split out of [`Deps`] for convenience. The rest of [`Deps`] can stay
-/// the same for "real" and local workers, but sending messages to the broker is different. For the
-/// "real" worker, we just enqueue the message as it is, but for the local worker, we need to wrap
-/// it in a local-broker-specific message.
+/// The broker sender is split out of [`Deps`] for convenience. Sending message to the broker is
+/// different for "real" and local workers, but the rest of [`Deps`] is the same. For the "real"
+/// worker, we just enqueue the message as it is, but for the local worker, we need to wrap it in a
+/// local-broker-specific message.
 pub trait BrokerSender {
     /// Send a message to the broker.
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
@@ -95,8 +213,8 @@ pub trait BrokerSender {
     fn close(&mut self);
 }
 
-/// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
-/// public interface. We have this so we can isolate [`Dispatcher`] when testing.
+/// The [`cache::Cache`] dependency for [`Dispatcher`]. This should be very similar to
+/// [`cache::Cache`]'s public interface.
 pub trait Cache {
     type Fs: fs::Fs;
     fn get_artifact(
@@ -148,88 +266,6 @@ impl Cache for cache::Cache<fs::std::Fs, WorkerKeyKind, WorkerGetStrategy> {
 
     fn cache_path(&self, kind: WorkerKeyKind, digest: &Sha256Digest) -> PathBuf {
         self.cache_path(kind, digest).into_path_buf()
-    }
-}
-
-/// An input message for the dispatcher. These come from the broker, an executor, or an artifact
-/// fetcher.
-#[derive(Debug)]
-pub enum Message<FsT: fs::Fs> {
-    Broker(BrokerToWorker),
-    JobCompleted(JobId, JobResult<JobCompleted, String>),
-    JobTimer(JobId),
-    ArtifactFetchCompleted(Sha256Digest, Result<GotArtifact<FsT>>),
-    BuiltBottomFsLayer(Sha256Digest, Result<GotArtifact<FsT>>),
-    BuiltUpperFsLayer(Sha256Digest, Result<GotArtifact<FsT>>),
-    ReadManifestDigests(Sha256Digest, JobId, Result<HashSet<Sha256Digest>>),
-    Shutdown(Error),
-}
-
-impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
-    Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
-where
-    DepsT: Deps,
-    ArtifactFetcherT: ArtifactFetcher,
-    BrokerSenderT: BrokerSender,
-    CacheT: Cache,
-{
-    /// Create a new dispatcher with the provided slot count. The slot count must be a positive
-    /// number.
-    pub fn new(
-        deps: DepsT,
-        artifact_fetcher: ArtifactFetcherT,
-        broker_sender: BrokerSenderT,
-        cache: CacheT,
-        slots: Slots,
-    ) -> Self {
-        Dispatcher {
-            deps,
-            artifact_fetcher,
-            broker_sender,
-            cache,
-            slots: slots.into_inner().into(),
-            awaiting_layers: HashMap::default(),
-            available: BinaryHeap::default(),
-            executing: HashMap::default(),
-        }
-    }
-
-    /// Process an incoming message. Messages come from the broker and from executors. See
-    /// [Message] for more information.
-    pub fn receive_message(&mut self, msg: Message<CacheT::Fs>) {
-        match msg {
-            Message::Broker(BrokerToWorker::EnqueueJob(jid, spec)) => {
-                self.receive_enqueue_job(jid, spec)
-            }
-            Message::Broker(BrokerToWorker::CancelJob(jid)) => self.receive_cancel_job(jid),
-            Message::JobCompleted(jid, result) => self.receive_job_completed(jid, result),
-            Message::JobTimer(jid) => self.receive_job_timer(jid),
-            Message::ArtifactFetchCompleted(digest, Ok(artifact)) => {
-                self.receive_artifact_success(digest, artifact)
-            }
-            Message::ArtifactFetchCompleted(digest, Err(err)) => {
-                self.receive_artifact_failure(digest, err)
-            }
-            Message::BuiltBottomFsLayer(digest, Ok(artifact)) => {
-                self.receive_build_bottom_fs_layer_success(digest, artifact)
-            }
-            Message::BuiltBottomFsLayer(digest, Err(err)) => {
-                self.receive_build_bottom_fs_layer_failure(digest, err)
-            }
-            Message::BuiltUpperFsLayer(digest, Ok(artifact)) => {
-                self.receive_build_upper_fs_layer_success(digest, artifact)
-            }
-            Message::BuiltUpperFsLayer(digest, Err(err)) => {
-                self.receive_build_upper_fs_layer_failure(digest, err)
-            }
-            Message::ReadManifestDigests(digest, jid, Ok(digests)) => {
-                self.receive_read_manifest_digests_success(digest, jid, digests)
-            }
-            Message::ReadManifestDigests(digest, jid, Err(err)) => {
-                self.receive_read_manifest_digests_failure(digest, jid, err)
-            }
-            Message::Shutdown(_) => self.receive_shutdown(),
-        }
     }
 }
 
@@ -324,7 +360,7 @@ struct ExecutingJob<DepsT: Deps> {
 /// requests than there are slots, the extra requests are queued in a FIFO queue. It's up to the
 /// broker to order the requests properly.
 ///
-/// All methods are completely nonblocking. They will never block the task or the thread.
+/// All methods are completely nonblocking. They will never block the thread.
 pub struct Dispatcher<DepsT: Deps, ArtifactFetcherT, BrokerSenderT, CacheT> {
     deps: DepsT,
     artifact_fetcher: ArtifactFetcherT,
@@ -334,92 +370,6 @@ pub struct Dispatcher<DepsT: Deps, ArtifactFetcherT, BrokerSenderT, CacheT> {
     awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
     available: BinaryHeap<AvailableJob>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
-}
-
-struct Fetcher<'dispatcher, DepsT, ArtifactFetcherT, CacheT> {
-    deps: &'dispatcher mut DepsT,
-    artifact_fetcher: &'dispatcher mut ArtifactFetcherT,
-    cache: &'dispatcher mut CacheT,
-    jid: JobId,
-}
-
-impl<'dispatcher, DepsT, ArtifactFetcherT, CacheT> tracker::Fetcher
-    for Fetcher<'dispatcher, DepsT, ArtifactFetcherT, CacheT>
-where
-    DepsT: Deps,
-    ArtifactFetcherT: ArtifactFetcher,
-    CacheT: Cache,
-{
-    fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult {
-        match self
-            .cache
-            .get_artifact(WorkerKeyKind::Blob, digest.clone(), self.jid)
-        {
-            GetArtifact::Success => {
-                FetcherResult::Got(self.cache.cache_path(WorkerKeyKind::Blob, digest))
-            }
-            GetArtifact::Wait => FetcherResult::Pending,
-            GetArtifact::Get => {
-                self.artifact_fetcher.start_artifact_fetch(digest.clone());
-                FetcherResult::Pending
-            }
-        }
-    }
-
-    fn fetch_bottom_fs_layer(
-        &mut self,
-        digest: &Sha256Digest,
-        artifact_type: ArtifactType,
-        artifact_path: &Path,
-    ) -> FetcherResult {
-        match self
-            .cache
-            .get_artifact(WorkerKeyKind::BottomFsLayer, digest.clone(), self.jid)
-        {
-            GetArtifact::Success => {
-                FetcherResult::Got(self.cache.cache_path(WorkerKeyKind::BottomFsLayer, digest))
-            }
-            GetArtifact::Wait => FetcherResult::Pending,
-            GetArtifact::Get => {
-                self.deps.build_bottom_fs_layer(
-                    digest.clone(),
-                    artifact_type,
-                    artifact_path.into(),
-                );
-                FetcherResult::Pending
-            }
-        }
-    }
-
-    fn fetch_upper_fs_layer(
-        &mut self,
-        digest: &Sha256Digest,
-        lower_layer_path: &Path,
-        upper_layer_path: &Path,
-    ) -> FetcherResult {
-        match self
-            .cache
-            .get_artifact(WorkerKeyKind::UpperFsLayer, digest.clone(), self.jid)
-        {
-            GetArtifact::Success => {
-                FetcherResult::Got(self.cache.cache_path(WorkerKeyKind::UpperFsLayer, digest))
-            }
-            GetArtifact::Wait => FetcherResult::Pending,
-            GetArtifact::Get => {
-                self.deps.build_upper_fs_layer(
-                    digest.clone(),
-                    lower_layer_path.into(),
-                    upper_layer_path.into(),
-                );
-                FetcherResult::Pending
-            }
-        }
-    }
-
-    fn fetch_manifest_digests(&mut self, digest: &Sha256Digest, path: &Path) {
-        self.deps
-            .read_manifest_digests(digest.clone(), path.into(), self.jid);
-    }
 }
 
 impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
@@ -774,10 +724,91 @@ where
             self.receive_cancel_job(jid);
         }
     }
+}
 
-    /// Returns the number of executing jobs
-    pub fn num_executing(&self) -> usize {
-        self.executing.len()
+struct Fetcher<'dispatcher, DepsT, ArtifactFetcherT, CacheT> {
+    deps: &'dispatcher mut DepsT,
+    artifact_fetcher: &'dispatcher mut ArtifactFetcherT,
+    cache: &'dispatcher mut CacheT,
+    jid: JobId,
+}
+
+impl<'dispatcher, DepsT, ArtifactFetcherT, CacheT> tracker::Fetcher
+    for Fetcher<'dispatcher, DepsT, ArtifactFetcherT, CacheT>
+where
+    DepsT: Deps,
+    ArtifactFetcherT: ArtifactFetcher,
+    CacheT: Cache,
+{
+    fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult {
+        match self
+            .cache
+            .get_artifact(WorkerKeyKind::Blob, digest.clone(), self.jid)
+        {
+            GetArtifact::Success => {
+                FetcherResult::Got(self.cache.cache_path(WorkerKeyKind::Blob, digest))
+            }
+            GetArtifact::Wait => FetcherResult::Pending,
+            GetArtifact::Get => {
+                self.artifact_fetcher.start_artifact_fetch(digest.clone());
+                FetcherResult::Pending
+            }
+        }
+    }
+
+    fn fetch_bottom_fs_layer(
+        &mut self,
+        digest: &Sha256Digest,
+        artifact_type: ArtifactType,
+        artifact_path: &Path,
+    ) -> FetcherResult {
+        match self
+            .cache
+            .get_artifact(WorkerKeyKind::BottomFsLayer, digest.clone(), self.jid)
+        {
+            GetArtifact::Success => {
+                FetcherResult::Got(self.cache.cache_path(WorkerKeyKind::BottomFsLayer, digest))
+            }
+            GetArtifact::Wait => FetcherResult::Pending,
+            GetArtifact::Get => {
+                self.deps.build_bottom_fs_layer(
+                    digest.clone(),
+                    artifact_type,
+                    artifact_path.into(),
+                );
+                FetcherResult::Pending
+            }
+        }
+    }
+
+    fn fetch_upper_fs_layer(
+        &mut self,
+        digest: &Sha256Digest,
+        lower_layer_path: &Path,
+        upper_layer_path: &Path,
+    ) -> FetcherResult {
+        match self
+            .cache
+            .get_artifact(WorkerKeyKind::UpperFsLayer, digest.clone(), self.jid)
+        {
+            GetArtifact::Success => {
+                FetcherResult::Got(self.cache.cache_path(WorkerKeyKind::UpperFsLayer, digest))
+            }
+            GetArtifact::Wait => FetcherResult::Pending,
+            GetArtifact::Get => {
+                self.deps.build_upper_fs_layer(
+                    digest.clone(),
+                    lower_layer_path.into(),
+                    upper_layer_path.into(),
+                );
+                FetcherResult::Pending
+            }
+        }
+    }
+
+    fn fetch_manifest_digests(&mut self, digest: &Sha256Digest, path: &Path) {
+        self.deps
+            .read_manifest_digests(digest.clone(), path.into(), self.jid);
     }
 }
 
