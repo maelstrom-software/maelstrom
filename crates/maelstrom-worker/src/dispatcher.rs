@@ -3,7 +3,7 @@
 
 mod tracker;
 
-use crate::{WorkerGetStrategy, WorkerKeyKind};
+use crate::WorkerKeyKind;
 use anyhow::{Error, Result};
 use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
@@ -11,7 +11,7 @@ use maelstrom_base::{
     Sha256Digest,
 };
 use maelstrom_util::{
-    cache::{self, fs, GetArtifact, GotArtifact, Key},
+    cache::{fs, GetArtifact, GotArtifact, Key},
     config::common::Slots,
     duration,
     ext::OptionExt as _,
@@ -232,41 +232,6 @@ pub trait Cache {
     ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)>;
     fn decrement_ref_count(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest);
     fn cache_path(&self, kind: WorkerKeyKind, digest: &Sha256Digest) -> PathBuf;
-}
-
-/// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
-impl Cache for cache::Cache<fs::std::Fs, WorkerKeyKind, WorkerGetStrategy> {
-    type Fs = fs::std::Fs;
-
-    fn get_artifact(
-        &mut self,
-        kind: WorkerKeyKind,
-        artifact: Sha256Digest,
-        jid: JobId,
-    ) -> GetArtifact {
-        self.get_artifact(kind, artifact, jid)
-    }
-
-    fn got_artifact_failure(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest) -> Vec<JobId> {
-        self.got_artifact_failure(kind, digest)
-    }
-
-    fn got_artifact_success(
-        &mut self,
-        kind: WorkerKeyKind,
-        digest: &Sha256Digest,
-        artifact: GotArtifact<fs::std::Fs>,
-    ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)> {
-        self.got_artifact_success(kind, digest, artifact)
-    }
-
-    fn decrement_ref_count(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest) {
-        self.decrement_ref_count(kind, digest)
-    }
-
-    fn cache_path(&self, kind: WorkerKeyKind, digest: &Sha256Digest) -> PathBuf {
-        self.cache_path(kind, digest).into_path_buf()
-    }
 }
 
 /*             _            _
