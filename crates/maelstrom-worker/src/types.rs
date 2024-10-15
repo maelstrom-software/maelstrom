@@ -1,6 +1,6 @@
 use crate::{
     artifact_fetcher::ArtifactFetcher, deps::CacheGetStrategy, dispatcher,
-    dispatcher_adapter::DispatcherAdapter, BrokerSender,
+    dispatcher_adapter::DispatcherAdapter,
 };
 use maelstrom_base::proto::{BrokerToWorker, WorkerToBroker};
 use maelstrom_util::cache::{self, fs};
@@ -21,6 +21,30 @@ impl cache::KeyKind for CacheKeyKind {
 
     fn iter() -> Self::Iterator {
         <Self as strum::IntoEnumIterator>::iter()
+    }
+}
+
+pub struct BrokerSender {
+    sender: Option<BrokerSocketOutgoingSender>,
+}
+
+impl BrokerSender {
+    pub fn new(broker_socket_outgoing_sender: BrokerSocketOutgoingSender) -> Self {
+        Self {
+            sender: Some(broker_socket_outgoing_sender),
+        }
+    }
+}
+
+impl dispatcher::BrokerSender for BrokerSender {
+    fn send_message_to_broker(&mut self, message: WorkerToBroker) {
+        if let Some(sender) = self.sender.as_ref() {
+            sender.send(message).ok();
+        }
+    }
+
+    fn close(&mut self) {
+        self.sender = None;
     }
 }
 

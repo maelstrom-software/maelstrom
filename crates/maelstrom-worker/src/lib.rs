@@ -21,7 +21,7 @@ use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
 use executor::{MountDir, TmpfsDir};
 use futures::StreamExt as _;
-use maelstrom_base::proto::{Hello, WorkerToBroker};
+use maelstrom_base::proto::Hello;
 use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal, WaitStatus,
@@ -36,37 +36,13 @@ use slog::{debug, error, info, Logger};
 use std::{future::Future, pin::pin, process, slice, time::Duration};
 use tokio::{io::BufReader, net::TcpStream, sync::mpsc};
 use types::{
-    BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache, DefaultDispatcher,
-    DispatcherReceiver, DispatcherSender,
+    BrokerSender, BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache,
+    DefaultDispatcher, DispatcherReceiver, DispatcherSender,
 };
 
 pub struct WorkerCacheDir;
 
 pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
-
-struct BrokerSender {
-    sender: Option<BrokerSocketOutgoingSender>,
-}
-
-impl BrokerSender {
-    fn new(broker_socket_outgoing_sender: BrokerSocketOutgoingSender) -> Self {
-        Self {
-            sender: Some(broker_socket_outgoing_sender),
-        }
-    }
-}
-
-impl dispatcher::BrokerSender for BrokerSender {
-    fn send_message_to_broker(&mut self, message: WorkerToBroker) {
-        if let Some(sender) = self.sender.as_ref() {
-            sender.send(message).ok();
-        }
-    }
-
-    fn close(&mut self) {
-        self.sender = None;
-    }
-}
 
 /// Returns error from shutdown message, or delivers message to dispatcher.
 fn handle_dispatcher_message(
