@@ -36,8 +36,8 @@ use slog::{debug, error, info, Logger};
 use std::{future::Future, pin::pin, process, slice, time::Duration};
 use tokio::{io::BufReader, net::TcpStream, sync::mpsc};
 use types::{
-    BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache, DispatcherReceiver,
-    DispatcherSender,
+    BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache, DefaultDispatcher,
+    DispatcherReceiver, DispatcherSender,
 };
 
 pub struct WorkerCacheDir;
@@ -120,8 +120,6 @@ async fn handle_incoming_messages(
         let _ = handle_dispatcher_message(msg, &mut dispatcher);
     }
 }
-
-type DefaultDispatcher = Dispatcher<DispatcherAdapter, ArtifactFetcher, BrokerSender, Cache>;
 
 async fn dispatcher_main(
     config: Config,
