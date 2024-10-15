@@ -483,10 +483,10 @@ impl Client {
                     debug!(
                         log_clone,
                         "canceling {} running jobs",
-                        worker_dispatcher.num_executing()
+                        worker_dispatcher.num_jobs_executing()
                     );
 
-                    while worker_dispatcher.num_executing() > 0 {
+                    while worker_dispatcher.num_jobs_executing() > 0 {
                         let msg = local_worker_receiver
                             .recv()
                             .await

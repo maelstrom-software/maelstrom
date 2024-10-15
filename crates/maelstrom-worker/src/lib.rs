@@ -483,12 +483,16 @@ async fn handle_incoming_messages(
     error!(log, "shutting down due to {err}");
 
     // This should close the connection with the broker, and canceling running jobs.
-    info!(log, "canceling {} running jobs", dispatcher.num_executing());
+    info!(
+        log,
+        "canceling {} running jobs",
+        dispatcher.num_jobs_executing()
+    );
     dispatcher.receive_message(Message::Shutdown(err));
     drop(broker_socket_incoming_recevier);
 
     // Wait for the running jobs to finish.
-    while dispatcher.num_executing() > 0 {
+    while dispatcher.num_jobs_executing() > 0 {
         let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
         let _ = handle_dispatcher_message(msg, &mut dispatcher);
     }

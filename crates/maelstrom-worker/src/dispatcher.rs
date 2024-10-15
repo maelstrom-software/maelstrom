@@ -148,7 +148,7 @@ where
     }
 
     /// Returns the number of executing jobs
-    pub fn num_executing(&self) -> usize {
+    pub fn num_jobs_executing(&self) -> usize {
         self.executing.len()
     }
 }
@@ -1675,14 +1675,14 @@ mod tests {
             .receive_message(Shutdown(anyhow!("test error")));
         fixture.expect_messages_in_any_order(vec![JobHandleDropped(jid!(1))]);
 
-        assert_eq!(fixture.dispatcher.num_executing(), 1);
+        assert_eq!(fixture.dispatcher.num_jobs_executing(), 1);
         assert!(fixture.test_state.borrow().closed);
 
         fixture
             .dispatcher
             .receive_message(JobCompleted(jid!(1), Ok(completed!(3))));
 
-        assert_eq!(fixture.dispatcher.num_executing(), 0);
+        assert_eq!(fixture.dispatcher.num_jobs_executing(), 0);
     }
 
     script_test! {
