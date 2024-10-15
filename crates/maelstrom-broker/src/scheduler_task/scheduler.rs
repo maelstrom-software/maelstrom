@@ -861,8 +861,7 @@ mod tests {
         get_artifact_returns: HashMap<(JobId, Sha256Digest), Vec<GetArtifact>>,
         got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<JobId>>>,
         #[allow(clippy::type_complexity)]
-        get_artifact_for_worker_returns:
-            HashMap<Sha256Digest, Vec<Option<(PathBuf, u64)>>>,
+        get_artifact_for_worker_returns: HashMap<Sha256Digest, Vec<Option<(PathBuf, u64)>>>,
         read_manifest_returns: HashMap<Sha256Digest, Vec<ManifestEntry>>,
     }
 
@@ -881,10 +880,9 @@ mod tests {
         }
 
         fn got_artifact(&mut self, digest: Sha256Digest, file: Self::TempFile) -> Vec<JobId> {
-            self.borrow_mut().messages.push(CacheGotArtifact(
-                digest.clone(),
-                file,
-            ));
+            self.borrow_mut()
+                .messages
+                .push(CacheGotArtifact(digest.clone(), file));
             self.borrow_mut()
                 .got_artifact_returns
                 .get_mut(&digest)
@@ -904,10 +902,7 @@ mod tests {
                 .push(CacheClientDisconnected(cid));
         }
 
-        fn get_artifact_for_worker(
-            &mut self,
-            digest: &Sha256Digest,
-        ) -> Option<(PathBuf, u64)> {
+        fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
             self.borrow_mut()
                 .messages
                 .push(CacheGetArtifactForWorker(digest.clone()));
@@ -1007,10 +1002,7 @@ mod tests {
         fn new<const L: usize, const M: usize, const N: usize, const O: usize>(
             get_artifact_returns: [((JobId, Sha256Digest), Vec<GetArtifact>); L],
             got_artifact_returns: [(Sha256Digest, Vec<Vec<JobId>>); M],
-            get_artifact_for_worker_returns: [(
-                Sha256Digest,
-                Vec<Option<(PathBuf, u64)>>,
-            ); N],
+            get_artifact_for_worker_returns: [(Sha256Digest, Vec<Option<(PathBuf, u64)>>); N],
             read_manifest_returns: [(Sha256Digest, Vec<ManifestEntry>); O],
         ) -> Self {
             let result = Self::default();
@@ -1044,7 +1036,10 @@ mod tests {
             );
         }
 
-        fn receive_message(&mut self, msg: Message<Rc<RefCell<TestState>>, cache::fs::test::TempFile>) {
+        fn receive_message(
+            &mut self,
+            msg: Message<Rc<RefCell<TestState>>, cache::fs::test::TempFile>,
+        ) {
             self.scheduler.receive_message(&mut self.test_state, msg);
         }
     }
