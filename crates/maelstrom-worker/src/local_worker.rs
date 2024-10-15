@@ -1,9 +1,9 @@
 pub use crate::{
     check_open_file_limit,
     dispatcher::{ArtifactFetcher, BrokerSender, Cache as CacheTrait, Deps, Dispatcher, Message},
-    executor::MountDir,
-    executor::TmpfsDir,
-    DispatcherAdapter, WorkerCacheDir,
+    dispatcher_adapter::DispatcherAdapter,
+    executor::{MountDir, TmpfsDir},
+    WorkerCacheDir,
 };
 pub use maelstrom_layer_fs::BlobDir;
 pub use maelstrom_util::cache::{
