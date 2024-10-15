@@ -1,12 +1,15 @@
 //! Code for the worker binary.
 
 pub mod config;
+pub mod local_worker;
+pub mod signals;
+
+mod deps;
 mod dispatcher;
 mod executor;
 mod fetcher;
 mod layer_fs;
-pub mod local_worker;
-pub mod signals;
+mod types;
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use config::Config;
@@ -26,9 +29,8 @@ use maelstrom_linux::{
 use maelstrom_util::{
     async_fs,
     cache::{
-        self,
         fs::{std::Fs as StdFs, TempFile as _},
-        Cache, CacheDir, GotArtifact,
+        CacheDir, GotArtifact,
     },
     config::common::{BrokerAddr, InlineLimit, Slots},
     fs::Fs,
@@ -45,7 +47,7 @@ use std::{
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
     path::Path,
-    result, slice,
+    slice,
     sync::Arc,
     {path::PathBuf, process, thread, time::Duration},
 };
@@ -57,6 +59,7 @@ use tokio::{
     task::{self, JoinHandle},
     time,
 };
+use types::{Cache, TempFileFactory};
 
 pub struct WorkerCacheDir;
 
@@ -168,7 +171,7 @@ pub struct DispatcherAdapter {
     layer_fs_cache: Arc<tokio::sync::Mutex<ReaderCache>>,
     manifest_digest_cache: ManifestDigestCache,
     layer_building_semaphore: Arc<tokio::sync::Semaphore>,
-    temp_file_factory: cache::TempFileFactory<StdFs>,
+    temp_file_factory: TempFileFactory,
 }
 
 pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
@@ -182,7 +185,7 @@ impl DispatcherAdapter {
         mount_dir: RootBuf<MountDir>,
         tmpfs_dir: RootBuf<TmpfsDir>,
         blob_dir: RootBuf<BlobDir>,
-        temp_file_factory: cache::TempFileFactory<StdFs>,
+        temp_file_factory: TempFileFactory,
     ) -> Result<Self> {
         let fs = Fs::new();
         fs.create_dir_all(&mount_dir)?;
@@ -366,7 +369,7 @@ struct ArtifactFetcher {
     dispatcher_sender: DispatcherSender,
     log: Logger,
     sem: Arc<Semaphore>,
-    temp_file_factory: cache::TempFileFactory<StdFs>,
+    temp_file_factory: TempFileFactory,
 }
 
 impl ArtifactFetcher {
@@ -374,7 +377,7 @@ impl ArtifactFetcher {
         dispatcher_sender: DispatcherSender,
         broker_addr: BrokerAddr,
         log: Logger,
-        temp_file_factory: cache::TempFileFactory<StdFs>,
+        temp_file_factory: TempFileFactory,
     ) -> Self {
         ArtifactFetcher {
             broker_addr,
@@ -418,41 +421,6 @@ impl dispatcher::ArtifactFetcher for ArtifactFetcher {
                 });
             }
         }
-    }
-}
-
-/// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
-impl dispatcher::Cache for cache::Cache<StdFs, WorkerKeyKind, WorkerGetStrategy> {
-    type Fs = StdFs;
-
-    fn get_artifact(
-        &mut self,
-        kind: WorkerKeyKind,
-        artifact: Sha256Digest,
-        jid: JobId,
-    ) -> cache::GetArtifact {
-        self.get_artifact(kind, artifact, jid)
-    }
-
-    fn got_artifact_failure(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest) -> Vec<JobId> {
-        self.got_artifact_failure(kind, digest)
-    }
-
-    fn got_artifact_success(
-        &mut self,
-        kind: WorkerKeyKind,
-        digest: &Sha256Digest,
-        artifact: GotArtifact<StdFs>,
-    ) -> result::Result<Vec<JobId>, (anyhow::Error, Vec<JobId>)> {
-        self.got_artifact_success(kind, digest, artifact)
-    }
-
-    fn decrement_ref_count(&mut self, kind: WorkerKeyKind, digest: &Sha256Digest) {
-        self.decrement_ref_count(kind, digest)
-    }
-
-    fn cache_path(&self, kind: WorkerKeyKind, digest: &Sha256Digest) -> PathBuf {
-        self.cache_path(kind, digest).into_path_buf()
     }
 }
 
@@ -533,37 +501,7 @@ async fn handle_incoming_messages(
     }
 }
 
-#[derive(
-    Clone, Copy, Debug, strum::Display, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum WorkerKeyKind {
-    Blob,
-    BottomFsLayer,
-    UpperFsLayer,
-}
-
-impl cache::KeyKind for WorkerKeyKind {
-    type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
-
-    fn iter() -> Self::Iterator {
-        <Self as strum::IntoEnumIterator>::iter()
-    }
-}
-
-pub enum WorkerGetStrategy {}
-
-impl cache::GetStrategy for WorkerGetStrategy {
-    type Getter = ();
-    fn getter_from_job_id(_jid: JobId) -> Self::Getter {}
-}
-
-type DefaultDispatcher = Dispatcher<
-    DispatcherAdapter,
-    ArtifactFetcher,
-    BrokerSender,
-    Cache<StdFs, WorkerKeyKind, WorkerGetStrategy>,
->;
+type DefaultDispatcher = Dispatcher<DispatcherAdapter, ArtifactFetcher, BrokerSender, Cache>;
 
 async fn dispatcher_main(
     config: Config,
