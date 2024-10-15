@@ -5,7 +5,6 @@ pub mod local_worker;
 pub mod signals;
 
 mod artifact_fetcher;
-mod deps;
 mod dispatcher;
 mod dispatcher_adapter;
 mod executor;
@@ -15,7 +14,7 @@ mod manifest_digest_cache;
 mod types;
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use artifact_fetcher::{ArtifactFetcher, MAX_ARTIFACT_FETCHES};
+use artifact_fetcher::ArtifactFetcher;
 use config::Config;
 use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
@@ -178,7 +177,7 @@ fn open_file_max(slots: Slots) -> u64 {
         maelstrom_fuse::MAX_INFLIGHT as u64 /* each FUSE request opens a file */;
     existing_open_files
         + (maelstrom_layer_fs::READER_CACHE_SIZE * 2) // 1 for socket, 1 for the file
-        + MAX_ARTIFACT_FETCHES
+        + artifact_fetcher::MAX_ARTIFACT_FETCHES
         + per_slot_estimate * u16::from(slots) as u64
         + (MAX_IN_FLIGHT_LAYERS_BUILDS * maelstrom_layer_fs::LAYER_BUILDING_FILE_MAX) as u64
 }
