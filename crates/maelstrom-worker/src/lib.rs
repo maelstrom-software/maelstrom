@@ -8,7 +8,6 @@ mod artifact_fetcher;
 mod dispatcher;
 mod dispatcher_adapter;
 mod executor;
-mod fetcher;
 mod layer_fs;
 mod manifest_digest_cache;
 mod types;
