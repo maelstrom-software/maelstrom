@@ -2,8 +2,9 @@ use crate::{
     dispatcher::{Deps, Message},
     executor::{self, Executor, MountDir, TmpfsDir},
     layer_fs,
+    manifest_digest_cache::ManifestDigestCache,
     types::{DispatcherSender, TempFileFactory},
-    ManifestDigestCache, MAX_IN_FLIGHT_LAYERS_BUILDS,
+    MAX_IN_FLIGHT_LAYERS_BUILDS,
 };
 use anyhow::Result;
 use maelstrom_base::{ArtifactType, JobError, JobId, JobSpec, Sha256Digest};
