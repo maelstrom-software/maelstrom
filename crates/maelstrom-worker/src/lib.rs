@@ -4,6 +4,7 @@ pub mod config;
 pub mod local_worker;
 pub mod signals;
 
+mod artifact_fetcher;
 mod deps;
 mod dispatcher;
 mod dispatcher_adapter;
@@ -13,6 +14,7 @@ mod layer_fs;
 mod types;
 
 use anyhow::{anyhow, bail, Context as _, Result};
+use artifact_fetcher::{ArtifactFetcher, MAX_ARTIFACT_FETCHES};
 use config::Config;
 use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
@@ -30,16 +32,13 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{
     async_fs,
-    cache::{
-        fs::{std::Fs as StdFs, TempFile as _},
-        CacheDir, GotArtifact,
-    },
-    config::common::{BrokerAddr, Slots},
+    cache::{fs::std::Fs as StdFs, CacheDir},
+    config::common::Slots,
     fs::Fs,
     manifest::AsyncManifestReader,
     net,
 };
-use slog::{debug, error, info, o, Logger};
+use slog::{debug, error, info, Logger};
 use std::future::Future;
 use std::pin::pin;
 use std::{
@@ -48,16 +47,15 @@ use std::{
     path::Path,
     slice,
     sync::Arc,
-    {path::PathBuf, process, thread, time::Duration},
+    {path::PathBuf, process, time::Duration},
 };
-use std_semaphore::Semaphore;
 use tokio::{
     io::BufReader,
     net::TcpStream,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task::{self},
 };
-use types::{Cache, TempFileFactory};
+use types::Cache;
 
 pub struct WorkerCacheDir;
 
@@ -159,68 +157,6 @@ type BrokerSocketOutgoingSender = UnboundedSender<WorkerToBroker>;
 type BrokerSocketIncomingReceiver = UnboundedReceiver<BrokerToWorker>;
 
 pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
-
-const MAX_ARTIFACT_FETCHES: u64 = 10;
-
-struct ArtifactFetcher {
-    broker_addr: BrokerAddr,
-    dispatcher_sender: DispatcherSender,
-    log: Logger,
-    sem: Arc<Semaphore>,
-    temp_file_factory: TempFileFactory,
-}
-
-impl ArtifactFetcher {
-    fn new(
-        dispatcher_sender: DispatcherSender,
-        broker_addr: BrokerAddr,
-        log: Logger,
-        temp_file_factory: TempFileFactory,
-    ) -> Self {
-        ArtifactFetcher {
-            broker_addr,
-            dispatcher_sender,
-            log,
-            sem: Arc::new(Semaphore::new(MAX_ARTIFACT_FETCHES as isize)),
-            temp_file_factory,
-        }
-    }
-}
-
-impl dispatcher::ArtifactFetcher for ArtifactFetcher {
-    fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
-        let sender = self.dispatcher_sender.clone();
-        let broker_addr = self.broker_addr;
-        let mut log = self.log.new(o!(
-            "digest" => digest.to_string(),
-            "broker_addr" => broker_addr.inner().to_string()
-        ));
-        match self.temp_file_factory.temp_file() {
-            Err(err) => {
-                debug!(log, "artifact fetcher failed to get a temporary file"; "err" => ?err);
-                sender
-                    .send(Message::ArtifactFetchCompleted(digest, Err(err)))
-                    .ok();
-            }
-            Ok(temp_file) => {
-                let sem = self.sem.clone();
-                debug!(log, "artifact fetcher starting");
-                thread::spawn(move || {
-                    let _permit = sem.access();
-                    let result =
-                        fetcher::main(&digest, temp_file.path().to_owned(), broker_addr, &mut log);
-                    debug!(log, "artifact fetcher completed"; "result" => ?result);
-                    sender
-                        .send(Message::ArtifactFetchCompleted(
-                            digest,
-                            result.map(|_| GotArtifact::File { source: temp_file }),
-                        ))
-                        .ok();
-                });
-            }
-        }
-    }
-}
 
 struct BrokerSender {
     sender: Option<BrokerSocketOutgoingSender>,
