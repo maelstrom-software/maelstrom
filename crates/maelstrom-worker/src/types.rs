@@ -34,6 +34,7 @@ impl cache::GetStrategy for CacheGetStrategy {
 
 pub type CacheKey = cache::Key<CacheKeyKind>;
 pub type Cache = cache::Cache<StdFs, CacheKeyKind, CacheGetStrategy>;
+pub type TempFile = cache::fs::std::TempFile;
 pub type TempFileFactory = cache::TempFileFactory<StdFs>;
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
