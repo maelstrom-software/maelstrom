@@ -18,8 +18,6 @@ use slog::{debug, o, warn, Logger};
 use std::{net::TcpStream, os::fd::AsRawFd as _, sync::Arc, thread};
 use std_semaphore::Semaphore;
 
-pub const MAX_ARTIFACT_FETCHES: u64 = 10;
-
 pub struct ArtifactFetcher {
     broker_addr: BrokerAddr,
     dispatcher_sender: DispatcherSender,
@@ -30,6 +28,7 @@ pub struct ArtifactFetcher {
 
 impl ArtifactFetcher {
     pub fn new(
+        max_simultaneous_fetches: usize,
         dispatcher_sender: DispatcherSender,
         broker_addr: BrokerAddr,
         log: Logger,
@@ -39,7 +38,7 @@ impl ArtifactFetcher {
             broker_addr,
             dispatcher_sender,
             log,
-            semaphore: Arc::new(Semaphore::new(MAX_ARTIFACT_FETCHES as isize)),
+            semaphore: Arc::new(Semaphore::new(max_simultaneous_fetches.try_into().unwrap())),
             temp_file_factory,
         }
     }

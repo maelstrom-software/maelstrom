@@ -41,6 +41,7 @@ use types::{
 pub struct WorkerCacheDir;
 
 pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
+pub const MAX_ARTIFACT_FETCHES: usize = 10;
 
 /// Returns error from shutdown message, or delivers message to dispatcher.
 fn handle_dispatcher_message(
@@ -118,6 +119,7 @@ async fn dispatcher_main(
             Ok((cache, temp_file_factory)) => (cache, temp_file_factory),
         };
     let artifact_fetcher = ArtifactFetcher::new(
+        MAX_ARTIFACT_FETCHES,
         dispatcher_sender.clone(),
         config.broker,
         log.clone(),
@@ -176,7 +178,7 @@ fn open_file_max(slots: Slots) -> u64 {
         maelstrom_fuse::MAX_INFLIGHT as u64 /* each FUSE request opens a file */;
     existing_open_files
         + (maelstrom_layer_fs::READER_CACHE_SIZE * 2) // 1 for socket, 1 for the file
-        + artifact_fetcher::MAX_ARTIFACT_FETCHES
+        + MAX_ARTIFACT_FETCHES as u64
         + per_slot_estimate * u16::from(slots) as u64
         + (MAX_IN_FLIGHT_LAYERS_BUILDS * maelstrom_layer_fs::LAYER_BUILDING_FILE_MAX) as u64
 }
