@@ -7,7 +7,7 @@ mod router;
 mod rpc;
 mod stream_wrapper;
 
-pub use maelstrom_worker::clone_into_pid_and_user_namespace;
+pub use maelstrom_util::process::clone_into_pid_and_user_namespace;
 
 use anyhow::Result;
 use futures::stream::{self, StreamExt as _};
