@@ -1,3 +1,4 @@
+use crate::{fs::Fs, signal};
 use anyhow::{Context as _, Result};
 use futures::StreamExt as _;
 use maelstrom_linux::{
@@ -11,7 +12,6 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use crate::{signal, thread, fs::Fs};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum ExitCodeInner {
@@ -81,6 +81,18 @@ impl ExitCodeAccumulator {
     pub fn get(&self) -> ExitCode {
         *self.0.lock().unwrap()
     }
+}
+
+fn assert_single_threaded() -> Result<()> {
+    let fs = Fs::new();
+    let num_tasks = fs
+        .read_dir("/proc/self/task")?
+        .filter(|e| e.is_ok())
+        .count();
+    if num_tasks != 1 {
+        panic!("Process not single threaded, found {num_tasks} threads");
+    }
+    Ok(())
 }
 
 fn mimic_child_death(status: WaitStatus) -> ! {
@@ -169,7 +181,7 @@ async fn gen_1_process_main(gen_2_pid: linux::Pid) -> WaitStatus {
 /// WARNING: This function must only be called while the program is single-threaded. We check this
 /// and will panic if called when there is more than one thread.
 pub fn clone_into_pid_and_user_namespace() -> Result<()> {
-    thread::assert_single_threaded()?;
+    assert_single_threaded()?;
 
     let gen_0_uid = linux::getuid();
     let gen_0_gid = linux::getgid();
