@@ -100,5 +100,5 @@ pub type DispatcherReceiver = UnboundedReceiver<dispatcher::Message<StdFs>>;
 pub type DispatcherSender = UnboundedSender<dispatcher::Message<StdFs>>;
 pub type BrokerSocketOutgoingSender = UnboundedSender<WorkerToBroker>;
 pub type BrokerSocketIncomingReceiver = UnboundedReceiver<BrokerToWorker>;
-pub type DefaultDispatcher =
+pub type Dispatcher =
     dispatcher::Dispatcher<DispatcherAdapter, ArtifactFetcher, BrokerSender, Cache>;

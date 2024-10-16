@@ -14,14 +14,12 @@ mod types;
 use anyhow::{anyhow, bail, Context as _, Result};
 use artifact_fetcher::ArtifactFetcher;
 use config::Config;
-use dispatcher::{Dispatcher, Message};
+use dispatcher::Message;
 use dispatcher_adapter::DispatcherAdapter;
 use executor::{MountDir, TmpfsDir};
 use maelstrom_base::proto::Hello;
 use maelstrom_layer_fs::BlobDir;
-use maelstrom_linux::{
-    self as linux,
-};
+use maelstrom_linux::{self as linux};
 use maelstrom_util::{
     cache::{fs::std::Fs as StdFs, CacheDir},
     config::common::Slots,
@@ -31,8 +29,8 @@ use slog::{debug, error, info, Logger};
 use std::{future::Future, process};
 use tokio::{io::BufReader, net::TcpStream, sync::mpsc};
 use types::{
-    BrokerSender, BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache,
-    DefaultDispatcher, DispatcherReceiver, DispatcherSender,
+    BrokerSender, BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache, Dispatcher,
+    DispatcherReceiver, DispatcherSender,
 };
 
 pub struct WorkerCacheDir;
@@ -41,10 +39,7 @@ pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
 pub const MAX_ARTIFACT_FETCHES: usize = 10;
 
 /// Returns error from shutdown message, or delivers message to dispatcher.
-fn handle_dispatcher_message(
-    msg: Message<StdFs>,
-    dispatcher: &mut DefaultDispatcher,
-) -> Result<()> {
+fn handle_dispatcher_message(msg: Message<StdFs>, dispatcher: &mut Dispatcher) -> Result<()> {
     if let Message::Shutdown(error) = msg {
         return Err(error);
     }
@@ -57,7 +52,7 @@ async fn handle_incoming_messages(
     log: Logger,
     mut dispatcher_receiver: DispatcherReceiver,
     mut broker_socket_incoming_recevier: BrokerSocketIncomingReceiver,
-    mut dispatcher: DefaultDispatcher,
+    mut dispatcher: Dispatcher,
 ) {
     // Multiplex messages from broker and others sources
     let err = loop {
