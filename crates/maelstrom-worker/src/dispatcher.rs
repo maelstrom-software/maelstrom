@@ -2010,9 +2010,9 @@ mod tests {
             CacheGetArtifact(Blob, digest!(44), jid!(1)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::WaitingForLayers)),
         };
-        ArtifactFetchCompleted(digest!(41), Ok(GotArtifact::File { source: "/tmp/foo".into()})) => {
+        ArtifactFetchCompleted(digest!(41), Ok(GotArtifact::file("/tmp/foo".into()))) => {
             CachePath(Blob, digest!(41)),
-            CacheGotArtifactSuccess(Blob, digest!(41), GotArtifact::File { source: "/tmp/foo".into() }),
+            CacheGotArtifactSuccess(Blob, digest!(41), GotArtifact::file("/tmp/foo".into())),
             CacheGetArtifact(BottomFsLayer, digest!(41), jid!(1)),
         };
         ArtifactFetchCompleted(digest!(42), Err(anyhow!("foo"))) => {
@@ -2021,9 +2021,9 @@ mod tests {
                 string!("Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a: foo"))))),
             CacheDecrementRefCount(Blob, digest!(41))
         };
-        ArtifactFetchCompleted(digest!(43), Ok(GotArtifact::File { source: "/tmp/bar".into()})) => {
+        ArtifactFetchCompleted(digest!(43), Ok(GotArtifact::file("/tmp/bar".into()))) => {
             CachePath(Blob, digest!(43)),
-            CacheGotArtifactSuccess(Blob, digest!(43), GotArtifact::File { source: "/tmp/bar".into()}),
+            CacheGotArtifactSuccess(Blob, digest!(43), GotArtifact::file("/tmp/bar".into())),
             CacheDecrementRefCount(Blob, digest!(43))
         };
         ArtifactFetchCompleted(digest!(44), Err(anyhow!("foo"))) => {

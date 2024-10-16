@@ -125,13 +125,9 @@ impl<FsT: cache::fs::Fs> SchedulerCache for Cache<FsT, BrokerKeyKind, BrokerGetS
     }
 
     fn got_artifact(&mut self, digest: Sha256Digest, file: FsT::TempFile) -> Vec<JobId> {
-        self.got_artifact_success(
-            BrokerKeyKind::Blob,
-            &digest,
-            GotArtifact::File { source: file },
-        )
-        .map_err(|(err, _)| err)
-        .unwrap()
+        self.got_artifact_success(BrokerKeyKind::Blob, &digest, GotArtifact::file(file))
+            .map_err(|(err, _)| err)
+            .unwrap()
     }
 
     fn decrement_refcount(&mut self, digest: Sha256Digest) {

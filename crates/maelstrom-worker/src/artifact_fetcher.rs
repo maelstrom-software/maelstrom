@@ -61,7 +61,7 @@ impl dispatcher::ArtifactFetcher for ArtifactFetcher {
             debug!(log, "artifact fetcher completed"; "result" => ?result);
             let _ = dispatcher_sender.send(Message::ArtifactFetchCompleted(
                 digest,
-                result.map(|temp_file| GotArtifact::File { source: temp_file }),
+                result.map(GotArtifact::file),
             ));
         });
     }

@@ -61,6 +61,20 @@ pub enum GotArtifact<FsT: Fs> {
     Directory { source: FsT::TempDir, size: u64 },
 }
 
+impl<FsT: Fs> GotArtifact<FsT> {
+    pub fn symlink(target: PathBuf) -> Self {
+        Self::Symlink { target }
+    }
+
+    pub fn file(source: FsT::TempFile) -> Self {
+        Self::File { source }
+    }
+
+    pub fn directory(source: FsT::TempDir, size: u64) -> Self {
+        Self::Directory { source, size }
+    }
+}
+
 impl<FsT: Fs> Debug for GotArtifact<FsT>
 where
     FsT::TempFile: Debug,
@@ -1119,12 +1133,7 @@ mod tests {
         ) {
             let source = self.temp_file_factory.temp_dir().unwrap();
             self.fs.graft(source.path(), contents);
-            self.got_artifact_success(
-                kind,
-                digest,
-                GotArtifact::Directory { source, size },
-                expected,
-            )
+            self.got_artifact_success(kind, digest, GotArtifact::directory(source, size), expected)
         }
 
         #[track_caller]
@@ -1137,7 +1146,7 @@ mod tests {
         ) {
             let source = self.temp_file_factory.temp_file().unwrap();
             self.fs.graft(source.path(), Entry::file(contents));
-            self.got_artifact_success(kind, digest, GotArtifact::File { source }, expected)
+            self.got_artifact_success(kind, digest, GotArtifact::file(source), expected)
         }
 
         #[track_caller]
@@ -1149,7 +1158,7 @@ mod tests {
             expected: Vec<JobId>,
         ) {
             let target = target.into();
-            self.got_artifact_success(kind, digest, GotArtifact::Symlink { target }, expected)
+            self.got_artifact_success(kind, digest, GotArtifact::symlink(target), expected)
         }
 
         #[track_caller]
@@ -1367,11 +1376,7 @@ mod tests {
         fixture.fs.set_failure(true);
         let (err, jids) = fixture
             .cache
-            .got_artifact_success(
-                Apple,
-                &digest!(1),
-                GotArtifact::Directory { source, size: 6 },
-            )
+            .got_artifact_success(Apple, &digest!(1), GotArtifact::directory(source, 6))
             .unwrap_err();
         assert_eq!(jids, vec![jid!(1), jid!(2)]);
         assert_eq!(err.to_string(), "Test");

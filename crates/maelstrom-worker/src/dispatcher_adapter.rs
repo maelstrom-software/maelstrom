@@ -183,7 +183,7 @@ impl Deps for DispatcherAdapter {
             sender
                 .send(Message::BuiltBottomFsLayer(
                     digest,
-                    result.map(|(source, size)| GotArtifact::Directory { source, size }),
+                    result.map(|(source, size)| GotArtifact::directory(source, size)),
                 ))
                 .ok();
         });
@@ -216,7 +216,7 @@ impl Deps for DispatcherAdapter {
             sender
                 .send(Message::BuiltUpperFsLayer(
                     digest,
-                    result.map(|(source, size)| GotArtifact::Directory { source, size }),
+                    result.map(|(source, size)| GotArtifact::directory(source, size)),
                 ))
                 .ok();
         });

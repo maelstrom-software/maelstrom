@@ -215,7 +215,7 @@ impl Deps for Adapter {
             .local_worker_sender
             .send(local_worker::Message::ArtifactFetchCompleted(
                 digest,
-                result.map(|target| local_worker::GotArtifact::Symlink { target }),
+                result.map(local_worker::GotArtifact::symlink),
             ));
     }
 
