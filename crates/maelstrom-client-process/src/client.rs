@@ -33,7 +33,7 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
     net,
     root::RootBuf,
-    signals,
+    signal,
 };
 use maelstrom_worker::local_worker;
 use slog::{debug, warn, Logger};
@@ -553,7 +553,7 @@ impl Client {
                 let log = state.log.clone();
                 let fail_clone = fail.clone();
                 tokio::task::spawn(async move {
-                    let signal = signals::wait_for_signal(log.clone()).await;
+                    let signal = signal::wait_for_signal(log.clone()).await;
                     fail_clone(format!("received signal {signal}"));
                 });
 

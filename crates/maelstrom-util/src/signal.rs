@@ -158,7 +158,7 @@ mod tests {
         use maelstrom_linux as linux;
 
         for s in EXIT {
-            match fake_fork("signals::tests::wait_for_signal_exit") {
+            match fake_fork("signal::tests::wait_for_signal_exit") {
                 ForkResult::Parent(pid) => {
                     println!("trying signal {s}");
                     linux::kill(pid, s).unwrap();
@@ -180,7 +180,7 @@ mod tests {
     fn wait_for_signal_ignore() {
         use maelstrom_linux as linux;
 
-        match fake_fork("signals::tests::wait_for_signal_ignore") {
+        match fake_fork("signal::tests::wait_for_signal_ignore") {
             ForkResult::Parent(pid) => {
                 let wait_handle = std::thread::spawn(move || {
                     let status = linux::waitpid(pid).unwrap();

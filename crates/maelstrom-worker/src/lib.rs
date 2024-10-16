@@ -27,7 +27,7 @@ use maelstrom_util::{
     cache::{fs::std::Fs as StdFs, CacheDir},
     config::common::Slots,
     fs::Fs,
-    net, signals,
+    net, signal,
 };
 use slog::{debug, error, info, Logger};
 use std::{future::Future, pin::pin, process, slice, time::Duration};
@@ -165,7 +165,7 @@ async fn shutdown_on_error(
 }
 
 async fn wait_for_signal(log: Logger) -> Result<()> {
-    let signal = signals::wait_for_signal(log).await;
+    let signal = signal::wait_for_signal(log).await;
     Err(anyhow!("signal {signal}"))
 }
 
@@ -310,7 +310,7 @@ async fn gen_1_process_main(gen_2_pid: linux::Pid) -> WaitStatus {
 
     loop {
         tokio::select! {
-            signal = signals::wait_for_signal(log.clone()) => {
+            signal = signal::wait_for_signal(log.clone()) => {
                 if let Err(e) = linux::kill(gen_2_pid, signal) {
                     // If we failed to find the process, it already exited, so just ignore.
                     if e != linux::Errno::ESRCH {
