@@ -44,27 +44,21 @@ biggest being that we don't run our tests often enough. Instead of running
 tests every few minutes, we run them a few times a day. This means we catch
 issues later in the development cycle, which wastes our time.
 
-Our assertion is that we should be able to run all of our tests locally, as
-well as in CI, in the exact same environments with the exact same dependencies.
-That's why we built Maelstrom.
+We should be able to run all of our tests locally, as well as in CI, in the
+exact same environments with the exact same dependencies. That's why we built
+Maelstrom.
 
 ### Easier, Better, Faster, Stronger
 
 Our goal with Maelstrom is to give developers the tools to run their tests
 after every change they make. You shouldn't have to wait for CI to run your
-tests: you should be able to do it right from your machine, on demand.
-
-Moreover, if you run your tests this often, you need those tests to run
-quickly. Tests are embarrassingly parallel, as by definition, they shouldn't
-interact with each other. Maelstrom harnesses the immense amount of
-computational power available today to run tests in parallel, which reduces how
-long you wait for tests.
+tests: you should be able to do it right from your local machine, on demand.
+And you shouldn't have to wait long for your tests to run.
 
 We've identified three traits a good test-running system must have to achieve
 these goals. Running tests should be be **fast**, **accessible**, and
 **reliable**. We'll next look at what we mean by these traits and why they are
-important, and then proceed to show what we've built to meet these
-requirements.
+important, and then proceed to show how Maelstrom addresses them.
 
 ### Fast
 
@@ -81,10 +75,15 @@ the development process. Defects are much easier and cheaper to correct when
 discovered immediately. The longer they persist, the harder and more expensive
 they are to fix.
 
-We've found that even small differences in the time it takes tests to run can
-have a huge impact on our testing practices. With a fast test-running setup,
-you can run your tests scores of times during the day, catch defects
-immediately, and do so without losing focus.
+Tests are embarassingly parallel. By definition, tests shouldn't interact with
+each other. Additionally, there are a huge number of servers sitting out there
+in data centers that would love to run our tests. We shouldn't have to wait for
+our tests.
+
+Even small differences in the time it takes tests to run can have a huge impact
+on our testing practices. With a fast test-running tools, you can run your
+tests scores of times during the day, catch defects immediately, and do so
+without losing focus.
 
 ### Accessible
 
@@ -92,9 +91,9 @@ You should be able to run any test at any time, right from your machine.
 
 There's a disturbing trend in today's software development practices where many
 tests can only be run in CI. The implication is that instead of running those
-tests many times throughout the day, you only run them occasionally, sometimes
-as little as a few times a week. You often complete hours or days of work only
-to find out in CI that you need a new design.
+tests many times throughout the day, we only run them occasionally, sometimes
+as little as a few times a week. We often complete hours or days of work only
+to find out in CI that we need a new design.
 
 It can be incredibly hard to diagnose and fix a failure found in CI, as it may
 not be reproducible locally. You may have to resort to repeatedly submitting
@@ -130,16 +129,16 @@ frustrating to debug.
 
 ### What We've Built
 
-Maelstrom addresses these problems by following three guiding principles.
+What does Maelstrom do to making testing fast, accessible, and reliable?
 
-First, we provide a way to specify the dependencies of every test. These
-dependencies include any external software, devices, and files the test expects
-to be installed on the system, as well as any shared network resources the test
-relies on.
+First, we provide a way to declaratively specify the dependencies of every
+test. These dependencies include any external software, devices, and files the
+test expects to be installed on the system, as well as any shared network
+resources the test relies on.
 
 These dependencies are "opt-in": very few dependencies are provided by default.
-This ensures that the set of dependencies stays small and also that the
-developer understands what's going on with their tests.
+This ensures that the set of dependencies stays small and also that you realize
+if a test has an unexpected dependency.
 
 Second, we run every test in its own isolated environment that includes only
 the test's enumerated dependencies. This is an extension of the best practice
@@ -149,45 +148,43 @@ lightweight container runtime to implement this feature, meaning there is very
 little overhead compared to running every test in its own process.
 
 Third, we provide a mechanism to build a cluster of test runners, so you can
-run tests locally on your machine, or in parallel on an arbitrarily large
+run tests on your local machine, or in parallel on an arbitrarily large
 cluster.
 
 ### How to Use Maelstrom
 
-Maelstrom provides specialized test runners for multiple test frameworks.
-We currently support Rust (via `cargo test`), Golang (via `go test`), and
-Pytest. We will continue to add more test runners in the future.
+Maelstrom provides specialized test runners for multiple test frameworks. We
+currently support Rust (via `cargo test`), Golang (via `go test`), and Pytest.
+We will continue to add more test runners in the future.
 
 If Maelstrom doesn't currently support your chosen test runner, you can write
 your own using our Rust or gRPC bindings. We also provide a command-line
 utility for running an arbitrary program in the Maelstrom environment. You can
 use this for ad hoc testing or as a target for scripts.
 
-To get started running your tests using Maelstrom, start by using the
-Maelstrom test runner as a drop-in replacement for your test runner. For
-example, you would type `cargo maelstrom` instead of `cargo test`. This will
-run all tests in a minimal environment to start with. Some tests may not run
-properly without more dependencies specified. You can then opt into these
-required dependencies by adding dependencies to tests that match certain
-patterns. It usually only takes a few minutes to get a whole project's tests
-working with Maelstrom.
+To get started running your tests using Maelstrom, start by using the Maelstrom
+test runner as a drop-in replacement for your test runner. For example, you
+would type `cargo maelstrom` instead of `cargo test`. This will run all tests
+in a minimal environment to start with. Some tests may not run properly without
+more dependencies specified. You can then opt into these required dependencies
+by adding dependencies to tests that match certain patterns. It usually only
+takes a few minutes to get a whole project's tests working with Maelstrom.
 
 ### Conclusion
 
-I have found through my own experience that once developers have the experience
-of having a system like Maelstrom at their disposal, they change how they
-approach testing. Being able to test more of the system more often is part of
-it, but they also start to write test differently. It now becomes more feasible
-to engage in more computationally intensive testing. Developers can rely more
-heavily on fuzz testing, "chaos testing", and exhaustive simulation.
+In my experience, once developers have the experience of having a system like
+Maelstrom at their disposal, they change how they approach testing.
 
+Being able to test more of the system more often is part of it, but they also
+start to write test differently. It now becomes more feasible to engage in more
+computationally intensive testing. Developers can rely more heavily on fuzz
+testing, "chaos testing", and exhaustive simulation.
 
 While the full value of Maelstrom's model works best when developers have
-clusters available to them, there are a multitude of advantages even when
-run locally. We know that most developers will start with Maelstrom
-without a generally available cluster, then maybe move to having a cluster just
-for CI, and then progress eventually to having a shared cluster for the entire
-project.
+clusters available to them, there are a multitude of advantages even when run
+locally. We know that most developers will start with Maelstrom without a
+generally available cluster, then maybe move to having a cluster just for CI,
+and then progress eventually to having a shared cluster for the entire project.
 
 You should have testing tools that move as fast as you do. Give Maelstrom a
 shot and tell us what you think.
