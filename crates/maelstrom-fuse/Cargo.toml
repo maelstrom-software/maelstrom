@@ -26,7 +26,7 @@ slog-async.workspace = true
 slog-term.workspace = true
 slog.workspace = true
 smallvec.workspace = true
-tokio = { workspace = true, features = [ "net", "io-std" ] }
+tokio.workspace = true
 zerocopy.workspace = true
 
 [dev-dependencies]

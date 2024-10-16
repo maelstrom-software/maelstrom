@@ -36,7 +36,7 @@ slog.workspace = true
 std-semaphore.workspace = true
 strum.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["io-util", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]
@@ -50,4 +50,4 @@ maplit.workspace = true
 maelstrom-linux = { workspace = true, features = ["std", "test"] }
 maelstrom-test.workspace = true
 pathdiff.workspace = true
-tokio = { workspace = true, features = ["macros"] }
+tokio.workspace = true
