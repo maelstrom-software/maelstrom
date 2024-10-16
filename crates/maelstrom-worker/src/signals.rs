@@ -8,26 +8,26 @@ fn kind_from_sig(sig: Signal) -> TokioSignalKind {
     TokioSignalKind::from_raw(sig.as_c_int())
 }
 
-pub struct SignalWaiter {
+struct SignalWaiter {
     signals: BTreeMap<Signal, TokioSignal>,
     log: Logger,
 }
 
 impl SignalWaiter {
-    pub fn new(log: Logger) -> Self {
+    fn new(log: Logger) -> Self {
         Self {
             log,
             signals: BTreeMap::new(),
         }
     }
 
-    pub fn add_signal(&mut self, sig: Signal) {
+    fn add_signal(&mut self, sig: Signal) {
         let tokio_sig = unix::signal(kind_from_sig(sig))
             .unwrap_or_else(|_| panic!("failed to register signal handler for {sig}"));
         self.signals.insert(sig, tokio_sig);
     }
 
-    pub async fn wait_for_signal(&mut self) -> Signal {
+    async fn wait_for_signal(&mut self) -> Signal {
         assert!(!self.signals.is_empty(), "SignalWaiter has no signals");
 
         let mut futs: FuturesUnordered<_> = self
