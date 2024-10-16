@@ -75,7 +75,7 @@ the development process. Defects are much easier and cheaper to correct when
 discovered immediately. The longer they persist, the harder and more expensive
 they are to fix.
 
-Tests are embarassingly parallel. By definition, tests shouldn't interact with
+Tests are embarrassingly parallel. By definition, tests shouldn't interact with
 each other. Additionally, there are a huge number of servers sitting out there
 in data centers that would love to run our tests. We shouldn't have to wait for
 our tests.
