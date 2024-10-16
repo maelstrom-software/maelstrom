@@ -98,7 +98,7 @@ mod tests {
         use tokio::io::AsyncWriteExt as _;
         let mut sock = tokio::net::UnixStream::from_std(sock).unwrap();
 
-        let log = maelstrom_util::log::test_logger();
+        let log = crate::log::test_logger();
         let w = default_signal_waiter(log);
         sock.write_all(&[12]).await.unwrap();
 

@@ -2,7 +2,6 @@
 
 pub mod config;
 pub mod local_worker;
-pub mod signals;
 
 mod artifact_fetcher;
 mod dispatcher;
@@ -28,7 +27,7 @@ use maelstrom_util::{
     cache::{fs::std::Fs as StdFs, CacheDir},
     config::common::Slots,
     fs::Fs,
-    net,
+    net, signals,
 };
 use slog::{debug, error, info, Logger};
 use std::{future::Future, pin::pin, process, slice, time::Duration};
