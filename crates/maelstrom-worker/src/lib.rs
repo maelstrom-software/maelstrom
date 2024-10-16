@@ -355,9 +355,9 @@ async fn gen_1_process_main(gen_2_pid: linux::Pid) -> WaitStatus {
 /// terminates. This is accomplished in the following ways:
 ///   - If the gen 0 process (the calling process) terminates, the gen 1 process will receive a
 ///     parent-death signal, which will immediately terminate it.
-///   - If the gen 1 process terminates, all processes in the new pid namespace -- including the
-///     gen 2 process -- will immediately
-///     terminate, since the gen 1 process had pid 1 in their pid namespace
+///   - If the gen 1 process terminates, all processes in the new pid namespace --- including the
+///     gen 2 process --- will immediately terminate, since the gen 1 process had pid 1 in their
+///     pid namespace.
 ///   - After creating the gen 2 process, the gen 1 process loops calling wait(2) forever. It does
 ///     this to reap zombies, but it also allows it to detect when the gen 2 process terminates.
 ///     When this happens, the gen 1 process will terminate itself, trying to mimic the termination
