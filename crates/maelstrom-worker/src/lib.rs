@@ -36,7 +36,7 @@ use types::{
 pub struct WorkerCacheDir;
 
 pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
-pub const MAX_ARTIFACT_FETCHES: usize = 10;
+pub const MAX_ARTIFACT_FETCHES: usize = 1;
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
     main_inner(config, log)
@@ -192,7 +192,10 @@ async fn dispatcher_main(
             Ok((cache, temp_file_factory)) => (cache, temp_file_factory),
         };
     let artifact_fetcher = ArtifactFetcher::new(
-        MAX_ARTIFACT_FETCHES,
+        u32::try_from(MAX_ARTIFACT_FETCHES)
+            .unwrap()
+            .try_into()
+            .unwrap(),
         dispatcher_sender.clone(),
         config.broker,
         log.clone(),

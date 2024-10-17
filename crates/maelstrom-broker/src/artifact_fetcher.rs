@@ -9,7 +9,11 @@ use maelstrom_util::{
     net,
 };
 use slog::{debug, Logger};
-use std::{io, net::TcpStream, sync::mpsc};
+use std::{
+    io::{self, Read as _},
+    net::TcpStream,
+    sync::mpsc,
+};
 
 fn get_file<'fs>(
     fs: &'fs Fs,
@@ -31,15 +35,18 @@ fn get_file<'fs>(
 
 fn send_artifact(
     scheduler_sender: &SchedulerSender,
-    mut file: &mut File<'_>,
+    file: File,
     mut socket: &mut impl io::Write,
     size: u64,
     digest: Sha256Digest,
 ) -> Result<()> {
-    let copied = io::copy(&mut file, &mut socket)?;
-    assert_eq!(copied, size);
+    let copied = io::copy(&mut file.take(size), &mut socket)?;
     scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
-    Ok(())
+    if copied == size {
+        Ok(())
+    } else {
+        Err(anyhow!("unexpected EOF"))
+    }
 }
 
 fn handle_one_message(
@@ -61,8 +68,8 @@ fn handle_one_message(
     debug!(log, "sending artifact fetcher message"; "msg" => ?msg);
     net::write_message_to_socket(&mut socket, msg)?;
 
-    let (mut f, size) = result?;
-    send_artifact(scheduler_sender, &mut f, &mut socket, size, digest)?;
+    let (f, size) = result?;
+    send_artifact(scheduler_sender, f, &mut socket, size, digest)?;
 
     Ok(())
 }

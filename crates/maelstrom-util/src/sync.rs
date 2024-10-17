@@ -3,7 +3,9 @@ use anyhow::Result;
 use pin_project::pin_project;
 use std::{
     future::Future,
+    num::NonZeroU32,
     pin::Pin,
+    sync::{Condvar, Mutex},
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
@@ -94,6 +96,61 @@ impl Event {
 
     pub fn is_set(&self) -> bool {
         *self.completed.lock().unwrap()
+    }
+}
+
+pub struct Pool<T> {
+    mutex: Mutex<PoolInner<T>>,
+    condvar: Condvar,
+}
+
+struct PoolInner<T> {
+    available_slots: u32,
+    available_items: Vec<T>,
+}
+
+impl<T> Pool<T> {
+    pub fn new(slots: NonZeroU32) -> Self {
+        Self {
+            mutex: Mutex::new(PoolInner {
+                available_slots: slots.into(),
+                available_items: Default::default(),
+            }),
+            condvar: Default::default(),
+        }
+    }
+
+    /// Run call a closure after obtaining a slot, potentially with a pre-built item.
+    ///
+    /// The calling thread will block until there is an available slot. Once there is, the provided
+    /// closure will be called, potentially with an item returned from a previously called closure.
+    /// Upon completion, if the closure returns a new item, the item will be provided to a
+    /// subsequent closure.
+    pub fn call_with_item<U, E>(
+        &self,
+        f: impl FnOnce(Option<T>) -> Result<(T, U), E>,
+    ) -> Result<U, E> {
+        let guard = self.mutex.lock().unwrap();
+        let mut guard = self
+            .condvar
+            .wait_while(guard, |inner| inner.available_slots == 0)
+            .unwrap();
+        guard.available_slots -= 1;
+        let item = guard.available_items.pop();
+        drop(guard);
+
+        let result = f(item);
+
+        let mut guard = self.mutex.lock().unwrap();
+        guard.available_slots += 1;
+        let result = result.map(|(item, ret)| {
+            guard.available_items.push(item);
+            ret
+        });
+        drop(guard);
+
+        self.condvar.notify_one();
+        result
     }
 }
 
