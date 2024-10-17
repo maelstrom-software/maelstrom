@@ -324,8 +324,12 @@ impl Client {
                 debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
                 // Send it a Hello message.
-                net::write_message_to_async_socket(&mut broker_socket_write_half, Hello::Client)
-                    .await?;
+                net::write_message_to_async_socket(
+                    &mut broker_socket_write_half,
+                    Hello::Client,
+                    &log,
+                )
+                .await?;
 
                 // Spawn a task to read from the socket and write to the router's channel.
                 let log_clone = log.clone();
@@ -334,10 +338,8 @@ impl Client {
                     net::async_socket_reader(
                         broker_socket_read_half,
                         local_broker_sender_clone,
-                        |msg| {
-                            debug!(log_clone, "received broker message"; "msg" => ?msg);
-                            router::Message::Broker(msg)
-                        },
+                        router::Message::Broker,
+                        &log_clone,
                     )
                     .await
                     .inspect_err(
@@ -349,14 +351,12 @@ impl Client {
                 // Spawn a task to read from the broker's channel and write to the socket.
                 let log_clone = log.clone();
                 join_set.spawn(async move {
-                    net::async_socket_writer(broker_receiver, broker_socket_write_half, |msg| {
-                        debug!(log_clone, "sending broker message"; "msg" => ?msg);
-                    })
-                    .await
-                    .inspect_err(
-                        |err| debug!(log_clone, "error writing broker message"; "err" => ?err),
-                    )
-                    .context("writing to broker")
+                    net::async_socket_writer(broker_receiver, broker_socket_write_half, &log_clone)
+                        .await
+                        .inspect_err(
+                            |err| debug!(log_clone, "error writing broker message"; "err" => ?err),
+                        )
+                        .context("writing to broker")
                 });
 
                 // Spawn a task for the artifact_pusher.
@@ -365,6 +365,7 @@ impl Client {
                     artifact_pusher_receiver,
                     broker_addr,
                     artifact_upload_tracker.clone(),
+                    log.clone(),
                 );
             } else {
                 // We don't have a broker_addr, which means we're in standalone mode.

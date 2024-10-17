@@ -5,6 +5,7 @@ use maelstrom_base::{
     Sha256Digest,
 };
 use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net};
+use slog::Logger;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::{
@@ -29,9 +30,10 @@ async fn push_one_artifact(
     broker_addr: BrokerAddr,
     path: PathBuf,
     digest: Sha256Digest,
+    log: &Logger,
 ) -> Result<()> {
     let mut stream = TcpStream::connect(broker_addr.inner()).await?;
-    net::write_message_to_async_socket(&mut stream, Hello::ArtifactPusher).await?;
+    net::write_message_to_async_socket(&mut stream, Hello::ArtifactPusher, log).await?;
 
     let fs = Fs::new();
     let file = fs.open_file(&path).await?;
@@ -42,11 +44,13 @@ async fn push_one_artifact(
 
     let mut file = UploadProgressReader::new(prog, file.chain(io::repeat(0)).take(size));
 
-    net::write_message_to_async_socket(&mut stream, ArtifactPusherToBroker(digest, size)).await?;
+    net::write_message_to_async_socket(&mut stream, ArtifactPusherToBroker(digest, size), log)
+        .await?;
     let copied = io::copy(&mut file, &mut stream).await?;
     assert_eq!(copied, size);
 
-    let BrokerToArtifactPusher(resp) = net::read_message_from_async_socket(&mut stream).await?;
+    let BrokerToArtifactPusher(resp) =
+        net::read_message_from_async_socket(&mut stream, log).await?;
 
     upload_tracker.remove_task(&upload_name);
     resp.map_err(|e| anyhow!("Error from broker: {e}"))
@@ -71,6 +75,7 @@ pub fn start_task(
     mut receiver: Receiver,
     broker_addr: BrokerAddr,
     upload_tracker: ProgressTracker,
+    log: Logger,
 ) {
     let sem = Arc::new(Semaphore::new(MAX_CLIENT_UPLOADS));
     join_set.spawn(async move {
@@ -91,10 +96,10 @@ pub fn start_task(
                     let Some(msg) = res else { break; };
                     let upload_tracker = upload_tracker.clone();
                     let sem = sem.clone();
-
+                    let log_clone = log.clone();
                     join_set.spawn(async move {
                         let _permit = sem.acquire_owned().await.unwrap();
-                        push_one_artifact(upload_tracker, broker_addr, msg.path.clone(), msg.digest)
+                        push_one_artifact(upload_tracker, broker_addr, msg.path.clone(), msg.digest, &log_clone)
                             .await
                             .with_context(|| format!("pushing artifact {}", msg.path.display()))
                     });

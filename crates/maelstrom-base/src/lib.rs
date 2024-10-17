@@ -762,11 +762,7 @@ impl fmt::Display for Sha256Digest {
 
 impl Debug for Sha256Digest {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if f.alternate() {
-            f.debug_tuple("Sha256Digest").field(&self.0).finish()
-        } else {
-            f.pad(&format!("Sha256Digest({})", self))
-        }
+        f.pad(&format!("Sha256Digest({})", self))
     }
 }
 
@@ -952,42 +948,7 @@ mod tests {
         );
         assert_eq!(
             format!("{d:#?}"),
-            "Sha256Digest(
-    [
-        16,
-        17,
-        18,
-        19,
-        20,
-        21,
-        22,
-        23,
-        24,
-        25,
-        26,
-        27,
-        28,
-        29,
-        30,
-        31,
-        32,
-        33,
-        34,
-        35,
-        36,
-        37,
-        38,
-        39,
-        40,
-        41,
-        42,
-        43,
-        44,
-        45,
-        46,
-        47,
-    ],
-)"
+            "Sha256Digest(101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f)"
         );
     }
 

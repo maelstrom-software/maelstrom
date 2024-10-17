@@ -35,15 +35,13 @@ fn connection_loop(
     mut socket: TcpStream,
     scheduler_sender: &SchedulerSender,
     temp_file_factory: &TempFileFactory<Fs>,
-    log: &mut Logger,
+    log: &Logger,
 ) -> Result<()> {
     loop {
-        let msg = net::read_message_from_socket(&mut socket)?;
-        debug!(log, "received artifact pusher message"; "msg" => ?msg);
+        let msg = net::read_message_from_socket(&mut socket, log)?;
         let result = handle_one_message(msg, &mut socket, scheduler_sender, temp_file_factory);
         let msg = BrokerToArtifactPusher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
-        debug!(log, "sending artifact pusher message"; "msg" => ?msg);
-        net::write_message_to_socket(&mut socket, msg)?;
+        net::write_message_to_socket(&mut socket, msg, log)?;
         result?;
     }
 }
@@ -52,10 +50,10 @@ pub fn connection_main(
     socket: TcpStream,
     scheduler_sender: SchedulerSender,
     temp_file_factory: TempFileFactory<Fs>,
-    mut log: Logger,
+    log: Logger,
 ) -> Result<()> {
     debug!(log, "artifact pusher connected");
-    let err = connection_loop(socket, &scheduler_sender, &temp_file_factory, &mut log).unwrap_err();
+    let err = connection_loop(socket, &scheduler_sender, &temp_file_factory, &log).unwrap_err();
     debug!(log, "artifact pusher disconnected"; "err" => %err);
     Err(err)
 }

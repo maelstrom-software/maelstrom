@@ -46,7 +46,7 @@ impl ArtifactFetcher {
 
 impl dispatcher::ArtifactFetcher for ArtifactFetcher {
     fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
-        let mut log = self.log.new(o!(
+        let log = self.log.new(o!(
             "digest" => digest.to_string(),
             "broker_addr" => self.broker_addr.to_string()
         ));
@@ -57,7 +57,7 @@ impl dispatcher::ArtifactFetcher for ArtifactFetcher {
         let temp_file_factory = self.temp_file_factory.clone();
         thread::spawn(move || {
             let result = pool.call_with_item(|stream| {
-                main(broker_addr, &digest, &mut log, stream, temp_file_factory)
+                main(broker_addr, &digest, &log, stream, temp_file_factory)
             });
             debug!(log, "artifact fetcher request completed"; "result" => ?result);
             let _ = dispatcher_sender.send(Message::ArtifactFetchCompleted(
@@ -71,7 +71,7 @@ impl dispatcher::ArtifactFetcher for ArtifactFetcher {
 fn main(
     broker_addr: BrokerAddr,
     digest: &Sha256Digest,
-    log: &mut Logger,
+    log: &Logger,
     mut stream_option: Option<TcpStream>,
     temp_file_factory: TempFileFactory,
 ) -> Result<(TcpStream, TempFile)> {
@@ -82,7 +82,7 @@ fn main(
     }
 
     let temp_file = temp_file_factory.temp_file().inspect_err(|err| {
-        warn!(log, "artifact fetcher failed to create a temporary file"; "err" => ?err);
+        warn!(log, "artifact fetcher failed to create a temporary file"; "err" => %err);
     })?;
 
     // Loop up to two times. It's possible that a re-used existing connection isn't really active.
@@ -96,22 +96,21 @@ fn main(
                 debug!(log, "artifact fetcher connecting to broker");
                 let mut stream = TcpStream::connect(broker_addr.inner())?;
 
-                let msg = Hello::ArtifactFetcher;
-                debug!(log, "artifact fetcher sending message"; "msg" => ?msg);
-                net::write_message_to_socket(&mut stream, msg)?;
+                net::write_message_to_socket(&mut stream, Hello::ArtifactFetcher, log)?;
 
                 (stream, false)
             }
         };
 
         let size_result = (|| {
-            let msg = ArtifactFetcherToBroker(digest.clone());
-            debug!(log, "artifact fetcher sending message"; "msg" => ?msg);
-            net::write_message_to_socket(&mut stream, msg)?;
+            net::write_message_to_socket(
+                &mut stream,
+                ArtifactFetcherToBroker(digest.clone()),
+                log,
+            )?;
 
-            let msg = net::read_message_from_socket::<BrokerToArtifactFetcher>(&mut stream)?;
-            debug!(log, "artifact fetcher received message"; "msg" => ?msg);
-            msg.0
+            net::read_message_from_socket::<BrokerToArtifactFetcher>(&mut stream, log)?
+                .0
                 .map_err(|e| anyhow!("broker error reading artifact: {e}"))
         })();
 

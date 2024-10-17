@@ -3,9 +3,10 @@
 use anyhow::Result;
 use maelstrom_base::proto;
 use serde::{de::DeserializeOwned, Serialize};
+use slog::{debug, Logger};
 use std::{
+    fmt::Debug,
     io::{Read, Write},
-    sync::mpsc::SyncSender,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _},
@@ -21,8 +22,13 @@ fn write_message_to_vec(msg: impl Serialize) -> Result<Vec<u8>> {
 }
 
 /// Write a message to a normal (threaded) writer. Each message is framed by sending a leading
-/// 4-byte, little-endian message size.
-pub fn write_message_to_socket(stream: &mut impl Write, msg: impl Serialize) -> Result<()> {
+/// 4-byte, little-endian message size. The message is logged at the debug log level.
+pub fn write_message_to_socket(
+    stream: &mut impl Write,
+    msg: impl Debug + Serialize,
+    log: &Logger,
+) -> Result<()> {
+    debug!(log, "sending message"; "msg" => #?msg);
     Ok(stream.write_all(&write_message_to_vec(msg)?)?)
 }
 
@@ -30,37 +36,45 @@ pub fn write_message_to_socket(stream: &mut impl Write, msg: impl Serialize) -> 
 /// little-endian message size.
 pub async fn write_message_to_async_socket(
     stream: &mut (impl AsyncWrite + Unpin),
-    msg: impl Serialize,
+    msg: impl Debug + Serialize,
+    log: &Logger,
 ) -> Result<()> {
+    debug!(log, "sending message"; "msg" => #?msg);
     Ok(stream.write_all(&write_message_to_vec(msg)?).await?)
 }
 
 /// Read a message from a normal (threaded) reader. The framing must match that of
-/// [`write_message_to_socket`] and [`write_message_to_async_socket`].
-pub fn read_message_from_socket<MessageT>(stream: &mut impl Read) -> Result<MessageT>
+/// [`write_message_to_socket`] and [`write_message_to_async_socket`]. The received message will be
+/// logged at the debug log level.
+pub fn read_message_from_socket<MessageT>(stream: &mut impl Read, log: &Logger) -> Result<MessageT>
 where
-    MessageT: DeserializeOwned,
+    MessageT: Debug + DeserializeOwned,
 {
     let mut msg_len: [u8; 4] = [0; 4];
     stream.read_exact(&mut msg_len)?;
     let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
     stream.read_exact(&mut buf)?;
-    Ok(proto::deserialize_from(&mut &buf[..])?)
+    let msg = proto::deserialize_from(&mut &buf[..])?;
+    debug!(log, "received message"; "msg" => #?msg);
+    Ok(msg)
 }
 
 /// Read a message from a Tokio input stream. The framing must match that of
 /// [`write_message_to_socket`] and [`write_message_to_async_socket`].
 pub async fn read_message_from_async_socket<MessageT>(
     stream: &mut (impl AsyncRead + Unpin),
+    log: &Logger,
 ) -> Result<MessageT>
 where
-    MessageT: DeserializeOwned,
+    MessageT: Debug + DeserializeOwned,
 {
     let mut msg_len: [u8; 4] = [0; 4];
     stream.read_exact(&mut msg_len).await?;
     let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
     stream.read_exact(&mut buf).await?;
-    Ok(proto::deserialize_from(&mut &buf[..])?)
+    let msg = proto::deserialize_from(&mut &buf[..])?;
+    debug!(log, "received message"; "msg" => #?msg);
+    Ok(msg)
 }
 
 /// Loop, reading messages from a channel and writing them to a socket. The `log` parameter is used
@@ -68,14 +82,13 @@ where
 pub async fn async_socket_writer<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
     mut socket: (impl AsyncWrite + Unpin),
-    mut log: impl FnMut(&MessageT),
+    log: &Logger,
 ) -> Result<()>
 where
-    MessageT: Serialize,
+    MessageT: Debug + Serialize,
 {
     while let Some(msg) = channel.recv().await {
-        log(&msg);
-        write_message_to_async_socket(&mut socket, msg).await?;
+        write_message_to_async_socket(&mut socket, msg, log).await?;
     }
     Ok(())
 }
@@ -87,31 +100,15 @@ pub async fn async_socket_reader<MessageT, TransformedT>(
     mut socket: (impl AsyncRead + Unpin),
     channel: UnboundedSender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
+    log: &Logger,
 ) -> Result<()>
 where
-    MessageT: DeserializeOwned,
+    MessageT: Debug + DeserializeOwned,
 {
     loop {
-        let msg = read_message_from_async_socket(&mut socket).await?;
+        let msg = read_message_from_async_socket(&mut socket, log).await?;
         if channel.send(transform(msg)).is_err() {
             return Ok(());
-        }
-    }
-}
-
-/// Loop, reading messages from a socket and writing them to an mpsc channel. The `transform`
-/// parameter is used to log the messages and wrap them in any necessary structure for internal use
-/// by the program.
-pub fn socket_reader<MessageT, TransformedT>(
-    mut socket: impl Read,
-    channel: SyncSender<TransformedT>,
-    transform: impl Fn(MessageT) -> TransformedT,
-) where
-    MessageT: DeserializeOwned,
-{
-    while let Ok(msg) = read_message_from_socket(&mut socket) {
-        if channel.send(transform(msg)).is_err() {
-            break;
         }
     }
 }

@@ -55,7 +55,6 @@ fn handle_one_message(
     scheduler_sender: &SchedulerSender,
     log: &mut Logger,
 ) -> Result<()> {
-    debug!(log, "received artifact fetcher message"; "msg" => ?msg);
     let ArtifactFetcherToBroker(digest) = msg;
     let fs = Fs::new();
     let result = get_file(&fs, &digest, scheduler_sender);
@@ -65,8 +64,7 @@ fn handle_one_message(
             .map(|(_, size)| *size)
             .map_err(|e| e.to_string()),
     );
-    debug!(log, "sending artifact fetcher message"; "msg" => ?msg);
-    net::write_message_to_socket(&mut socket, msg)?;
+    net::write_message_to_socket(&mut socket, msg, log)?;
 
     let (f, size) = result?;
     send_artifact(scheduler_sender, f, &mut socket, size, digest)?;
@@ -80,7 +78,7 @@ fn connection_loop(
     log: &mut Logger,
 ) -> Result<()> {
     loop {
-        let msg = net::read_message_from_socket(&mut socket)?;
+        let msg = net::read_message_from_socket(&mut socket, log)?;
         handle_one_message(msg, &mut socket, scheduler_sender, log)?;
     }
 }

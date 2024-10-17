@@ -109,7 +109,7 @@ async fn unassigned_connection_main(
     temp_file_factory: TempFileFactory<Fs>,
     log: Logger,
 ) {
-    match net::read_message_from_async_socket(&mut socket).await {
+    match net::read_message_from_async_socket(&mut socket, &log).await {
         Ok(Hello::Client) => {
             let (read_stream, write_stream) = socket.into_split();
             let read_stream = BufReader::new(read_stream);
@@ -126,18 +126,15 @@ async fn unassigned_connection_main(
                 |scheduler_sender| async move {
                     net::async_socket_reader(read_stream, scheduler_sender, |msg| {
                         assert!(!matches!(&msg, ClientToBroker::JobRequest(_, spec) if spec.must_be_run_locally()));
-                        debug!(log_clone, "received client message"; "msg" => ?msg);
                         SchedulerMessage::FromClient(id, msg)
-                    })
+                    }, &log_clone)
                     .await
                     .unwrap_or_else(
                         |err| debug!(log_clone, "error reading client message"; "err" => ?err),
                     );
                 },
                 |scheduler_receiver| async move {
-                    net::async_socket_writer(scheduler_receiver, write_stream, |msg| {
-                        debug!(log_clone2, "sending client message"; "msg" => ?msg);
-                    })
+                    net::async_socket_writer(scheduler_receiver, write_stream, &log_clone2)
                     .await
                     .unwrap_or_else(
                         |err| debug!(log_clone2, "error writing client message"; "err" => ?err),
@@ -161,23 +158,23 @@ async fn unassigned_connection_main(
                 |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
                 SchedulerMessage::WorkerDisconnected,
                 |scheduler_sender| async move {
-                    net::async_socket_reader(read_stream, scheduler_sender, |msg| {
-                        debug!(log_clone, "received worker message"; "msg" => ?msg);
-                        SchedulerMessage::FromWorker(id, msg)
-                    })
+                    net::async_socket_reader(
+                        read_stream,
+                        scheduler_sender,
+                        |msg| SchedulerMessage::FromWorker(id, msg),
+                        &log_clone,
+                    )
                     .await
                     .unwrap_or_else(
                         |err| debug!(log_clone, "error reading worker message"; "err" => ?err),
                     );
                 },
                 |scheduler_receiver| async move {
-                    net::async_socket_writer(scheduler_receiver, write_stream, |msg| {
-                        debug!(log_clone2, "sending worker message"; "msg" => ?msg);
-                    })
-                    .await
-                    .unwrap_or_else(
-                        |err| debug!(log_clone2, "error writing worker message"; "err" => ?err),
-                    );
+                    net::async_socket_writer(scheduler_receiver, write_stream, &log_clone2)
+                        .await
+                        .unwrap_or_else(
+                            |err| debug!(log_clone2, "error writing worker message"; "err" => ?err),
+                        );
                 },
             )
             .await;
@@ -197,19 +194,20 @@ async fn unassigned_connection_main(
                 SchedulerMessage::MonitorConnected,
                 SchedulerMessage::MonitorDisconnected,
                 |scheduler_sender| async move {
-                    net::async_socket_reader(read_stream, scheduler_sender, |msg| {
-                        debug!(log_clone, "received monitor message"; "msg" => ?msg);
-                        SchedulerMessage::FromMonitor(id, msg)
-                    })
+                    net::async_socket_reader(
+                        read_stream,
+                        scheduler_sender,
+                        |msg| SchedulerMessage::FromMonitor(id, msg),
+                        &log_clone,
+                    )
                     .await
                     .unwrap_or_else(
                         |err| debug!(log_clone, "error reading monitor message"; "err" => ?err),
                     );
                 },
                 |scheduler_receiver| async move {
-                    net::async_socket_writer(scheduler_receiver, write_stream, |msg| {
-                        debug!(log_clone2, "sending monitor message"; "msg" => ?msg);
-                    })
+                    net::async_socket_writer(scheduler_receiver, write_stream,
+                    &log_clone2)
                     .await
                     .unwrap_or_else(
                         |err| debug!(log_clone2, "error writing monitor message"; "err" => ?err),
@@ -220,7 +218,7 @@ async fn unassigned_connection_main(
             debug!(log, "monitor disconnected");
         }
         Ok(Hello::ArtifactFetcher) => {
-            let log = log.clone();
+            let log = log.new(o!("afid" => id_vendor.vend::<u32>().to_string()));
             let socket = socket.into_std().unwrap();
             socket.set_nonblocking(false).unwrap();
             thread::spawn(move || -> Result<()> {
@@ -228,7 +226,7 @@ async fn unassigned_connection_main(
             });
         }
         Ok(Hello::ArtifactPusher) => {
-            let log = log.clone();
+            let log = log.new(o!("apid" => id_vendor.vend::<u32>().to_string()));
             let socket = socket.into_std().unwrap();
             socket.set_nonblocking(false).unwrap();
             thread::spawn(move || -> Result<()> {

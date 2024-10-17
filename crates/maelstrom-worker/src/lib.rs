@@ -64,6 +64,7 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
         Hello::Worker {
             slots: (*config.slots.inner()).into(),
         },
+        &log,
     )
     .await
     .map_err(|err| {
@@ -80,10 +81,12 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
     let log_clone = log.clone();
     tokio::task::spawn(shutdown_on_error(
         async move {
-            net::async_socket_reader(read_stream, broker_socket_incoming_sender, move |msg| {
-                debug!(log_clone, "received broker message"; "msg" => ?msg);
-                msg
-            })
+            net::async_socket_reader(
+                read_stream,
+                broker_socket_incoming_sender,
+                |msg| msg,
+                &log_clone,
+            )
             .await
             .context("error communicating with broker")
         },
@@ -93,11 +96,9 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
     let log_clone = log.clone();
     tokio::task::spawn(shutdown_on_error(
         async move {
-            net::async_socket_writer(broker_socket_outgoing_receiver, write_stream, move |msg| {
-                debug!(log_clone, "sending broker message"; "msg" => ?msg);
-            })
-            .await
-            .context("error communicating with broker")
+            net::async_socket_writer(broker_socket_outgoing_receiver, write_stream, &log_clone)
+                .await
+                .context("error communicating with broker")
         },
         dispatcher_sender.clone(),
     ));
