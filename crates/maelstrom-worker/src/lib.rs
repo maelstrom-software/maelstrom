@@ -53,7 +53,7 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
     let (read_stream, mut write_stream) = TcpStream::connect(config.broker.inner())
         .await
         .map_err(|err| {
-            error!(log, "error connecting to broker"; "err" => %err);
+            error!(log, "error connecting to broker"; "error" => %err);
             err
         })?
         .into_split();
@@ -68,7 +68,7 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
     )
     .await
     .map_err(|err| {
-        error!(log, "error writing hello message"; "err" => %err);
+        error!(log, "error writing hello message"; "error" => %err);
         err
     })?;
 
@@ -187,7 +187,7 @@ async fn dispatcher_main(
     let (cache, temp_file_factory) =
         match Cache::new(StdFs, cache_root, config.cache_size, log.clone()) {
             Err(err) => {
-                error!(log, "could not start cache"; "err" => ?err);
+                error!(log, "could not start cache"; "error" => %err);
                 return;
             }
             Ok((cache, temp_file_factory)) => (cache, temp_file_factory),
@@ -212,7 +212,7 @@ async fn dispatcher_main(
         temp_file_factory,
     ) {
         Err(err) => {
-            error!(log, "could not start executor"; "err" => ?err);
+            error!(log, "could not start executor"; "error" => %err);
         }
         Ok(adapter) => {
             let dispatcher = Dispatcher::new(

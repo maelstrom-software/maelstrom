@@ -739,7 +739,7 @@ impl MaybeFastWriter {
         match Splicer::new() {
             Ok(splicer) => Self(SpliceOrFallback::Splice(splicer)),
             Err(err) => {
-                warn!(log, "Failed to get pipe memory, cannot splice"; "err" => %err);
+                warn!(log, "error getting pipe memory, cannot splice"; "error" => %err);
                 Self(SpliceOrFallback::Fallback(SlowWriter::new(
                     SLOW_WRITE_CHUNK_SIZE,
                 )))

@@ -230,7 +230,7 @@ pub async fn listener_main(
                 tokio::spawn(async move { connection.await.ok() });
             }
             Err(err) => {
-                error!(log, "error accepting http connection"; "err" => err);
+                error!(log, "error accepting http connection"; "error" => %err);
                 return;
             }
         }

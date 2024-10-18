@@ -81,7 +81,7 @@ fn main(
     }
 
     let temp_file = temp_file_factory.temp_file().inspect_err(|err| {
-        warn!(log, "artifact fetcher failed to create a temporary file"; "err" => %err);
+        warn!(log, "artifact fetcher failed to create a temporary file"; "error" => %err);
     })?;
 
     // Loop up to two times. It's possible that a re-used existing connection isn't really active.
@@ -124,7 +124,7 @@ fn main(
                 debug!(
                     log,
                     "artifact fetcher failed to use preexisting connection; retrying with new connection";
-                    "err" => ?err);
+                    "error" => %err);
                 stream_option = None;
             }
         }

@@ -144,8 +144,8 @@ impl LocalRegistry {
             tokio::task::spawn(async move {
                 let stream = match tls_acceptor.accept(stream).await {
                     Ok(stream) => stream,
-                    Err(error) => {
-                        slog::error!(self_clone.log, "failure serving TLS"; "error" => ?error);
+                    Err(err) => {
+                        slog::error!(self_clone.log, "failure serving TLS"; "error" => %err);
                         return;
                     }
                 };
@@ -155,8 +155,8 @@ impl LocalRegistry {
                 let handle = LocalRegistryHandle {
                     handle: self_clone.clone(),
                 };
-                if let Err(error) = http.serve_connection(stream, handle).await {
-                    slog::error!(self_clone.log, "failure serving HTTP"; "error" => ?error);
+                if let Err(err) = http.serve_connection(stream, handle).await {
+                    slog::error!(self_clone.log, "failure serving HTTP"; "error" => %err);
                 }
             });
         }

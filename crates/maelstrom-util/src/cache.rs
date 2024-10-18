@@ -681,7 +681,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             artifact: GotArtifact<FsT>,
         ) {
             if let Err(err) = dispose_of_artifact(fs, removing, artifact) {
-                warn!(log, "error encountered disposing of unnecessary artifact"; "err" => %err);
+                warn!(log, "error encountered disposing of unnecessary artifact"; "error" => %err);
             }
         }
 
@@ -803,7 +803,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     fn possibly_remove_some_ignore_error(&mut self) {
         if let Err(err) = self.possibly_remove_some_can_error() {
             warn!(self.log, "error removing unused entries from cache to reclaim space";
-                "err" => %err,
+                "error" => %err,
                 "entries" => %self.entries.len(),
                 "bytes_used" => %ByteSize::b(self.bytes_used),
                 "byte_used_target" => %ByteSize::b(self.bytes_used_target)

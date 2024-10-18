@@ -90,6 +90,6 @@ pub fn connection_main(
 ) -> Result<()> {
     debug!(log, "artifact fetcher connected");
     let err = connection_loop(socket, &scheduler_sender, &mut log).unwrap_err();
-    debug!(log, "artifact fetcher disconnected"; "err" => %err);
+    debug!(log, "artifact fetcher disconnected"; "error" => %err);
     Err(err)
 }

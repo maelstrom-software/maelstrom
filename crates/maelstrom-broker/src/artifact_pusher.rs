@@ -54,6 +54,6 @@ pub fn connection_main(
 ) -> Result<()> {
     debug!(log, "artifact pusher connected");
     let err = connection_loop(socket, &scheduler_sender, &temp_file_factory, &log).unwrap_err();
-    debug!(log, "artifact pusher disconnected"; "err" => %err);
+    debug!(log, "artifact pusher disconnected"; "error" => %err);
     Err(err)
 }

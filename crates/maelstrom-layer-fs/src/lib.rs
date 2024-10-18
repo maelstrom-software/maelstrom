@@ -133,22 +133,22 @@ use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
                                               //
-fn to_eio<ValueT, ErrorT: std::fmt::Debug>(
+fn to_eio<ValueT, ErrorT: std::fmt::Display>(
     log: slog::Logger,
     res: std::result::Result<ValueT, ErrorT>,
 ) -> ErrnoResult<ValueT> {
     res.map_err(|err| {
-        slog::error!(log, "Got error servicing FUSE request. Returning EIO"; "error" => ?err);
+        slog::error!(log, "Got error servicing FUSE request. Returning EIO"; "error" => %err);
         Errno::EIO
     })
 }
 
-fn to_einval<ValueT, ErrorT: std::fmt::Debug>(
+fn to_einval<ValueT, ErrorT: std::fmt::Display>(
     log: slog::Logger,
     res: std::result::Result<ValueT, ErrorT>,
 ) -> ErrnoResult<ValueT> {
     res.map_err(|err| {
-        slog::error!(log, "Got error servicing FUSE request. Returning EIO"; "error" => ?err);
+        slog::error!(log, "Got error servicing FUSE request. Returning EIO"; "error" => %err);
         Errno::EINVAL
     })
 }

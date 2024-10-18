@@ -343,7 +343,7 @@ impl Client {
                     )
                     .await
                     .inspect_err(
-                        |err| debug!(log_clone, "error reading broker message"; "err" => ?err),
+                        |err| debug!(log_clone, "error reading broker message"; "error" => %err),
                     )
                     .context("reading from broker")
                 });
@@ -354,7 +354,7 @@ impl Client {
                     net::async_socket_writer(broker_receiver, broker_socket_write_half, &log_clone)
                         .await
                         .inspect_err(
-                            |err| debug!(log_clone, "error writing broker message"; "err" => ?err),
+                            |err| debug!(log_clone, "error writing broker message"; "error" => %err),
                         )
                         .context("writing to broker")
                 });
@@ -574,13 +574,13 @@ impl Client {
                         match res {
                             Err(err) => {
                                 // This means that the task was either cancelled or it panicked.
-                                warn!(log, "task join failed"; "err" => ?err);
+                                warn!(log, "error joining task"; "error" => %err);
                                 fail(format!("{err:?}"));
                                 return;
                             }
                             Ok(Err(err)) => {
                                 // One of the tasks ran into an error. Log it and return.
-                                debug!(log, "task completed with error"; "err" => ?err);
+                                debug!(log, "task completed with error"; "error" => %err);
                                 fail(format!("{err:?}"));
                                 return;
                             }

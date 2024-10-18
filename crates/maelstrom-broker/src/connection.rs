@@ -130,14 +130,14 @@ async fn unassigned_connection_main(
                     }, &log_clone)
                     .await
                     .unwrap_or_else(
-                        |err| debug!(log_clone, "error reading client message"; "err" => ?err),
+                        |err| debug!(log_clone, "error reading client message"; "error" => %err),
                     );
                 },
                 |scheduler_receiver| async move {
                     net::async_socket_writer(scheduler_receiver, write_stream, &log_clone2)
                     .await
                     .unwrap_or_else(
-                        |err| debug!(log_clone2, "error writing client message"; "err" => ?err),
+                        |err| debug!(log_clone2, "error writing client message"; "error" => %err),
                     );
                 },
             )
@@ -166,14 +166,14 @@ async fn unassigned_connection_main(
                     )
                     .await
                     .unwrap_or_else(
-                        |err| debug!(log_clone, "error reading worker message"; "err" => ?err),
+                        |err| debug!(log_clone, "error reading worker message"; "error" => %err),
                     );
                 },
                 |scheduler_receiver| async move {
                     net::async_socket_writer(scheduler_receiver, write_stream, &log_clone2)
                         .await
                         .unwrap_or_else(
-                            |err| debug!(log_clone2, "error writing worker message"; "err" => ?err),
+                            |err| debug!(log_clone2, "error writing worker message"; "error" => %err),
                         );
                 },
             )
@@ -202,7 +202,7 @@ async fn unassigned_connection_main(
                     )
                     .await
                     .unwrap_or_else(
-                        |err| debug!(log_clone, "error reading monitor message"; "err" => ?err),
+                        |err| debug!(log_clone, "error reading monitor message"; "error" => %err),
                     );
                 },
                 |scheduler_receiver| async move {
@@ -210,7 +210,7 @@ async fn unassigned_connection_main(
                     &log_clone2)
                     .await
                     .unwrap_or_else(
-                        |err| debug!(log_clone2, "error writing monitor message"; "err" => ?err),
+                        |err| debug!(log_clone2, "error writing monitor message"; "error" => %err),
                     );
                 },
             )
@@ -234,7 +234,7 @@ async fn unassigned_connection_main(
             });
         }
         Err(err) => {
-            warn!(log, "error reading hello message"; "err" => %err);
+            warn!(log, "error reading hello message"; "error" => %err);
         }
     }
 }
@@ -263,7 +263,7 @@ pub async fn listener_main(
                 ));
             }
             Err(err) => {
-                error!(log, "error accepting connection"; "err" => err);
+                error!(log, "error accepting connection"; "error" => %err);
                 return;
             }
         }
