@@ -160,7 +160,7 @@ fn copy_using_splice(
         if read == 0 {
             break;
         }
-        buffer.copy_to_fd(write_fd, Some(copied))?;
+        buffer.copy_to_fd(write_fd, None)?;
         copied += read as u64;
     }
 
