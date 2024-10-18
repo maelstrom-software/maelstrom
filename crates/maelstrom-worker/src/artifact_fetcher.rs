@@ -7,16 +7,17 @@ use maelstrom_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
     Sha256Digest,
 };
-use maelstrom_linux as linux;
+use maelstrom_linux::Fd;
 use maelstrom_util::{
     cache::{fs::TempFile as _, GotArtifact},
     config::common::BrokerAddr,
     fs::Fs,
-    io, net,
+    io::MaybeFastWriter,
+    net,
     sync::Pool,
 };
 use slog::{debug, o, warn, Logger};
-use std::{net::TcpStream, num::NonZeroU32, os::fd::AsRawFd as _, sync::Arc, thread};
+use std::{cmp, net::TcpStream, num::NonZeroU32, os::fd::AsRawFd, sync::Arc, thread};
 
 pub struct ArtifactFetcher {
     broker_addr: BrokerAddr,
@@ -89,7 +90,7 @@ fn main(
     // The broker could have silently shut it down, or may be in the process of shutting it down.
     // For this reason, if we have a reused connection and get an error writing to it or reading
     // the first response, try again with a newly-created connection.
-    let (stream, size) = loop {
+    let (mut stream, size) = loop {
         let (mut stream, can_retry) = match stream_option {
             Some(stream) => (stream, true),
             None => {
@@ -132,22 +133,36 @@ fn main(
     };
 
     let fs = Fs::new();
-    let file = fs.create_file(temp_file.path())?;
-    let mut writer = io::MaybeFastWriter::new(log.clone());
-    let stream_fd = linux::Fd::from_raw(stream.as_raw_fd());
-    let file_fd = linux::Fd::from_raw(file.as_raw_fd());
-
-    let mut file_offset = 0;
-    while file_offset < size {
-        let remaining = size - file_offset;
-        let to_read = std::cmp::min(writer.buffer_size(), remaining as usize);
-        let written = writer.write_fd(stream_fd, None, to_read)?;
-        if written == 0 {
-            bail!("got unexpected EOF receiving artifact");
-        }
-        writer.copy_to_fd(file_fd, Some(file_offset))?;
-        file_offset += written as u64;
+    let mut file = fs.create_file(temp_file.path())?;
+    let copied = copy_using_splice(&mut stream, &mut file, size, log)?;
+    if copied < size {
+        debug!(log, "artifact fetcher got premature EOF copying file");
+        bail!("premature EOF reading artifact");
     }
 
     Ok((stream, temp_file))
+}
+
+fn copy_using_splice(
+    reader: &mut impl AsRawFd,
+    writer: &mut impl AsRawFd,
+    to_copy: u64,
+    log: &Logger,
+) -> Result<u64> {
+    let mut buffer = MaybeFastWriter::new(log.clone());
+    let read_fd = Fd::from_raw(reader.as_raw_fd());
+    let write_fd = Fd::from_raw(writer.as_raw_fd());
+
+    let mut copied = 0;
+    while copied < to_copy {
+        let to_read = cmp::min(buffer.buffer_size(), (to_copy - copied) as usize);
+        let read = buffer.write_fd(read_fd, None, to_read)?;
+        if read == 0 {
+            break;
+        }
+        buffer.copy_to_fd(write_fd, Some(copied))?;
+        copied += read as u64;
+    }
+
+    Ok(copied)
 }
