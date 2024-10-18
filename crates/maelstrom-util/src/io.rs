@@ -6,6 +6,7 @@ use lru::LruCache;
 use maelstrom_base::Sha256Digest;
 use maelstrom_linux::{self as linux};
 use sha2::{Digest as _, Sha256};
+use slog::{warn, Logger};
 use std::{
     fs::File,
     io::{self, Chain, Read, Repeat, Take, Write},
@@ -1073,11 +1074,11 @@ const SLOW_WRITE_CHUNK_SIZE: usize = 1024 * 1024;
 pub struct MaybeFastWriter(SpliceOrFallback);
 
 impl MaybeFastWriter {
-    pub fn new(log: slog::Logger) -> Self {
+    pub fn new(log: Logger) -> Self {
         match Splicer::new() {
             Ok(splicer) => Self(SpliceOrFallback::Splice(splicer)),
             Err(err) => {
-                slog::error!(log, "Failed to get pipe memory, cannot splice"; "error" => ?err);
+                warn!(log, "Failed to get pipe memory, cannot splice"; "error" => ?err);
                 Self(SpliceOrFallback::Fallback(SlowWriter::new(
                     SLOW_WRITE_CHUNK_SIZE,
                 )))
