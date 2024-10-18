@@ -149,7 +149,7 @@ fn copy_using_splice(
     to_copy: u64,
     log: &Logger,
 ) -> Result<u64> {
-    let mut buffer = MaybeFastWriter::new(log.clone());
+    let mut buffer = MaybeFastWriter::new(log);
     let read_fd = Fd::from_raw(reader.as_raw_fd());
     let write_fd = Fd::from_raw(writer.as_raw_fd());
 

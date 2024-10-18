@@ -72,7 +72,7 @@ fn run_splice_sender(
 ) {
     let fuse_fd = Fd::from_raw(fuse.get_ref().as_raw_fd());
 
-    let mut writer = MaybeFastWriter::new(log);
+    let mut writer = MaybeFastWriter::new(&log);
 
     while let Some(req) = recv.blocking_recv() {
         let res = (|| {

@@ -1074,11 +1074,11 @@ const SLOW_WRITE_CHUNK_SIZE: usize = 1024 * 1024;
 pub struct MaybeFastWriter(SpliceOrFallback);
 
 impl MaybeFastWriter {
-    pub fn new(log: Logger) -> Self {
+    pub fn new(log: &Logger) -> Self {
         match Splicer::new() {
             Ok(splicer) => Self(SpliceOrFallback::Splice(splicer)),
             Err(err) => {
-                warn!(log, "Failed to get pipe memory, cannot splice"; "error" => ?err);
+                warn!(log, "Failed to get pipe memory, cannot splice"; "err" => %err);
                 Self(SpliceOrFallback::Fallback(SlowWriter::new(
                     SLOW_WRITE_CHUNK_SIZE,
                 )))
