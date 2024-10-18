@@ -107,7 +107,7 @@ added_mounts = [
 ]
 
 [[directives]]
-filter = "package.equals(maelstrom-util) && name.equals(io::splicer)"
+filter = "package.equals(maelstrom-util) && name.equals(io::tests::splicer)"
 added_mounts = [
     { type = "proc", mount_point = "/proc" },
 ]

@@ -124,49 +124,6 @@ impl<InnerT: AsyncWrite + Unpin> AsyncWrite for Sha256Stream<InnerT> {
     }
 }
 
-#[cfg(test)]
-fn calculate_read_hash(mut input: &[u8]) -> Sha256Digest {
-    let mut reader = Sha256Stream::new(&mut input);
-    std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
-    reader.finalize().1
-}
-
-#[cfg(test)]
-fn calculate_write_hash(mut input: &[u8]) -> Sha256Digest {
-    let mut writer = Sha256Stream::new(std::io::sink());
-    std::io::copy(&mut input, &mut writer).unwrap();
-    writer.finalize().1
-}
-
-#[cfg(test)]
-async fn calculate_async_read_hash(mut input: &[u8]) -> Sha256Digest {
-    let mut reader = Sha256Stream::new(&mut input);
-    tokio::io::copy(&mut reader, &mut tokio::io::sink())
-        .await
-        .unwrap();
-    reader.finalize().1
-}
-
-#[cfg(test)]
-async fn calculate_async_write_hash(mut input: &[u8]) -> Sha256Digest {
-    let mut writer = Sha256Stream::new(tokio::io::sink());
-    tokio::io::copy(&mut input, &mut writer).await.unwrap();
-    writer.finalize().1
-}
-
-#[tokio::test]
-async fn sha256_stream_impls_consistent() {
-    let test_bytes = Vec::from_iter([1, 2, 3, 4, 5, 6, 7].into_iter().cycle().take(1000));
-    let read_hash = calculate_read_hash(&test_bytes);
-    let write_hash = calculate_write_hash(&test_bytes);
-    let async_read_hash = calculate_async_read_hash(&test_bytes).await;
-    let async_write_hash = calculate_async_write_hash(&test_bytes).await;
-
-    assert_eq!(read_hash, write_hash);
-    assert_eq!(read_hash, async_read_hash);
-    assert_eq!(read_hash, async_write_hash);
-}
-
 struct Chunk<ReaderT> {
     reader: io::Take<ReaderT>,
 }
@@ -223,49 +180,6 @@ impl<ReaderT: io::Read> io::Read for ChunkedReader<ReaderT> {
         }
         Ok(0)
     }
-}
-
-#[cfg(test)]
-fn test_chunked_reader(input: &[u8], expected: &[&[u8]]) -> io::Result<()> {
-    let mut reader = ChunkedReader::new(input);
-    for e in expected {
-        let mut actual = vec![0; e.len()];
-        reader.read_exact(&mut actual[..])?;
-        assert_eq!(&actual, e);
-    }
-
-    let mut rest = vec![];
-    reader.read_to_end(&mut rest)?;
-    assert!(rest.is_empty(), "{rest:?}");
-
-    Ok(())
-}
-
-#[test]
-fn chunked_reader() {
-    test_chunked_reader(
-        &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 2, 6, 7, 0, 0, 0, 0],
-        &[&[1, 2, 3], &[4, 5, 6], &[7]],
-    )
-    .unwrap();
-
-    test_chunked_reader(
-        &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 2, 6, 7, 0, 0, 0, 0],
-        &[&[1, 2, 3, 4, 5], &[6, 7]],
-    )
-    .unwrap();
-
-    test_chunked_reader(
-        &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 2, 6, 7, 0, 0, 0, 0],
-        &[&[1, 2, 3, 4, 5, 6, 7]],
-    )
-    .unwrap();
-
-    test_chunked_reader(
-        &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 2, 6, 7],
-        &[&[1, 2, 3], &[4, 5, 6], &[7]],
-    )
-    .unwrap_err();
 }
 
 pub struct ChunkedWriter<WriterT> {
@@ -328,56 +242,6 @@ impl<WriterT: io::Write> io::Write for ChunkedWriter<WriterT> {
         }
         self.writer.flush()
     }
-}
-
-#[cfg(test)]
-fn test_chunk_writer(input: &[&[u8]], expected: &[u8]) {
-    use std::io::Write as _;
-
-    let mut written = vec![];
-    let mut writer = ChunkedWriter::new(&mut written, 5);
-    for i in input {
-        writer.write_all(i).unwrap();
-    }
-
-    writer.finish().unwrap();
-    assert_eq!(written, expected,);
-}
-
-#[test]
-fn chunk_writer() {
-    test_chunk_writer(
-        &[&[1, 2, 3, 4, 5, 6, 7, 8]],
-        &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 3, 6, 7, 8, 0, 0, 0, 0],
-    );
-
-    test_chunk_writer(
-        &[&[1, 2], &[3, 4], &[5, 6, 7, 8]],
-        &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 3, 6, 7, 8, 0, 0, 0, 0],
-    );
-    test_chunk_writer(&[&[1, 2]], &[0, 0, 0, 2, 1, 2, 0, 0, 0, 0]);
-
-    test_chunk_writer(
-        &[&[1, 2, 3, 4, 5]],
-        &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 0],
-    );
-}
-
-#[test]
-fn chunk_reader_and_writer() {
-    use std::io::{Read as _, Write as _};
-
-    let test_data = Vec::from_iter((0u8..=255).cycle().take(1000));
-    let mut encoded = vec![];
-    let mut writer = ChunkedWriter::new(&mut encoded, 7);
-    writer.write_all(&test_data).unwrap();
-    writer.finish().unwrap();
-
-    let mut reader = ChunkedReader::new(&encoded[..]);
-    let mut decoded = vec![];
-    reader.read_to_end(&mut decoded).unwrap();
-
-    assert_eq!(&decoded, &test_data);
 }
 
 #[derive(Default, Debug)]
@@ -698,210 +562,6 @@ impl<StreamT: Unpin> AsyncSeek for BufferedStream<StreamT> {
     }
 }
 
-#[tokio::test]
-async fn buffered_read() {
-    use tokio::io::AsyncReadExt as _;
-
-    for chunk_size in 1..10 {
-        let underlying: Vec<_> = (0..10).collect();
-        let mut stream = BufferedStream::new(
-            chunk_size,
-            10.try_into().unwrap(),
-            std::io::Cursor::new(underlying),
-        )
-        .await
-        .unwrap();
-
-        let mut buf = [0; 5];
-
-        stream.read_exact(&mut buf).await.unwrap();
-        assert_eq!(&buf[..], &[0, 1, 2, 3, 4]);
-
-        stream.read_exact(&mut buf).await.unwrap();
-        assert_eq!(&buf[..], &[5, 6, 7, 8, 9]);
-    }
-}
-
-#[tokio::test]
-async fn buffered_read_cached() {
-    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
-
-    let tmp = tempfile::tempdir().unwrap();
-    let fs = crate::async_fs::Fs::new();
-    let mut f1 = fs
-        .create_file_read_write(tmp.path().join("foo"))
-        .await
-        .unwrap();
-
-    let mut f2 = f1.try_clone().await.unwrap();
-    f2.write_all(&(0..10).collect::<Vec<_>>()).await.unwrap();
-    f2.flush().await.unwrap();
-
-    f1.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-    let mut stream = BufferedStream::new(4, 10.try_into().unwrap(), f1)
-        .await
-        .unwrap();
-
-    let mut buf = [0; 3];
-    stream.read_exact(&mut buf).await.unwrap();
-    assert_eq!(&buf[..], &[0, 1, 2]);
-
-    // Write zeros to the underlying stream
-    f2.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-    f2.write_all(&[0; 10]).await.unwrap();
-
-    // We should still get the same thing
-    stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-    stream.read_exact(&mut buf).await.unwrap();
-    assert_eq!(&buf[..], &[0, 1, 2]);
-}
-
-#[tokio::test]
-async fn buffered_write_then_read() {
-    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
-
-    for chunk_size in 1..10 {
-        let underlying = vec![0; 10];
-        let mut stream = BufferedStream::new(
-            chunk_size,
-            10.try_into().unwrap(),
-            std::io::Cursor::new(underlying),
-        )
-        .await
-        .unwrap();
-
-        stream.write_all(&[0, 1, 2, 3, 4]).await.unwrap();
-        stream.write_all(&[5, 6, 7, 8, 9]).await.unwrap();
-        stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-
-        let mut buf = [0; 5];
-
-        stream.read_exact(&mut buf).await.unwrap();
-        assert_eq!(&buf[..], &[0, 1, 2, 3, 4]);
-
-        stream.read_exact(&mut buf).await.unwrap();
-        assert_eq!(&buf[..], &[5, 6, 7, 8, 9]);
-    }
-}
-
-#[tokio::test]
-async fn buffered_write_then_flush() {
-    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
-
-    let tmp = tempfile::tempdir().unwrap();
-    let fs = crate::async_fs::Fs::new();
-    let mut f1 = fs
-        .create_file_read_write(tmp.path().join("foo"))
-        .await
-        .unwrap();
-
-    let mut f2 = f1.try_clone().await.unwrap();
-
-    f1.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-    let mut stream = BufferedStream::new(4, 10.try_into().unwrap(), f1)
-        .await
-        .unwrap();
-
-    stream.write_all(&[0, 1, 2, 3, 4]).await.unwrap();
-
-    // nothing should be written yet
-    let file_len = f2.metadata().await.unwrap().len();
-    assert_eq!(file_len, 0);
-
-    stream.flush().await.unwrap();
-
-    let mut buf = [0; 5];
-
-    f2.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-    f2.read_exact(&mut buf).await.unwrap();
-    assert_eq!(&buf[..], &[0, 1, 2, 3, 4]);
-}
-
-#[cfg(test)]
-#[tokio::main]
-async fn buffered_stream_simex_test(
-    sim: &mut maelstrom_simex::Simulation,
-    read_size: usize,
-    write_size: usize,
-    file_size: usize,
-) {
-    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
-
-    let tmp = tempfile::tempdir().unwrap();
-    let fs = crate::async_fs::Fs::new();
-    let f1 = fs
-        .create_file_read_write(tmp.path().join("foo"))
-        .await
-        .unwrap();
-
-    let mut stream = BufferedStream::new(4, 2.try_into().unwrap(), f1)
-        .await
-        .unwrap();
-    let mut shadow: Vec<_> = (1..(u8::try_from(file_size).unwrap())).collect();
-
-    stream.write_all(&shadow[..]).await.unwrap();
-    stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-
-    const ITERATIONS: u8 = 5;
-    for i in 0..ITERATIONS {
-        match sim.choose(["read", "write", "flush", "seek"]).unwrap() {
-            "read" => {
-                let pos = stream.stream_position().await.unwrap() as usize;
-                let read_length = std::cmp::min(read_size, shadow.len() - pos);
-
-                let mut buf = vec![0; read_length];
-                stream.read_exact(&mut buf).await.unwrap();
-
-                assert_eq!(&shadow[pos..(pos + read_length)], &buf);
-            }
-            "write" => {
-                let pos = stream.stream_position().await.unwrap() as usize;
-                let data = vec![i; write_size];
-                stream.write_all(&data[..]).await.unwrap();
-                let end = pos + write_size;
-                if end > shadow.len() {
-                    shadow.resize(end, 0);
-                }
-                shadow[pos..(pos + write_size)].copy_from_slice(&data[..]);
-            }
-            "seek" => {
-                let pos = ((shadow.len() as u64) / (ITERATIONS - 1) as u64) * i as u64;
-                stream.seek(std::io::SeekFrom::Start(pos)).await.unwrap();
-            }
-            "flush" => {
-                stream.flush().await.unwrap();
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-    let mut verify = vec![0; shadow.len()];
-    stream.read_exact(&mut verify).await.unwrap();
-    assert_eq!(shadow, verify);
-
-    stream.flush().await.unwrap();
-    let mut file = stream.into_inner();
-    file.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-    file.read_exact(&mut verify).await.unwrap();
-
-    assert_eq!(shadow, verify);
-}
-
-#[test]
-fn buffered_stream_simex_read_10_write_15_size_50() {
-    maelstrom_simex::SimulationExplorer::default().for_each(|mut sim| {
-        buffered_stream_simex_test(&mut sim, 10, 15, 50);
-    })
-}
-
-#[test]
-fn buffered_stream_simex_read_3_write_3_size_10() {
-    maelstrom_simex::SimulationExplorer::default().for_each(|mut sim| {
-        buffered_stream_simex_test(&mut sim, 3, 3, 10);
-    })
-}
-
 struct Splicer {
     pipe_in: linux::OwnedFd,
     pipe_out: linux::OwnedFd,
@@ -1137,82 +797,6 @@ impl MaybeFastWriter {
     }
 }
 
-#[cfg(test)]
-fn maybe_fast_writer_test(mut writer: MaybeFastWriter, len1: usize, len2: usize) {
-    use std::io::Write as _;
-    use std::io::{Seek as _, SeekFrom};
-    use std::os::fd::AsRawFd as _;
-
-    let buf1 = Vec::from_iter((0u8..0xFFu8).cycle().take(len1));
-    let buf2 = Vec::from_iter((0u8..0xFFu8).cycle().take(len2));
-
-    writer.write(&buf1).unwrap();
-
-    let tmp = tempfile::tempdir().unwrap();
-    let fs = crate::fs::Fs::new();
-    let mut f1 = fs.create_file_read_write(tmp.path().join("f1")).unwrap();
-    f1.write_all(b"xx").unwrap();
-    f1.write_all(&buf2).unwrap();
-    f1.write_all(b"xx").unwrap();
-    f1.flush().unwrap();
-    let fd = linux::Fd::from_raw(f1.as_raw_fd());
-    writer.write_fd(fd, Some(2), buf2.len()).unwrap();
-
-    let mut f2 = fs.create_file_read_write(tmp.path().join("f2")).unwrap();
-    let fd = linux::Fd::from_raw(f2.as_raw_fd());
-    writer.copy_to_fd(fd, None).unwrap();
-
-    f2.seek(SeekFrom::Start(0)).unwrap();
-    let mut read = vec![];
-    f2.read_to_end(&mut read).unwrap();
-
-    let expected = Vec::from_iter(buf1.iter().copied().chain(buf2.iter().copied()));
-    assert_eq!(&read[..], expected);
-
-    // Do it again, we should have reset
-    writer.write(&buf1).unwrap();
-    let fd = linux::Fd::from_raw(f1.as_raw_fd());
-    writer.write_fd(fd, Some(2), buf2.len()).unwrap();
-
-    let mut f3 = fs.create_file_read_write(tmp.path().join("f3")).unwrap();
-    f3.write_all(b"xx").unwrap();
-    f3.flush().unwrap();
-
-    let fd = linux::Fd::from_raw(f3.as_raw_fd());
-    writer.copy_to_fd(fd, Some(0)).unwrap();
-
-    f3.seek(SeekFrom::Start(0)).unwrap();
-    let mut read = vec![];
-    f3.read_to_end(&mut read).unwrap();
-    assert_eq!(&read[..], expected);
-}
-
-#[test]
-fn splicer() {
-    for i in 1..15 {
-        for j in 1..15 {
-            maybe_fast_writer_test(
-                MaybeFastWriter(SpliceOrFallback::Splice(Splicer::new().unwrap())),
-                i,
-                j,
-            );
-        }
-    }
-}
-
-#[test]
-fn slow_writer() {
-    for i in 1..15 {
-        for j in 1..15 {
-            maybe_fast_writer_test(
-                MaybeFastWriter(SpliceOrFallback::Fallback(SlowWriter::new(5))),
-                i,
-                j,
-            );
-        }
-    }
-}
-
 /// A wrapper for a raw, non-blocking fd that allows it to be read from async code.
 pub struct AsyncFile(AsyncFd<File>);
 
@@ -1295,4 +879,417 @@ pub fn copy_using_splice(
     }
 
     Ok(copied)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn calculate_read_hash(mut input: &[u8]) -> Sha256Digest {
+        let mut reader = Sha256Stream::new(&mut input);
+        std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
+        reader.finalize().1
+    }
+
+    fn calculate_write_hash(mut input: &[u8]) -> Sha256Digest {
+        let mut writer = Sha256Stream::new(std::io::sink());
+        std::io::copy(&mut input, &mut writer).unwrap();
+        writer.finalize().1
+    }
+
+    async fn calculate_async_read_hash(mut input: &[u8]) -> Sha256Digest {
+        let mut reader = Sha256Stream::new(&mut input);
+        tokio::io::copy(&mut reader, &mut tokio::io::sink())
+            .await
+            .unwrap();
+        reader.finalize().1
+    }
+
+    async fn calculate_async_write_hash(mut input: &[u8]) -> Sha256Digest {
+        let mut writer = Sha256Stream::new(tokio::io::sink());
+        tokio::io::copy(&mut input, &mut writer).await.unwrap();
+        writer.finalize().1
+    }
+
+    #[tokio::test]
+    async fn sha256_stream_impls_consistent() {
+        let test_bytes = Vec::from_iter([1, 2, 3, 4, 5, 6, 7].into_iter().cycle().take(1000));
+        let read_hash = calculate_read_hash(&test_bytes);
+        let write_hash = calculate_write_hash(&test_bytes);
+        let async_read_hash = calculate_async_read_hash(&test_bytes).await;
+        let async_write_hash = calculate_async_write_hash(&test_bytes).await;
+
+        assert_eq!(read_hash, write_hash);
+        assert_eq!(read_hash, async_read_hash);
+        assert_eq!(read_hash, async_write_hash);
+    }
+
+    fn test_chunked_reader(input: &[u8], expected: &[&[u8]]) -> io::Result<()> {
+        let mut reader = ChunkedReader::new(input);
+        for e in expected {
+            let mut actual = vec![0; e.len()];
+            reader.read_exact(&mut actual[..])?;
+            assert_eq!(&actual, e);
+        }
+
+        let mut rest = vec![];
+        reader.read_to_end(&mut rest)?;
+        assert!(rest.is_empty(), "{rest:?}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn chunked_reader() {
+        test_chunked_reader(
+            &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 2, 6, 7, 0, 0, 0, 0],
+            &[&[1, 2, 3], &[4, 5, 6], &[7]],
+        )
+        .unwrap();
+
+        test_chunked_reader(
+            &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 2, 6, 7, 0, 0, 0, 0],
+            &[&[1, 2, 3, 4, 5], &[6, 7]],
+        )
+        .unwrap();
+
+        test_chunked_reader(
+            &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 2, 6, 7, 0, 0, 0, 0],
+            &[&[1, 2, 3, 4, 5, 6, 7]],
+        )
+        .unwrap();
+
+        test_chunked_reader(
+            &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 2, 6, 7],
+            &[&[1, 2, 3], &[4, 5, 6], &[7]],
+        )
+        .unwrap_err();
+    }
+
+    fn test_chunk_writer(input: &[&[u8]], expected: &[u8]) {
+        use std::io::Write as _;
+
+        let mut written = vec![];
+        let mut writer = ChunkedWriter::new(&mut written, 5);
+        for i in input {
+            writer.write_all(i).unwrap();
+        }
+
+        writer.finish().unwrap();
+        assert_eq!(written, expected,);
+    }
+
+    #[test]
+    fn chunk_writer() {
+        test_chunk_writer(
+            &[&[1, 2, 3, 4, 5, 6, 7, 8]],
+            &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 3, 6, 7, 8, 0, 0, 0, 0],
+        );
+
+        test_chunk_writer(
+            &[&[1, 2], &[3, 4], &[5, 6, 7, 8]],
+            &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 3, 6, 7, 8, 0, 0, 0, 0],
+        );
+        test_chunk_writer(&[&[1, 2]], &[0, 0, 0, 2, 1, 2, 0, 0, 0, 0]);
+
+        test_chunk_writer(
+            &[&[1, 2, 3, 4, 5]],
+            &[0, 0, 0, 5, 1, 2, 3, 4, 5, 0, 0, 0, 0],
+        );
+    }
+
+    #[test]
+    fn chunk_reader_and_writer() {
+        use std::io::{Read as _, Write as _};
+
+        let test_data = Vec::from_iter((0u8..=255).cycle().take(1000));
+        let mut encoded = vec![];
+        let mut writer = ChunkedWriter::new(&mut encoded, 7);
+        writer.write_all(&test_data).unwrap();
+        writer.finish().unwrap();
+
+        let mut reader = ChunkedReader::new(&encoded[..]);
+        let mut decoded = vec![];
+        reader.read_to_end(&mut decoded).unwrap();
+
+        assert_eq!(&decoded, &test_data);
+    }
+
+    #[tokio::test]
+    async fn buffered_read() {
+        use tokio::io::AsyncReadExt as _;
+
+        for chunk_size in 1..10 {
+            let underlying: Vec<_> = (0..10).collect();
+            let mut stream = BufferedStream::new(
+                chunk_size,
+                10.try_into().unwrap(),
+                std::io::Cursor::new(underlying),
+            )
+            .await
+            .unwrap();
+
+            let mut buf = [0; 5];
+
+            stream.read_exact(&mut buf).await.unwrap();
+            assert_eq!(&buf[..], &[0, 1, 2, 3, 4]);
+
+            stream.read_exact(&mut buf).await.unwrap();
+            assert_eq!(&buf[..], &[5, 6, 7, 8, 9]);
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_read_cached() {
+        use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let fs = crate::async_fs::Fs::new();
+        let mut f1 = fs
+            .create_file_read_write(tmp.path().join("foo"))
+            .await
+            .unwrap();
+
+        let mut f2 = f1.try_clone().await.unwrap();
+        f2.write_all(&(0..10).collect::<Vec<_>>()).await.unwrap();
+        f2.flush().await.unwrap();
+
+        f1.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        let mut stream = BufferedStream::new(4, 10.try_into().unwrap(), f1)
+            .await
+            .unwrap();
+
+        let mut buf = [0; 3];
+        stream.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf[..], &[0, 1, 2]);
+
+        // Write zeros to the underlying stream
+        f2.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        f2.write_all(&[0; 10]).await.unwrap();
+
+        // We should still get the same thing
+        stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        stream.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf[..], &[0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn buffered_write_then_read() {
+        use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
+
+        for chunk_size in 1..10 {
+            let underlying = vec![0; 10];
+            let mut stream = BufferedStream::new(
+                chunk_size,
+                10.try_into().unwrap(),
+                std::io::Cursor::new(underlying),
+            )
+            .await
+            .unwrap();
+
+            stream.write_all(&[0, 1, 2, 3, 4]).await.unwrap();
+            stream.write_all(&[5, 6, 7, 8, 9]).await.unwrap();
+            stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+
+            let mut buf = [0; 5];
+
+            stream.read_exact(&mut buf).await.unwrap();
+            assert_eq!(&buf[..], &[0, 1, 2, 3, 4]);
+
+            stream.read_exact(&mut buf).await.unwrap();
+            assert_eq!(&buf[..], &[5, 6, 7, 8, 9]);
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_write_then_flush() {
+        use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let fs = crate::async_fs::Fs::new();
+        let mut f1 = fs
+            .create_file_read_write(tmp.path().join("foo"))
+            .await
+            .unwrap();
+
+        let mut f2 = f1.try_clone().await.unwrap();
+
+        f1.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        let mut stream = BufferedStream::new(4, 10.try_into().unwrap(), f1)
+            .await
+            .unwrap();
+
+        stream.write_all(&[0, 1, 2, 3, 4]).await.unwrap();
+
+        // nothing should be written yet
+        let file_len = f2.metadata().await.unwrap().len();
+        assert_eq!(file_len, 0);
+
+        stream.flush().await.unwrap();
+
+        let mut buf = [0; 5];
+
+        f2.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        f2.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf[..], &[0, 1, 2, 3, 4]);
+    }
+
+    #[tokio::main]
+    async fn buffered_stream_simex_test(
+        sim: &mut maelstrom_simex::Simulation,
+        read_size: usize,
+        write_size: usize,
+        file_size: usize,
+    ) {
+        use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let fs = crate::async_fs::Fs::new();
+        let f1 = fs
+            .create_file_read_write(tmp.path().join("foo"))
+            .await
+            .unwrap();
+
+        let mut stream = BufferedStream::new(4, 2.try_into().unwrap(), f1)
+            .await
+            .unwrap();
+        let mut shadow: Vec<_> = (1..(u8::try_from(file_size).unwrap())).collect();
+
+        stream.write_all(&shadow[..]).await.unwrap();
+        stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+
+        const ITERATIONS: u8 = 5;
+        for i in 0..ITERATIONS {
+            match sim.choose(["read", "write", "flush", "seek"]).unwrap() {
+                "read" => {
+                    let pos = stream.stream_position().await.unwrap() as usize;
+                    let read_length = std::cmp::min(read_size, shadow.len() - pos);
+
+                    let mut buf = vec![0; read_length];
+                    stream.read_exact(&mut buf).await.unwrap();
+
+                    assert_eq!(&shadow[pos..(pos + read_length)], &buf);
+                }
+                "write" => {
+                    let pos = stream.stream_position().await.unwrap() as usize;
+                    let data = vec![i; write_size];
+                    stream.write_all(&data[..]).await.unwrap();
+                    let end = pos + write_size;
+                    if end > shadow.len() {
+                        shadow.resize(end, 0);
+                    }
+                    shadow[pos..(pos + write_size)].copy_from_slice(&data[..]);
+                }
+                "seek" => {
+                    let pos = ((shadow.len() as u64) / (ITERATIONS - 1) as u64) * i as u64;
+                    stream.seek(std::io::SeekFrom::Start(pos)).await.unwrap();
+                }
+                "flush" => {
+                    stream.flush().await.unwrap();
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        let mut verify = vec![0; shadow.len()];
+        stream.read_exact(&mut verify).await.unwrap();
+        assert_eq!(shadow, verify);
+
+        stream.flush().await.unwrap();
+        let mut file = stream.into_inner();
+        file.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        file.read_exact(&mut verify).await.unwrap();
+
+        assert_eq!(shadow, verify);
+    }
+
+    #[test]
+    fn buffered_stream_simex_read_10_write_15_size_50() {
+        maelstrom_simex::SimulationExplorer::default().for_each(|mut sim| {
+            buffered_stream_simex_test(&mut sim, 10, 15, 50);
+        })
+    }
+
+    #[test]
+    fn buffered_stream_simex_read_3_write_3_size_10() {
+        maelstrom_simex::SimulationExplorer::default().for_each(|mut sim| {
+            buffered_stream_simex_test(&mut sim, 3, 3, 10);
+        })
+    }
+
+    fn maybe_fast_writer_test(mut writer: MaybeFastWriter, len1: usize, len2: usize) {
+        use std::io::Write as _;
+        use std::io::{Seek as _, SeekFrom};
+        use std::os::fd::AsRawFd as _;
+
+        let buf1 = Vec::from_iter((0u8..0xFFu8).cycle().take(len1));
+        let buf2 = Vec::from_iter((0u8..0xFFu8).cycle().take(len2));
+
+        writer.write(&buf1).unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let fs = crate::fs::Fs::new();
+        let mut f1 = fs.create_file_read_write(tmp.path().join("f1")).unwrap();
+        f1.write_all(b"xx").unwrap();
+        f1.write_all(&buf2).unwrap();
+        f1.write_all(b"xx").unwrap();
+        f1.flush().unwrap();
+        let fd = linux::Fd::from_raw(f1.as_raw_fd());
+        writer.write_fd(fd, Some(2), buf2.len()).unwrap();
+
+        let mut f2 = fs.create_file_read_write(tmp.path().join("f2")).unwrap();
+        let fd = linux::Fd::from_raw(f2.as_raw_fd());
+        writer.copy_to_fd(fd, None).unwrap();
+
+        f2.seek(SeekFrom::Start(0)).unwrap();
+        let mut read = vec![];
+        f2.read_to_end(&mut read).unwrap();
+
+        let expected = Vec::from_iter(buf1.iter().copied().chain(buf2.iter().copied()));
+        assert_eq!(&read[..], expected);
+
+        // Do it again, we should have reset
+        writer.write(&buf1).unwrap();
+        let fd = linux::Fd::from_raw(f1.as_raw_fd());
+        writer.write_fd(fd, Some(2), buf2.len()).unwrap();
+
+        let mut f3 = fs.create_file_read_write(tmp.path().join("f3")).unwrap();
+        f3.write_all(b"xx").unwrap();
+        f3.flush().unwrap();
+
+        let fd = linux::Fd::from_raw(f3.as_raw_fd());
+        writer.copy_to_fd(fd, Some(0)).unwrap();
+
+        f3.seek(SeekFrom::Start(0)).unwrap();
+        let mut read = vec![];
+        f3.read_to_end(&mut read).unwrap();
+        assert_eq!(&read[..], expected);
+    }
+
+    #[test]
+    fn splicer() {
+        for i in 1..15 {
+            for j in 1..15 {
+                maybe_fast_writer_test(
+                    MaybeFastWriter(SpliceOrFallback::Splice(Splicer::new().unwrap())),
+                    i,
+                    j,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn slow_writer() {
+        for i in 1..15 {
+            for j in 1..15 {
+                maybe_fast_writer_test(
+                    MaybeFastWriter(SpliceOrFallback::Fallback(SlowWriter::new(5))),
+                    i,
+                    j,
+                );
+            }
+        }
+    }
 }
