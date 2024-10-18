@@ -28,7 +28,7 @@ pub fn write_message_to_socket(
     msg: impl Debug + Serialize,
     log: &Logger,
 ) -> Result<()> {
-    debug!(log, "sending message"; "msg" => #?msg);
+    debug!(log, "sending message"; "message" => #?msg);
     Ok(stream.write_all(&write_message_to_vec(msg)?)?)
 }
 
@@ -39,7 +39,7 @@ pub async fn write_message_to_async_socket(
     msg: impl Debug + Serialize,
     log: &Logger,
 ) -> Result<()> {
-    debug!(log, "sending message"; "msg" => #?msg);
+    debug!(log, "sending message"; "message" => #?msg);
     Ok(stream.write_all(&write_message_to_vec(msg)?).await?)
 }
 
@@ -55,7 +55,7 @@ where
     let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
     stream.read_exact(&mut buf)?;
     let msg = proto::deserialize_from(&mut &buf[..])?;
-    debug!(log, "received message"; "msg" => #?msg);
+    debug!(log, "received message"; "message" => #?msg);
     Ok(msg)
 }
 
@@ -73,7 +73,7 @@ where
     let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
     stream.read_exact(&mut buf).await?;
     let msg = proto::deserialize_from(&mut &buf[..])?;
-    debug!(log, "received message"; "msg" => #?msg);
+    debug!(log, "received message"; "message" => #?msg);
     Ok(msg)
 }
 
