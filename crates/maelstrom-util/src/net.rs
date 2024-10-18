@@ -22,25 +22,30 @@ fn write_message_to_vec(msg: impl Serialize) -> Result<Vec<u8>> {
 }
 
 /// Write a message to a normal (threaded) writer. Each message is framed by sending a leading
-/// 4-byte, little-endian message size. The message is logged at the debug log level.
+/// 4-byte, little-endian message size. The message is logged at the debug log level, as well as
+/// any error encountered sending it.
 pub fn write_message_to_socket(
     stream: &mut impl Write,
     msg: impl Debug + Serialize,
     log: &Logger,
 ) -> Result<()> {
     debug!(log, "sending message"; "message" => #?msg);
-    Ok(stream.write_all(&write_message_to_vec(msg)?)?)
+    (|| Ok(stream.write_all(&write_message_to_vec(msg)?)?))()
+        .inspect_err(|err| debug!(log, "error sending message"; "error" => %err))
 }
 
 /// Write a message to a Tokio output stream. Each message is framed by sending a leading 4-byte,
-/// little-endian message size.
+/// little-endian message size. The message is logged at the debug log level, as well as any error
+/// encountered sending it.
 pub async fn write_message_to_async_socket(
     stream: &mut (impl AsyncWrite + Unpin),
     msg: impl Debug + Serialize,
     log: &Logger,
 ) -> Result<()> {
     debug!(log, "sending message"; "message" => #?msg);
-    Ok(stream.write_all(&write_message_to_vec(msg)?).await?)
+    async { Ok(stream.write_all(&write_message_to_vec(msg)?).await?) }
+        .await
+        .inspect_err(|err| debug!(log, "error sending message"; "error" => %err))
 }
 
 /// Read a message from a normal (threaded) reader. The framing must match that of
@@ -50,13 +55,15 @@ pub fn read_message_from_socket<MessageT>(stream: &mut impl Read, log: &Logger) 
 where
     MessageT: Debug + DeserializeOwned,
 {
-    let mut msg_len: [u8; 4] = [0; 4];
-    stream.read_exact(&mut msg_len)?;
-    let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
-    stream.read_exact(&mut buf)?;
-    let msg = proto::deserialize_from(&mut &buf[..])?;
-    debug!(log, "received message"; "message" => #?msg);
-    Ok(msg)
+    (|| {
+        let mut msg_len: [u8; 4] = [0; 4];
+        stream.read_exact(&mut msg_len)?;
+        let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
+        stream.read_exact(&mut buf)?;
+        Result::Ok(proto::deserialize_from(&mut &buf[..])?)
+    })()
+    .inspect(|msg| debug!(log, "received message"; "message" => #?msg))
+    .inspect_err(|err| debug!(log, "error receiving message"; "error" => %err))
 }
 
 /// Read a message from a Tokio input stream. The framing must match that of
@@ -68,17 +75,21 @@ pub async fn read_message_from_async_socket<MessageT>(
 where
     MessageT: Debug + DeserializeOwned,
 {
-    let mut msg_len: [u8; 4] = [0; 4];
-    stream.read_exact(&mut msg_len).await?;
-    let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
-    stream.read_exact(&mut buf).await?;
-    let msg = proto::deserialize_from(&mut &buf[..])?;
-    debug!(log, "received message"; "message" => #?msg);
-    Ok(msg)
+    async {
+        let mut msg_len: [u8; 4] = [0; 4];
+        stream.read_exact(&mut msg_len).await?;
+        let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
+        stream.read_exact(&mut buf).await?;
+        Result::Ok(proto::deserialize_from(&mut &buf[..])?)
+    }
+    .await
+    .inspect(|msg| debug!(log, "received message"; "message" => #?msg))
+    .inspect_err(|err| debug!(log, "error receiving message"; "error" => %err))
 }
 
 /// Loop, reading messages from a channel and writing them to a socket. The `log` parameter is used
-/// to insert debug logging.
+/// to insert debug logging. Each message is logged. Also, if there is a failure reading a message,
+/// that is logged as well.
 pub async fn async_socket_writer<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
     mut socket: (impl AsyncWrite + Unpin),

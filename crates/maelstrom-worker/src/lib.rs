@@ -66,11 +66,7 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
         },
         &log,
     )
-    .await
-    .map_err(|err| {
-        error!(log, "error writing hello message"; "error" => %err);
-        err
-    })?;
+    .await?;
 
     let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =

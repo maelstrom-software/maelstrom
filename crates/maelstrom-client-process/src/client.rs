@@ -342,9 +342,6 @@ impl Client {
                         &log_clone,
                     )
                     .await
-                    .inspect_err(
-                        |err| debug!(log_clone, "error reading broker message"; "error" => %err),
-                    )
                     .context("reading from broker")
                 });
 
@@ -353,9 +350,6 @@ impl Client {
                 join_set.spawn(async move {
                     net::async_socket_writer(broker_receiver, broker_socket_write_half, &log_clone)
                         .await
-                        .inspect_err(
-                            |err| debug!(log_clone, "error writing broker message"; "error" => %err),
-                        )
                         .context("writing to broker")
                 });
 
