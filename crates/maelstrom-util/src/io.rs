@@ -8,10 +8,11 @@ use maelstrom_linux::{self as linux};
 use sha2::{Digest as _, Sha256};
 use slog::{warn, Logger};
 use std::{
+    cmp,
     fs::File,
     io::{self, Chain, Read, Repeat, Take, Write},
     num::NonZeroUsize,
-    os::fd,
+    os::fd::{self, AsRawFd},
     pin::{pin, Pin},
     task::{ready, Context, Poll},
 };
@@ -1270,4 +1271,28 @@ impl AsyncWrite for AsyncFile {
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Poll::Ready(Ok(()))
     }
+}
+
+pub fn copy_using_splice(
+    reader: &mut impl AsRawFd,
+    writer: &mut impl AsRawFd,
+    to_copy: u64,
+    log: &Logger,
+) -> io::Result<u64> {
+    let mut buffer = MaybeFastWriter::new(log);
+    let read_fd = linux::Fd::from_raw(reader.as_raw_fd());
+    let write_fd = linux::Fd::from_raw(writer.as_raw_fd());
+
+    let mut copied = 0;
+    while copied < to_copy {
+        let to_read = cmp::min(buffer.buffer_size(), (to_copy - copied) as usize);
+        let read = buffer.write_fd(read_fd, None, to_read)?;
+        if read == 0 {
+            break;
+        }
+        buffer.copy_to_fd(write_fd, None)?;
+        copied += read as u64;
+    }
+
+    Ok(copied)
 }

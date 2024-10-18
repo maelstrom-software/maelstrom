@@ -7,17 +7,15 @@ use maelstrom_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
     Sha256Digest,
 };
-use maelstrom_linux::Fd;
 use maelstrom_util::{
     cache::{fs::TempFile as _, GotArtifact},
     config::common::BrokerAddr,
     fs::Fs,
-    io::MaybeFastWriter,
-    net,
+    io, net,
     sync::Pool,
 };
 use slog::{debug, o, warn, Logger};
-use std::{cmp, net::TcpStream, num::NonZeroU32, os::fd::AsRawFd, sync::Arc, thread};
+use std::{net::TcpStream, num::NonZeroU32, sync::Arc, thread};
 
 pub struct ArtifactFetcher {
     broker_addr: BrokerAddr,
@@ -134,35 +132,11 @@ fn main(
 
     let fs = Fs::new();
     let mut file = fs.create_file(temp_file.path())?;
-    let copied = copy_using_splice(&mut stream, &mut file, size, log)?;
+    let copied = io::copy_using_splice(&mut stream, &mut file, size, log)?;
     if copied < size {
         debug!(log, "artifact fetcher got premature EOF copying file");
         bail!("premature EOF reading artifact");
     }
 
     Ok((stream, temp_file))
-}
-
-fn copy_using_splice(
-    reader: &mut impl AsRawFd,
-    writer: &mut impl AsRawFd,
-    to_copy: u64,
-    log: &Logger,
-) -> Result<u64> {
-    let mut buffer = MaybeFastWriter::new(log);
-    let read_fd = Fd::from_raw(reader.as_raw_fd());
-    let write_fd = Fd::from_raw(writer.as_raw_fd());
-
-    let mut copied = 0;
-    while copied < to_copy {
-        let to_read = cmp::min(buffer.buffer_size(), (to_copy - copied) as usize);
-        let read = buffer.write_fd(read_fd, None, to_read)?;
-        if read == 0 {
-            break;
-        }
-        buffer.copy_to_fd(write_fd, None)?;
-        copied += read as u64;
-    }
-
-    Ok(copied)
 }
