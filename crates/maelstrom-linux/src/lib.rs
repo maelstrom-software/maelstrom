@@ -1469,6 +1469,37 @@ pub fn setsid() -> Result<(), Errno> {
     Errno::result(unsafe { libc::setsid() }).map(drop)
 }
 
+pub fn setsockopt_so_keepalive(sock: &impl AsFd, value: bool) -> Result<(), Errno> {
+    setsockopt_u32(sock, libc::SOL_SOCKET, libc::SO_KEEPALIVE, value as u32)
+}
+
+pub fn setsockopt_tcp_nodelay(sock: &impl AsFd, value: bool) -> Result<(), Errno> {
+    setsockopt_u32(sock, libc::IPPROTO_TCP, libc::TCP_NODELAY, value as u32)
+}
+
+pub fn setsockopt_tcp_keepcnt(sock: &impl AsFd, value: u32) -> Result<(), Errno> {
+    setsockopt_u32(sock, libc::IPPROTO_TCP, libc::TCP_KEEPCNT, value)
+}
+
+pub fn setsockopt_tcp_keepidle(sock: &impl AsFd, value: u32) -> Result<(), Errno> {
+    setsockopt_u32(sock, libc::IPPROTO_TCP, libc::TCP_KEEPIDLE, value)
+}
+
+pub fn setsockopt_tcp_keepintvl(sock: &impl AsFd, value: u32) -> Result<(), Errno> {
+    setsockopt_u32(sock, libc::IPPROTO_TCP, libc::TCP_KEEPINTVL, value)
+}
+
+fn setsockopt_u32(sock: &impl AsFd, level: c_int, name: c_int, value: u32) -> Result<(), Errno> {
+    let fd = sock.fd();
+    let value = value as c_int;
+    let value_ptr: *const c_int = &value;
+    let value_len = mem::size_of::<c_int>() as socklen_t;
+    Errno::result(unsafe {
+        libc::setsockopt(fd.0, level, name, value_ptr as *const c_void, value_len)
+    })
+    .map(drop)
+}
+
 pub fn sigprocmask(how: SigprocmaskHow, set: Option<&SignalSet>) -> Result<SignalSet, Errno> {
     let set: *const sigset_t = set.map(|s| &s.0 as *const sigset_t).unwrap_or(ptr::null());
     let mut oldset: MaybeUninit<sigset_t> = MaybeUninit::uninit();
