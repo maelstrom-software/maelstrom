@@ -3583,6 +3583,7 @@ dependencies = [
  "serde",
  "sha2",
  "slog",
+ "socket2 0.5.7",
  "std-semaphore",
  "strum 0.25.0",
  "tempfile",

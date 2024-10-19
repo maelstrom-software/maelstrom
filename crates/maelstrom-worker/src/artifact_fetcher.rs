@@ -15,7 +15,8 @@ use maelstrom_util::{
     sync::Pool,
 };
 use slog::{debug, o, warn, Logger};
-use std::{net::TcpStream, num::NonZeroU32, sync::Arc, thread};
+use socket2::{Socket, TcpKeepalive};
+use std::{net::TcpStream, num::NonZeroU32, sync::Arc, thread, time::Duration};
 
 pub struct ArtifactFetcher {
     broker_addr: BrokerAddr,
@@ -93,7 +94,16 @@ fn main(
             Some(stream) => (stream, true),
             None => {
                 debug!(log, "artifact fetcher connecting to broker");
-                let mut stream = TcpStream::connect(broker_addr.inner())?;
+                let stream = TcpStream::connect(broker_addr.inner())?;
+                stream.set_nodelay(true)?;
+                let socket = Socket::from(stream);
+                socket.set_tcp_keepalive(
+                    &TcpKeepalive::new()
+                        .with_time(Duration::from_secs(300))
+                        .with_interval(Duration::from_secs(300))
+                        .with_retries(3),
+                )?;
+                let mut stream: TcpStream = socket.into();
 
                 net::write_message_to_socket(&mut stream, Hello::ArtifactFetcher, log)?;
 
