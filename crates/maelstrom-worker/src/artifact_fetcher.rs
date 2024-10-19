@@ -108,9 +108,8 @@ fn main(
                 log,
             )?;
 
-            net::read_message_from_socket::<BrokerToArtifactFetcher>(&mut stream, log)?
-                .0
-                .map_err(|e| anyhow!("broker error reading artifact: {e}"))
+            let BrokerToArtifactFetcher(result) = net::read_message_from_socket(&mut stream, log)?;
+            result.map_err(|e| anyhow!("broker error reading artifact: {e}"))
         })();
 
         match size_result {
