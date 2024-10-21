@@ -258,6 +258,12 @@ impl ErrnoSentinel for i64 {
     }
 }
 
+impl ErrnoSentinel for *mut c_void {
+    fn sentinel() -> Self {
+        libc::MAP_FAILED
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExitCode(c_int);
 
@@ -1387,7 +1393,7 @@ pub fn mmap(
     fd: Option<Fd>,
     offset: i64,
 ) -> Result<*mut c_void, Errno> {
-    let addr = unsafe {
+    Errno::result(unsafe {
         libc::mmap(
             addr,
             len,
@@ -1396,11 +1402,7 @@ pub fn mmap(
             fd.map(|fd| fd.0).unwrap_or(0),
             offset,
         )
-    };
-    if addr == libc::MAP_FAILED {
-        return Err(Errno(unsafe { *libc::__errno_location() }));
-    }
-    Ok(addr)
+    })
 }
 
 pub fn mount(
