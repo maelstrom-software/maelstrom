@@ -197,17 +197,11 @@ impl ClientState {
 
     async fn get_container_image(&self, name: &str) -> Result<ContainerImage> {
         let dl_name = name.to_owned();
-
         let tracker = self.image_download_tracker.clone();
-        let dl_name_clone = dl_name.clone();
-        let prog = LazyProgress::new(move |size| tracker.new_task(&dl_name_clone, size));
-
-        let res = self
-            .container_image_depot
+        let prog = LazyProgress::new(move |size| tracker.new_task(&dl_name, size));
+        self.container_image_depot
             .get_container_image(name, prog)
-            .await;
-        self.image_download_tracker.remove_task(&dl_name);
-        res
+            .await
     }
 }
 

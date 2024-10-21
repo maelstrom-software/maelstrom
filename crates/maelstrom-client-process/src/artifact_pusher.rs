@@ -54,7 +54,6 @@ async fn push_one_artifact(
     let BrokerToArtifactPusher(resp) =
         net::read_message_from_async_socket(&mut stream, log).await?;
 
-    upload_tracker.remove_task(&upload_name);
     resp.map_err(|e| anyhow!("Error from broker: {e}"))
 }
 

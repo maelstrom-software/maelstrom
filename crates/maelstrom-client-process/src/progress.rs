@@ -11,7 +11,7 @@ use tokio::io::{self, AsyncRead};
 
 pub struct LazyProgress<FactoryT> {
     factory: FactoryT,
-    tracker: OnceLock<Arc<RunningProgress>>,
+    tracker: OnceLock<RunningProgress>,
 }
 
 impl<FactoryT> LazyProgress<FactoryT> {
@@ -25,65 +25,102 @@ impl<FactoryT> LazyProgress<FactoryT> {
 
 impl<FactoryT> maelstrom_container::ProgressTracker for LazyProgress<FactoryT>
 where
-    FactoryT: Fn(u64) -> Arc<RunningProgress> + Send + Sync + Unpin + 'static,
+    FactoryT: Fn(u64) -> RunningProgress + Send + Sync + Unpin + 'static,
 {
     fn set_length(&self, length: u64) {
         self.tracker.set((self.factory)(length)).unwrap();
     }
 
     fn inc(&self, v: u64) {
-        let prog = self.tracker.get().unwrap();
-        prog.progress.fetch_add(v, Ordering::AcqRel);
+        self.tracker.get().unwrap().update(v);
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RunningProgress {
-    size: u64,
-    progress: AtomicU64,
+    name: String,
+    progress: Arc<AtomicU64>,
+    tracker: Arc<Mutex<ProgressTrackerInner>>,
+}
+
+impl RunningProgress {
+    pub fn update(&self, amount_to_add: u64) {
+        self.progress.fetch_add(amount_to_add, Ordering::AcqRel);
+    }
+}
+
+impl Drop for RunningProgress {
+    fn drop(&mut self) {
+        self.tracker
+            .lock()
+            .unwrap()
+            .tasks
+            .remove(&self.name)
+            .assert_is_some();
+    }
 }
 
 #[derive(Clone, Default)]
 pub struct ProgressTracker {
-    tasks: Arc<Mutex<HashMap<String, Arc<RunningProgress>>>>,
+    inner: Arc<Mutex<ProgressTrackerInner>>,
+}
+
+#[derive(Debug, Default)]
+struct ProgressTrackerInner {
+    tasks: HashMap<String, ProgressTrackerTask>,
+}
+
+#[derive(Debug)]
+struct ProgressTrackerTask {
+    size: u64,
+    progress: Arc<AtomicU64>,
 }
 
 impl ProgressTracker {
-    pub fn new_task(&self, name: impl Into<String>, size: u64) -> Arc<RunningProgress> {
-        let mut tasks = self.tasks.lock().unwrap();
-        let prog = Arc::new(RunningProgress {
+    pub fn new_task(&self, name: impl Into<String>, size: u64) -> RunningProgress {
+        let name = name.into();
+        let progress = Arc::new(AtomicU64::new(0));
+        let task = ProgressTrackerTask {
             size,
-            progress: AtomicU64::new(0),
-        });
-        tasks.insert(name.into(), prog.clone()).assert_is_none();
-        prog
-    }
-
-    pub fn remove_task(&self, name: &str) {
-        let mut tasks = self.tasks.lock().unwrap();
-        tasks.remove(name);
+            progress: progress.clone(),
+        };
+        self.inner
+            .lock()
+            .unwrap()
+            .tasks
+            .insert(name.clone(), task)
+            .assert_is_none();
+        RunningProgress {
+            name,
+            progress,
+            tracker: self.inner.clone(),
+        }
     }
 
     pub fn get_remote_progresses(&self) -> Vec<RemoteProgress> {
-        let tasks = self.tasks.lock().unwrap();
-        tasks
+        self.inner
+            .lock()
+            .unwrap()
+            .tasks
             .iter()
-            .map(|(name, p)| RemoteProgress {
-                name: name.clone(),
-                size: p.size,
-                progress: p.progress.load(Ordering::Acquire),
-            })
+            .map(
+                |(name, ProgressTrackerTask { size, progress })| RemoteProgress {
+                    name: name.clone(),
+                    size: *size,
+                    progress: progress.load(Ordering::Acquire),
+                },
+            )
             .collect()
     }
 }
 
 pub struct UploadProgressReader<ReadT> {
-    prog: Arc<RunningProgress>,
+    prog: RunningProgress,
     read: ReadT,
 }
 
 impl<ReadT> UploadProgressReader<ReadT> {
-    pub fn new(prog: Arc<RunningProgress>, read: ReadT) -> Self {
+    pub fn new(prog: RunningProgress, read: ReadT) -> Self {
         Self { prog, read }
     }
 }
@@ -98,9 +135,7 @@ impl<ReadT: AsyncRead + Unpin> AsyncRead for UploadProgressReader<ReadT> {
         let me = self.get_mut();
         let result = AsyncRead::poll_read(pin!(&mut me.read), cx, dst);
         let amount_read = dst.filled().len() - start_len;
-        me.prog
-            .progress
-            .fetch_add(amount_read as u64, Ordering::AcqRel);
+        me.prog.update(amount_read as u64);
         result
     }
 }
