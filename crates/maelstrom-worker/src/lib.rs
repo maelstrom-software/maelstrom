@@ -50,13 +50,14 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
 
     check_open_file_limit(&log, config.slots, 0)?;
 
-    let (read_stream, mut write_stream) = TcpStream::connect(config.broker.inner())
+    let stream = TcpStream::connect(config.broker.inner())
         .await
         .map_err(|err| {
             error!(log, "error connecting to broker"; "error" => %err);
             err
-        })?
-        .into_split();
+        })?;
+    net::set_socket_options(&stream)?;
+    let (read_stream, mut write_stream) = stream.into_split();
     let read_stream = BufReader::new(read_stream);
 
     net::write_message_to_async_socket(
