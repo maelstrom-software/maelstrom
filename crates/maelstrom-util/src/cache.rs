@@ -11,7 +11,7 @@ use anyhow::{Error, Result};
 use bytesize::ByteSize;
 use fs::{FileType, Fs, Metadata};
 use maelstrom_base::{JobId, Sha256Digest};
-use slog::{debug, warn, Logger};
+use slog::{debug, info, warn, Logger};
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
@@ -336,6 +336,7 @@ pub struct Cache<FsT, KeyKindT: KeyKind, GetStrategyT: GetStrategy> {
     next_priority: u64,
     bytes_used: u64,
     bytes_used_target: u64,
+    getting: usize,
     log: Logger,
 }
 
@@ -425,11 +426,17 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             sha256,
             entries: Map::default(),
             heap: Heap::default(),
+            getting: 0,
             next_priority: 0,
             bytes_used: 0,
             bytes_used_target: size.into(),
             log,
         };
+        info!(cache.log, "cache initialized; all previous entries removed";
+            "entries" => %cache.entries.len(),
+            "bytes_used" => %ByteSize::b(cache.bytes_used),
+            "byte_used_target" => %ByteSize::b(cache.bytes_used_target)
+        );
         let temp_file_factory = TempFileFactory { fs, tmp };
         Ok((cache, temp_file_factory))
     }
@@ -545,11 +552,18 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             sha256,
             entries,
             heap,
+            getting: 0,
             next_priority,
             bytes_used,
             bytes_used_target: size.into(),
             log,
         };
+        info!(cache.log, "cache initialized; preserved previous instance's entries";
+            "entries" => %cache.entries.len(),
+            "bytes_used" => %ByteSize::b(cache.bytes_used),
+            "byte_used_target" => %ByteSize::b(cache.bytes_used_target)
+        );
+
         cache.possibly_remove_some_can_error()?;
         let temp_file_factory = TempFileFactory { fs, tmp };
         Ok((cache, temp_file_factory))
@@ -569,6 +583,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
                     jobs: vec![jid],
                     getters: HashSet::from([GetStrategyT::getter_from_job_id(jid)]),
                 });
+                self.getting += 1;
                 GetArtifact::Get
             }
             HashEntry::Occupied(entry) => {
@@ -613,6 +628,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         if let Some(Entry::Getting { jobs, .. }) =
             self.entries.remove(&Key::new(kind, digest.clone()))
         {
+            self.getting -= 1;
             jobs
         } else {
             vec![]
@@ -688,14 +704,23 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         let cache_path = self.cache_path(kind, digest);
 
         let Some(entry) = self.entries.get_mut(&Key::new(kind, digest.clone())) else {
+            debug!(self.log, "cache disposing of added artifact because it is no longer required";
+                "kind" => ?kind,
+                "digest" => %digest,
+            );
             dispose_of_artifact_or_warn(&self.fs, &self.log, &self.removing, artifact);
             return Ok(vec![]);
         };
 
         let Entry::Getting { jobs, .. } = entry else {
+            debug!(self.log, "cache disposing of added artifact because it is no longer required";
+                "kind" => ?kind,
+                "digest" => %digest,
+            );
             dispose_of_artifact_or_warn(&self.fs, &self.log, &self.removing, artifact);
             return Ok(vec![]);
         };
+        self.getting -= 1;
 
         let (file_type, bytes_used) = match update_cache_directory(&self.fs, &cache_path, artifact)
         {
@@ -718,7 +743,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             "kind" => ?kind,
             "digest" => %digest,
             "artifact_bytes_used" => %ByteSize::b(bytes_used),
-            "entries" => %self.entries.len(),
+            "entries" => %(self.entries.len() - self.getting),
             "file_type" => %file_type,
             "bytes_used" => %ByteSize::b(self.bytes_used),
             "byte_used_target" => %ByteSize::b(self.bytes_used_target)
@@ -788,7 +813,11 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             };
             jobs.retain(|jid| GetStrategyT::getter_from_job_id(*jid) != getter);
             getters.remove(&getter);
-            !jobs.is_empty()
+            let keep = !jobs.is_empty();
+            if !keep {
+                self.getting -= 1;
+            }
+            keep
         });
     }
 
@@ -802,12 +831,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     /// recently used artifacts.
     fn possibly_remove_some_ignore_error(&mut self) {
         if let Err(err) = self.possibly_remove_some_can_error() {
-            warn!(self.log, "error removing unused entries from cache to reclaim space";
-                "error" => %err,
-                "entries" => %self.entries.len(),
-                "bytes_used" => %ByteSize::b(self.bytes_used),
-                "byte_used_target" => %ByteSize::b(self.bytes_used_target)
-            );
+            warn!(self.log, "error removing unused entries from cache to reclaim space"; "error" => %err);
         }
     }
 
@@ -832,10 +856,10 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
                 self.fs.remove(&cache_path)?;
             }
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
-            debug!(self.log, "cache removed artifact";
+            debug!(self.log, "cache removed unused artifact";
                 "key" => ?key,
                 "artifact_bytes_used" => %ByteSize::b(bytes_used),
-                "entries" => %self.entries.len(),
+                "entries" => %(self.entries.len() - self.getting),
                 "bytes_used" => %ByteSize::b(self.bytes_used),
                 "byte_used_target" => %ByteSize::b(self.bytes_used_target)
             );
