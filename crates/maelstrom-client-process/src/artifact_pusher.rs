@@ -4,7 +4,7 @@ use maelstrom_base::{
     proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},
     Sha256Digest,
 };
-use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net};
+use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net, net::AsRawFdExt as _};
 use slog::Logger;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -32,7 +32,9 @@ async fn push_one_artifact(
     digest: Sha256Digest,
     log: &Logger,
 ) -> Result<()> {
-    let mut stream = TcpStream::connect(broker_addr.inner()).await?;
+    let mut stream = TcpStream::connect(broker_addr.inner())
+        .await?
+        .set_socket_options()?;
     net::write_message_to_async_socket(&mut stream, Hello::ArtifactPusher, log).await?;
 
     let fs = Fs::new();

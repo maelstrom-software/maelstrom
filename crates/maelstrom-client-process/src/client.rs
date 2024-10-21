@@ -31,7 +31,7 @@ use maelstrom_container::{
 use maelstrom_util::{
     async_fs,
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
-    net,
+    net::{self, AsRawFdExt as _},
     root::RootBuf,
     signal,
 };
@@ -320,6 +320,7 @@ impl Client {
                     TcpStream::connect(broker_addr.inner())
                         .await
                         .with_context(|| format!("failed to connect to {broker_addr}"))?
+                        .set_socket_options()?
                         .into_split();
                 debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 

@@ -10,7 +10,7 @@ use maelstrom_base::{
 };
 use maelstrom_util::{
     cache::{fs::std::Fs, TempFileFactory},
-    net,
+    net::{self, AsRawFdExt},
 };
 use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};
@@ -103,12 +103,19 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
 }
 
 async fn unassigned_connection_main(
-    mut socket: TcpStream,
+    socket: TcpStream,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
     temp_file_factory: TempFileFactory<Fs>,
     log: Logger,
 ) {
+    let mut socket = match socket.set_socket_options() {
+        Ok(socket) => socket,
+        Err(err) => {
+            warn!(log, "error setting socket options"; "error" => %err);
+            return;
+        }
+    };
     match net::read_message_from_async_socket(&mut socket, &log).await {
         Ok(Hello::Client) => {
             let (read_stream, write_stream) = socket.into_split();
