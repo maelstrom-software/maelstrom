@@ -2,11 +2,13 @@
 
 use anyhow::Result;
 use maelstrom_base::proto;
+use maelstrom_linux::{self as linux, Fd};
 use serde::{de::DeserializeOwned, Serialize};
 use slog::{debug, Logger};
 use std::{
     fmt::Debug,
     io::{Read, Write},
+    os::fd::AsRawFd,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _},
@@ -122,4 +124,14 @@ where
             return Ok(());
         }
     }
+}
+
+pub fn set_socket_options(socket: &impl AsRawFd) -> Result<()> {
+    let fd = Fd::from_raw(socket.as_raw_fd());
+    linux::setsockopt_tcp_nodelay(&fd, true)?;
+    linux::setsockopt_so_keepalive(&fd, true)?;
+    linux::setsockopt_tcp_keepcnt(&fd, 3)?;
+    linux::setsockopt_tcp_keepidle(&fd, 300)?;
+    linux::setsockopt_tcp_keepintvl(&fd, 300)?;
+    Ok(())
 }
