@@ -4,17 +4,19 @@ use maelstrom_base::{
     proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},
     Sha256Digest,
 };
-use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net, net::AsRawFdExt as _};
+use maelstrom_util::{
+    async_fs::Fs, config::common::BrokerAddr, net, net::AsRawFdExt as _, r#async::Pool,
+};
 use slog::Logger;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::{
+    num::NonZeroU32,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::{
     io::{self, AsyncReadExt as _},
     net::TcpStream,
-    sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Semaphore,
-    },
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task::JoinSet,
 };
 
@@ -26,22 +28,42 @@ fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
 }
 
 async fn push_one_artifact(
+    stream: Option<TcpStream>,
     upload_tracker: ProgressTracker,
     broker_addr: BrokerAddr,
     path: PathBuf,
     digest: Sha256Digest,
     log: &Logger,
-) -> Result<()> {
-    let mut stream = TcpStream::connect(broker_addr.inner())
-        .await?
-        .set_socket_options()?;
-    net::write_message_to_async_socket(&mut stream, Hello::ArtifactPusher, log).await?;
+) -> Result<(TcpStream, ())> {
+    push_one_artifact_inner(stream, upload_tracker, broker_addr, &path, digest, log)
+        .await
+        .with_context(|| format!("pushing artifact {}", path.display()))
+}
+
+async fn push_one_artifact_inner(
+    stream: Option<TcpStream>,
+    upload_tracker: ProgressTracker,
+    broker_addr: BrokerAddr,
+    path: &Path,
+    digest: Sha256Digest,
+    log: &Logger,
+) -> Result<(TcpStream, ())> {
+    let mut stream = match stream {
+        Some(stream) => stream,
+        None => {
+            let mut stream = TcpStream::connect(broker_addr.inner())
+                .await?
+                .set_socket_options()?;
+            net::write_message_to_async_socket(&mut stream, Hello::ArtifactPusher, log).await?;
+            stream
+        }
+    };
 
     let fs = Fs::new();
     let file = fs.open_file(&path).await?;
     let size = file.metadata().await?.len();
 
-    let upload_name = construct_upload_name(&digest, &path);
+    let upload_name = construct_upload_name(&digest, path);
     let prog = upload_tracker.new_task(&upload_name, size);
 
     let mut file = UploadProgressReader::new(prog, file.chain(io::repeat(0)).take(size));
@@ -54,7 +76,8 @@ async fn push_one_artifact(
     let BrokerToArtifactPusher(resp) =
         net::read_message_from_async_socket(&mut stream, log).await?;
 
-    resp.map_err(|e| anyhow!("Error from broker: {e}"))
+    resp.map(|()| (stream, ()))
+        .map_err(|e| anyhow!("Error from broker: {e}"))
 }
 
 pub struct Message {
@@ -78,7 +101,9 @@ pub fn start_task(
     upload_tracker: ProgressTracker,
     log: Logger,
 ) {
-    let sem = Arc::new(Semaphore::new(MAX_CLIENT_UPLOADS));
+    let pool = Arc::new(Pool::new(
+        NonZeroU32::try_from(u32::try_from(MAX_CLIENT_UPLOADS).unwrap()).unwrap(),
+    ));
     join_set.spawn(async move {
         // When this join_set gets destroyed, all outstanding artifact pusher tasks will be
         // canceled. That will happen either when our sender is closed, or when our own task is
@@ -94,15 +119,13 @@ pub fn start_task(
                     res.unwrap()?; // We don't expect JoinErrors.
                 },
                 res = receiver.recv() => {
-                    let Some(msg) = res else { break; };
+                    let Some(Message{path, digest}) = res else { break; };
+                    let log = log.clone();
+                    let pool = pool.clone();
                     let upload_tracker = upload_tracker.clone();
-                    let sem = sem.clone();
-                    let log_clone = log.clone();
                     join_set.spawn(async move {
-                        let _permit = sem.acquire_owned().await.unwrap();
-                        push_one_artifact(upload_tracker, broker_addr, msg.path.clone(), msg.digest, &log_clone)
-                            .await
-                            .with_context(|| format!("pushing artifact {}", msg.path.display()))
+                        pool.call_with_item(
+                            |stream| push_one_artifact(stream, upload_tracker, broker_addr, path, digest, &log)).await
                     });
                 }
             }
