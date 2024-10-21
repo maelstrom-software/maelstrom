@@ -371,6 +371,24 @@ impl Gid {
     }
 }
 
+#[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
+pub struct MapFlags(c_int);
+
+impl MapFlags {
+    pub const ANONYMOUS: Self = Self(libc::MAP_ANONYMOUS);
+    pub const PRIVATE: Self = Self(libc::MAP_PRIVATE);
+}
+
+#[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
+pub struct MemoryProtection(c_int);
+
+impl MemoryProtection {
+    pub const EXEC: Self = Self(libc::PROT_EXEC);
+    pub const READ: Self = Self(libc::PROT_READ);
+    pub const WRITE: Self = Self(libc::PROT_WRITE);
+    pub const NONE: Self = Self(libc::PROT_NONE);
+}
+
 #[derive(BitOr, Clone, Copy, Default)]
 pub struct MountAttrs(c_uint);
 
@@ -563,6 +581,17 @@ impl PollFd {
             revents: 0,
         })
     }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Rlimit {
+    pub current: u64,
+    pub max: u64,
+}
+
+#[repr(u32)]
+pub enum RlimitResource {
+    NoFile = libc::RLIMIT_NOFILE,
 }
 
 #[derive(Clone, Copy, Debug, Default, Into, PartialEq, Eq, PartialOrd, Ord)]
@@ -973,6 +1002,10 @@ impl Whence {
  *  FIGLET: functions
  */
 
+pub fn abort() -> ! {
+    unsafe { libc::abort() }
+}
+
 pub fn access(path: &CStr, mode: AccessMode) -> Result<(), Errno> {
     let path_ptr = path.as_ptr();
     Errno::result(unsafe { libc::access(path_ptr, mode.0) }).map(drop)
@@ -1272,6 +1305,15 @@ pub fn getpid() -> Pid {
     Pid(unsafe { libc::getpid() })
 }
 
+pub fn getrlimit(resource: RlimitResource) -> Result<Rlimit, Errno> {
+    let mut rlimit: libc::rlimit = unsafe { mem::zeroed() };
+    Errno::result(unsafe { libc::getrlimit(resource as u32, &mut rlimit) })?;
+    Ok(Rlimit {
+        current: rlimit.rlim_cur,
+        max: rlimit.rlim_max,
+    })
+}
+
 pub fn getsockname(fd: &impl AsFd) -> Result<SockaddrStorage, Errno> {
     let fd = fd.fd();
     let mut sockaddr = SockaddrStorage::default();
@@ -1329,6 +1371,36 @@ pub fn lseek(fd: &impl AsFd, offset: i64, whence: Whence) -> Result<i64, Errno> 
 pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
     let path_ptr = path.as_ptr();
     Errno::result(unsafe { libc::mkdir(path_ptr, mode.0) }).map(drop)
+}
+
+// N.B. From the man page description I don't think the kernel actually dereferences the pointer, so we
+// don't have to worry about marking this function "unsafe".
+//
+// TODO: We should return some type which will provides a safe way to get a reference and will call
+// `unmap` for us when it is dropped.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn mmap(
+    addr: *mut c_void,
+    len: usize,
+    prot: MemoryProtection,
+    flags: MapFlags,
+    fd: Option<Fd>,
+    offset: i64,
+) -> Result<*mut c_void, Errno> {
+    let addr = unsafe {
+        libc::mmap(
+            addr,
+            len,
+            prot.0,
+            flags.0,
+            fd.map(|fd| fd.0).unwrap_or(0),
+            offset,
+        )
+    };
+    if addr == libc::MAP_FAILED {
+        return Err(Errno(unsafe { *libc::__errno_location() }));
+    }
+    Ok(addr)
 }
 
 pub fn mount(
@@ -1911,76 +1983,4 @@ mod tests {
         assert_eq!(sa2.family(), libc::AF_UNIX as sa_family_t);
         assert_eq!(sa2.len(), mem::size_of::<sockaddr>());
     }
-}
-
-pub fn abort() -> ! {
-    unsafe { libc::abort() }
-}
-
-#[repr(u32)]
-pub enum RlimitResource {
-    NoFile = libc::RLIMIT_NOFILE,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Rlimit {
-    pub current: u64,
-    pub max: u64,
-}
-
-pub fn getrlimit(resource: RlimitResource) -> Result<Rlimit, Errno> {
-    let mut rlimit: libc::rlimit = unsafe { mem::zeroed() };
-    Errno::result(unsafe { libc::getrlimit(resource as u32, &mut rlimit) })?;
-    Ok(Rlimit {
-        current: rlimit.rlim_cur,
-        max: rlimit.rlim_max,
-    })
-}
-
-#[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
-pub struct MemoryProtection(c_int);
-
-impl MemoryProtection {
-    pub const EXEC: Self = Self(libc::PROT_EXEC);
-    pub const READ: Self = Self(libc::PROT_READ);
-    pub const WRITE: Self = Self(libc::PROT_WRITE);
-    pub const NONE: Self = Self(libc::PROT_NONE);
-}
-
-#[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
-pub struct MapFlags(c_int);
-
-impl MapFlags {
-    pub const ANONYMOUS: Self = Self(libc::MAP_ANONYMOUS);
-    pub const PRIVATE: Self = Self(libc::MAP_PRIVATE);
-}
-
-// N.B. From the man page description I don't think the kernel actually dereferences the pointer, so we
-// don't have to worry about marking this function "unsafe".
-//
-// TODO: We should return some type which will provides a safe way to get a reference and will call
-// `unmap` for us when it is dropped.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn mmap(
-    addr: *mut c_void,
-    len: usize,
-    prot: MemoryProtection,
-    flags: MapFlags,
-    fd: Option<Fd>,
-    offset: i64,
-) -> Result<*mut c_void, Errno> {
-    let addr = unsafe {
-        libc::mmap(
-            addr,
-            len,
-            prot.0,
-            flags.0,
-            fd.map(|fd| fd.0).unwrap_or(0),
-            offset,
-        )
-    };
-    if addr == libc::MAP_FAILED {
-        return Err(Errno(unsafe { *libc::__errno_location() }));
-    }
-    Ok(addr)
 }
