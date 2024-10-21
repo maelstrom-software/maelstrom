@@ -126,12 +126,18 @@ where
     }
 }
 
-pub fn set_socket_options(socket: &impl AsRawFd) -> Result<()> {
-    let fd = Fd::from_raw(socket.as_raw_fd());
-    linux::setsockopt_tcp_nodelay(&fd, true)?;
-    linux::setsockopt_so_keepalive(&fd, true)?;
-    linux::setsockopt_tcp_keepcnt(&fd, 3)?;
-    linux::setsockopt_tcp_keepidle(&fd, 300)?;
-    linux::setsockopt_tcp_keepintvl(&fd, 300)?;
-    Ok(())
+pub trait AsRawFdExt: Sized {
+    fn set_socket_options(self) -> Result<Self>;
+}
+
+impl<T: AsRawFd> AsRawFdExt for T {
+    fn set_socket_options(self) -> Result<Self> {
+        let fd = Fd::from_raw(self.as_raw_fd());
+        linux::setsockopt_tcp_nodelay(&fd, true)?;
+        linux::setsockopt_so_keepalive(&fd, true)?;
+        linux::setsockopt_tcp_keepcnt(&fd, 3)?;
+        linux::setsockopt_tcp_keepidle(&fd, 300)?;
+        linux::setsockopt_tcp_keepintvl(&fd, 300)?;
+        Ok(self)
+    }
 }

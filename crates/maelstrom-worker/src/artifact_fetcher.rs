@@ -11,7 +11,8 @@ use maelstrom_util::{
     cache::{fs::TempFile as _, GotArtifact},
     config::common::BrokerAddr,
     fs::Fs,
-    io, net,
+    io,
+    net::{self, AsRawFdExt as _},
     sync::Pool,
 };
 use slog::{debug, o, warn, Logger};
@@ -93,8 +94,7 @@ fn main(
             Some(stream) => (stream, true),
             None => {
                 debug!(log, "artifact fetcher connecting to broker");
-                let mut stream = TcpStream::connect(broker_addr.inner())?;
-                net::set_socket_options(&stream)?;
+                let mut stream = TcpStream::connect(broker_addr.inner())?.set_socket_options()?;
 
                 net::write_message_to_socket(&mut stream, Hello::ArtifactFetcher, log)?;
 

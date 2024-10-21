@@ -23,7 +23,8 @@ use maelstrom_linux::{self as linux};
 use maelstrom_util::{
     cache::{fs::std::Fs as StdFs, CacheDir},
     config::common::Slots,
-    net, signal,
+    net::{self, AsRawFdExt as _},
+    signal,
 };
 use slog::{debug, error, info, Logger};
 use std::{future::Future, process};
@@ -50,14 +51,14 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
 
     check_open_file_limit(&log, config.slots, 0)?;
 
-    let stream = TcpStream::connect(config.broker.inner())
+    let (read_stream, mut write_stream) = TcpStream::connect(config.broker.inner())
         .await
         .map_err(|err| {
             error!(log, "error connecting to broker"; "error" => %err);
             err
-        })?;
-    net::set_socket_options(&stream)?;
-    let (read_stream, mut write_stream) = stream.into_split();
+        })?
+        .set_socket_options()?
+        .into_split();
     let read_stream = BufReader::new(read_stream);
 
     net::write_message_to_async_socket(
