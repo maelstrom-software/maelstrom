@@ -140,7 +140,6 @@ slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_debug", "rele
 slog-async = "2.8.0"
 slog-json = "2.6"
 slog-term = "2.9.0"
-socket2 = "0.5.7"
 std-semaphore = "0.1"
 smallvec = "1.6.1"
 strum = { version = "0.25.0", features = ["derive"] }

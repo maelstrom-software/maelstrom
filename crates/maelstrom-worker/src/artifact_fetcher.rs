@@ -14,9 +14,11 @@ use maelstrom_util::{
     io, net,
     sync::Pool,
 };
+use maelstrom_linux::{self as linux, Fd};
 use slog::{debug, o, warn, Logger};
-use socket2::{Socket, TcpKeepalive};
-use std::{net::TcpStream, num::NonZeroU32, sync::Arc, thread, time::Duration};
+use std::{
+    net::TcpStream, num::NonZeroU32, os::fd::AsRawFd as _, sync::Arc, thread,
+};
 
 pub struct ArtifactFetcher {
     broker_addr: BrokerAddr,
@@ -94,16 +96,13 @@ fn main(
             Some(stream) => (stream, true),
             None => {
                 debug!(log, "artifact fetcher connecting to broker");
-                let stream = TcpStream::connect(broker_addr.inner())?;
-                stream.set_nodelay(true)?;
-                let socket = Socket::from(stream);
-                socket.set_tcp_keepalive(
-                    &TcpKeepalive::new()
-                        .with_time(Duration::from_secs(300))
-                        .with_interval(Duration::from_secs(300))
-                        .with_retries(3),
-                )?;
-                let mut stream: TcpStream = socket.into();
+                let mut stream = TcpStream::connect(broker_addr.inner())?;
+                let fd = Fd::from_raw(stream.as_raw_fd());
+                linux::setsockopt_tcp_nodelay(&fd, true)?;
+                linux::setsockopt_so_keepalive(&fd, true)?;
+                linux::setsockopt_tcp_keepcnt(&fd, 3)?;
+                linux::setsockopt_tcp_keepidle(&fd, 300)?;
+                linux::setsockopt_tcp_keepintvl(&fd, 300)?;
 
                 net::write_message_to_socket(&mut stream, Hello::ArtifactFetcher, log)?;
 
