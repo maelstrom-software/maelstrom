@@ -21,7 +21,7 @@ use maelstrom_base::proto::Hello;
 use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux};
 use maelstrom_util::{
-    cache::{fs::std::Fs as StdFs, CacheDir},
+    cache::{fs::std::Fs as StdFs, self},
     config::common::Slots,
     net::{self, AsRawFdExt as _},
     signal,
@@ -34,7 +34,7 @@ use types::{
     DispatcherReceiver, DispatcherSender,
 };
 
-pub struct WorkerCacheDir;
+pub struct CacheDir;
 
 pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
 pub const MAX_ARTIFACT_FETCHES: usize = 1;
@@ -178,7 +178,7 @@ async fn dispatcher_main(
 ) {
     let mount_dir = config.cache_root.join::<MountDir>("mount");
     let tmpfs_dir = config.cache_root.join::<TmpfsDir>("upper");
-    let cache_root = config.cache_root.join::<CacheDir>("artifacts");
+    let cache_root = config.cache_root.join::<cache::CacheDir>("artifacts");
     let blob_dir = cache_root.join::<BlobDir>("sha256/blob");
 
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);

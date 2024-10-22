@@ -4,7 +4,7 @@ pub use crate::{
     dispatcher_adapter::DispatcherAdapter,
     executor::{MountDir, TmpfsDir},
     types::DispatcherSender,
-    WorkerCacheDir,
+    CacheDir as WorkerCacheDir,
 };
 pub use maelstrom_layer_fs::BlobDir;
 pub use maelstrom_util::cache::{

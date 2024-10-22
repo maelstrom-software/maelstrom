@@ -378,7 +378,7 @@ impl Client {
 
             // Start the local_worker.
             let worker_handle = {
-                let cache_root = cache_dir.join::<local_worker::WorkerCacheDir>(LOCAL_WORKER_DIR);
+                let cache_root = cache_dir.join::<local_worker::CacheDir>(LOCAL_WORKER_DIR);
                 let mount_dir = cache_root.join::<local_worker::MountDir>("mount");
                 let tmpfs_dir = cache_root.join::<local_worker::TmpfsDir>("upper");
                 let cache_root = cache_root.join::<local_worker::CacheDir>("artifacts");

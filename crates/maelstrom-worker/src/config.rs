@@ -1,4 +1,4 @@
-use crate::WorkerCacheDir;
+use crate::CacheDir;
 use maelstrom_macro::Config;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
@@ -26,7 +26,7 @@ pub struct Config {
                 .unwrap()
         }"#
     )]
-    pub cache_root: RootBuf<WorkerCacheDir>,
+    pub cache_root: RootBuf<CacheDir>,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
