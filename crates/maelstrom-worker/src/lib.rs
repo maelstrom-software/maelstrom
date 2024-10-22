@@ -21,7 +21,7 @@ use maelstrom_base::proto::Hello;
 use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux};
 use maelstrom_util::{
-    cache::{fs::std::Fs as StdFs, self},
+    cache::{self, fs::std::Fs as StdFs},
     config::common::Slots,
     net::{self, AsRawFdExt as _},
     signal,
@@ -33,8 +33,6 @@ use types::{
     BrokerSender, BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache, Dispatcher,
     DispatcherReceiver, DispatcherSender,
 };
-
-pub struct CacheDir;
 
 const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
 const MAX_ARTIFACT_FETCHES: usize = 1;

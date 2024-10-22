@@ -1,10 +1,11 @@
-use crate::CacheDir;
 use maelstrom_macro::Config;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     root::RootBuf,
 };
 use xdg::BaseDirectories;
+
+pub struct CacheDir;
 
 #[derive(Config, Debug)]
 pub struct Config {
