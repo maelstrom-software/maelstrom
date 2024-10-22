@@ -16,7 +16,10 @@ use maelstrom_base::{
     JobWorkerStatus, MonitorId, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
-    cache::{self, Cache, GetArtifact, GotArtifact},
+    cache::{
+        fs::{Fs, TempFile},
+        Cache, GetArtifact, GetStrategy, GotArtifact, KeyKind,
+    },
     duration,
     ext::{BoolExt as _, OptionExt as _},
     heap::{Heap, HeapDeps, HeapIndex},
@@ -70,7 +73,7 @@ pub enum BrokerKeyKind {
     Blob,
 }
 
-impl cache::KeyKind for BrokerKeyKind {
+impl KeyKind for BrokerKeyKind {
     type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
 
     fn iter() -> Self::Iterator {
@@ -80,44 +83,42 @@ impl cache::KeyKind for BrokerKeyKind {
 
 pub enum BrokerGetStrategy {}
 
-impl cache::GetStrategy for BrokerGetStrategy {
+impl GetStrategy for BrokerGetStrategy {
     type Getter = ClientId;
     fn getter_from_job_id(jid: JobId) -> Self::Getter {
         jid.cid
     }
 }
 
-/// The required interface for the cache that is provided to the [`Scheduler`]. This mirrors the API
-/// for [`super::cache::Cache`]. We keep them separate so that we can test the [`Scheduler`] more
-/// easily.
+/// The required interface for the cache that is provided to the [`Scheduler`]. This mirrors the
+/// API for [`Cache`]. We keep them separate so that we can test the [`Scheduler`] more easily.
 ///
 /// Unlike with [`SchedulerDeps`], all of these functions are immediate. In production, the
-/// [`super::cache::Cache`] is owned by the [`Scheduler`] and the two live on the same task. So
-/// these methods sometimes return actual values which can be handled immediately, unlike
-/// [`SchedulerDeps`].
+/// [`Cache`] is owned by the [`Scheduler`] and the two live on the same task. So these methods
+/// sometimes return actual values which can be handled immediately, unlike [`SchedulerDeps`].
 pub trait SchedulerCache {
-    type TempFile: cache::fs::TempFile;
+    type TempFile: TempFile;
 
-    /// See [`super::cache::Cache::get_artifact`].
+    /// See [`Cache::get_artifact`].
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact;
 
-    /// See [`super::cache::Cache::got_artifact`].
+    /// See [`Cache::got_artifact`].
     fn got_artifact(&mut self, digest: Sha256Digest, file: Self::TempFile) -> Vec<JobId>;
 
-    /// See [`super::cache::Cache::decrement_refcount`].
+    /// See [`Cache::decrement_refcount`].
     fn decrement_refcount(&mut self, digest: Sha256Digest);
 
-    /// See [`super::cache::Cache::client_disconnected`].
+    /// See [`Cache::client_disconnected`].
     fn client_disconnected(&mut self, cid: ClientId);
 
-    /// See [`super::cache::Cache::get_artifact_for_worker`].
+    /// See [`Cache::get_artifact_for_worker`].
     fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)>;
 
-    /// See [`super::cache::Cache::cache_path`].
+    /// See [`Cache::cache_path`].
     fn cache_path(&self, digest: &Sha256Digest) -> PathBuf;
 }
 
-impl<FsT: cache::fs::Fs> SchedulerCache for Cache<FsT, BrokerKeyKind, BrokerGetStrategy> {
+impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKeyKind, BrokerGetStrategy> {
     type TempFile = FsT::TempFile;
 
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
@@ -152,7 +153,7 @@ impl<FsT: cache::fs::Fs> SchedulerCache for Cache<FsT, BrokerKeyKind, BrokerGetS
 /// The incoming messages, or events, for [`Scheduler`].
 ///
 /// If [`Scheduler`] weren't implement as an async state machine, these would be its methods.
-pub enum Message<DepsT: SchedulerDeps, TempFileT: cache::fs::TempFile> {
+pub enum Message<DepsT: SchedulerDeps, TempFileT: TempFile> {
     /// The given client connected, and messages can be sent to it on the given sender.
     ClientConnected(ClientId, DepsT::ClientSender),
 
@@ -198,7 +199,7 @@ pub enum Message<DepsT: SchedulerDeps, TempFileT: cache::fs::TempFile> {
     StatisticsHeartbeat,
 }
 
-impl<DepsT: SchedulerDeps, TempFileT: cache::fs::TempFile> Debug for Message<DepsT, TempFileT> {
+impl<DepsT: SchedulerDeps, TempFileT: TempFile> Debug for Message<DepsT, TempFileT> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Message::ClientConnected(cid, _sender) => {
@@ -827,6 +828,7 @@ mod tests {
         proto::BrokerToWorker::{self, *},
     };
     use maelstrom_test::*;
+    use maelstrom_util::cache::fs::test;
     use maplit::hashmap;
     use std::{cell::RefCell, error, rc::Rc, str::FromStr as _};
     use strum::Display;
@@ -838,7 +840,7 @@ mod tests {
         ToMonitor(MonitorId, BrokerToMonitor),
         ToWorkerArtifactFetcher(u32, Option<(PathBuf, u64)>),
         CacheGetArtifact(JobId, Sha256Digest),
-        CacheGotArtifact(Sha256Digest, cache::fs::test::TempFile),
+        CacheGotArtifact(Sha256Digest, test::TempFile),
         CacheDecrementRefcount(Sha256Digest),
         CacheClientDisconnected(ClientId),
         CacheGetArtifactForWorker(Sha256Digest),
@@ -862,7 +864,7 @@ mod tests {
     }
 
     impl SchedulerCache for Rc<RefCell<TestState>> {
-        type TempFile = cache::fs::test::TempFile;
+        type TempFile = test::TempFile;
 
         fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
             self.borrow_mut()
@@ -1032,10 +1034,7 @@ mod tests {
             );
         }
 
-        fn receive_message(
-            &mut self,
-            msg: Message<Rc<RefCell<TestState>>, cache::fs::test::TempFile>,
-        ) {
+        fn receive_message(&mut self, msg: Message<Rc<RefCell<TestState>>, test::TempFile>) {
             self.scheduler.receive_message(&mut self.test_state, msg);
         }
     }
