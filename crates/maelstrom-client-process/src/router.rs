@@ -164,14 +164,14 @@ impl<DepsT: Deps> Router<DepsT> {
 pub struct Adapter {
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: artifact_pusher::Sender,
-    local_worker_sender: local_worker::DispatcherSender,
+    local_worker_sender: local_worker::Sender,
 }
 
 impl Adapter {
     fn new(
         broker_sender: UnboundedSender<ClientToBroker>,
         artifact_pusher_sender: artifact_pusher::Sender,
-        local_worker_sender: local_worker::DispatcherSender,
+        local_worker_sender: local_worker::Sender,
     ) -> Self {
         Self {
             broker_sender,
@@ -239,7 +239,7 @@ pub fn start_task(
     receiver: Receiver,
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: artifact_pusher::Sender,
-    local_worker_sender: local_worker::DispatcherSender,
+    local_worker_sender: local_worker::Sender,
 ) {
     let adapter = Adapter::new(broker_sender, artifact_pusher_sender, local_worker_sender);
     let mut router = Router::new(adapter, standalone);

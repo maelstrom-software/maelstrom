@@ -48,8 +48,8 @@ use std::{
 };
 use tokio::{
     net::TcpStream,
-    sync::{mpsc, Mutex},
-    task::{self, JoinSet},
+    sync::{mpsc, Mutex, Semaphore},
+    task::{self, JoinHandle, JoinSet},
 };
 
 #[derive(Clone)]
@@ -59,14 +59,14 @@ pub struct Client {
 }
 
 struct ClientState {
-    local_broker_sender: router::Sender,
+    router_sender: router::Sender,
     layer_builder: Arc<LayerBuilder>,
     artifact_upload_tracker: ProgressTracker,
     image_download_tracker: ProgressTracker,
     container_image_depot: ContainerImageDepot,
     log: Logger,
     locked: Arc<Mutex<ClientStateLocked>>,
-    layer_building_semaphore: Arc<tokio::sync::Semaphore>,
+    layer_building_semaphore: Arc<Semaphore>,
 }
 
 struct ClientStateLocked {
@@ -98,7 +98,7 @@ impl CleanUpWork {
 #[derive(Clone)]
 struct Uploader {
     log: slog::Logger,
-    local_broker_sender: router::Sender,
+    router_sender: router::Sender,
     locked: Arc<Mutex<ClientStateLocked>>,
 }
 
@@ -122,7 +122,7 @@ impl Uploader {
         };
         if !locked.processed_artifact_digests.contains(&digest) {
             locked.processed_artifact_digests.insert(digest.clone());
-            self.local_broker_sender
+            self.router_sender
                 .send(router::Message::AddArtifact(path, digest.clone()))?;
         }
         Ok(digest)
@@ -140,13 +140,13 @@ impl ClientState {
     fn build_layer(&self, layer: LayerSpec) {
         let uploader = Uploader {
             log: self.log.clone(),
-            local_broker_sender: self.local_broker_sender.clone(),
+            router_sender: self.router_sender.clone(),
             locked: self.locked.clone(),
         };
         let layer_builder = self.layer_builder.clone();
         let sem = self.layer_building_semaphore.clone();
         let locked = self.locked.clone();
-        tokio::task::spawn(async move {
+        task::spawn(async move {
             let build_fn = async {
                 let _permit = sem.acquire().await.unwrap();
                 let (artifact_path, artifact_type) =
@@ -244,11 +244,7 @@ impl Client {
             inline_limit: InlineLimit,
             slots: Slots,
             accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-        ) -> Result<(
-            ClientState,
-            JoinSet<Result<()>>,
-            tokio::task::JoinHandle<()>,
-        )> {
+        ) -> Result<(ClientState, JoinSet<Result<()>>, JoinHandle<()>)> {
             let fs = async_fs::Fs::new();
 
             // Make sure the state dir exists before we try to put a log file in.
@@ -301,8 +297,8 @@ impl Client {
             // Create all of the channels we're going to need to connect everything up.
             let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
             let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-            let (local_broker_sender, local_broker_receiver) = router::channel();
-            let (local_worker_sender, mut local_worker_receiver) = mpsc::unbounded_channel();
+            let (router_sender, router_receiver) = router::channel();
+            let (local_worker_sender, local_worker_receiver) = local_worker::channel();
 
             let standalone;
             if let Some(broker_addr) = broker_addr {
@@ -328,11 +324,11 @@ impl Client {
 
                 // Spawn a task to read from the socket and write to the router's channel.
                 let log_clone = log.clone();
-                let local_broker_sender_clone = local_broker_sender.clone();
+                let router_sender_clone = router_sender.clone();
                 join_set.spawn(async move {
                     net::async_socket_reader(
                         broker_socket_read_half,
-                        local_broker_sender_clone,
+                        router_sender_clone,
                         router::Message::Broker,
                         &log_clone,
                     )
@@ -370,129 +366,51 @@ impl Client {
             router::start_task(
                 &mut join_set,
                 standalone,
-                local_broker_receiver,
+                router_receiver,
                 broker_sender,
                 artifact_pusher_sender,
                 local_worker_sender.clone(),
             );
 
-            // Start the local_worker.
-            let worker_handle = {
-                let cache_root = cache_dir.join::<local_worker::CacheDir>(LOCAL_WORKER_DIR);
-                let mount_dir = cache_root.join::<local_worker::MountDir>("mount");
-                let tmpfs_dir = cache_root.join::<local_worker::TmpfsDir>("upper");
-                let cache_root = cache_root.join::<local_worker::CacheDir>("artifacts");
-                let blob_dir = cache_root.join::<local_worker::BlobDir>("sha256/blob");
+            // Start the local worker.
+            struct ArtifactFetcher(router::Sender);
+            impl local_worker::ArtifactFetcher for ArtifactFetcher {
+                fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
+                    let _ = self
+                        .0
+                        .send(router::Message::LocalWorkerStartArtifactFetch(digest));
+                }
+            }
 
-                // Create the local_worker's cache. This is the same cache as the "real" worker
-                // uses.
-                let (local_worker_cache, local_worker_temp_file_factory) =
-                    local_worker::Cache::new(
-                        local_worker::Fs,
-                        cache_root,
-                        cache_size,
-                        log.clone(),
-                        false,
-                    )?;
+            struct BrokerSender(Option<router::Sender>);
+            impl local_worker::BrokerSender for BrokerSender {
+                fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
+                    if let Some(sender) = self.0.as_ref() {
+                        let _ = sender.send(router::Message::LocalWorker(msg));
+                    }
+                }
+                fn close(&mut self) {
+                    self.0 = None;
+                }
+            }
 
-                // Create the local_worker's deps. This the same adapter as the "real" worker uses.
-                let local_worker_dispatcher_adapter = local_worker::DispatcherAdapter::new(
-                    local_worker_sender,
+            let local_worker_handle = local_worker::start_task(
+                ArtifactFetcher(router_sender.clone()),
+                BrokerSender(Some(router_sender.clone())),
+                local_worker::Config {
+                    cache_root: cache_dir.join(LOCAL_WORKER_DIR),
+                    cache_size,
                     inline_limit,
-                    log.clone(),
-                    mount_dir,
-                    tmpfs_dir,
-                    blob_dir,
-                    local_worker_temp_file_factory,
-                )?;
-
-                // Create an ArtifactFetcher for the local_worker that just forwards requests to
-                // the router.
-                struct ArtifactFetcher(router::Sender);
-                impl local_worker::ArtifactFetcher for ArtifactFetcher {
-                    fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
-                        self.0
-                            .send(router::Message::LocalWorkerStartArtifactFetch(digest))
-                            .ok();
-                    }
-                }
-                let local_worker_artifact_fetcher = ArtifactFetcher(local_broker_sender.clone());
-
-                // Create a BrokerSender for the local_worker that just forwards messages to
-                // the router.
-                struct BrokerSender(Option<router::Sender>);
-                impl local_worker::BrokerSender for BrokerSender {
-                    fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
-                        if let Some(sender) = self.0.as_ref() {
-                            sender.send(router::Message::LocalWorker(msg)).ok();
-                        }
-                    }
-
-                    fn close(&mut self) {
-                        self.0 = None;
-                    }
-                }
-                let worker_broker_sender = BrokerSender(Some(local_broker_sender.clone()));
-
-                // Create the actual local_worker.
-                let mut worker_dispatcher = local_worker::Dispatcher::new(
-                    local_worker_dispatcher_adapter,
-                    local_worker_artifact_fetcher,
-                    worker_broker_sender,
-                    local_worker_cache,
                     slots,
-                );
-
-                let handle_worker_message =
-                    |msg, worker: &mut local_worker::Dispatcher<_, _, _, _>| -> Result<()> {
-                        if let local_worker::Message::Shutdown(error) = msg {
-                            Err(error)
-                        } else {
-                            worker.receive_message(msg);
-                            Ok(())
-                        }
-                    };
-
-                // Spawn a task for the local_worker.
-                let log_clone = log.clone();
-                task::spawn(async move {
-                    let shutdown_error = loop {
-                        let msg = local_worker_receiver
-                            .recv()
-                            .await
-                            .expect("missing shutdown");
-                        if let Err(err) = handle_worker_message(msg, &mut worker_dispatcher) {
-                            break err;
-                        }
-                    };
-
-                    debug!(
-                        log_clone,
-                        "shutting down local worker due to {shutdown_error}"
-                    );
-                    worker_dispatcher
-                        .receive_message(local_worker::Message::Shutdown(shutdown_error));
-                    debug!(
-                        log_clone,
-                        "canceling {} running jobs",
-                        worker_dispatcher.num_jobs_executing()
-                    );
-
-                    while worker_dispatcher.num_jobs_executing() > 0 {
-                        let msg = local_worker_receiver
-                            .recv()
-                            .await
-                            .expect("missing shutdown");
-                        let _ = handle_worker_message(msg, &mut worker_dispatcher);
-                    }
-
-                    debug!(log_clone, "local worker exiting");
-                })
-            };
+                },
+                local_worker_receiver,
+                local_worker_sender,
+                &log,
+            )?;
 
             Ok((
                 ClientState {
-                    local_broker_sender,
+                    router_sender,
                     layer_builder: Arc::new(LayerBuilder::new(
                         cache_dir,
                         project_dir,
@@ -508,12 +426,10 @@ impl Client {
                         cached_layers: LayerCache::new(),
                         containers: HashMap::new(),
                     })),
-                    layer_building_semaphore: Arc::new(tokio::sync::Semaphore::new(
-                        MAX_IN_FLIGHT_LAYER_BUILDS,
-                    )),
+                    layer_building_semaphore: Arc::new(Semaphore::new(MAX_IN_FLIGHT_LAYER_BUILDS)),
                 },
                 join_set,
-                worker_handle,
+                local_worker_handle,
             ))
         }
 
@@ -533,8 +449,8 @@ impl Client {
         )
         .await;
         match result {
-            Ok((state, mut join_set, worker_handle)) => {
-                let shutdown_sender = state.local_broker_sender.clone();
+            Ok((state, mut join_set, local_worker_handle)) => {
+                let shutdown_sender = state.router_sender.clone();
                 let state_machine_clone = self.state_machine.clone();
                 let fail = move |msg: String| {
                     state_machine_clone.fail(msg.clone());
@@ -543,7 +459,7 @@ impl Client {
 
                 let log = state.log.clone();
                 let fail_clone = fail.clone();
-                tokio::task::spawn(async move {
+                task::spawn(async move {
                     let signal = signal::wait_for_signal(log.clone()).await;
                     fail_clone(format!("received signal {signal}"));
                 });
@@ -551,11 +467,11 @@ impl Client {
                 let log = state.log.clone();
                 debug!(log, "client started successfully");
 
-                let shutdown_sender = state.local_broker_sender.clone();
+                let shutdown_sender = state.router_sender.clone();
                 self.clean_up.add_work(async move {
                     let _ = shutdown_sender
                         .send(router::Message::Shutdown(anyhow!("connection closed")));
-                    let _ = worker_handle.await;
+                    let _ = local_worker_handle.await;
                 });
                 activation_handle.activate(state);
 
@@ -664,7 +580,7 @@ impl Client {
             priority: spec.priority,
         };
         state
-            .local_broker_sender
+            .router_sender
             .send(router::Message::RunJob(spec, sender))?;
         Ok(receiver)
     }
