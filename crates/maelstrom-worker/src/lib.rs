@@ -36,8 +36,8 @@ use types::{
 
 pub struct CacheDir;
 
-pub const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
-pub const MAX_ARTIFACT_FETCHES: usize = 1;
+const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
+const MAX_ARTIFACT_FETCHES: usize = 1;
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
     main_inner(config, log)
@@ -46,7 +46,7 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
 #[tokio::main]
-pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
+async fn main_inner(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config, "pid" => process::id());
 
     check_open_file_limit(&log, config.slots, 0)?;
