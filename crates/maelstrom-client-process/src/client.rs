@@ -392,6 +392,7 @@ impl Client {
                         cache_root,
                         cache_size,
                         log.clone(),
+                        false,
                     )?;
 
                 // Create the local_worker's deps. This the same adapter as the "real" worker uses.

@@ -83,7 +83,7 @@ impl SchedulerTask {
     pub fn new(cache_root: RootBuf<CacheDir>, cache_size: CacheSize, log: Logger) -> Self {
         let (sender, receiver) = tokio_mpsc::unbounded_channel();
         let (cache, temp_file_factory) =
-            Cache::new(cache::fs::std::Fs, cache_root, cache_size, log).unwrap();
+            Cache::new(cache::fs::std::Fs, cache_root, cache_size, log, true).unwrap();
         SchedulerTask {
             scheduler: Scheduler::new(cache),
             sender,

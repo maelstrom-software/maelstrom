@@ -183,7 +183,7 @@ async fn dispatcher_main(
 
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
     let (cache, temp_file_factory) =
-        match Cache::new(StdFs, cache_root, config.cache_size, log.clone()) {
+        match Cache::new(StdFs, cache_root, config.cache_size, log.clone(), true) {
             Err(err) => {
                 error!(log, "could not start cache"; "error" => %err);
                 return;

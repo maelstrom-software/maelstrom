@@ -354,6 +354,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         root: RootBuf<CacheDir>,
         size: CacheSize,
         log: Logger,
+        log_initial_message_at_info: bool,
     ) -> Result<(Self, TempFileFactory<FsT>)> {
         let cachedir_tag = root.join::<CachedirTagPath>(CACHEDIR_TAG);
         let removing = root.join::<RemovingRoot>("removing");
@@ -379,7 +380,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             _ => false,
         };
 
-        if preserve_directory_contents {
+        let (cache, temp_file_factory) = if preserve_directory_contents {
             Self::new_preserve_directory_contents(fs, root, removing, tmp, sha256, size, log)
         } else {
             Self::new_clear_directory_contents(
@@ -392,7 +393,23 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
                 size,
                 log,
             )
+        }?;
+
+        if log_initial_message_at_info {
+            info!(cache.log, "cache initialized";
+                "entries" => %cache.entries.len(),
+                "bytes_used" => %ByteSize::b(cache.bytes_used),
+                "byte_used_target" => %ByteSize::b(cache.bytes_used_target)
+            );
+        } else {
+            debug!(cache.log, "cache initialized";
+                "entries" => %cache.entries.len(),
+                "bytes_used" => %ByteSize::b(cache.bytes_used),
+                "byte_used_target" => %ByteSize::b(cache.bytes_used_target)
+            );
         }
+
+        Ok((cache, temp_file_factory))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -432,11 +449,6 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             bytes_used_target: size.into(),
             log,
         };
-        info!(cache.log, "cache initialized; all previous entries removed";
-            "entries" => %cache.entries.len(),
-            "bytes_used" => %ByteSize::b(cache.bytes_used),
-            "byte_used_target" => %ByteSize::b(cache.bytes_used_target)
-        );
         let temp_file_factory = TempFileFactory { fs, tmp };
         Ok((cache, temp_file_factory))
     }
@@ -558,11 +570,6 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             bytes_used_target: size.into(),
             log,
         };
-        info!(cache.log, "cache initialized; preserved previous instance's entries";
-            "entries" => %cache.entries.len(),
-            "bytes_used" => %ByteSize::b(cache.bytes_used),
-            "byte_used_target" => %ByteSize::b(cache.bytes_used_target)
-        );
 
         cache.possibly_remove_some_can_error()?;
         let temp_file_factory = TempFileFactory { fs, tmp };
@@ -1083,6 +1090,7 @@ mod tests {
                 "/z".parse().unwrap(),
                 ByteSize::b(bytes_used_target).into(),
                 Logger::root(Discard, o!()),
+                false,
             )
             .unwrap();
             Fixture {
