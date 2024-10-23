@@ -38,16 +38,17 @@ const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
 const MAX_ARTIFACT_FETCHES: usize = 1;
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
-    main_inner(config, log)
+    info!(log, "started"; "config" => ?config, "pid" => process::id());
+    let result = main_inner(config, &log);
+    info!(log, "exiting");
+    result
 }
 
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
 #[tokio::main]
-async fn main_inner(config: Config, log: Logger) -> Result<()> {
-    info!(log, "started"; "config" => ?config, "pid" => process::id());
-
-    check_open_file_limit(&log, config.slots, 0)?;
+async fn main_inner(config: Config, log: &Logger) -> Result<()> {
+    check_open_file_limit(log, config.slots, 0)?;
 
     let (read_stream, mut write_stream) = TcpStream::connect(config.broker.inner())
         .await
@@ -64,7 +65,7 @@ async fn main_inner(config: Config, log: Logger) -> Result<()> {
         Hello::Worker {
             slots: (*config.slots.inner()).into(),
         },
-        &log,
+        log,
     )
     .await?;
 
@@ -104,17 +105,15 @@ async fn main_inner(config: Config, log: Logger) -> Result<()> {
         dispatcher_sender.clone(),
     ));
 
-    dispatcher_main(
+    let handle = tokio::task::spawn(dispatcher_main(
         config,
         dispatcher_receiver,
         dispatcher_sender,
         broker_socket_outgoing_sender,
         broker_socket_incoming_receiver,
         log.clone(),
-    )
-    .await;
-
-    info!(log, "exiting");
+    ));
+    handle.await?;
 
     Ok(())
 }
