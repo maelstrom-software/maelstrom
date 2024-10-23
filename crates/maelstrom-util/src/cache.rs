@@ -583,7 +583,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
                     jobs: vec![jid],
                     getters: HashSet::from([GetStrategyT::getter_from_job_id(jid)]),
                 });
-                self.getting += 1;
+                self.getting = self.getting.checked_add(1).unwrap();
                 GetArtifact::Get
             }
             HashEntry::Occupied(entry) => {
@@ -628,7 +628,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         if let Some(Entry::Getting { jobs, .. }) =
             self.entries.remove(&Key::new(kind, digest.clone()))
         {
-            self.getting -= 1;
+            self.getting = self.getting.checked_sub(1).unwrap();
             jobs
         } else {
             vec![]
@@ -720,7 +720,6 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             dispose_of_artifact_or_warn(&self.fs, &self.log, &self.removing, artifact);
             return Ok(vec![]);
         };
-        self.getting -= 1;
 
         let (file_type, bytes_used) = match update_cache_directory(&self.fs, &cache_path, artifact)
         {
@@ -738,6 +737,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             bytes_used,
             ref_count,
         };
+        self.getting = self.getting.checked_sub(1).unwrap();
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
         debug!(self.log, "cache added artifact";
             "kind" => ?kind,
@@ -815,7 +815,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             getters.remove(&getter);
             let keep = !jobs.is_empty();
             if !keep {
-                self.getting -= 1;
+                self.getting = self.getting.checked_sub(1).unwrap();
             }
             keep
         });
