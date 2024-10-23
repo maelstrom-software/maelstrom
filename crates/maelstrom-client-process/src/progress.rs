@@ -36,7 +36,7 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RunningProgress {
     name: String,
     progress: Arc<AtomicU64>,
