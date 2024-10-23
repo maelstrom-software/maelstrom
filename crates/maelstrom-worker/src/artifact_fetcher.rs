@@ -85,10 +85,6 @@ fn main(
         warn!(log, "artifact fetcher failed to create a temporary file"; "error" => %err);
     })?;
 
-    // Loop up to two times. It's possible that a re-used existing connection isn't really active.
-    // The broker could have silently shut it down, or may be in the process of shutting it down.
-    // For this reason, if we have a reused connection and get an error writing to it or reading
-    // the first response, try again with a newly-created connection.
     let mut stream = match stream_option {
         Some(stream) => stream,
         None => {
