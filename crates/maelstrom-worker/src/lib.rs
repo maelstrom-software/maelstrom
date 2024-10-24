@@ -28,7 +28,7 @@ use maelstrom_util::{
 };
 use slog::{debug, error, info, Logger};
 use std::{future::Future, process};
-use tokio::{io::BufReader, net::TcpStream, sync::mpsc};
+use tokio::{io::BufReader, net::TcpStream, sync::mpsc, task};
 use types::{
     BrokerSender, BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache, Dispatcher,
     DispatcherReceiver, DispatcherSender,
@@ -76,7 +76,7 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
         mpsc::unbounded_channel();
 
     let log_clone = log.clone();
-    tokio::task::spawn(shutdown_on_error(
+    task::spawn(shutdown_on_error(
         async move {
             net::async_socket_reader(
                 read_stream,
@@ -91,7 +91,7 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
     ));
 
     let log_clone = log.clone();
-    tokio::task::spawn(shutdown_on_error(
+    task::spawn(shutdown_on_error(
         async move {
             net::async_socket_writer(broker_socket_outgoing_receiver, write_stream, &log_clone)
                 .await
@@ -100,12 +100,12 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
         dispatcher_sender.clone(),
     ));
 
-    tokio::task::spawn(shutdown_on_error(
+    task::spawn(shutdown_on_error(
         wait_for_signal(log.clone()),
         dispatcher_sender.clone(),
     ));
 
-    let handle = tokio::task::spawn(dispatcher_main(
+    let handle = task::spawn(dispatcher_main(
         config,
         dispatcher_receiver,
         dispatcher_sender,
