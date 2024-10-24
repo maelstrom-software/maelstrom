@@ -116,7 +116,7 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
         dispatcher_sender,
         broker_socket_outgoing_sender,
         broker_socket_incoming_receiver,
-        log.clone(),
+        log,
     )?
     .await?;
 
@@ -176,7 +176,7 @@ fn start_dispatcher_task(
     dispatcher_sender: DispatcherSender,
     broker_socket_outgoing_sender: BrokerSocketOutgoingSender,
     broker_socket_incoming_receiver: BrokerSocketIncomingReceiver,
-    log: Logger,
+    log: &Logger,
 ) -> Result<JoinHandle<()>> {
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
 
@@ -221,7 +221,7 @@ fn start_dispatcher_task(
         broker_socket_incoming_receiver,
         dispatcher,
         dispatcher_receiver,
-        log,
+        log.clone(),
     )))
 }
 
