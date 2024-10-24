@@ -178,38 +178,16 @@ fn start_dispatcher_task(
     broker_socket_incoming_receiver: BrokerSocketIncomingReceiver,
     log: Logger,
 ) -> Result<JoinHandle<()>> {
-    Ok(task::spawn(dispatcher_main(
-        config,
-        dispatcher_receiver,
-        dispatcher_sender,
-        broker_socket_outgoing_sender,
-        broker_socket_incoming_receiver,
-        log,
-    )))
-}
+    let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
 
-async fn dispatcher_main(
-    config: Config,
-    dispatcher_receiver: DispatcherReceiver,
-    dispatcher_sender: DispatcherSender,
-    broker_socket_outgoing_sender: BrokerSocketOutgoingSender,
-    broker_socket_incoming_receiver: BrokerSocketIncomingReceiver,
-    log: Logger,
-) {
     let mount_dir = config.cache_root.join::<MountDir>("mount");
     let tmpfs_dir = config.cache_root.join::<TmpfsDir>("upper");
     let cache_root = config.cache_root.join::<cache::CacheDir>("artifacts");
     let blob_dir = cache_root.join::<BlobDir>("sha256/blob");
 
-    let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
     let (cache, temp_file_factory) =
-        match Cache::new(StdFs, cache_root, config.cache_size, log.clone(), true) {
-            Err(err) => {
-                error!(log, "could not start cache"; "error" => %err);
-                return;
-            }
-            Ok((cache, temp_file_factory)) => (cache, temp_file_factory),
-        };
+        Cache::new(StdFs, cache_root, config.cache_size, log.clone(), true)?;
+
     let artifact_fetcher = ArtifactFetcher::new(
         u32::try_from(MAX_ARTIFACT_FETCHES)
             .unwrap()
@@ -220,7 +198,8 @@ async fn dispatcher_main(
         log.clone(),
         temp_file_factory.clone(),
     );
-    match DispatcherAdapter::new(
+
+    let adapter = DispatcherAdapter::new(
         dispatcher_sender,
         config.inline_limit,
         log.clone(),
@@ -228,34 +207,29 @@ async fn dispatcher_main(
         tmpfs_dir,
         blob_dir,
         temp_file_factory,
-    ) {
-        Err(err) => {
-            error!(log, "could not start executor"; "error" => %err);
-        }
-        Ok(adapter) => {
-            let dispatcher = Dispatcher::new(
-                adapter,
-                artifact_fetcher,
-                broker_sender,
-                cache,
-                config.slots,
-            );
-            handle_incoming_messages(
-                log,
-                dispatcher_receiver,
-                broker_socket_incoming_receiver,
-                dispatcher,
-            )
-            .await;
-        }
-    }
+    )?;
+
+    let dispatcher = Dispatcher::new(
+        adapter,
+        artifact_fetcher,
+        broker_sender,
+        cache,
+        config.slots,
+    );
+
+    Ok(task::spawn(dispatcher_main(
+        broker_socket_incoming_receiver,
+        dispatcher,
+        dispatcher_receiver,
+        log,
+    )))
 }
 
-async fn handle_incoming_messages(
-    log: Logger,
-    mut dispatcher_receiver: DispatcherReceiver,
+async fn dispatcher_main(
     mut broker_socket_incoming_recevier: BrokerSocketIncomingReceiver,
     mut dispatcher: Dispatcher,
+    mut dispatcher_receiver: DispatcherReceiver,
+    log: Logger,
 ) {
     // Multiplex messages from broker and others sources
     let err = loop {
