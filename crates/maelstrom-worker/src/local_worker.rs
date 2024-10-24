@@ -21,7 +21,7 @@ use maelstrom_util::{
 use slog::{debug, Logger};
 use tokio::{
     sync::mpsc::{self},
-    task::{self, JoinHandle},
+    task::JoinHandle,
 };
 
 pub struct Config {
@@ -39,7 +39,7 @@ pub fn start_task(
     artifact_fetcher: impl ArtifactFetcher + Send + Sync + 'static,
     broker_sender: impl BrokerSender + Send + Sync + 'static,
     config: Config,
-    mut dispatcher_receiver: Receiver,
+    dispatcher_receiver: Receiver,
     dispatcher_sender: Sender,
     log: &Logger,
 ) -> Result<JoinHandle<()>> {
@@ -65,7 +65,7 @@ pub fn start_task(
     )?;
 
     // Create the actual local_worker.
-    let mut worker_dispatcher = Dispatcher::new(
+    let dispatcher = Dispatcher::new(
         local_worker_dispatcher_adapter,
         artifact_fetcher,
         broker_sender,
@@ -73,41 +73,53 @@ pub fn start_task(
         config.slots,
     );
 
-    let handle_worker_message = |msg, worker: &mut Dispatcher<_, _, _, _>| -> Result<()> {
+    // Spawn a task for the local_worker.
+    crate::start_dispatcher_task_common(dispatcher, log, move |dispatcher, log| {
+        main(dispatcher, dispatcher_receiver, log)
+    })
+}
+
+async fn main<
+    ArtifactFetcherT: crate::dispatcher::ArtifactFetcher,
+    BrokerSenderT: crate::dispatcher::BrokerSender,
+>(
+    mut dispatcher: Dispatcher<
+        DispatcherAdapter,
+        ArtifactFetcherT,
+        BrokerSenderT,
+        crate::types::Cache,
+    >,
+    mut dispatcher_receiver: Receiver,
+    log: Logger,
+) {
+    let handle_worker_message = |msg, dispatcher: &mut Dispatcher<_, _, _, _>| -> Result<()> {
         if let Message::Shutdown(error) = msg {
             Err(error)
         } else {
-            worker.receive_message(msg);
+            dispatcher.receive_message(msg);
             Ok(())
         }
     };
 
-    // Spawn a task for the local_worker.
-    let log_clone = log.clone();
-    Ok(task::spawn(async move {
-        let shutdown_error = loop {
-            let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
-            if let Err(err) = handle_worker_message(msg, &mut worker_dispatcher) {
-                break err;
-            }
-        };
-
-        debug!(
-            log_clone,
-            "shutting down local worker due to {shutdown_error}"
-        );
-        worker_dispatcher.receive_message(Message::Shutdown(shutdown_error));
-        debug!(
-            log_clone,
-            "canceling {} running jobs",
-            worker_dispatcher.num_jobs_executing()
-        );
-
-        while worker_dispatcher.num_jobs_executing() > 0 {
-            let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
-            let _ = handle_worker_message(msg, &mut worker_dispatcher);
+    let shutdown_error = loop {
+        let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
+        if let Err(err) = handle_worker_message(msg, &mut dispatcher) {
+            break err;
         }
+    };
 
-        debug!(log_clone, "local worker exiting");
-    }))
+    debug!(log, "shutting down local worker due to {shutdown_error}");
+    dispatcher.receive_message(Message::Shutdown(shutdown_error));
+    debug!(
+        log,
+        "canceling {} running jobs",
+        dispatcher.num_jobs_executing()
+    );
+
+    while dispatcher.num_jobs_executing() > 0 {
+        let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
+        let _ = handle_worker_message(msg, &mut dispatcher);
+    }
+
+    debug!(log, "local worker exiting");
 }

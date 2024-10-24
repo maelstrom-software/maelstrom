@@ -217,12 +217,31 @@ fn start_dispatcher_task(
         config.slots,
     );
 
-    Ok(task::spawn(dispatcher_main(
-        broker_socket_incoming_receiver,
-        dispatcher,
-        dispatcher_receiver,
-        log.clone(),
-    )))
+    start_dispatcher_task_common(dispatcher, log, move |dispatcher, log| {
+        dispatcher_main(
+            broker_socket_incoming_receiver,
+            dispatcher,
+            dispatcher_receiver,
+            log,
+        )
+    })
+}
+
+fn start_dispatcher_task_common<
+    DepsT: dispatcher::Deps,
+    ArtifactFetcherT,
+    BrokerSenderT,
+    CacheT,
+    MainFutureT: Future<Output = ()> + Send + 'static,
+>(
+    dispatcher: dispatcher::Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>,
+    log: &Logger,
+    main: impl FnOnce(
+        dispatcher::Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>,
+        Logger,
+    ) -> MainFutureT,
+) -> Result<JoinHandle<()>> {
+    Ok(task::spawn(main(dispatcher, log.clone())))
 }
 
 async fn dispatcher_main(
