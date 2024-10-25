@@ -1,6 +1,6 @@
-use crate::types::CacheKeyKind;
+use crate::types::CacheKey;
 use maelstrom_base::{ArtifactType, NonEmpty, Sha256Digest};
-use maelstrom_util::{cache::Key, ext::OptionExt as _};
+use maelstrom_util::ext::OptionExt as _;
 use sha2::{Digest as _, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -85,7 +85,7 @@ pub struct LayerTracker {
     layers: NonEmpty<Sha256Digest>,
     bottom_layers: HashMap<Sha256Digest, PendingBottomLayer>,
     top_fs_layer: PendingTopLayer,
-    cache_keys: HashSet<Key<CacheKeyKind>>,
+    cache_keys: HashSet<CacheKey>,
     pending_manifest_dependencies: HashMap<Sha256Digest, Vec<Sha256Digest>>,
 }
 
@@ -195,7 +195,7 @@ impl LayerTracker {
             match fetcher.fetch_upper_fs_layer(&digest, lower_path, upper_path) {
                 FetcherResult::Got(path) => {
                     self.cache_keys
-                        .insert(Key::new(CacheKeyKind::UpperFsLayer, digest.clone()));
+                        .insert(CacheKey::upper_fs_layer(digest.clone()));
                     self.top_fs_layer.add_layer(digest.clone(), path)
                 }
                 FetcherResult::Pending => break,
@@ -223,8 +223,7 @@ impl LayerTracker {
         path: PathBuf,
         fetcher: &mut impl Fetcher,
     ) {
-        self.cache_keys
-            .insert(Key::new(CacheKeyKind::Blob, digest.clone()));
+        self.cache_keys.insert(CacheKey::blob(digest.clone()));
 
         if self.pending_manifest_dependencies.contains_key(digest) {
             self.got_manifest_artifact(digest, fetcher);
@@ -286,7 +285,7 @@ impl LayerTracker {
         };
         let mut num_remaining = 0;
         for digest in digests {
-            let cache_key = Key::new(CacheKeyKind::Blob, digest.clone());
+            let cache_key = CacheKey::blob(digest.clone());
             if self.cache_keys.contains(&cache_key) {
                 continue;
             }
@@ -326,7 +325,7 @@ impl LayerTracker {
         );
         assert_eq!(existing, PendingBottomLayer::WaitingForFsLayer);
         self.cache_keys
-            .insert(Key::new(CacheKeyKind::BottomFsLayer, digest.clone()));
+            .insert(CacheKey::bottom_fs_layer(digest.clone()));
 
         if self.bottom_layers_all_ready() {
             self.fetch_upper_layers(fetcher);
@@ -340,7 +339,7 @@ impl LayerTracker {
         fetcher: &mut impl Fetcher,
     ) {
         self.cache_keys
-            .insert(Key::new(CacheKeyKind::UpperFsLayer, digest.clone()));
+            .insert(CacheKey::upper_fs_layer(digest.clone()));
         self.top_fs_layer.add_layer(digest.clone(), path);
         self.fetch_upper_layers(fetcher);
     }
@@ -352,11 +351,11 @@ impl LayerTracker {
         ) || (self.bottom_layers_all_ready() && self.layers.len() < 2)
     }
 
-    pub fn into_cache_keys(self) -> HashSet<Key<CacheKeyKind>> {
+    pub fn into_cache_keys(self) -> HashSet<CacheKey> {
         self.cache_keys
     }
 
-    pub fn into_path_and_cache_keys(self) -> (PathBuf, HashSet<Key<CacheKeyKind>>) {
+    pub fn into_path_and_cache_keys(self) -> (PathBuf, HashSet<CacheKey>) {
         assert!(self.is_complete());
         if self.layers.len() < 2 {
             (
@@ -472,8 +471,8 @@ mod tests {
             (
                 path_buf!("/fs_b/1"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
                 }
             ),
         );
@@ -500,9 +499,9 @@ mod tests {
             (
                 path_buf!("/fs_b/1"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
                 }
             ),
         );
@@ -527,8 +526,8 @@ mod tests {
             (
                 path_buf!("/fs_b/1"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
                 }
             ),
         );
@@ -561,9 +560,9 @@ mod tests {
             (
                 path_buf!("/fs_b/1"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
                 }
             ),
         );
@@ -598,11 +597,11 @@ mod tests {
             (
                 path_buf!("/fs_u/2"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(2)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2)),
                 }
             ),
         );
@@ -645,13 +644,13 @@ mod tests {
             (
                 path_buf!("/fs_u/2"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::Blob, digest!(3)),
-                    Key::new(CacheKeyKind::Blob, digest!(4)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::blob(digest!(3)),
+                    CacheKey::blob(digest!(4)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(2)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2)),
                 }
             ),
         );
@@ -678,8 +677,8 @@ mod tests {
         assert_eq!(
             tracker.into_cache_keys(),
             hashset! {
-                Key::new(CacheKeyKind::Blob, digest!(2)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
+                CacheKey::blob(digest!(2)),
+                CacheKey::bottom_fs_layer(digest!(2)),
             }
         );
     }
@@ -713,8 +712,8 @@ mod tests {
         assert_eq!(
             tracker.into_cache_keys(),
             hashset! {
-                Key::new(CacheKeyKind::Blob, digest!(2)),
-                Key::new(CacheKeyKind::Blob, digest!(3)),
+                CacheKey::blob(digest!(2)),
+                CacheKey::blob(digest!(3)),
             }
         );
     }
@@ -744,10 +743,10 @@ mod tests {
         assert_eq!(
             tracker.into_cache_keys(),
             hashset! {
-                Key::new(CacheKeyKind::Blob, digest!(1)),
-                Key::new(CacheKeyKind::Blob, digest!(2)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
+                CacheKey::blob(digest!(1)),
+                CacheKey::blob(digest!(2)),
+                CacheKey::bottom_fs_layer(digest!(1)),
+                CacheKey::bottom_fs_layer(digest!(2)),
             }
         );
     }
@@ -786,12 +785,12 @@ mod tests {
         assert_eq!(
             tracker.into_cache_keys(),
             hashset! {
-                Key::new(CacheKeyKind::Blob, digest!(1)),
-                Key::new(CacheKeyKind::Blob, digest!(2)),
-                Key::new(CacheKeyKind::Blob, digest!(3)),
-                Key::new(CacheKeyKind::Blob, digest!(4)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
+                CacheKey::blob(digest!(1)),
+                CacheKey::blob(digest!(2)),
+                CacheKey::blob(digest!(3)),
+                CacheKey::blob(digest!(4)),
+                CacheKey::bottom_fs_layer(digest!(1)),
+                CacheKey::bottom_fs_layer(digest!(2)),
             }
         );
     }
@@ -820,9 +819,9 @@ mod tests {
         assert_eq!(
             tracker.into_cache_keys(),
             hashset! {
-                Key::new(CacheKeyKind::Blob, digest!(1)),
-                Key::new(CacheKeyKind::Blob, digest!(2)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
+                CacheKey::blob(digest!(1)),
+                CacheKey::blob(digest!(2)),
+                CacheKey::bottom_fs_layer(digest!(2)),
             }
         );
     }
@@ -852,10 +851,10 @@ mod tests {
         assert_eq!(
             tracker.into_cache_keys(),
             hashset! {
-                Key::new(CacheKeyKind::Blob, digest!(1)),
-                Key::new(CacheKeyKind::Blob, digest!(2)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
+                CacheKey::blob(digest!(1)),
+                CacheKey::blob(digest!(2)),
+                CacheKey::bottom_fs_layer(digest!(1)),
+                CacheKey::bottom_fs_layer(digest!(2)),
             }
         );
     }
@@ -884,10 +883,10 @@ mod tests {
         assert_eq!(
             tracker.into_cache_keys(),
             hashset! {
-                Key::new(CacheKeyKind::Blob, digest!(1)),
-                Key::new(CacheKeyKind::Blob, digest!(2)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
+                CacheKey::blob(digest!(1)),
+                CacheKey::blob(digest!(2)),
+                CacheKey::bottom_fs_layer(digest!(1)),
+                CacheKey::bottom_fs_layer(digest!(2)),
             }
         );
     }
@@ -917,11 +916,11 @@ mod tests {
         assert_eq!(
             tracker.into_cache_keys(),
             hashset! {
-                Key::new(CacheKeyKind::Blob, digest!(1)),
-                Key::new(CacheKeyKind::Blob, digest!(2)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
-                Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2)),
+                CacheKey::blob(digest!(1)),
+                CacheKey::blob(digest!(2)),
+                CacheKey::bottom_fs_layer(digest!(1)),
+                CacheKey::bottom_fs_layer(digest!(2)),
+                CacheKey::upper_fs_layer(upper_digest!(1, 2)),
             }
         );
     }
@@ -959,11 +958,11 @@ mod tests {
             (
                 path_buf!("/fs_u/2"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(2)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2)),
                 }
             ),
         );
@@ -1007,14 +1006,14 @@ mod tests {
             (
                 path_buf!("/fs_u/3"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::Blob, digest!(3)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(3)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(2, 3)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2, 3)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::blob(digest!(3)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(2)),
+                    CacheKey::bottom_fs_layer(digest!(3)),
+                    CacheKey::upper_fs_layer(upper_digest!(2, 3)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2, 3)),
                 }
             ),
         );
@@ -1080,16 +1079,16 @@ mod tests {
             (
                 path_buf!("/fs_u/3"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::Blob, digest!(3)),
-                    Key::new(CacheKeyKind::Blob, digest!(4)),
-                    Key::new(CacheKeyKind::Blob, digest!(5)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(3)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(2, 3)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2, 3)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::blob(digest!(3)),
+                    CacheKey::blob(digest!(4)),
+                    CacheKey::blob(digest!(5)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(2)),
+                    CacheKey::bottom_fs_layer(digest!(3)),
+                    CacheKey::upper_fs_layer(upper_digest!(2, 3)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2, 3)),
                 }
             ),
         );
@@ -1148,15 +1147,15 @@ mod tests {
             (
                 path_buf!("/fs_u/6"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2, 1, 2, 1, 2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(2, 1, 2, 1, 2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2, 1, 2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(2, 1, 2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(2)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2, 1, 2, 1, 2)),
+                    CacheKey::upper_fs_layer(upper_digest!(2, 1, 2, 1, 2)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2, 1, 2)),
+                    CacheKey::upper_fs_layer(upper_digest!(2, 1, 2)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2)),
                 }
             ),
         );
@@ -1193,11 +1192,11 @@ mod tests {
             (
                 path_buf!("/fs_u/3"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(2)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2)),
                 }
             ),
         );
@@ -1235,11 +1234,11 @@ mod tests {
             (
                 path_buf!("/fs_u/3"),
                 hashset! {
-                    Key::new(CacheKeyKind::Blob, digest!(1)),
-                    Key::new(CacheKeyKind::Blob, digest!(2)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(1)),
-                    Key::new(CacheKeyKind::BottomFsLayer, digest!(2)),
-                    Key::new(CacheKeyKind::UpperFsLayer, upper_digest!(1, 2)),
+                    CacheKey::blob(digest!(1)),
+                    CacheKey::blob(digest!(2)),
+                    CacheKey::bottom_fs_layer(digest!(1)),
+                    CacheKey::bottom_fs_layer(digest!(2)),
+                    CacheKey::upper_fs_layer(upper_digest!(1, 2)),
                 }
             ),
         );

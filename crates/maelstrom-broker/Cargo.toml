@@ -23,6 +23,7 @@ maelstrom-base.workspace = true
 maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
 maelstrom-web.workspace = true
+ref-cast.workspace = true
 serde.workspace = true
 strum.workspace = true
 tar.workspace = true

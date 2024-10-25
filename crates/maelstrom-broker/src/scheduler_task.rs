@@ -71,7 +71,7 @@ pub type SchedulerSender = tokio_mpsc::UnboundedSender<SchedulerMessage>;
 
 pub struct SchedulerTask {
     scheduler: Scheduler<
-        Cache<cache::fs::std::Fs, scheduler::BrokerKeyKind, scheduler::BrokerGetStrategy>,
+        Cache<cache::fs::std::Fs, scheduler::BrokerKey, scheduler::BrokerGetStrategy>,
         PassThroughDeps,
     >,
     sender: SchedulerSender,

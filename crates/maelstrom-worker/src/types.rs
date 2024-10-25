@@ -7,21 +7,82 @@ use maelstrom_util::cache::{self, fs::std::Fs as StdFs, GotArtifact};
 use std::path::PathBuf;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-#[derive(
-    Clone, Copy, Debug, strum::Display, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter,
-)]
-#[strum(serialize_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CacheKeyKind {
     Blob,
     BottomFsLayer,
     UpperFsLayer,
 }
 
-impl cache::KeyKind for CacheKeyKind {
-    type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
+impl CacheKeyKind {
+    fn from_str(kind: &'static str) -> Self {
+        match kind {
+            "blob" => Self::Blob,
+            "bottom_fs_layer" => Self::BottomFsLayer,
+            "upper_fs_layer" => Self::UpperFsLayer,
+            _ => {
+                panic!("bad CacheKeyKind {kind}");
+            }
+        }
+    }
 
-    fn iter() -> Self::Iterator {
-        <Self as strum::IntoEnumIterator>::iter()
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Blob => "blob",
+            Self::BottomFsLayer => "bottom_fs_layer",
+            Self::UpperFsLayer => "upper_fs_layer",
+        }
+    }
+
+    fn iter() -> <[&'static str; 3] as IntoIterator>::IntoIter {
+        ["blob", "bottom_fs_layer", "upper_fs_layer"].into_iter()
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CacheKey {
+    kind: CacheKeyKind,
+    digest: Sha256Digest,
+}
+
+impl CacheKey {
+    pub fn new(kind: CacheKeyKind, digest: Sha256Digest) -> Self {
+        Self { kind, digest }
+    }
+
+    pub fn blob(digest: Sha256Digest) -> Self {
+        Self::new(CacheKeyKind::Blob, digest)
+    }
+
+    pub fn bottom_fs_layer(digest: Sha256Digest) -> Self {
+        Self::new(CacheKeyKind::BottomFsLayer, digest)
+    }
+
+    pub fn upper_fs_layer(digest: Sha256Digest) -> Self {
+        Self::new(CacheKeyKind::UpperFsLayer, digest)
+    }
+}
+
+impl cache::Key for CacheKey {
+    type KindIterator = <[&'static str; 3] as IntoIterator>::IntoIter;
+
+    fn kinds() -> Self::KindIterator {
+        CacheKeyKind::iter()
+    }
+
+    fn from_kind_and_digest(kind: &'static str, digest: Sha256Digest) -> Self {
+        Self {
+            kind: CacheKeyKind::from_str(kind),
+            digest,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        self.kind.as_str()
+    }
+
+    fn digest(&self) -> &Sha256Digest {
+        &self.digest
     }
 }
 
@@ -32,8 +93,7 @@ impl cache::GetStrategy for CacheGetStrategy {
     fn getter_from_job_id(_jid: JobId) -> Self::Getter {}
 }
 
-pub type CacheKey = cache::Key<CacheKeyKind>;
-pub type Cache = cache::Cache<StdFs, CacheKeyKind, CacheGetStrategy>;
+pub type Cache = cache::Cache<StdFs, CacheKey, CacheGetStrategy>;
 pub type TempFile = cache::fs::std::TempFile;
 pub type TempFileFactory = cache::TempFileFactory<StdFs>;
 
@@ -41,34 +101,28 @@ pub type TempFileFactory = cache::TempFileFactory<StdFs>;
 impl dispatcher::Cache for Cache {
     type Fs = StdFs;
 
-    fn get_artifact(
-        &mut self,
-        kind: CacheKeyKind,
-        artifact: Sha256Digest,
-        jid: JobId,
-    ) -> cache::GetArtifact {
-        self.get_artifact(kind, artifact, jid)
+    fn get_artifact(&mut self, key: CacheKey, jid: JobId) -> cache::GetArtifact {
+        self.get_artifact(key, jid)
     }
 
-    fn got_artifact_failure(&mut self, kind: CacheKeyKind, digest: &Sha256Digest) -> Vec<JobId> {
-        self.got_artifact_failure(kind, digest)
+    fn got_artifact_failure(&mut self, key: &CacheKey) -> Vec<JobId> {
+        self.got_artifact_failure(key)
     }
 
     fn got_artifact_success(
         &mut self,
-        kind: CacheKeyKind,
-        digest: &Sha256Digest,
+        key: &CacheKey,
         artifact: GotArtifact<StdFs>,
     ) -> Result<Vec<JobId>, (anyhow::Error, Vec<JobId>)> {
-        self.got_artifact_success(kind, digest, artifact)
+        self.got_artifact_success(key, artifact)
     }
 
-    fn decrement_ref_count(&mut self, kind: CacheKeyKind, digest: &Sha256Digest) {
-        self.decrement_ref_count(kind, digest)
+    fn decrement_ref_count(&mut self, key: &CacheKey) {
+        self.decrement_ref_count(key)
     }
 
-    fn cache_path(&self, kind: CacheKeyKind, digest: &Sha256Digest) -> PathBuf {
-        self.cache_path(kind, digest).into_path_buf()
+    fn cache_path(&self, key: &CacheKey) -> PathBuf {
+        self.cache_path(key).into_path_buf()
     }
 }
 

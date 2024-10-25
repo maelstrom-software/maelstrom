@@ -18,12 +18,13 @@ use maelstrom_base::{
 use maelstrom_util::{
     cache::{
         fs::{Fs, TempFile},
-        Cache, GetArtifact, GetStrategy, GotArtifact, KeyKind,
+        Cache, GetArtifact, GetStrategy, GotArtifact, Key,
     },
     duration,
     ext::{BoolExt as _, OptionExt as _},
     heap::{Heap, HeapDeps, HeapIndex},
 };
+use ref_cast::RefCast;
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap, HashSet},
@@ -67,17 +68,27 @@ pub trait SchedulerDeps {
         -> Result<Self::ManifestIterator, Self::ManifestError>;
 }
 
-#[derive(Clone, Copy, Debug, strum::Display, Eq, Hash, PartialEq, strum::EnumIter)]
-#[strum(serialize_all = "snake_case")]
-pub enum BrokerKeyKind {
-    Blob,
-}
+#[derive(Clone, Debug, Eq, Hash, PartialEq, RefCast)]
+#[repr(transparent)]
+pub struct BrokerKey(pub Sha256Digest);
 
-impl KeyKind for BrokerKeyKind {
-    type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
+impl Key for BrokerKey {
+    type KindIterator = <[&'static str; 1] as IntoIterator>::IntoIter;
 
-    fn iter() -> Self::Iterator {
-        <Self as strum::IntoEnumIterator>::iter()
+    fn kinds() -> Self::KindIterator {
+        ["blob"].into_iter()
+    }
+
+    fn from_kind_and_digest(_kind: &'static str, digest: Sha256Digest) -> Self {
+        Self(digest)
+    }
+
+    fn kind(&self) -> &'static str {
+        "blob"
+    }
+
+    fn digest(&self) -> &Sha256Digest {
+        &self.0
     }
 }
 
@@ -103,10 +114,10 @@ pub trait SchedulerCache {
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact;
 
     /// See [`Cache::got_artifact`].
-    fn got_artifact(&mut self, digest: Sha256Digest, file: Self::TempFile) -> Vec<JobId>;
+    fn got_artifact(&mut self, digest: &Sha256Digest, file: Self::TempFile) -> Vec<JobId>;
 
     /// See [`Cache::decrement_refcount`].
-    fn decrement_refcount(&mut self, digest: Sha256Digest);
+    fn decrement_refcount(&mut self, digest: &Sha256Digest);
 
     /// See [`Cache::client_disconnected`].
     fn client_disconnected(&mut self, cid: ClientId);
@@ -118,21 +129,21 @@ pub trait SchedulerCache {
     fn cache_path(&self, digest: &Sha256Digest) -> PathBuf;
 }
 
-impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKeyKind, BrokerGetStrategy> {
+impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKey, BrokerGetStrategy> {
     type TempFile = FsT::TempFile;
 
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
-        self.get_artifact(BrokerKeyKind::Blob, digest, jid)
+        self.get_artifact(BrokerKey(digest), jid)
     }
 
-    fn got_artifact(&mut self, digest: Sha256Digest, file: FsT::TempFile) -> Vec<JobId> {
-        self.got_artifact_success(BrokerKeyKind::Blob, &digest, GotArtifact::file(file))
+    fn got_artifact(&mut self, digest: &Sha256Digest, file: FsT::TempFile) -> Vec<JobId> {
+        self.got_artifact_success(BrokerKey::ref_cast(digest), GotArtifact::file(file))
             .map_err(|(err, _)| err)
             .unwrap()
     }
 
-    fn decrement_refcount(&mut self, digest: Sha256Digest) {
-        self.decrement_ref_count(BrokerKeyKind::Blob, &digest)
+    fn decrement_refcount(&mut self, digest: &Sha256Digest) {
+        self.decrement_ref_count(BrokerKey::ref_cast(digest))
     }
 
     fn client_disconnected(&mut self, cid: ClientId) {
@@ -140,13 +151,13 @@ impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKeyKind, BrokerGetStrategy> {
     }
 
     fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
-        let cache_path = self.cache_path(BrokerKeyKind::Blob, digest).into_path_buf();
-        self.try_increment_ref_count(BrokerKeyKind::Blob, digest)
+        let cache_path = self.cache_path(BrokerKey::ref_cast(digest)).into_path_buf();
+        self.try_increment_ref_count(BrokerKey::ref_cast(digest))
             .map(|size| (cache_path, size))
     }
 
     fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
-        self.cache_path(BrokerKeyKind::Blob, digest).into_path_buf()
+        self.cache_path(BrokerKey::ref_cast(digest)).into_path_buf()
     }
 }
 
@@ -495,7 +506,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         let client = self.clients.0.remove(&id).unwrap();
         for job in client.jobs.into_values() {
             for artifact in job.acquired_artifacts {
-                self.cache.decrement_refcount(artifact);
+                self.cache.decrement_refcount(&artifact);
             }
         }
 
@@ -645,7 +656,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         );
         let job = client.jobs.remove(&jid.cjid).unwrap();
         for artifact in job.acquired_artifacts {
-            self.cache.decrement_refcount(artifact);
+            self.cache.decrement_refcount(&artifact);
         }
         client.num_completed_jobs += 1;
 
@@ -726,7 +737,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         file: CacheT::TempFile,
     ) {
         let mut just_enqueued = HashSet::default();
-        for jid in self.cache.got_artifact(digest.clone(), file) {
+        for jid in self.cache.got_artifact(&digest, file) {
             let client = self.clients.0.get_mut(&jid.cid).unwrap();
             let job = client.jobs.get_mut(&jid.cjid).unwrap();
             job.acquired_artifacts
@@ -765,7 +776,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     }
 
     fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
-        self.cache.decrement_refcount(digest);
+        self.cache.decrement_refcount(&digest);
     }
 
     fn sample_job_statistics_for_client(&self, cid: ClientId) -> JobStateCounts {
@@ -877,7 +888,7 @@ mod tests {
                 .remove(0)
         }
 
-        fn got_artifact(&mut self, digest: Sha256Digest, file: Self::TempFile) -> Vec<JobId> {
+        fn got_artifact(&mut self, digest: &Sha256Digest, file: Self::TempFile) -> Vec<JobId> {
             self.borrow_mut()
                 .messages
                 .push(CacheGotArtifact(digest.clone(), file));
@@ -888,10 +899,10 @@ mod tests {
                 .remove(0)
         }
 
-        fn decrement_refcount(&mut self, digest: Sha256Digest) {
+        fn decrement_refcount(&mut self, digest: &Sha256Digest) {
             self.borrow_mut()
                 .messages
-                .push(CacheDecrementRefcount(digest));
+                .push(CacheDecrementRefcount(digest.clone()));
         }
 
         fn client_disconnected(&mut self, cid: ClientId) {

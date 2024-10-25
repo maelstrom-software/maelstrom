@@ -16,7 +16,7 @@ use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
     ffi::{OsStr, OsString},
-    fmt::{self, Debug, Display, Formatter},
+    fmt::{self, Debug, Formatter},
     hash::Hash,
     iter::IntoIterator,
     mem,
@@ -196,26 +196,17 @@ where
     }
 }
 
-pub trait KeyKind: Clone + Copy + Debug + Display + Eq + Hash {
-    type Iterator: Iterator<Item = Self>;
-    fn iter() -> Self::Iterator;
+pub trait Key: Clone + Debug + Eq + Hash {
+    type KindIterator: Iterator<Item = &'static str>;
+    fn kinds() -> Self::KindIterator;
+    fn from_kind_and_digest(kind: &'static str, digest: Sha256Digest) -> Self;
+    fn kind(&self) -> &'static str;
+    fn digest(&self) -> &Sha256Digest;
 }
 
 pub trait GetStrategy {
     type Getter: Eq + Hash;
     fn getter_from_job_id(jid: JobId) -> Self::Getter;
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Key<KeyKindT> {
-    pub kind: KeyKindT,
-    pub digest: Sha256Digest,
-}
-
-impl<KeyKindT> Key<KeyKindT> {
-    pub fn new(kind: KeyKindT, digest: Sha256Digest) -> Self {
-        Self { kind, digest }
-    }
 }
 
 /// An entry for a specific [`Key`] in the [`Cache`]'s hash table. There is one of these for every
@@ -249,32 +240,30 @@ enum Entry<GetStrategyT: GetStrategy> {
 
 /// An implementation of the "newtype" pattern so that we can implement [`HeapDeps`] on a
 /// [`HashMap`].
-struct Map<KeyKindT: KeyKind, GetStrategyT: GetStrategy>(
-    HashMap<Key<KeyKindT>, Entry<GetStrategyT>>,
-);
+struct Map<KeyT: Key, GetStrategyT: GetStrategy>(HashMap<KeyT, Entry<GetStrategyT>>);
 
-impl<KeyKindT: KeyKind, GetStrategyT: GetStrategy> Default for Map<KeyKindT, GetStrategyT> {
+impl<KeyT: Key, GetStrategyT: GetStrategy> Default for Map<KeyT, GetStrategyT> {
     fn default() -> Self {
         Self(HashMap::default())
     }
 }
 
-impl<KeyKindT: KeyKind, GetStrategyT: GetStrategy> Deref for Map<KeyKindT, GetStrategyT> {
-    type Target = HashMap<Key<KeyKindT>, Entry<GetStrategyT>>;
+impl<KeyT: Key, GetStrategyT: GetStrategy> Deref for Map<KeyT, GetStrategyT> {
+    type Target = HashMap<KeyT, Entry<GetStrategyT>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<KeyKindT: KeyKind, GetStrategyT: GetStrategy> DerefMut for Map<KeyKindT, GetStrategyT> {
+impl<KeyT: Key, GetStrategyT: GetStrategy> DerefMut for Map<KeyT, GetStrategyT> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<KeyKindT: KeyKind, GetStrategyT: GetStrategy> HeapDeps for Map<KeyKindT, GetStrategyT> {
-    type Element = Key<KeyKindT>;
+impl<KeyT: Key, GetStrategyT: GetStrategy> HeapDeps for Map<KeyT, GetStrategyT> {
+    type Element = KeyT;
 
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
         let lhs_priority = match self.get(lhs) {
@@ -327,12 +316,12 @@ struct SizeFile;
 /// Manage a directory of downloaded, extracted artifacts. Coordinate fetching of these artifacts,
 /// and removing them when they are no longer in use and the amount of space used by the directory
 /// has grown too large.
-pub struct Cache<FsT, KeyKindT: KeyKind, GetStrategyT: GetStrategy> {
+pub struct Cache<FsT, KeyT: Key, GetStrategyT: GetStrategy> {
     fs: FsT,
     removing: RootBuf<RemovingRoot>,
     sha256: RootBuf<Sha256Dir>,
-    entries: Map<KeyKindT, GetStrategyT>,
-    heap: Heap<Map<KeyKindT, GetStrategyT>>,
+    entries: Map<KeyT, GetStrategyT>,
+    heap: Heap<Map<KeyT, GetStrategyT>>,
     next_priority: u64,
     bytes_used: u64,
     bytes_used_target: u64,
@@ -340,7 +329,7 @@ pub struct Cache<FsT, KeyKindT: KeyKind, GetStrategyT: GetStrategy> {
     log: Logger,
 }
 
-impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT, GetStrategyT> {
+impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategyT> {
     /// Create a new [Cache] rooted at `root`. The directory `root` and all necessary ancestors
     /// will be created, along with `{root}/removing` and `{root}/{kind}/sha256`. Any pre-existing
     /// entries in `{root}/removing` and `{root}/{kind}/sha256` will be removed. That implies that
@@ -433,7 +422,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS)?;
         fs.mkdir(&tmp)?;
         fs.mkdir(&sha256)?;
-        for kind in KeyKindT::iter() {
+        for kind in KeyT::kinds() {
             fs.mkdir(&kind_dir(&sha256, kind))?;
         }
 
@@ -479,25 +468,25 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         fs.mkdir_recursively(&sha256)?;
 
         // Next, remove any old or garbage sha256 subdirectories and create any missing ones.
-        remove_all_from_directory_except(&fs, &removing, &sha256, KeyKindT::iter())?;
-        for kind in KeyKindT::iter() {
+        remove_all_from_directory_except(&fs, &removing, &sha256, KeyT::kinds())?;
+        for kind in KeyT::kinds() {
             fs.mkdir_recursively(&kind_dir(&sha256, kind))?;
         }
 
-        let mut entries = Map::<KeyKindT, GetStrategyT>::default();
-        let mut heap = Heap::<Map<KeyKindT, GetStrategyT>>::default();
+        let mut entries = Map::<KeyT, GetStrategyT>::default();
+        let mut heap = Heap::<Map<KeyT, GetStrategyT>>::default();
         let mut next_priority = 0u64;
         let mut bytes_used = 0u64;
 
         // Finally, Go through the sha256 subdirs and decide what to do with the contents.
-        for kind in KeyKindT::iter() {
-            let kind_dir: RootBuf<KindDir> = sha256.join(kind.to_string());
+        for kind in KeyT::kinds() {
+            let kind_dir: RootBuf<KindDir> = sha256.join(kind);
             let mut directory_sizes = HashMap::<Sha256Digest, (bool, Option<u64>)>::new();
             for entry in fs.read_dir(&kind_dir)? {
                 let (name, metadata) = entry?;
                 match cache_file_name_type(&fs, &kind_dir, &name, metadata) {
                     CacheFileNameType::File(digest, size) => {
-                        let key = Key::new(kind, digest);
+                        let key = KeyT::from_kind_and_digest(kind, digest);
                         entries.insert(
                             key.clone(),
                             Entry::InHeap {
@@ -531,7 +520,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             for (digest, entry) in directory_sizes {
                 match entry {
                     (true, Some(size)) => {
-                        let key = Key::new(kind, digest);
+                        let key = KeyT::from_kind_and_digest(kind, digest);
                         entries.insert(
                             key.clone(),
                             Entry::InHeap {
@@ -578,13 +567,8 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
 
     /// Attempt to fetch `artifact` from the cache. See [`GetArtifact`] for the meaning of the
     /// return values.
-    pub fn get_artifact(
-        &mut self,
-        kind: KeyKindT,
-        digest: Sha256Digest,
-        jid: JobId,
-    ) -> GetArtifact {
-        match self.entries.entry(Key::new(kind, digest)) {
+    pub fn get_artifact(&mut self, key: KeyT, jid: JobId) -> GetArtifact {
+        match self.entries.entry(key) {
             HashEntry::Vacant(entry) => {
                 entry.insert(Entry::Getting {
                     jobs: vec![jid],
@@ -631,10 +615,8 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
 
     /// Notify the cache that an artifact fetch has failed. The returned vector lists the jobs that
     /// are affected and that need to be canceled.
-    pub fn got_artifact_failure(&mut self, kind: KeyKindT, digest: &Sha256Digest) -> Vec<JobId> {
-        if let Some(Entry::Getting { jobs, .. }) =
-            self.entries.remove(&Key::new(kind, digest.clone()))
-        {
+    pub fn got_artifact_failure(&mut self, key: &KeyT) -> Vec<JobId> {
+        if let Some(Entry::Getting { jobs, .. }) = self.entries.remove(key) {
             self.getting = self.getting.checked_sub(1).unwrap();
             jobs
         } else {
@@ -646,8 +628,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     /// lists the jobs that are affected, and the path they can use to access the artifact.
     pub fn got_artifact_success(
         &mut self,
-        kind: KeyKindT,
-        digest: &Sha256Digest,
+        key: &KeyT,
         artifact: GotArtifact<FsT>,
     ) -> result::Result<Vec<JobId>, (Error, Vec<JobId>)> {
         fn update_cache_directory<FsT: Fs>(
@@ -708,12 +689,11 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             }
         }
 
-        let cache_path = self.cache_path(kind, digest);
+        let cache_path = self.cache_path(key);
 
-        let Some(entry) = self.entries.get_mut(&Key::new(kind, digest.clone())) else {
+        let Some(entry) = self.entries.get_mut(key) else {
             debug!(self.log, "cache disposing of added artifact because it is no longer required";
-                "kind" => ?kind,
-                "digest" => %digest,
+                "key" => ?key,
             );
             dispose_of_artifact_or_warn(&self.fs, &self.log, &self.removing, artifact);
             return Ok(vec![]);
@@ -721,8 +701,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
 
         let Entry::Getting { jobs, .. } = entry else {
             debug!(self.log, "cache disposing of added artifact because it is no longer required";
-                "kind" => ?kind,
-                "digest" => %digest,
+                "key" => ?key,
             );
             dispose_of_artifact_or_warn(&self.fs, &self.log, &self.removing, artifact);
             return Ok(vec![]);
@@ -731,7 +710,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         let (file_type, bytes_used) = match update_cache_directory(&self.fs, &cache_path, artifact)
         {
             Err(err) => {
-                return Err((err, self.got_artifact_failure(kind, digest)));
+                return Err((err, self.got_artifact_failure(key)));
             }
             Ok((file_type, bytes_used)) => (file_type, bytes_used),
         };
@@ -747,8 +726,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
         self.getting = self.getting.checked_sub(1).unwrap();
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
         debug!(self.log, "cache added artifact";
-            "kind" => ?kind,
-            "digest" => %digest,
+            "key" => ?key,
             "artifact_bytes_used" => %ByteSize::b(bytes_used),
             "entries" => %(self.entries.len() - self.getting),
             "file_type" => %file_type,
@@ -763,17 +741,12 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     /// by one and return the size of the artifact. If no reference count is already held, return
     /// None.
     #[must_use]
-    pub fn try_increment_ref_count(
-        &mut self,
-        kind: KeyKindT,
-        digest: &Sha256Digest,
-    ) -> Option<u64> {
-        let key = Key::new(kind, digest.clone());
+    pub fn try_increment_ref_count(&mut self, key: &KeyT) -> Option<u64> {
         if let Some(Entry::InUse {
             ref_count,
             bytes_used,
             ..
-        }) = self.entries.get_mut(&key)
+        }) = self.entries.get_mut(key)
         {
             *ref_count = ref_count.checked_add(1).unwrap();
             Some(*bytes_used)
@@ -783,11 +756,10 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     }
 
     /// Notify the cache that a reference to an artifact is no longer needed.
-    pub fn decrement_ref_count(&mut self, kind: KeyKindT, digest: &Sha256Digest) {
-        let key = Key::new(kind, digest.clone());
+    pub fn decrement_ref_count(&mut self, key: &KeyT) {
         let entry = self
             .entries
-            .get_mut(&key)
+            .get_mut(key)
             .expect("Got decrement_ref_count in unexpected state");
         let Entry::InUse {
             file_type,
@@ -829,9 +801,8 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
     }
 
     /// Return the directory path for the artifact referenced by `digest`.
-    pub fn cache_path(&self, kind: KeyKindT, digest: &Sha256Digest) -> RootBuf<EntryPath> {
-        let kind_dir: RootBuf<KindDir> = self.sha256.join(kind.to_string());
-        cache_file_name(&kind_dir, digest)
+    pub fn cache_path(&self, key: &KeyT) -> RootBuf<EntryPath> {
+        cache_file_name(self.sha256.join(key.kind()).as_root(), key.digest())
     }
 
     /// Check to see if the cache is over its goal size, and if so, try to remove the least
@@ -855,7 +826,7 @@ impl<FsT: Fs, KeyKindT: KeyKind, GetStrategyT: GetStrategy> Cache<FsT, KeyKindT,
             else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
-            let cache_path = self.cache_path(key.kind, &key.digest);
+            let cache_path = self.cache_path(&key);
             if file_type == FileType::Directory {
                 rmdir_in_background(&self.fs, &self.removing, &cache_path)?;
                 self.fs.remove(&size_file_name(&cache_path))?;
@@ -1015,8 +986,8 @@ fn ensure_removing_directory(
     Ok(())
 }
 
-fn kind_dir(sha256: &Root<Sha256Dir>, kind: impl KeyKind) -> RootBuf<KindDir> {
-    sha256.join(kind.to_string())
+fn kind_dir(sha256: &Root<Sha256Dir>, kind: &'static str) -> RootBuf<KindDir> {
+    sha256.join(kind)
 }
 
 /*  _            _
@@ -1039,21 +1010,65 @@ mod tests {
     use crate::fs;
     use maelstrom_test::*;
     use slog::{o, Discard};
-    use TestKeyKind::*;
 
-    #[derive(Clone, Copy, Debug, strum::Display, strum::EnumIter, Eq, Hash, PartialEq)]
-    #[strum(serialize_all = "snake_case")]
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     enum TestKeyKind {
         Apple,
         Orange,
     }
 
-    impl KeyKind for TestKeyKind {
-        type Iterator = <Self as strum::IntoEnumIterator>::Iterator;
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+    struct TestKey {
+        kind: TestKeyKind,
+        digest: Sha256Digest,
+    }
 
-        fn iter() -> Self::Iterator {
-            <Self as strum::IntoEnumIterator>::iter()
+    impl Key for TestKey {
+        type KindIterator = <[&'static str; 2] as IntoIterator>::IntoIter;
+
+        fn kinds() -> Self::KindIterator {
+            ["apple", "orange"].into_iter()
         }
+
+        fn from_kind_and_digest(kind: &'static str, digest: Sha256Digest) -> Self {
+            let kind = match kind {
+                "apple" => TestKeyKind::Apple,
+                "orange" => TestKeyKind::Orange,
+                _ => {
+                    panic!("bad kind {kind}");
+                }
+            };
+            Self { kind, digest }
+        }
+
+        fn kind(&self) -> &'static str {
+            match self.kind {
+                TestKeyKind::Apple => "apple",
+                TestKeyKind::Orange => "orange",
+            }
+        }
+
+        fn digest(&self) -> &Sha256Digest {
+            &self.digest
+        }
+    }
+
+    macro_rules! apple {
+        ($digest:expr) => {
+            TestKey {
+                kind: TestKeyKind::Apple,
+                digest: digest!($digest),
+            }
+        };
+    }
+
+    macro_rules! orange {
+        ($digest:expr) => {
+            TestKey {
+                kind: TestKeyKind::Orange,
+                digest: digest!($digest),
+            }
+        };
     }
 
     #[derive(Eq, Hash, PartialEq)]
@@ -1078,7 +1093,7 @@ mod tests {
 
     struct Fixture {
         fs: test::Fs,
-        cache: Cache<test::Fs, TestKeyKind, TestGetStrategy>,
+        cache: Cache<test::Fs, TestKey, TestGetStrategy>,
         temp_file_factory: TempFileFactory<test::Fs>,
     }
 
@@ -1118,13 +1133,8 @@ mod tests {
         }
 
         #[track_caller]
-        fn assert_file_exists(
-            &self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
-            expected_metadata: Metadata,
-        ) {
-            let cache_path = self.cache.cache_path(kind, &digest);
+        fn assert_file_exists(&self, key: TestKey, expected_metadata: Metadata) {
+            let cache_path = self.cache.cache_path(&key);
             assert_eq!(
                 self.fs.metadata(&cache_path).unwrap().unwrap(),
                 expected_metadata
@@ -1132,8 +1142,8 @@ mod tests {
         }
 
         #[track_caller]
-        fn assert_file_does_not_exist(&self, kind: TestKeyKind, digest: Sha256Digest) {
-            let cache_path = self.cache.cache_path(kind, &digest);
+        fn assert_file_does_not_exist(&self, key: TestKey) {
+            let cache_path = self.cache.cache_path(&key);
             assert!(self.fs.metadata(&cache_path).unwrap().is_none());
         }
 
@@ -1143,93 +1153,70 @@ mod tests {
         }
 
         #[track_caller]
-        fn get_artifact(
-            &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
-            jid: JobId,
-            expected: GetArtifact,
-        ) {
-            let result = self.cache.get_artifact(kind, digest, jid);
+        fn get_artifact(&mut self, key: TestKey, jid: JobId, expected: GetArtifact) {
+            let result = self.cache.get_artifact(key, jid);
             assert_eq!(result, expected);
         }
 
         #[track_caller]
         fn got_artifact_success_directory(
             &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
+            key: TestKey,
             contents: Entry,
             size: u64,
             expected: Vec<JobId>,
         ) {
             let source = self.temp_file_factory.temp_dir().unwrap();
             self.fs.graft(source.path(), contents);
-            self.got_artifact_success(kind, digest, GotArtifact::directory(source, size), expected)
+            self.got_artifact_success(key, GotArtifact::directory(source, size), expected)
         }
 
         #[track_caller]
         fn got_artifact_success_file(
             &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
+            key: TestKey,
             contents: &[u8],
             expected: Vec<JobId>,
         ) {
             let source = self.temp_file_factory.temp_file().unwrap();
             self.fs.graft(source.path(), Entry::file(contents));
-            self.got_artifact_success(kind, digest, GotArtifact::file(source), expected)
+            self.got_artifact_success(key, GotArtifact::file(source), expected)
         }
 
         #[track_caller]
         fn got_artifact_success_symlink(
             &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
+            key: TestKey,
             target: &str,
             expected: Vec<JobId>,
         ) {
             let target = target.into();
-            self.got_artifact_success(kind, digest, GotArtifact::symlink(target), expected)
+            self.got_artifact_success(key, GotArtifact::symlink(target), expected)
         }
 
         #[track_caller]
         fn got_artifact_success(
             &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
+            key: TestKey,
             artifact: GotArtifact<test::Fs>,
             expected: Vec<JobId>,
         ) {
-            let result = self
-                .cache
-                .got_artifact_success(kind, &digest, artifact)
-                .unwrap();
+            let result = self.cache.got_artifact_success(&key, artifact).unwrap();
             assert_eq!(result, expected);
         }
 
         #[track_caller]
-        fn got_artifact_failure(
-            &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
-            expected: Vec<JobId>,
-        ) {
-            let result = self.cache.got_artifact_failure(kind, &digest);
+        fn got_artifact_failure(&mut self, key: TestKey, expected: Vec<JobId>) {
+            let result = self.cache.got_artifact_failure(&key);
             assert_eq!(result, expected);
         }
 
-        fn try_increment_ref_count(
-            &mut self,
-            kind: TestKeyKind,
-            digest: Sha256Digest,
-            expected: Option<u64>,
-        ) {
-            assert_eq!(self.cache.try_increment_ref_count(kind, &digest), expected);
+        fn try_increment_ref_count(&mut self, key: TestKey, expected: Option<u64>) {
+            assert_eq!(self.cache.try_increment_ref_count(&key), expected);
         }
 
-        fn decrement_ref_count(&mut self, kind: TestKeyKind, digest: Sha256Digest) {
-            self.cache.decrement_ref_count(kind, &digest);
+        fn decrement_ref_count(&mut self, key: TestKey) {
+            self.cache.decrement_ref_count(&key);
         }
     }
 
@@ -1238,24 +1225,19 @@ mod tests {
         let mut fixture = Fixture::new(10, fs! {});
         fixture.assert_bytes_used(0);
 
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
-        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
-        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(apple!(42), jid!(3), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(apple!(42));
         fixture.assert_bytes_used(0);
 
-        fixture.got_artifact_success_file(
-            Apple,
-            digest!(42),
-            b"a",
-            vec![jid!(1), jid!(2), jid!(3)],
-        );
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.got_artifact_success_file(apple!(42), b"a", vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.assert_file_exists(apple!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
 
-        fixture.get_artifact(Apple, digest!(42), jid!(4), GetArtifact::Success);
-        fixture.get_artifact(Apple, digest!(42), jid!(5), GetArtifact::Success);
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.get_artifact(apple!(42), jid!(4), GetArtifact::Success);
+        fixture.get_artifact(apple!(42), jid!(5), GetArtifact::Success);
+        fixture.assert_file_exists(apple!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
     }
 
@@ -1264,25 +1246,24 @@ mod tests {
         let mut fixture = Fixture::new(10, fs! {});
         fixture.assert_bytes_used(0);
 
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
-        fixture.get_artifact(Apple, digest!(42), jid!(100), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(42), jid!(101), GetArtifact::Wait);
-        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(apple!(42), jid!(100), GetArtifact::Get);
+        fixture.get_artifact(apple!(42), jid!(101), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(apple!(42));
         fixture.assert_bytes_used(0);
 
         fixture.got_artifact_success_file(
-            Apple,
-            digest!(42),
+            apple!(42),
             b"a",
             vec![jid!(1), jid!(2), jid!(100), jid!(101)],
         );
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.assert_file_exists(apple!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
 
-        fixture.get_artifact(Apple, digest!(42), jid!(4), GetArtifact::Success);
-        fixture.get_artifact(Apple, digest!(42), jid!(5), GetArtifact::Success);
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.get_artifact(apple!(42), jid!(4), GetArtifact::Success);
+        fixture.get_artifact(apple!(42), jid!(5), GetArtifact::Success);
+        fixture.assert_file_exists(apple!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
     }
 
@@ -1291,13 +1272,13 @@ mod tests {
         let mut fixture = Fixture::new(1, fs! {});
         fixture.assert_bytes_used(0);
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(2), GetArtifact::Wait);
         fixture.assert_bytes_used(0);
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.got_artifact_success_file(Apple, digest!(1), b"123456", vec![jid!(1), jid!(2)]);
+        fixture.got_artifact_success_file(apple!(1), b"123456", vec![jid!(1), jid!(2)]);
         fixture.assert_bytes_used(6);
         fixture.assert_fs_entry(
             "/z/sha256",
@@ -1310,8 +1291,8 @@ mod tests {
         );
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.decrement_ref_count(Apple, digest!(1));
-        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(apple!(1));
+        fixture.decrement_ref_count(apple!(1));
         fixture.assert_bytes_used(0);
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
@@ -1322,13 +1303,13 @@ mod tests {
         let mut fixture = Fixture::new(1, fs! {});
         fixture.assert_bytes_used(0);
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(2), GetArtifact::Wait);
         fixture.assert_bytes_used(0);
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.got_artifact_success_symlink(Apple, digest!(1), "target", vec![jid!(1), jid!(2)]);
+        fixture.got_artifact_success_symlink(apple!(1), "target", vec![jid!(1), jid!(2)]);
         fixture.assert_bytes_used(6);
         fixture.assert_fs_entry(
             "/z/sha256",
@@ -1341,8 +1322,8 @@ mod tests {
         );
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.decrement_ref_count(Apple, digest!(1));
-        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(apple!(1));
+        fixture.decrement_ref_count(apple!(1));
         fixture.assert_bytes_used(0);
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
@@ -1353,15 +1334,14 @@ mod tests {
         let mut fixture = Fixture::new(1, fs! {});
         fixture.assert_bytes_used(0);
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(2), GetArtifact::Wait);
         fixture.assert_bytes_used(0);
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
 
         fixture.got_artifact_success_directory(
-            Apple,
-            digest!(1),
+            apple!(1),
             fs! {
                 foo(b"bar"),
                 symlink -> "foo",
@@ -1385,8 +1365,8 @@ mod tests {
         );
         fixture.assert_pending_recursive_rmdirs([]);
 
-        fixture.decrement_ref_count(Apple, digest!(1));
-        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(apple!(1));
+        fixture.decrement_ref_count(apple!(1));
         fixture.assert_bytes_used(0);
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
@@ -1397,8 +1377,8 @@ mod tests {
         let mut fixture = Fixture::new(1, fs! {});
         fixture.assert_bytes_used(0);
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(2), GetArtifact::Wait);
         fixture.assert_bytes_used(0);
         fixture.assert_fs_entry("/z/sha256", fs! { apple {}, orange {} });
         fixture.assert_pending_recursive_rmdirs([]);
@@ -1408,7 +1388,7 @@ mod tests {
         fixture.fs.set_failure(true);
         let (err, jids) = fixture
             .cache
-            .got_artifact_success(Apple, &digest!(1), GotArtifact::directory(source, 6))
+            .got_artifact_success(&apple!(1), GotArtifact::directory(source, 6))
             .unwrap_err();
         assert_eq!(jids, vec![jid!(1), jid!(2)]);
         assert_eq!(err.to_string(), "Test");
@@ -1428,15 +1408,15 @@ mod tests {
     fn artifact_stays_in_cache() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(42), b"a", vec![jid!(1)]);
-        fixture.decrement_ref_count(Apple, digest!(42));
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(42), b"a", vec![jid!(1)]);
+        fixture.decrement_ref_count(apple!(42));
 
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.assert_file_exists(apple!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
 
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Success);
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Success);
+        fixture.assert_file_exists(apple!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
     }
 
@@ -1444,84 +1424,74 @@ mod tests {
     fn large_artifact_does_not_stay_in_cache() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(42), b"123456789", vec![jid!(1)]);
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(42), b"123456789", vec![jid!(1)]);
         fixture.assert_bytes_used(9);
-        fixture.decrement_ref_count(Apple, digest!(42));
+        fixture.decrement_ref_count(apple!(42));
 
-        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.assert_file_does_not_exist(apple!(42));
         fixture.assert_bytes_used(0);
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Get);
     }
 
     #[test]
     fn large_artifact_stays_in_cache_while_referenced() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(42), b"123456789", vec![jid!(1)]);
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(42), b"123456789", vec![jid!(1)]);
 
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Success);
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Success);
 
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(9));
+        fixture.decrement_ref_count(apple!(42));
+        fixture.assert_file_exists(apple!(42), Metadata::file(9));
         fixture.assert_bytes_used(9);
 
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.decrement_ref_count(apple!(42));
+        fixture.assert_file_does_not_exist(apple!(42));
         fixture.assert_bytes_used(0);
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Get);
     }
 
     #[test]
     fn different_key_kinds_are_independent() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
-        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
-        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(apple!(42), jid!(3), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(apple!(42));
         fixture.assert_bytes_used(0);
 
-        fixture.get_artifact(Orange, digest!(42), jid!(4), GetArtifact::Get);
-        fixture.get_artifact(Orange, digest!(42), jid!(5), GetArtifact::Wait);
-        fixture.assert_file_does_not_exist(Orange, digest!(42));
+        fixture.get_artifact(orange!(42), jid!(4), GetArtifact::Get);
+        fixture.get_artifact(orange!(42), jid!(5), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(orange!(42));
         fixture.assert_bytes_used(0);
 
-        fixture.got_artifact_success_file(
-            Apple,
-            digest!(42),
-            b"abc",
-            vec![jid!(1), jid!(2), jid!(3)],
-        );
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(3));
-        fixture.assert_file_does_not_exist(Orange, digest!(42));
+        fixture.got_artifact_success_file(apple!(42), b"abc", vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.assert_file_exists(apple!(42), Metadata::file(3));
+        fixture.assert_file_does_not_exist(orange!(42));
         fixture.assert_bytes_used(3);
 
-        fixture.get_artifact(Orange, digest!(42), jid!(6), GetArtifact::Wait);
+        fixture.get_artifact(orange!(42), jid!(6), GetArtifact::Wait);
 
-        fixture.got_artifact_success_file(
-            Orange,
-            digest!(42),
-            b"1234",
-            vec![jid!(4), jid!(5), jid!(6)],
-        );
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(3));
-        fixture.assert_file_exists(Orange, digest!(42), Metadata::file(4));
+        fixture.got_artifact_success_file(orange!(42), b"1234", vec![jid!(4), jid!(5), jid!(6)]);
+        fixture.assert_file_exists(apple!(42), Metadata::file(3));
+        fixture.assert_file_exists(orange!(42), Metadata::file(4));
         fixture.assert_bytes_used(7);
 
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.decrement_ref_count(Apple, digest!(42));
-        fixture.assert_file_does_not_exist(Apple, digest!(42));
-        fixture.assert_file_exists(Orange, digest!(42), Metadata::file(4));
+        fixture.decrement_ref_count(apple!(42));
+        fixture.decrement_ref_count(apple!(42));
+        fixture.decrement_ref_count(apple!(42));
+        fixture.assert_file_does_not_exist(apple!(42));
+        fixture.assert_file_exists(orange!(42), Metadata::file(4));
         fixture.assert_bytes_used(4);
 
-        fixture.decrement_ref_count(Orange, digest!(42));
-        fixture.decrement_ref_count(Orange, digest!(42));
-        fixture.decrement_ref_count(Orange, digest!(42));
-        fixture.assert_file_does_not_exist(Apple, digest!(42));
-        fixture.assert_file_does_not_exist(Orange, digest!(42));
+        fixture.decrement_ref_count(orange!(42));
+        fixture.decrement_ref_count(orange!(42));
+        fixture.decrement_ref_count(orange!(42));
+        fixture.assert_file_does_not_exist(apple!(42));
+        fixture.assert_file_does_not_exist(orange!(42));
         fixture.assert_bytes_used(0);
     }
 
@@ -1529,67 +1499,67 @@ mod tests {
     fn entries_are_removed_in_lru_order() {
         let mut fixture = Fixture::new(3, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Orange, digest!(2), jid!(2), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(3), jid!(3), GetArtifact::Get);
-        fixture.get_artifact(Orange, digest!(4), jid!(4), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(orange!(2), jid!(2), GetArtifact::Get);
+        fixture.get_artifact(apple!(3), jid!(3), GetArtifact::Get);
+        fixture.get_artifact(orange!(4), jid!(4), GetArtifact::Get);
         fixture.assert_bytes_used(0);
 
-        fixture.got_artifact_success_file(Apple, digest!(1), b"a", vec![jid!(1)]);
-        fixture.got_artifact_success_file(Orange, digest!(2), b"b", vec![jid!(2)]);
-        fixture.got_artifact_success_file(Apple, digest!(3), b"c", vec![jid!(3)]);
-        fixture.got_artifact_success_file(Orange, digest!(4), b"d", vec![jid!(4)]);
+        fixture.got_artifact_success_file(apple!(1), b"a", vec![jid!(1)]);
+        fixture.got_artifact_success_file(orange!(2), b"b", vec![jid!(2)]);
+        fixture.got_artifact_success_file(apple!(3), b"c", vec![jid!(3)]);
+        fixture.got_artifact_success_file(orange!(4), b"d", vec![jid!(4)]);
 
-        fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
-        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
-        fixture.assert_file_exists(Apple, digest!(3), Metadata::file(1));
-        fixture.assert_file_exists(Orange, digest!(4), Metadata::file(1));
+        fixture.assert_file_exists(apple!(1), Metadata::file(1));
+        fixture.assert_file_exists(orange!(2), Metadata::file(1));
+        fixture.assert_file_exists(apple!(3), Metadata::file(1));
+        fixture.assert_file_exists(orange!(4), Metadata::file(1));
         fixture.assert_bytes_used(4);
 
-        fixture.decrement_ref_count(Orange, digest!(4));
+        fixture.decrement_ref_count(orange!(4));
 
-        fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
-        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
-        fixture.assert_file_exists(Apple, digest!(3), Metadata::file(1));
-        fixture.assert_file_does_not_exist(Orange, digest!(4));
+        fixture.assert_file_exists(apple!(1), Metadata::file(1));
+        fixture.assert_file_exists(orange!(2), Metadata::file(1));
+        fixture.assert_file_exists(apple!(3), Metadata::file(1));
+        fixture.assert_file_does_not_exist(orange!(4));
         fixture.assert_bytes_used(3);
-        fixture.get_artifact(Orange, digest!(4), jid!(14), GetArtifact::Get);
+        fixture.get_artifact(orange!(4), jid!(14), GetArtifact::Get);
 
-        fixture.decrement_ref_count(Apple, digest!(3));
-        fixture.decrement_ref_count(Orange, digest!(2));
-        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(apple!(3));
+        fixture.decrement_ref_count(orange!(2));
+        fixture.decrement_ref_count(apple!(1));
 
-        fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
-        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
-        fixture.assert_file_exists(Apple, digest!(3), Metadata::file(1));
-        fixture.assert_file_does_not_exist(Orange, digest!(4));
+        fixture.assert_file_exists(apple!(1), Metadata::file(1));
+        fixture.assert_file_exists(orange!(2), Metadata::file(1));
+        fixture.assert_file_exists(apple!(3), Metadata::file(1));
+        fixture.assert_file_does_not_exist(orange!(4));
         fixture.assert_bytes_used(3);
 
-        fixture.get_artifact(Apple, digest!(5), jid!(5), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(5), b"e", vec![jid!(5)]);
+        fixture.get_artifact(apple!(5), jid!(5), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(5), b"e", vec![jid!(5)]);
 
-        fixture.assert_file_exists(Apple, digest!(1), Metadata::file(1));
-        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
-        fixture.assert_file_does_not_exist(Apple, digest!(3));
-        fixture.assert_file_does_not_exist(Orange, digest!(4));
-        fixture.assert_file_exists(Apple, digest!(5), Metadata::file(1));
+        fixture.assert_file_exists(apple!(1), Metadata::file(1));
+        fixture.assert_file_exists(orange!(2), Metadata::file(1));
+        fixture.assert_file_does_not_exist(apple!(3));
+        fixture.assert_file_does_not_exist(orange!(4));
+        fixture.assert_file_exists(apple!(5), Metadata::file(1));
         fixture.assert_bytes_used(3);
-        fixture.get_artifact(Apple, digest!(3), jid!(13), GetArtifact::Get);
+        fixture.get_artifact(apple!(3), jid!(13), GetArtifact::Get);
 
-        fixture.get_artifact(Orange, digest!(2), jid!(12), GetArtifact::Success);
-        fixture.decrement_ref_count(Orange, digest!(2));
+        fixture.get_artifact(orange!(2), jid!(12), GetArtifact::Success);
+        fixture.decrement_ref_count(orange!(2));
 
-        fixture.get_artifact(Orange, digest!(6), jid!(6), GetArtifact::Get);
-        fixture.got_artifact_success_file(Orange, digest!(6), b"f", vec![jid!(6)]);
+        fixture.get_artifact(orange!(6), jid!(6), GetArtifact::Get);
+        fixture.got_artifact_success_file(orange!(6), b"f", vec![jid!(6)]);
 
-        fixture.assert_file_does_not_exist(Apple, digest!(1));
-        fixture.assert_file_exists(Orange, digest!(2), Metadata::file(1));
-        fixture.assert_file_does_not_exist(Apple, digest!(3));
-        fixture.assert_file_does_not_exist(Orange, digest!(4));
-        fixture.assert_file_exists(Apple, digest!(5), Metadata::file(1));
-        fixture.assert_file_exists(Orange, digest!(6), Metadata::file(1));
+        fixture.assert_file_does_not_exist(apple!(1));
+        fixture.assert_file_exists(orange!(2), Metadata::file(1));
+        fixture.assert_file_does_not_exist(apple!(3));
+        fixture.assert_file_does_not_exist(orange!(4));
+        fixture.assert_file_exists(apple!(5), Metadata::file(1));
+        fixture.assert_file_exists(orange!(6), Metadata::file(1));
         fixture.assert_bytes_used(3);
-        fixture.get_artifact(Apple, digest!(1), jid!(11), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(11), GetArtifact::Get);
     }
 
     #[test]
@@ -1597,27 +1567,22 @@ mod tests {
         let mut fixture = Fixture::new(10, fs! {});
         fixture.assert_bytes_used(0);
 
-        fixture.get_artifact(Apple, digest!(42), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(42), jid!(2), GetArtifact::Wait);
-        fixture.get_artifact(Apple, digest!(42), jid!(3), GetArtifact::Wait);
-        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.get_artifact(apple!(42), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(42), jid!(2), GetArtifact::Wait);
+        fixture.get_artifact(apple!(42), jid!(3), GetArtifact::Wait);
+        fixture.assert_file_does_not_exist(apple!(42));
         fixture.assert_bytes_used(0);
 
-        fixture.got_artifact_failure(Apple, digest!(42), vec![jid!(1), jid!(2), jid!(3)]);
-        fixture.assert_file_does_not_exist(Apple, digest!(42));
+        fixture.got_artifact_failure(apple!(42), vec![jid!(1), jid!(2), jid!(3)]);
+        fixture.assert_file_does_not_exist(apple!(42));
         fixture.assert_bytes_used(0);
 
-        fixture.get_artifact(Apple, digest!(42), jid!(4), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(42), jid!(5), GetArtifact::Wait);
-        fixture.get_artifact(Apple, digest!(42), jid!(6), GetArtifact::Wait);
+        fixture.get_artifact(apple!(42), jid!(4), GetArtifact::Get);
+        fixture.get_artifact(apple!(42), jid!(5), GetArtifact::Wait);
+        fixture.get_artifact(apple!(42), jid!(6), GetArtifact::Wait);
 
-        fixture.got_artifact_success_file(
-            Apple,
-            digest!(42),
-            b"a",
-            vec![jid!(4), jid!(5), jid!(6)],
-        );
-        fixture.assert_file_exists(Apple, digest!(42), Metadata::file(1));
+        fixture.got_artifact_success_file(apple!(42), b"a", vec![jid!(4), jid!(5), jid!(6)]);
+        fixture.assert_file_exists(apple!(42), Metadata::file(1));
         fixture.assert_bytes_used(1);
     }
 
@@ -1625,28 +1590,28 @@ mod tests {
     fn try_increment_ref_count() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.get_artifact(Apple, digest!(2), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(2), jid!(1), GetArtifact::Get);
 
-        fixture.get_artifact(Apple, digest!(3), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(3), b"abc", vec![jid!(1)]);
-        fixture.decrement_ref_count(Apple, digest!(3));
+        fixture.get_artifact(apple!(3), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(3), b"abc", vec![jid!(1)]);
+        fixture.decrement_ref_count(apple!(3));
 
-        fixture.get_artifact(Apple, digest!(4), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(4), b"def", vec![jid!(1)]);
+        fixture.get_artifact(apple!(4), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(4), b"def", vec![jid!(1)]);
 
-        fixture.try_increment_ref_count(Apple, digest!(1), None);
-        fixture.try_increment_ref_count(Apple, digest!(2), None);
-        fixture.try_increment_ref_count(Apple, digest!(3), None);
-        fixture.try_increment_ref_count(Apple, digest!(4), Some(3));
+        fixture.try_increment_ref_count(apple!(1), None);
+        fixture.try_increment_ref_count(apple!(2), None);
+        fixture.try_increment_ref_count(apple!(3), None);
+        fixture.try_increment_ref_count(apple!(4), Some(3));
 
-        fixture.get_artifact(Apple, digest!(5), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(5), b"0123456789", vec![jid!(1)]);
+        fixture.get_artifact(apple!(5), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(5), b"0123456789", vec![jid!(1)]);
         fixture.assert_bytes_used(13);
 
-        fixture.decrement_ref_count(Apple, digest!(4));
+        fixture.decrement_ref_count(apple!(4));
         fixture.assert_bytes_used(13);
 
-        fixture.decrement_ref_count(Apple, digest!(4));
+        fixture.decrement_ref_count(apple!(4));
         fixture.assert_bytes_used(10);
     }
 
@@ -1654,35 +1619,35 @@ mod tests {
     fn got_artifact_failure_no_entry() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.got_artifact_failure(Apple, digest!(1), vec![]);
+        fixture.got_artifact_failure(apple!(1), vec![]);
     }
 
     #[test]
     fn got_artifact_failure_in_use() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(1), b"abc", vec![jid!(1)]);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(1), b"abc", vec![jid!(1)]);
 
-        fixture.got_artifact_failure(Apple, digest!(1), vec![]);
+        fixture.got_artifact_failure(apple!(1), vec![]);
     }
 
     #[test]
     fn got_artifact_failure_in_cache() {
         let mut fixture = Fixture::new(100, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(1), b"abc", vec![jid!(1)]);
-        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(1), b"abc", vec![jid!(1)]);
+        fixture.decrement_ref_count(apple!(1));
 
-        fixture.got_artifact_failure(Apple, digest!(1), vec![]);
+        fixture.got_artifact_failure(apple!(1), vec![]);
     }
 
     #[test]
     fn got_artifact_success_directory_no_entry() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.got_artifact_success_directory(Apple, digest!(1), fs! { foo(b"foo") }, 1, vec![]);
+        fixture.got_artifact_success_directory(apple!(1), fs! { foo(b"foo") }, 1, vec![]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
@@ -1705,7 +1670,7 @@ mod tests {
     fn got_artifact_success_file_no_entry() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.got_artifact_success_file(Apple, digest!(1), b"abc", vec![]);
+        fixture.got_artifact_success_file(apple!(1), b"abc", vec![]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
@@ -1725,7 +1690,7 @@ mod tests {
     fn got_artifact_success_symlink_no_entry() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.got_artifact_success_symlink(Apple, digest!(1), "/target", vec![]);
+        fixture.got_artifact_success_symlink(apple!(1), "/target", vec![]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
@@ -1745,16 +1710,15 @@ mod tests {
     fn got_artifact_success_directory_in_use() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(100), GetArtifact::Get);
         fixture.got_artifact_success_directory(
-            Apple,
-            digest!(1),
+            apple!(1),
             fs! { foo(b"foo") },
             1,
             vec![jid!(1), jid!(100)],
         );
-        fixture.got_artifact_success_directory(Apple, digest!(1), fs! { foo(b"bar") }, 1, vec![]);
+        fixture.got_artifact_success_directory(apple!(1), fs! { foo(b"bar") }, 1, vec![]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
@@ -1782,10 +1746,10 @@ mod tests {
     fn got_artifact_success_file_in_use() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(1), b"foo", vec![jid!(1), jid!(100)]);
-        fixture.got_artifact_success_file(Apple, digest!(1), b"bar", vec![]);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(1), b"foo", vec![jid!(1), jid!(100)]);
+        fixture.got_artifact_success_file(apple!(1), b"bar", vec![]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
@@ -1807,10 +1771,10 @@ mod tests {
     fn got_artifact_success_symlink_in_use() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
-        fixture.got_artifact_success_symlink(Apple, digest!(1), "/foo", vec![jid!(1), jid!(100)]);
-        fixture.got_artifact_success_symlink(Apple, digest!(1), "/bar", vec![]);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_symlink(apple!(1), "/foo", vec![jid!(1), jid!(100)]);
+        fixture.got_artifact_success_symlink(apple!(1), "/bar", vec![]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
@@ -1832,18 +1796,17 @@ mod tests {
     fn got_artifact_success_directory_in_cache() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(100), GetArtifact::Get);
         fixture.got_artifact_success_directory(
-            Apple,
-            digest!(1),
+            apple!(1),
             fs! { foo(b"foo") },
             1,
             vec![jid!(1), jid!(100)],
         );
-        fixture.decrement_ref_count(Apple, digest!(1));
-        fixture.decrement_ref_count(Apple, digest!(1));
-        fixture.got_artifact_success_directory(Apple, digest!(1), fs! { foo(b"bar") }, 1, vec![]);
+        fixture.decrement_ref_count(apple!(1));
+        fixture.decrement_ref_count(apple!(1));
+        fixture.got_artifact_success_directory(apple!(1), fs! { foo(b"bar") }, 1, vec![]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
@@ -1871,12 +1834,12 @@ mod tests {
     fn got_artifact_success_file_in_cache() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
-        fixture.got_artifact_success_file(Apple, digest!(1), b"foo", vec![jid!(1), jid!(100)]);
-        fixture.decrement_ref_count(Apple, digest!(1));
-        fixture.decrement_ref_count(Apple, digest!(1));
-        fixture.got_artifact_success_file(Apple, digest!(1), b"bar", vec![]);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_file(apple!(1), b"foo", vec![jid!(1), jid!(100)]);
+        fixture.decrement_ref_count(apple!(1));
+        fixture.decrement_ref_count(apple!(1));
+        fixture.got_artifact_success_file(apple!(1), b"bar", vec![]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
@@ -1898,12 +1861,12 @@ mod tests {
     fn got_artifact_success_symlink_in_cache() {
         let mut fixture = Fixture::new(10, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
-        fixture.got_artifact_success_symlink(Apple, digest!(1), "/foo", vec![jid!(1), jid!(100)]);
-        fixture.decrement_ref_count(Apple, digest!(1));
-        fixture.decrement_ref_count(Apple, digest!(1));
-        fixture.got_artifact_success_symlink(Apple, digest!(1), "/bar", vec![]);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(100), GetArtifact::Get);
+        fixture.got_artifact_success_symlink(apple!(1), "/foo", vec![jid!(1), jid!(100)]);
+        fixture.decrement_ref_count(apple!(1));
+        fixture.decrement_ref_count(apple!(1));
+        fixture.got_artifact_success_symlink(apple!(1), "/bar", vec![]);
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
@@ -1925,16 +1888,16 @@ mod tests {
     fn getter_disconnected_getting() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(100), GetArtifact::Get);
 
         fixture.cache.getter_disconnected(TestGetter::Large);
 
         // Only jid!(1) is returned.
-        fixture.got_artifact_success_file(Apple, digest!(1), b"foo", vec![jid!(1)]);
+        fixture.got_artifact_success_file(apple!(1), b"foo", vec![jid!(1)]);
 
         fixture.assert_bytes_used(3);
-        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(apple!(1));
         fixture.assert_bytes_used(0);
     }
 
@@ -1942,18 +1905,18 @@ mod tests {
     fn getter_disconnected_in_use() {
         let mut fixture = Fixture::new(1, fs! {});
 
-        fixture.get_artifact(Apple, digest!(1), jid!(1), GetArtifact::Get);
-        fixture.get_artifact(Apple, digest!(1), jid!(100), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(1), GetArtifact::Get);
+        fixture.get_artifact(apple!(1), jid!(100), GetArtifact::Get);
 
-        fixture.got_artifact_success_file(Apple, digest!(1), b"foo", vec![jid!(1), jid!(100)]);
+        fixture.got_artifact_success_file(apple!(1), b"foo", vec![jid!(1), jid!(100)]);
 
         // No effect since the cache has already turned the jid into a refcount.
         fixture.cache.getter_disconnected(TestGetter::Large);
 
         fixture.assert_bytes_used(3);
-        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(apple!(1));
         fixture.assert_bytes_used(3);
-        fixture.decrement_ref_count(Apple, digest!(1));
+        fixture.decrement_ref_count(apple!(1));
         fixture.assert_bytes_used(0);
     }
 
@@ -1962,10 +1925,7 @@ mod tests {
         let fixture = Fixture::new(10, fs! {});
         let cache_path: PathBuf = long_path!("/z/sha256/apple", 42);
         assert_eq!(
-            fixture
-                .cache
-                .cache_path(Apple, &digest!(42))
-                .into_path_buf(),
+            fixture.cache.cache_path(&apple!(42)).into_path_buf(),
             cache_path
         );
     }
@@ -2343,7 +2303,7 @@ mod tests {
         ]);
 
         fixture.assert_bytes_used(257);
-        fixture.get_artifact(Apple, digest!(2), jid!(1), GetArtifact::Success);
-        fixture.get_artifact(Apple, digest!(5), jid!(1), GetArtifact::Success);
+        fixture.get_artifact(apple!(2), jid!(1), GetArtifact::Success);
+        fixture.get_artifact(apple!(5), jid!(1), GetArtifact::Success);
     }
 }
