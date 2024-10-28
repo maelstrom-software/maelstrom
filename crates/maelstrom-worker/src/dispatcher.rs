@@ -1551,7 +1551,7 @@ mod tests {
     }
 
     #[test]
-    fn shutdown() {
+    fn shut_down() {
         let mut fixture = Fixture::new(
             1,
             [
