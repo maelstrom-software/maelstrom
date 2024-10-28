@@ -1009,8 +1009,10 @@ mod tests {
     use crate::fs;
     use maelstrom_test::*;
     use slog::{o, Discard};
+    use strum::{EnumString, IntoStaticStr, VariantNames};
 
-    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    #[derive(Clone, Copy, Debug, EnumString, Eq, Hash, IntoStaticStr, PartialEq, VariantNames)]
+    #[strum(serialize_all = "snake_case")]
     enum TestKeyKind {
         Apple,
         Orange,
@@ -1024,25 +1026,18 @@ mod tests {
 
     impl Key for TestKey {
         fn kinds() -> impl Iterator<Item = &'static str> {
-            ["apple", "orange"].into_iter()
+            TestKeyKind::VARIANTS.iter().copied()
         }
 
         fn from_kind_and_digest(kind: &'static str, digest: Sha256Digest) -> Self {
-            let kind = match kind {
-                "apple" => TestKeyKind::Apple,
-                "orange" => TestKeyKind::Orange,
-                _ => {
-                    panic!("bad kind {kind}");
-                }
-            };
-            Self { kind, digest }
+            Self {
+                kind: kind.try_into().unwrap(),
+                digest,
+            }
         }
 
         fn kind(&self) -> &'static str {
-            match self.kind {
-                TestKeyKind::Apple => "apple",
-                TestKeyKind::Orange => "orange",
-            }
+            self.kind.into()
         }
 
         fn digest(&self) -> &Sha256Digest {

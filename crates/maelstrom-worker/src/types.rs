@@ -5,38 +5,27 @@ use maelstrom_base::{
 };
 use maelstrom_util::cache::{self, fs::std::Fs as StdFs, GotArtifact};
 use std::path::PathBuf;
+use strum::{EnumString, IntoStaticStr, VariantNames};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    EnumString,
+    Eq,
+    Hash,
+    IntoStaticStr,
+    Ord,
+    PartialEq,
+    VariantNames,
+    PartialOrd,
+)]
+#[strum(serialize_all = "snake_case")]
 pub enum CacheKeyKind {
     Blob,
     BottomFsLayer,
     UpperFsLayer,
-}
-
-impl CacheKeyKind {
-    fn from_str(kind: &'static str) -> Self {
-        match kind {
-            "blob" => Self::Blob,
-            "bottom_fs_layer" => Self::BottomFsLayer,
-            "upper_fs_layer" => Self::UpperFsLayer,
-            _ => {
-                panic!("bad CacheKeyKind {kind}");
-            }
-        }
-    }
-
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Blob => "blob",
-            Self::BottomFsLayer => "bottom_fs_layer",
-            Self::UpperFsLayer => "upper_fs_layer",
-        }
-    }
-
-    fn iter() -> <[&'static str; 3] as IntoIterator>::IntoIter {
-        ["blob", "bottom_fs_layer", "upper_fs_layer"].into_iter()
-    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -65,18 +54,18 @@ impl CacheKey {
 
 impl cache::Key for CacheKey {
     fn kinds() -> impl Iterator<Item = &'static str> {
-        CacheKeyKind::iter()
+        CacheKeyKind::VARIANTS.iter().copied()
     }
 
     fn from_kind_and_digest(kind: &'static str, digest: Sha256Digest) -> Self {
         Self {
-            kind: CacheKeyKind::from_str(kind),
+            kind: kind.try_into().unwrap(),
             digest,
         }
     }
 
     fn kind(&self) -> &'static str {
-        self.kind.as_str()
+        self.kind.into()
     }
 
     fn digest(&self) -> &Sha256Digest {
