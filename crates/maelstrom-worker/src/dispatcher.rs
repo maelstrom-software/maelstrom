@@ -422,7 +422,7 @@ where
             }
         } else if let Some(&mut ExecutingJob { ref mut state, .. }) = self.executing.get_mut(&jid) {
             // The job was executing. We kill the job and cancel a timer if there is one, but we
-            // wait around until it's actually teriminated. We don't want to release the layers
+            // wait around until it's actually terminated. We don't want to release the layers
             // until then. If we didn't it would be possible for us to try to remove a directory
             // that was still in use, which would fail.
             *state = ExecutingJobState::Canceled;
@@ -481,10 +481,9 @@ where
         else {
             return;
         };
-        // We kill the job, but we wait around until it's actually
-        // teriminated. We don't want to release the layers until the job has terminated. If we
-        // didn't it would be possible for us to try to remove a directory that was still in
-        // use, which would fail.
+        // We kill the job, but we wait around until it's actually terminated. We don't want to
+        // release the layers until the job has terminated. If we didn't it would be possible for
+        // us to try to remove a directory that was still in use, which would fail.
         match state {
             ExecutingJobState::Nominal { .. } => {
                 *state = ExecutingJobState::TimedOut;
@@ -667,8 +666,10 @@ where
         self.awaiting_layers = Default::default();
         self.available = Default::default();
 
-        for jid in self.executing.keys().cloned().collect::<Vec<_>>() {
-            self.receive_cancel_job(jid);
+        for ExecutingJob { state, .. } in self.executing.values_mut() {
+            // Kill all executing jobs and cancel their timers (if they have any), but wait around
+            // until they are actual terminated.
+            *state = ExecutingJobState::Canceled;
         }
     }
 }
