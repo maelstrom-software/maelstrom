@@ -285,7 +285,15 @@ async fn dispatcher_main(
 }
 
 /// Returns error from shutdown message, or delivers message to dispatcher.
-fn handle_dispatcher_message(msg: Message<StdFs>, dispatcher: &mut Dispatcher) -> Result<()> {
+pub fn handle_dispatcher_message<
+    DepsT: dispatcher::Deps,
+    ArtifactFetcherT: dispatcher::ArtifactFetcher,
+    BrokerSenderT: dispatcher::BrokerSender,
+    CacheT: dispatcher::Cache,
+>(
+    msg: Message<CacheT::Fs>,
+    dispatcher: &mut dispatcher::Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>,
+) -> Result<()> {
     if let Message::Shutdown(error) = msg {
         return Err(error);
     }
