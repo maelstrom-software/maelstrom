@@ -77,7 +77,7 @@ pub enum Message<FsT: Fs> {
     /// A message notifying the dispatcher that it must enter the shutdown state. In this state,
     /// the dispatcher will schedule no new work, but will continue to process job completions. The
     /// sender can check [`Dispatcher::num_executing`] to know when all jobs have completed.
-    Shutdown(Error),
+    ShutDown(Error),
 }
 
 impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
@@ -143,7 +143,7 @@ where
             Message::ReadManifestDigests(digest, jid, Err(err)) => {
                 self.receive_read_manifest_digests_failure(digest, jid, err)
             }
-            Message::Shutdown(_) => self.receive_shutdown(),
+            Message::ShutDown(_) => self.receive_shut_down(),
         }
     }
 
@@ -662,7 +662,7 @@ where
     }
 
     /// Close our connection to the broker, drop pending work, and cancel all jobs.
-    fn receive_shutdown(&mut self) {
+    fn receive_shut_down(&mut self) {
         self.broker_sender.close();
         self.awaiting_layers = Default::default();
         self.available = Default::default();
@@ -1601,7 +1601,7 @@ mod tests {
 
         fixture
             .dispatcher
-            .receive_message(Shutdown(anyhow!("test error")));
+            .receive_message(ShutDown(anyhow!("test error")));
         fixture.expect_messages_in_any_order(vec![JobHandleDropped(jid!(1))]);
 
         assert_eq!(fixture.dispatcher.num_jobs_executing(), 1);

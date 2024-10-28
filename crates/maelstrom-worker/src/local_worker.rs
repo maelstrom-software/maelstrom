@@ -100,7 +100,7 @@ async fn main<
     };
 
     debug!(log, "shutting down local worker due to {shutdown_error}");
-    dispatcher.receive_message(Message::Shutdown(shutdown_error));
+    dispatcher.receive_message(Message::ShutDown(shutdown_error));
     debug!(
         log,
         "canceling {} running jobs",

@@ -222,7 +222,7 @@ impl Deps for Adapter {
     fn shutdown_local_worker(&self, error: Error) {
         let _ = self
             .local_worker_sender
-            .send(local_worker::Message::Shutdown(error));
+            .send(local_worker::Message::ShutDown(error));
     }
 }
 

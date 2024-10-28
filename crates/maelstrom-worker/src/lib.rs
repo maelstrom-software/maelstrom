@@ -161,7 +161,7 @@ async fn shutdown_on_error(
     dispatcher_sender: DispatcherSender,
 ) {
     if let Err(error) = fut.await {
-        let _ = dispatcher_sender.send(Message::Shutdown(error));
+        let _ = dispatcher_sender.send(Message::ShutDown(error));
     }
 }
 
@@ -274,7 +274,7 @@ async fn dispatcher_main(
         "canceling {} running jobs",
         dispatcher.num_jobs_executing()
     );
-    dispatcher.receive_message(Message::Shutdown(err));
+    dispatcher.receive_message(Message::ShutDown(err));
     drop(broker_socket_incoming_recevier);
 
     // Wait for the running jobs to finish.
@@ -294,7 +294,7 @@ pub fn handle_dispatcher_message<
     msg: Message<CacheT::Fs>,
     dispatcher: &mut dispatcher::Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>,
 ) -> Result<()> {
-    if let Message::Shutdown(error) = msg {
+    if let Message::ShutDown(error) = msg {
         return Err(error);
     }
 
