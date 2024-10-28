@@ -28,7 +28,12 @@ use maelstrom_util::{
 };
 use slog::{debug, error, info, Logger};
 use std::{future::Future, process};
-use tokio::{io::BufReader, net::TcpStream, sync::mpsc, task};
+use tokio::{
+    io::BufReader,
+    net::TcpStream,
+    sync::mpsc,
+    task::{self, JoinHandle},
+};
 use types::{
     BrokerSender, BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache, Dispatcher,
     DispatcherReceiver, DispatcherSender,
@@ -105,15 +110,15 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
         dispatcher_sender.clone(),
     ));
 
-    let handle = task::spawn(dispatcher_main(
+    start_dispatcher_task(
         config,
         dispatcher_receiver,
         dispatcher_sender,
         broker_socket_outgoing_sender,
         broker_socket_incoming_receiver,
         log.clone(),
-    ));
-    handle.await?;
+    )?
+    .await?;
 
     Ok(())
 }
@@ -163,6 +168,24 @@ async fn shutdown_on_error(
 async fn wait_for_signal(log: Logger) -> Result<()> {
     let signal = signal::wait_for_signal(log).await;
     Err(anyhow!("signal {signal}"))
+}
+
+fn start_dispatcher_task(
+    config: Config,
+    dispatcher_receiver: DispatcherReceiver,
+    dispatcher_sender: DispatcherSender,
+    broker_socket_outgoing_sender: BrokerSocketOutgoingSender,
+    broker_socket_incoming_receiver: BrokerSocketIncomingReceiver,
+    log: Logger,
+) -> Result<JoinHandle<()>> {
+    Ok(task::spawn(dispatcher_main(
+        config,
+        dispatcher_receiver,
+        dispatcher_sender,
+        broker_socket_outgoing_sender,
+        broker_socket_incoming_receiver,
+        log,
+    )))
 }
 
 async fn dispatcher_main(
