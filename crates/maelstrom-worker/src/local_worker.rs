@@ -92,25 +92,15 @@ async fn main<
     mut dispatcher_receiver: Receiver,
     log: Logger,
 ) {
-    let shutdown_error = loop {
-        let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
-        if let Err(err) = crate::handle_dispatcher_message(msg, &mut dispatcher) {
+    let err = loop {
+        let msg = dispatcher_receiver
+            .recv()
+            .await
+            .expect("missing shut down message");
+        if let Err(err) = dispatcher.receive_message(msg) {
             break err;
         }
     };
 
-    debug!(log, "shutting down local worker due to {shutdown_error}");
-    dispatcher.receive_message(Message::ShutDown(shutdown_error));
-    debug!(
-        log,
-        "canceling {} running jobs",
-        dispatcher.num_jobs_executing()
-    );
-
-    while dispatcher.num_jobs_executing() > 0 {
-        let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
-        let _ = crate::handle_dispatcher_message(msg, &mut dispatcher);
-    }
-
-    debug!(log, "local worker exiting");
+    debug!(log, "local worker exiting due to {err}");
 }

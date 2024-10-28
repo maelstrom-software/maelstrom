@@ -241,46 +241,15 @@ async fn dispatcher_main(
     mut dispatcher_receiver: DispatcherReceiver,
     log: Logger,
 ) {
-    // Multiplex messages from broker and others sources
     let err = loop {
-        let msg = dispatcher_receiver.recv().await;
-        let res = handle_dispatcher_message(msg.expect("missing shutdown"), &mut dispatcher);
-        if let Err(err) = res {
+        let msg = dispatcher_receiver
+            .recv()
+            .await
+            .expect("missing shut down message");
+        if let Err(err) = dispatcher.receive_message(msg) {
             break err;
         }
     };
 
-    error!(log, "shutting down due to {err}");
-
-    // This should close the connection with the broker, and canceling running jobs.
-    info!(
-        log,
-        "canceling {} running jobs",
-        dispatcher.num_jobs_executing()
-    );
-    dispatcher.receive_message(Message::ShutDown(err));
-
-    // Wait for the running jobs to finish.
-    while dispatcher.num_jobs_executing() > 0 {
-        let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
-        let _ = handle_dispatcher_message(msg, &mut dispatcher);
-    }
-}
-
-/// Returns error from shutdown message, or delivers message to dispatcher.
-pub fn handle_dispatcher_message<
-    DepsT: dispatcher::Deps,
-    ArtifactFetcherT: dispatcher::ArtifactFetcher,
-    BrokerSenderT: dispatcher::BrokerSender,
-    CacheT: dispatcher::Cache,
->(
-    msg: Message<CacheT::Fs>,
-    dispatcher: &mut dispatcher::Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>,
-) -> Result<()> {
-    if let Message::ShutDown(error) = msg {
-        return Err(error);
-    }
-
-    dispatcher.receive_message(msg);
-    Ok(())
+    error!(log, "shut down due to {err}");
 }

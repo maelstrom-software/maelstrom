@@ -107,12 +107,13 @@ where
             available: Default::default(),
             executing: Default::default(),
             shut_down: false,
+            shutdown_error: None,
         }
     }
 
     /// Process an incoming message. Messages come from the broker and from executors. See
     /// [`Message`] for more information.
-    pub fn receive_message(&mut self, msg: Message<CacheT::Fs>) {
+    pub fn receive_message(&mut self, msg: Message<CacheT::Fs>) -> Result<()> {
         match msg {
             Message::Broker(BrokerToWorker::EnqueueJob(jid, spec)) => {
                 self.receive_enqueue_job(jid, spec)
@@ -144,13 +145,13 @@ where
             Message::ReadManifestDigests(digest, jid, Err(err)) => {
                 self.receive_read_manifest_digests_failure(digest, jid, err)
             }
-            Message::ShutDown(_) => self.receive_shut_down(),
+            Message::ShutDown(err) => self.receive_shut_down(err),
+        };
+        if self.shut_down && self.executing.is_empty() {
+            Err(self.shutdown_error.take().unwrap())
+        } else {
+            Ok(())
         }
-    }
-
-    /// Returns the number of executing jobs
-    pub fn num_jobs_executing(&self) -> usize {
-        self.executing.len()
     }
 }
 
@@ -331,6 +332,7 @@ pub struct Dispatcher<DepsT: Deps, ArtifactFetcherT, BrokerSenderT, CacheT> {
     available: BinaryHeap<AvailableJob>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
     shut_down: bool,
+    shutdown_error: Option<Error>,
 }
 
 impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
@@ -665,16 +667,19 @@ where
     }
 
     /// Close our connection to the broker, drop pending work, and cancel all jobs.
-    fn receive_shut_down(&mut self) {
-        self.broker_sender.close();
-        self.awaiting_layers = Default::default();
-        self.available = Default::default();
-        self.shut_down = true;
+    fn receive_shut_down(&mut self, shutdown_error: Error) {
+        if !self.shut_down {
+            self.broker_sender.close();
+            self.awaiting_layers = Default::default();
+            self.available = Default::default();
+            self.shut_down = true;
+            self.shutdown_error = Some(shutdown_error);
 
-        for ExecutingJob { state, .. } in self.executing.values_mut() {
-            // Kill all executing jobs and cancel their timers (if they have any), but wait around
-            // until they are actual terminated.
-            *state = ExecutingJobState::Canceled;
+            for ExecutingJob { state, .. } in self.executing.values_mut() {
+                // Kill all executing jobs and cancel their timers (if they have any), but wait around
+                // until they are actual terminated.
+                *state = ExecutingJobState::Canceled;
+            }
         }
     }
 }
@@ -990,6 +995,20 @@ mod tests {
                 }
             );
         }
+
+        fn receive_message(&mut self, message: Message<TestFs>) {
+            self.dispatcher.receive_message(message).unwrap();
+        }
+
+        fn receive_message_error(&mut self, message: Message<TestFs>, err: &str) {
+            assert_eq!(
+                self.dispatcher
+                    .receive_message(message)
+                    .unwrap_err()
+                    .to_string(),
+                err
+            );
+        }
     }
 
     macro_rules! upper_digest {
@@ -1025,7 +1044,7 @@ mod tests {
             fn $test_name() {
                 let mut fixture = $fixture;
                 $(
-                    fixture.dispatcher.receive_message($in_msg);
+                    fixture.receive_message($in_msg);
                     fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
                 )+
             }
@@ -1577,9 +1596,7 @@ mod tests {
             ],
         );
 
-        fixture
-            .dispatcher
-            .receive_message(Broker(EnqueueJob(jid!(1), spec!(1, Tar))));
+        fixture.receive_message(Broker(EnqueueJob(jid!(1), spec!(1, Tar))));
         fixture.expect_messages_in_any_order(vec![
             CacheGetArtifact(blob!(1), jid!(1)),
             CachePath(blob!(1)),
@@ -1592,9 +1609,7 @@ mod tests {
             )),
         ]);
 
-        fixture
-            .dispatcher
-            .receive_message(Broker(EnqueueJob(jid!(2), spec!(2, Tar))));
+        fixture.receive_message(Broker(EnqueueJob(jid!(2), spec!(2, Tar))));
         fixture.expect_messages_in_any_order(vec![
             CacheGetArtifact(blob!(2), jid!(2)),
             CachePath(blob!(2)),
@@ -1606,19 +1621,12 @@ mod tests {
             )),
         ]);
 
-        fixture
-            .dispatcher
-            .receive_message(ShutDown(anyhow!("test error")));
+        fixture.receive_message(ShutDown(anyhow!("test error")));
         fixture.expect_messages_in_any_order(vec![JobHandleDropped(jid!(1))]);
 
-        assert_eq!(fixture.dispatcher.num_jobs_executing(), 1);
         assert!(fixture.test_state.borrow().closed);
 
-        fixture
-            .dispatcher
-            .receive_message(JobCompleted(jid!(1), Ok(completed!(3))));
-
-        assert_eq!(fixture.dispatcher.num_jobs_executing(), 0);
+        fixture.receive_message_error(JobCompleted(jid!(1), Ok(completed!(3))), "test error");
     }
 
     #[test]
@@ -1641,7 +1649,7 @@ mod tests {
             ],
         );
 
-        fixture.dispatcher.receive_message(Broker(EnqueueJob(
+        fixture.receive_message(Broker(EnqueueJob(
             jid!(1),
             spec!(1, Tar).timeout(timeout!(1)),
         )));
@@ -1662,17 +1670,13 @@ mod tests {
             )),
         ]);
 
-        fixture
-            .dispatcher
-            .receive_message(ShutDown(anyhow!("test error")));
+        fixture.receive_message(ShutDown(anyhow!("test error")));
         fixture.expect_messages_in_any_order(vec![
             JobHandleDropped(jid!(1)),
             TimerHandleDropped(jid!(1)),
         ]);
 
-        fixture
-            .dispatcher
-            .receive_message(Broker(EnqueueJob(jid!(2), spec!(2, Tar))));
+        fixture.receive_message(Broker(EnqueueJob(jid!(2), spec!(2, Tar))));
         fixture.expect_messages_in_any_order(vec![]);
     }
 
@@ -1818,9 +1822,7 @@ mod tests {
     #[should_panic(expected = "missing entry for JobId")]
     fn receive_job_completed_unknown() {
         let mut fixture = Fixture::new(1, [], [], [], []);
-        fixture
-            .dispatcher
-            .receive_message(Message::JobCompleted(jid!(1), Ok(completed!(1))));
+        fixture.receive_message(Message::JobCompleted(jid!(1), Ok(completed!(1))));
     }
 
     script_test! {
@@ -2077,12 +2079,8 @@ mod tests {
                 (bottom_fs_layer!(2), path_buf!("/z/bl/2")),
             ],
         );
-        fixture
-            .dispatcher
-            .receive_message(Broker(EnqueueJob(jid!(1), spec!(1, Tar))));
-        fixture
-            .dispatcher
-            .receive_message(Broker(EnqueueJob(jid!(1), spec!(2, Tar))));
+        fixture.receive_message(Broker(EnqueueJob(jid!(1), spec!(1, Tar))));
+        fixture.receive_message(Broker(EnqueueJob(jid!(1), spec!(2, Tar))));
     }
 
     script_test! {
