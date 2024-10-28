@@ -103,9 +103,10 @@ where
             broker_sender,
             cache,
             slots: slots.into_inner().into(),
-            awaiting_layers: HashMap::default(),
-            available: BinaryHeap::default(),
-            executing: HashMap::default(),
+            awaiting_layers: Default::default(),
+            available: Default::default(),
+            executing: Default::default(),
+            shut_down: false,
         }
     }
 
@@ -329,6 +330,7 @@ pub struct Dispatcher<DepsT: Deps, ArtifactFetcherT, BrokerSenderT, CacheT> {
     awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
     available: BinaryHeap<AvailableJob>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
+    shut_down: bool,
 }
 
 impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
@@ -393,24 +395,26 @@ where
     }
 
     fn receive_enqueue_job(&mut self, jid: JobId, spec: JobSpec) {
-        let mut fetcher = Fetcher {
-            deps: &mut self.deps,
-            artifact_fetcher: &mut self.artifact_fetcher,
-            cache: &mut self.cache,
-            jid,
-        };
-        let tracker = LayerTracker::new(&spec.layers, &mut fetcher);
-        if tracker.is_complete() {
-            self.make_job_available(jid, spec, tracker);
-        } else {
-            self.awaiting_layers
-                .insert(jid, AwaitingLayersJob { spec, tracker })
-                .assert_is_none();
-            self.broker_sender
-                .send_message_to_broker(WorkerToBroker::JobStatusUpdate(
-                    jid,
-                    JobWorkerStatus::WaitingForLayers,
-                ));
+        if !self.shut_down {
+            let mut fetcher = Fetcher {
+                deps: &mut self.deps,
+                artifact_fetcher: &mut self.artifact_fetcher,
+                cache: &mut self.cache,
+                jid,
+            };
+            let tracker = LayerTracker::new(&spec.layers, &mut fetcher);
+            if tracker.is_complete() {
+                self.make_job_available(jid, spec, tracker);
+            } else {
+                self.awaiting_layers
+                    .insert(jid, AwaitingLayersJob { spec, tracker })
+                    .assert_is_none();
+                self.broker_sender
+                    .send_message_to_broker(WorkerToBroker::JobStatusUpdate(
+                        jid,
+                        JobWorkerStatus::WaitingForLayers,
+                    ));
+            }
         }
     }
 
@@ -665,6 +669,7 @@ where
         self.broker_sender.close();
         self.awaiting_layers = Default::default();
         self.available = Default::default();
+        self.shut_down = true;
 
         for ExecutingJob { state, .. } in self.executing.values_mut() {
             // Kill all executing jobs and cancel their timers (if they have any), but wait around
@@ -965,6 +970,7 @@ mod tests {
             }
         }
 
+        #[track_caller]
         fn expect_messages_in_any_order(&mut self, mut expected: Vec<TestMessage>) {
             expected.sort();
             let messages = &mut self.test_state.borrow_mut().messages;
@@ -1613,6 +1619,61 @@ mod tests {
             .receive_message(JobCompleted(jid!(1), Ok(completed!(3))));
 
         assert_eq!(fixture.dispatcher.num_jobs_executing(), 0);
+    }
+
+    #[test]
+    fn enqueue_job_is_ignored_after_shut_down() {
+        let mut fixture = Fixture::new(
+            2,
+            [
+                (blob!(1), GetArtifact::Success),
+                (blob!(2), GetArtifact::Success),
+                (bottom_fs_layer!(1), GetArtifact::Success),
+                (bottom_fs_layer!(2), GetArtifact::Success),
+            ],
+            [],
+            [],
+            [
+                (blob!(1), path_buf!("/z/b/1")),
+                (blob!(2), path_buf!("/z/b/2")),
+                (bottom_fs_layer!(1), path_buf!("/z/bl/1")),
+                (bottom_fs_layer!(2), path_buf!("/z/bl/2")),
+            ],
+        );
+
+        fixture.dispatcher.receive_message(Broker(EnqueueJob(
+            jid!(1),
+            spec!(1, Tar).timeout(timeout!(1)),
+        )));
+        fixture.expect_messages_in_any_order(vec![
+            CacheGetArtifact(blob!(1), jid!(1)),
+            CachePath(blob!(1)),
+            CacheGetArtifact(bottom_fs_layer!(1), jid!(1)),
+            CachePath(bottom_fs_layer!(1)),
+            StartJob(
+                jid!(1),
+                spec!(1, Tar).timeout(timeout!(1)),
+                path_buf!("/z/bl/1"),
+            ),
+            StartTimer(jid!(1), Duration::from_secs(1)),
+            SendMessageToBroker(WorkerToBroker::JobStatusUpdate(
+                jid!(1),
+                JobWorkerStatus::Executing,
+            )),
+        ]);
+
+        fixture
+            .dispatcher
+            .receive_message(ShutDown(anyhow!("test error")));
+        fixture.expect_messages_in_any_order(vec![
+            JobHandleDropped(jid!(1)),
+            TimerHandleDropped(jid!(1)),
+        ]);
+
+        fixture
+            .dispatcher
+            .receive_message(Broker(EnqueueJob(jid!(2), spec!(2, Tar))));
+        fixture.expect_messages_in_any_order(vec![]);
     }
 
     script_test! {
