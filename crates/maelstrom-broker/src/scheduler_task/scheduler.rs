@@ -73,9 +73,7 @@ pub trait SchedulerDeps {
 pub struct BrokerKey(pub Sha256Digest);
 
 impl Key for BrokerKey {
-    type KindIterator = <[&'static str; 1] as IntoIterator>::IntoIter;
-
-    fn kinds() -> Self::KindIterator {
+    fn kinds() -> impl Iterator<Item = &'static str> {
         ["blob"].into_iter()
     }
 

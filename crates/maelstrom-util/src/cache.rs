@@ -197,8 +197,7 @@ where
 }
 
 pub trait Key: Clone + Debug + Eq + Hash {
-    type KindIterator: Iterator<Item = &'static str>;
-    fn kinds() -> Self::KindIterator;
+    fn kinds() -> impl Iterator<Item = &'static str>;
     fn from_kind_and_digest(kind: &'static str, digest: Sha256Digest) -> Self;
     fn kind(&self) -> &'static str;
     fn digest(&self) -> &Sha256Digest;
@@ -1024,9 +1023,7 @@ mod tests {
     }
 
     impl Key for TestKey {
-        type KindIterator = <[&'static str; 2] as IntoIterator>::IntoIter;
-
-        fn kinds() -> Self::KindIterator {
+        fn kinds() -> impl Iterator<Item = &'static str> {
             ["apple", "orange"].into_iter()
         }
 

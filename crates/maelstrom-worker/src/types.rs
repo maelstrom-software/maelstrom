@@ -64,9 +64,7 @@ impl CacheKey {
 }
 
 impl cache::Key for CacheKey {
-    type KindIterator = <[&'static str; 3] as IntoIterator>::IntoIter;
-
-    fn kinds() -> Self::KindIterator {
+    fn kinds() -> impl Iterator<Item = &'static str> {
         CacheKeyKind::iter()
     }
 
