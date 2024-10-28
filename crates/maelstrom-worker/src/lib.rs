@@ -35,8 +35,8 @@ use tokio::{
     task::{self, JoinHandle},
 };
 use types::{
-    BrokerSender, BrokerSocketIncomingReceiver, BrokerSocketOutgoingSender, Cache, Dispatcher,
-    DispatcherReceiver, DispatcherSender,
+    BrokerSender, BrokerSocketOutgoingSender, Cache, Dispatcher, DispatcherReceiver,
+    DispatcherSender,
 };
 
 const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
@@ -77,16 +77,15 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
     let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =
         mpsc::unbounded_channel();
-    let (broker_socket_incoming_sender, broker_socket_incoming_receiver) =
-        mpsc::unbounded_channel();
 
     let log_clone = log.clone();
+    let dispatcher_sender_clone = dispatcher_sender.clone();
     task::spawn(shutdown_on_error(
         async move {
             net::async_socket_reader(
                 read_stream,
-                broker_socket_incoming_sender,
-                |msg| msg,
+                dispatcher_sender_clone,
+                dispatcher::Message::Broker,
                 &log_clone,
             )
             .await
@@ -115,7 +114,6 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
         dispatcher_receiver,
         dispatcher_sender,
         broker_socket_outgoing_sender,
-        broker_socket_incoming_receiver,
         log,
     )?
     .await?;
@@ -175,7 +173,6 @@ fn start_dispatcher_task(
     dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
     broker_socket_outgoing_sender: BrokerSocketOutgoingSender,
-    broker_socket_incoming_receiver: BrokerSocketIncomingReceiver,
     log: &Logger,
 ) -> Result<JoinHandle<()>> {
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
@@ -218,12 +215,7 @@ fn start_dispatcher_task(
     );
 
     start_dispatcher_task_common(dispatcher, log, move |dispatcher, log| {
-        dispatcher_main(
-            broker_socket_incoming_receiver,
-            dispatcher,
-            dispatcher_receiver,
-            log,
-        )
+        dispatcher_main(dispatcher, dispatcher_receiver, log)
     })
 }
 
@@ -245,22 +237,14 @@ fn start_dispatcher_task_common<
 }
 
 async fn dispatcher_main(
-    mut broker_socket_incoming_recevier: BrokerSocketIncomingReceiver,
     mut dispatcher: Dispatcher,
     mut dispatcher_receiver: DispatcherReceiver,
     log: Logger,
 ) {
     // Multiplex messages from broker and others sources
     let err = loop {
-        let res = tokio::select! {
-            msg = dispatcher_receiver.recv() => {
-                handle_dispatcher_message(msg.expect("missing shutdown"), &mut dispatcher)
-            },
-            msg = broker_socket_incoming_recevier.recv() => {
-                let Some(msg) = msg else { continue };
-                handle_dispatcher_message(Message::Broker(msg), &mut dispatcher)
-            },
-        };
+        let msg = dispatcher_receiver.recv().await;
+        let res = handle_dispatcher_message(msg.expect("missing shutdown"), &mut dispatcher);
         if let Err(err) = res {
             break err;
         }
@@ -275,7 +259,6 @@ async fn dispatcher_main(
         dispatcher.num_jobs_executing()
     );
     dispatcher.receive_message(Message::ShutDown(err));
-    drop(broker_socket_incoming_recevier);
 
     // Wait for the running jobs to finish.
     while dispatcher.num_jobs_executing() > 0 {

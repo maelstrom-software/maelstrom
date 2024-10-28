@@ -1,8 +1,5 @@
 use crate::{artifact_fetcher::ArtifactFetcher, dispatcher, dispatcher_adapter::DispatcherAdapter};
-use maelstrom_base::{
-    proto::{BrokerToWorker, WorkerToBroker},
-    JobId, Sha256Digest,
-};
+use maelstrom_base::{proto::WorkerToBroker, JobId, Sha256Digest};
 use maelstrom_util::cache::{self, fs::std::Fs as StdFs, GotArtifact};
 use std::path::PathBuf;
 use strum::{EnumString, IntoStaticStr, VariantNames};
@@ -145,6 +142,5 @@ impl dispatcher::BrokerSender for BrokerSender {
 pub type DispatcherReceiver = UnboundedReceiver<dispatcher::Message<StdFs>>;
 pub type DispatcherSender = UnboundedSender<dispatcher::Message<StdFs>>;
 pub type BrokerSocketOutgoingSender = UnboundedSender<WorkerToBroker>;
-pub type BrokerSocketIncomingReceiver = UnboundedReceiver<BrokerToWorker>;
 pub type Dispatcher =
     dispatcher::Dispatcher<DispatcherAdapter, ArtifactFetcher, BrokerSender, Cache>;
