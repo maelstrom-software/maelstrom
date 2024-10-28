@@ -35,20 +35,25 @@ pub struct CacheKey {
 }
 
 impl CacheKey {
-    pub fn new(kind: CacheKeyKind, digest: Sha256Digest) -> Self {
-        Self { kind, digest }
-    }
-
     pub fn blob(digest: Sha256Digest) -> Self {
-        Self::new(CacheKeyKind::Blob, digest)
+        Self {
+            kind: CacheKeyKind::Blob,
+            digest,
+        }
     }
 
     pub fn bottom_fs_layer(digest: Sha256Digest) -> Self {
-        Self::new(CacheKeyKind::BottomFsLayer, digest)
+        Self {
+            kind: CacheKeyKind::BottomFsLayer,
+            digest,
+        }
     }
 
     pub fn upper_fs_layer(digest: Sha256Digest) -> Self {
-        Self::new(CacheKeyKind::UpperFsLayer, digest)
+        Self {
+            kind: CacheKeyKind::UpperFsLayer,
+            digest,
+        }
     }
 }
 
