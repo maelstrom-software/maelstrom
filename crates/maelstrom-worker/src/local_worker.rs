@@ -11,14 +11,14 @@ use crate::{
     dispatcher_adapter::DispatcherAdapter,
     executor::{MountDir, TmpfsDir},
 };
-use anyhow::Result;
+use anyhow::{Error, Result};
 use maelstrom_layer_fs::BlobDir;
 use maelstrom_util::{
     cache::{self, fs::std::Fs, Cache},
     config::common::{CacheSize, InlineLimit, Slots},
     root::RootBuf,
 };
-use slog::{debug, Logger};
+use slog::Logger;
 use tokio::{
     sync::mpsc::{self},
     task::JoinHandle,
@@ -42,7 +42,7 @@ pub fn start_task(
     dispatcher_receiver: Receiver,
     dispatcher_sender: Sender,
     log: &Logger,
-) -> Result<JoinHandle<()>> {
+) -> Result<JoinHandle<Error>> {
     let mount_dir = config.cache_root.join::<MountDir>("mount");
     let tmpfs_dir = config.cache_root.join::<TmpfsDir>("upper");
     let cache_root = config.cache_root.join::<cache::CacheDir>("artifacts");
@@ -74,8 +74,8 @@ pub fn start_task(
     );
 
     // Spawn a task for the local_worker.
-    crate::start_dispatcher_task_common(dispatcher, log, move |dispatcher, log| {
-        main(dispatcher, dispatcher_receiver, log)
+    crate::start_dispatcher_task_common(dispatcher, move |dispatcher| {
+        main(dispatcher, dispatcher_receiver)
     })
 }
 
@@ -90,17 +90,14 @@ async fn main<
         crate::types::Cache,
     >,
     mut dispatcher_receiver: Receiver,
-    log: Logger,
-) {
-    let err = loop {
+) -> Error {
+    loop {
         let msg = dispatcher_receiver
             .recv()
             .await
             .expect("missing shut down message");
         if let Err(err) = dispatcher.receive_message(msg) {
-            break err;
+            return err;
         }
-    };
-
-    debug!(log, "local worker exiting due to {err}");
+    }
 }

@@ -8,7 +8,7 @@ use crate::{
     progress::{LazyProgress, ProgressTracker},
     router,
 };
-use anyhow::{anyhow, bail, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Error, Result};
 use assert_matches::assert_matches;
 use async_trait::async_trait;
 use layer_builder::LayerBuilder;
@@ -244,7 +244,7 @@ impl Client {
             inline_limit: InlineLimit,
             slots: Slots,
             accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-        ) -> Result<(ClientState, JoinSet<Result<()>>, JoinHandle<()>)> {
+        ) -> Result<(ClientState, JoinSet<Result<()>>, JoinHandle<Error>)> {
             let fs = async_fs::Fs::new();
 
             // Make sure the state dir exists before we try to put a log file in.
@@ -468,10 +468,12 @@ impl Client {
                 debug!(log, "client started successfully");
 
                 let shutdown_sender = state.router_sender.clone();
+                let log_clone = log.clone();
                 self.clean_up.add_work(async move {
                     let _ = shutdown_sender
                         .send(router::Message::Shutdown(anyhow!("connection closed")));
-                    let _ = local_worker_handle.await;
+                    let err = local_worker_handle.await.unwrap();
+                    debug!(log_clone, "local worker shut down"; "error" => %err);
                 });
                 activation_handle.activate(state);
 

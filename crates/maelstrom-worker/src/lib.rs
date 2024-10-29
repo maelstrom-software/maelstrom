@@ -11,7 +11,7 @@ mod layer_fs;
 mod manifest_digest_cache;
 mod types;
 
-use anyhow::{anyhow, bail, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Error, Result};
 use artifact_fetcher::ArtifactFetcher;
 use config::Config;
 use dispatcher::Message;
@@ -44,9 +44,9 @@ const MAX_ARTIFACT_FETCHES: usize = 1;
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config, "pid" => process::id());
-    let result = main_inner(config, &log);
-    info!(log, "exiting");
-    result
+    let err = main_inner(config, &log).unwrap_err();
+    error!(log, "exiting"; "error" => %err);
+    Err(err)
 }
 
 /// The main function for the worker. This should be called on a task of its own. It will return
@@ -109,16 +109,14 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
         dispatcher_sender.clone(),
     ));
 
-    start_dispatcher_task(
+    Err(start_dispatcher_task(
         config,
         dispatcher_receiver,
         dispatcher_sender,
         broker_socket_outgoing_sender,
         log,
     )?
-    .await?;
-
-    Ok(())
+    .await?)
 }
 
 /// Check if the open file limit is high enough to fit our estimate of how many files we need.
@@ -174,7 +172,7 @@ fn start_dispatcher_task(
     dispatcher_sender: DispatcherSender,
     broker_socket_outgoing_sender: BrokerSocketOutgoingSender,
     log: &Logger,
-) -> Result<JoinHandle<()>> {
+) -> Result<JoinHandle<Error>> {
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
 
     let mount_dir = config.cache_root.join::<MountDir>("mount");
@@ -214,8 +212,8 @@ fn start_dispatcher_task(
         config.slots,
     );
 
-    start_dispatcher_task_common(dispatcher, log, move |dispatcher, log| {
-        dispatcher_main(dispatcher, dispatcher_receiver, log)
+    start_dispatcher_task_common(dispatcher, move |dispatcher| {
+        dispatcher_main(dispatcher, dispatcher_receiver)
     })
 }
 
@@ -224,32 +222,27 @@ fn start_dispatcher_task_common<
     ArtifactFetcherT,
     BrokerSenderT,
     CacheT,
-    MainFutureT: Future<Output = ()> + Send + 'static,
+    MainFutureT: Future<Output = Error> + Send + 'static,
 >(
     dispatcher: dispatcher::Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>,
-    log: &Logger,
     main: impl FnOnce(
         dispatcher::Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>,
-        Logger,
     ) -> MainFutureT,
-) -> Result<JoinHandle<()>> {
-    Ok(task::spawn(main(dispatcher, log.clone())))
+) -> Result<JoinHandle<Error>> {
+    Ok(task::spawn(main(dispatcher)))
 }
 
 async fn dispatcher_main(
     mut dispatcher: Dispatcher,
     mut dispatcher_receiver: DispatcherReceiver,
-    log: Logger,
-) {
-    let err = loop {
+) -> Error {
+    loop {
         let msg = dispatcher_receiver
             .recv()
             .await
             .expect("missing shut down message");
         if let Err(err) = dispatcher.receive_message(msg) {
-            break err;
+            return err;
         }
-    };
-
-    error!(log, "shut down due to {err}");
+    }
 }
