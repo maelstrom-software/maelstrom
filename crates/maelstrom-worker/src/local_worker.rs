@@ -74,7 +74,5 @@ pub fn start_task(
     );
 
     // Spawn a task for the local_worker.
-    crate::start_dispatcher_task_common(dispatcher, move |dispatcher| {
-        crate::dispatcher_main(dispatcher, dispatcher_receiver)
-    })
+    crate::start_dispatcher_task_common(dispatcher, dispatcher_receiver)
 }

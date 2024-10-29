@@ -212,27 +212,23 @@ fn start_dispatcher_task(
         config.slots,
     );
 
-    start_dispatcher_task_common(dispatcher, move |dispatcher| {
-        dispatcher_main(dispatcher, dispatcher_receiver)
-    })
+    start_dispatcher_task_common(dispatcher, dispatcher_receiver)
 }
 
 fn start_dispatcher_task_common<
-    DepsT: dispatcher::Deps,
-    ArtifactFetcherT,
-    BrokerSenderT,
-    CacheT,
-    MainFutureT: Future<Output = Error> + Send + 'static,
+    ArtifactFetcherT: dispatcher::ArtifactFetcher + Send + 'static,
+    BrokerSenderT: dispatcher::BrokerSender + Send + 'static,
 >(
-    dispatcher: dispatcher::Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>,
-    main: impl FnOnce(
-        dispatcher::Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>,
-    ) -> MainFutureT,
+    dispatcher: dispatcher::Dispatcher<DispatcherAdapter, ArtifactFetcherT, BrokerSenderT, Cache>,
+    dispatcher_receiver: DispatcherReceiver,
 ) -> Result<JoinHandle<Error>> {
-    Ok(task::spawn(main(dispatcher)))
+    Ok(task::spawn(dispatcher_main(
+        dispatcher,
+        dispatcher_receiver,
+    )))
 }
 
-pub async fn dispatcher_main<
+async fn dispatcher_main<
     ArtifactFetcherT: dispatcher::ArtifactFetcher,
     BrokerSenderT: dispatcher::BrokerSender,
 >(
