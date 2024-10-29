@@ -21,10 +21,11 @@ use maelstrom_base::proto::Hello;
 use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux};
 use maelstrom_util::{
-    cache::{self, fs::std::Fs as StdFs},
-    config::common::Slots,
+    cache::{self, fs::std::Fs as StdFs, TempFileFactory},
+    config::common::{Slots, InlineLimit},
     net::{self, AsRawFdExt as _},
     signal,
+    root::RootBuf,
 };
 use slog::{debug, error, info, Logger};
 use std::{future::Future, process};
@@ -174,10 +175,7 @@ fn start_dispatcher_task(
 ) -> Result<JoinHandle<Error>> {
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
 
-    let mount_dir = config.cache_root.join::<MountDir>("mount");
-    let tmpfs_dir = config.cache_root.join::<TmpfsDir>("upper");
     let cache_root = config.cache_root.join::<cache::CacheDir>("artifacts");
-    let blob_dir = cache_root.join::<BlobDir>("sha256/blob");
 
     let (cache, temp_file_factory) =
         Cache::new(StdFs, cache_root, config.cache_size, log.clone(), true)?;
@@ -193,26 +191,21 @@ fn start_dispatcher_task(
         temp_file_factory.clone(),
     );
 
-    let dispatcher_adapter = DispatcherAdapter::new(
-        dispatcher_sender,
-        config.inline_limit,
-        log.clone(),
-        mount_dir,
-        tmpfs_dir,
-        blob_dir,
-        temp_file_factory,
-    )?;
-
     start_dispatcher_task_common(
         artifact_fetcher,
         broker_sender,
         cache,
-        dispatcher_adapter,
+        config.cache_root,
         dispatcher_receiver,
+        dispatcher_sender,
+        config.inline_limit,
+        log,
         config.slots,
+        temp_file_factory,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_dispatcher_task_common<
     ArtifactFetcherT: dispatcher::ArtifactFetcher + Send + 'static,
     BrokerSenderT: dispatcher::BrokerSender + Send + 'static,
@@ -220,10 +213,25 @@ fn start_dispatcher_task_common<
     artifact_fetcher: ArtifactFetcherT,
     broker_sender: BrokerSenderT,
     cache: Cache,
-    dispatcher_adapter: DispatcherAdapter,
+    cache_root: RootBuf<config::CacheDir>,
     mut dispatcher_receiver: DispatcherReceiver,
+    dispatcher_sender: DispatcherSender,
+    inline_limit: InlineLimit,
+    log: &Logger,
     slots: Slots,
+    temp_file_factory: TempFileFactory<StdFs>,
 ) -> Result<JoinHandle<Error>> {
+
+    let dispatcher_adapter = DispatcherAdapter::new(
+        dispatcher_sender,
+        inline_limit,
+        log.clone(),
+        cache_root.join::<MountDir>("mount"),
+        cache_root.join::<TmpfsDir>("upper"),
+        cache.root().join::<BlobDir>("sha256/blob"),
+        temp_file_factory,
+    )?;
+
     let mut dispatcher = Dispatcher::new(
         dispatcher_adapter,
         artifact_fetcher,

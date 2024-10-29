@@ -317,6 +317,7 @@ struct SizeFile;
 /// has grown too large.
 pub struct Cache<FsT, KeyT: Key, GetStrategyT: GetStrategy> {
     fs: FsT,
+    root: RootBuf<CacheDir>,
     removing: RootBuf<RemovingRoot>,
     sha256: RootBuf<Sha256Dir>,
     entries: Map<KeyT, GetStrategyT>,
@@ -427,6 +428,7 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
 
         let cache = Cache {
             fs: fs.clone(),
+            root,
             removing,
             sha256,
             entries: Map::default(),
@@ -548,6 +550,7 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
 
         let mut cache = Cache {
             fs: fs.clone(),
+            root,
             removing,
             sha256,
             entries,
@@ -797,6 +800,10 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
             }
             keep
         });
+    }
+
+    pub fn root(&self) -> &Root<CacheDir> {
+        &self.root
     }
 
     /// Return the directory path for the artifact referenced by `digest`.
