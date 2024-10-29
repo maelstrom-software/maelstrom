@@ -22,10 +22,10 @@ use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux};
 use maelstrom_util::{
     cache::{self, fs::std::Fs as StdFs, TempFileFactory},
-    config::common::{Slots, InlineLimit},
+    config::common::{CacheSize, InlineLimit, Slots},
     net::{self, AsRawFdExt as _},
-    signal,
     root::RootBuf,
+    signal,
 };
 use slog::{debug, error, info, Logger};
 use std::{future::Future, process};
@@ -173,54 +173,65 @@ fn start_dispatcher_task(
     broker_socket_outgoing_sender: BrokerSocketOutgoingSender,
     log: &Logger,
 ) -> Result<JoinHandle<Error>> {
+    let log_clone = log.clone();
+    let dispatcher_sender_clone = dispatcher_sender.clone();
+    let artifact_fetcher_factory = move |temp_file_factory| {
+        ArtifactFetcher::new(
+            u32::try_from(MAX_ARTIFACT_FETCHES)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+            dispatcher_sender_clone,
+            config.broker,
+            log_clone,
+            temp_file_factory,
+        )
+    };
+
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
 
-    let cache_root = config.cache_root.join::<cache::CacheDir>("artifacts");
-
-    let (cache, temp_file_factory) =
-        Cache::new(StdFs, cache_root, config.cache_size, log.clone(), true)?;
-
-    let artifact_fetcher = ArtifactFetcher::new(
-        u32::try_from(MAX_ARTIFACT_FETCHES)
-            .unwrap()
-            .try_into()
-            .unwrap(),
-        dispatcher_sender.clone(),
-        config.broker,
-        log.clone(),
-        temp_file_factory.clone(),
-    );
-
     start_dispatcher_task_common(
-        artifact_fetcher,
+        artifact_fetcher_factory,
         broker_sender,
-        cache,
+        config.cache_size,
         config.cache_root,
         dispatcher_receiver,
         dispatcher_sender,
         config.inline_limit,
         log,
+        true,
         config.slots,
-        temp_file_factory,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn start_dispatcher_task_common<
     ArtifactFetcherT: dispatcher::ArtifactFetcher + Send + 'static,
+    ArtifactFetcherFactoryT: FnOnce(TempFileFactory<StdFs>) -> ArtifactFetcherT,
     BrokerSenderT: dispatcher::BrokerSender + Send + 'static,
 >(
-    artifact_fetcher: ArtifactFetcherT,
+    artifact_fetcher_factory: ArtifactFetcherFactoryT,
     broker_sender: BrokerSenderT,
-    cache: Cache,
+    cache_size: CacheSize,
     cache_root: RootBuf<config::CacheDir>,
     mut dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
     inline_limit: InlineLimit,
     log: &Logger,
+    log_initial_cache_message_at_info: bool,
     slots: Slots,
-    temp_file_factory: TempFileFactory<StdFs>,
 ) -> Result<JoinHandle<Error>> {
+    let cache_root = cache_root.join::<cache::CacheDir>("artifacts");
+
+    let (cache, temp_file_factory) = Cache::new(
+        StdFs,
+        cache_root.clone(),
+        cache_size,
+        log.clone(),
+        log_initial_cache_message_at_info,
+    )?;
+
+    let artifact_fetcher = artifact_fetcher_factory(temp_file_factory.clone());
 
     let dispatcher_adapter = DispatcherAdapter::new(
         dispatcher_sender,
