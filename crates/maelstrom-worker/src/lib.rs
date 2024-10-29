@@ -14,7 +14,7 @@ mod types;
 use anyhow::{anyhow, bail, Context as _, Error, Result};
 use artifact_fetcher::ArtifactFetcher;
 use config::Config;
-use dispatcher::Message;
+use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
 use executor::{MountDir, TmpfsDir};
 use maelstrom_base::proto::Hello;
@@ -35,8 +35,7 @@ use tokio::{
     task::{self, JoinHandle},
 };
 use types::{
-    BrokerSender, BrokerSocketOutgoingSender, Cache, Dispatcher, DispatcherReceiver,
-    DispatcherSender,
+    BrokerSender, BrokerSocketOutgoingSender, Cache, DispatcherReceiver, DispatcherSender,
 };
 
 const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
@@ -85,7 +84,7 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
             net::async_socket_reader(
                 read_stream,
                 dispatcher_sender_clone,
-                dispatcher::Message::Broker,
+                Message::Broker,
                 &log_clone,
             )
             .await
@@ -194,7 +193,7 @@ fn start_dispatcher_task(
         temp_file_factory.clone(),
     );
 
-    let adapter = DispatcherAdapter::new(
+    let dispatcher_adapter = DispatcherAdapter::new(
         dispatcher_sender,
         config.inline_limit,
         log.clone(),
@@ -204,29 +203,35 @@ fn start_dispatcher_task(
         temp_file_factory,
     )?;
 
-    let dispatcher = Dispatcher::new(
-        adapter,
+    start_dispatcher_task_common(
         artifact_fetcher,
         broker_sender,
         cache,
+        dispatcher_adapter,
+        dispatcher_receiver,
         config.slots,
-    );
-
-    start_dispatcher_task_common(dispatcher, dispatcher_receiver)
+    )
 }
 
 fn start_dispatcher_task_common<
     ArtifactFetcherT: dispatcher::ArtifactFetcher + Send + 'static,
     BrokerSenderT: dispatcher::BrokerSender + Send + 'static,
 >(
-    mut dispatcher: dispatcher::Dispatcher<
-        DispatcherAdapter,
-        ArtifactFetcherT,
-        BrokerSenderT,
-        Cache,
-    >,
+    artifact_fetcher: ArtifactFetcherT,
+    broker_sender: BrokerSenderT,
+    cache: Cache,
+    dispatcher_adapter: DispatcherAdapter,
     mut dispatcher_receiver: DispatcherReceiver,
+    slots: Slots,
 ) -> Result<JoinHandle<Error>> {
+    let mut dispatcher = Dispatcher::new(
+        dispatcher_adapter,
+        artifact_fetcher,
+        broker_sender,
+        cache,
+        slots,
+    );
+
     let dispatcher_main = async move {
         loop {
             let msg = dispatcher_receiver

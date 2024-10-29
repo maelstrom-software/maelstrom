@@ -7,7 +7,6 @@ pub use crate::{
 pub use maelstrom_util::cache::GotArtifact;
 
 use crate::{
-    dispatcher::Dispatcher,
     dispatcher_adapter::DispatcherAdapter,
     executor::{MountDir, TmpfsDir},
 };
@@ -50,29 +49,27 @@ pub fn start_task(
 
     // Create the local_worker's cache. This is the same cache as the "real" worker uses, except we
     // will be populating it with symlinks in certain cases.
-    let (local_worker_cache, local_worker_temp_file_factory) =
+    let (cache, temp_file_factory) =
         Cache::new(Fs, cache_root, config.cache_size, log.clone(), false)?;
 
     // Create the local_worker's deps. This the same adapter as the "real" worker uses.
-    let local_worker_dispatcher_adapter = DispatcherAdapter::new(
+    let dispatcher_adapter = DispatcherAdapter::new(
         dispatcher_sender,
         config.inline_limit,
         log.clone(),
         mount_dir,
         tmpfs_dir,
         blob_dir,
-        local_worker_temp_file_factory,
+        temp_file_factory,
     )?;
 
-    // Create the actual local_worker.
-    let dispatcher = Dispatcher::new(
-        local_worker_dispatcher_adapter,
+    // Spawn a task for the local_worker.
+    crate::start_dispatcher_task_common(
         artifact_fetcher,
         broker_sender,
-        local_worker_cache,
+        cache,
+        dispatcher_adapter,
+        dispatcher_receiver,
         config.slots,
-    );
-
-    // Spawn a task for the local_worker.
-    crate::start_dispatcher_task_common(dispatcher, dispatcher_receiver)
+    )
 }
