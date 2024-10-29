@@ -219,19 +219,6 @@ fn start_dispatcher_task_common<
     ArtifactFetcherT: dispatcher::ArtifactFetcher + Send + 'static,
     BrokerSenderT: dispatcher::BrokerSender + Send + 'static,
 >(
-    dispatcher: dispatcher::Dispatcher<DispatcherAdapter, ArtifactFetcherT, BrokerSenderT, Cache>,
-    dispatcher_receiver: DispatcherReceiver,
-) -> Result<JoinHandle<Error>> {
-    Ok(task::spawn(dispatcher_main(
-        dispatcher,
-        dispatcher_receiver,
-    )))
-}
-
-async fn dispatcher_main<
-    ArtifactFetcherT: dispatcher::ArtifactFetcher,
-    BrokerSenderT: dispatcher::BrokerSender,
->(
     mut dispatcher: dispatcher::Dispatcher<
         DispatcherAdapter,
         ArtifactFetcherT,
@@ -239,14 +226,17 @@ async fn dispatcher_main<
         Cache,
     >,
     mut dispatcher_receiver: DispatcherReceiver,
-) -> Error {
-    loop {
-        let msg = dispatcher_receiver
-            .recv()
-            .await
-            .expect("missing shut down message");
-        if let Err(err) = dispatcher.receive_message(msg) {
-            return err;
+) -> Result<JoinHandle<Error>> {
+    let dispatcher_main = async move {
+        loop {
+            let msg = dispatcher_receiver
+                .recv()
+                .await
+                .expect("missing shut down message");
+            if let Err(err) = dispatcher.receive_message(msg) {
+                break err;
+            }
         }
-    }
+    };
+    Ok(task::spawn(dispatcher_main))
 }
