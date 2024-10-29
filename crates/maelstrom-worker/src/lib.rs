@@ -232,8 +232,16 @@ fn start_dispatcher_task_common<
     Ok(task::spawn(main(dispatcher)))
 }
 
-async fn dispatcher_main(
-    mut dispatcher: Dispatcher,
+pub async fn dispatcher_main<
+    ArtifactFetcherT: dispatcher::ArtifactFetcher,
+    BrokerSenderT: dispatcher::BrokerSender,
+>(
+    mut dispatcher: dispatcher::Dispatcher<
+        DispatcherAdapter,
+        ArtifactFetcherT,
+        BrokerSenderT,
+        Cache,
+    >,
     mut dispatcher_receiver: DispatcherReceiver,
 ) -> Error {
     loop {

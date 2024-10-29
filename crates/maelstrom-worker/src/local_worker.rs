@@ -75,29 +75,6 @@ pub fn start_task(
 
     // Spawn a task for the local_worker.
     crate::start_dispatcher_task_common(dispatcher, move |dispatcher| {
-        main(dispatcher, dispatcher_receiver)
+        crate::dispatcher_main(dispatcher, dispatcher_receiver)
     })
-}
-
-async fn main<
-    ArtifactFetcherT: crate::dispatcher::ArtifactFetcher,
-    BrokerSenderT: crate::dispatcher::BrokerSender,
->(
-    mut dispatcher: Dispatcher<
-        DispatcherAdapter,
-        ArtifactFetcherT,
-        BrokerSenderT,
-        crate::types::Cache,
-    >,
-    mut dispatcher_receiver: Receiver,
-) -> Error {
-    loop {
-        let msg = dispatcher_receiver
-            .recv()
-            .await
-            .expect("missing shut down message");
-        if let Err(err) = dispatcher.receive_message(msg) {
-            return err;
-        }
-    }
 }
