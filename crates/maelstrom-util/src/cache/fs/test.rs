@@ -689,9 +689,8 @@ impl Entry {
         mut cur: &'state Self,
         mut component_path: ComponentPath,
     ) -> Lookup<'state> {
-        for component in path.components().with_position() {
-            let is_last_component = matches!(component, Position::Last(_) | Position::Only(_));
-            let component = component.into_inner();
+        for (position, component) in path.components().with_position() {
+            let is_last_component = matches!(position, Position::Last | Position::Only);
             (cur, component_path) = match component {
                 Component::Prefix(_) => {
                     unimplemented!("prefix components don't occur in Unix")
