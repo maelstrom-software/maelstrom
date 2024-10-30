@@ -221,11 +221,9 @@ fn start_dispatcher_task_common<
     log_initial_cache_message_at_info: bool,
     slots: Slots,
 ) -> Result<JoinHandle<Error>> {
-    let cache_root = cache_root.join::<cache::CacheDir>("artifacts");
-
     let (cache, temp_file_factory) = Cache::new(
         StdFs,
-        cache_root.clone(),
+        cache_root.join::<cache::CacheDir>("artifacts"),
         cache_size,
         log.clone(),
         log_initial_cache_message_at_info,
