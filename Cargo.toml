@@ -154,7 +154,7 @@ tokio-util = { version = "0.7.10", features = [ "compat" ] }
 toml = "0.8.8"
 tonic = "0.11"
 tonic-build = "0.11"
-tower = "0.4"
+tower = { version = "0.5", features = ["util"] }
 tuple = "0.5.1"
 tui-term = "0.2.0"
 unicode-truncate = "0.2.0"
