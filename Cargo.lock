@@ -3580,7 +3580,7 @@ dependencies = [
  "tempfile",
  "toml",
  "tui-term",
- "unicode-truncate 0.2.0",
+ "unicode-truncate",
  "unicode-width 0.2.0",
  "vt100",
  "xdg",
@@ -4846,7 +4846,7 @@ dependencies = [
  "paste",
  "strum",
  "unicode-segmentation",
- "unicode-truncate 1.1.0",
+ "unicode-truncate",
  "unicode-width 0.2.0",
 ]
 
@@ -6311,15 +6311,6 @@ name = "unicode-segmentation"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493"
-
-[[package]]
-name = "unicode-truncate"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a04be5ca5f7a4a7270ffea82bc41c59b87c611ed04f20e77c338e8d3c2348e42"
-dependencies = [
- "unicode-width 0.1.14",
-]
 
 [[package]]
 name = "unicode-truncate"

@@ -157,7 +157,7 @@ tonic-build = "0.11"
 tower = { version = "0.5", features = ["util"] }
 tuple = "0.5.1"
 tui-term = "0.2.0"
-unicode-truncate = "0.2.0"
+unicode-truncate = "1"
 unicode-width = "0.2.0"
 versions = "6.2.0"
 vt100 =  "0.15"
