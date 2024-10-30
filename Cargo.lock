@@ -3466,7 +3466,6 @@ dependencies = [
  "std-semaphore",
  "strum",
  "tempfile",
- "throbber-widgets-tui",
  "toml",
  "tui-term",
  "unicode-truncate 0.2.0",
@@ -5683,16 +5682,6 @@ checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
 dependencies = [
  "cfg-if",
  "once_cell",
-]
-
-[[package]]
-name = "throbber-widgets-tui"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46994acd1137e3e5b78d9b9112d91596b20e64fc6ec788dfc0f2430a2e965633"
-dependencies = [
- "rand",
- "ratatui",
 ]
 
 [[package]]

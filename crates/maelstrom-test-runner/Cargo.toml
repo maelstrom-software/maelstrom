@@ -42,7 +42,6 @@ slog.workspace = true
 std-semaphore.workspace = true
 strum.workspace = true
 tui-term.workspace = true
-throbber-widgets-tui.workspace = true
 toml.workspace = true
 unicode-truncate.workspace = true
 unicode-width.workspace = true

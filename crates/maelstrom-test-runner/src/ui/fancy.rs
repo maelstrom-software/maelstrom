@@ -19,14 +19,16 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{palette::tailwind, Color, Modifier, Style, Stylize as _},
     text::{Line, Span, Text},
-    widgets::{Block, Cell, Gauge, Paragraph, Row, Table, Widget, Wrap},
+    widgets::{Block, Cell, Gauge, Paragraph, Row, StatefulWidget, Table, Widget, Wrap},
     Terminal, TerminalOptions, Viewport,
 };
 use slog::Drain as _;
-use std::cell::RefCell;
-use std::io::{self, stdout, Write as _};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::{
+    cell::RefCell,
+    io::{self, stdout, Write as _},
+    sync::mpsc::{Receiver, RecvTimeoutError},
+    time::{Duration, Instant},
+};
 use unicode_width::UnicodeWidthStr as _;
 
 enum SlogEntry {
@@ -306,8 +308,52 @@ fn test_status_constraints() -> Vec<Constraint> {
 impl Widget for PrintAbove {
     fn render(self, area: Rect, buf: &mut Buffer) {
         match self {
-            Self::StatusLine(row, constraints) => Table::new([row], constraints).render(area, buf),
+            Self::StatusLine(row, constraints) => {
+                Widget::render(Table::new([row], constraints), area, buf)
+            }
             Self::Output(p) => p.render(area, buf),
+        }
+    }
+}
+
+#[derive(Default)]
+struct ThrobberState {
+    index: usize,
+}
+
+impl ThrobberState {
+    fn advance(&mut self) {
+        self.index = self.index.saturating_add(1)
+    }
+}
+
+struct Throbber<'a> {
+    label: Span<'a>,
+}
+
+impl<'a> Throbber<'a> {
+    fn new(label: impl Into<Span<'a>>) -> Self {
+        Self {
+            label: label.into(),
+        }
+    }
+}
+
+impl<'a> StatefulWidget for Throbber<'a> {
+    type State = ThrobberState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        if area.height < 1 || area.width < 1 {
+            return;
+        }
+
+        const SYMBOLS: [&str; 6] = ["⠧ ", "⠏ ", "⠛ ", "⠹ ", "⠼ ", "⠶ "];
+        state.index %= SYMBOLS.len();
+        let span = Span::raw(SYMBOLS[state.index]);
+        let (col, row) = buf.set_span(area.left(), area.top(), &span, area.width);
+
+        if area.right() > col {
+            buf.set_span(col, row, &self.label, area.right() - col);
         }
     }
 }
@@ -320,7 +366,7 @@ pub struct FancyUi {
     build_output: vt100::Parser,
     print_above: Vec<PrintAbove>,
     enqueue_status: Option<String>,
-    throbber_state: throbber_widgets_tui::ThrobberState,
+    throbber_state: ThrobberState,
     remote_progress: Vec<RemoteProgress>,
     collection_output: String,
     blank: bool,
@@ -381,7 +427,7 @@ impl FancyUi {
                         })?;
                     }
                 }
-                self.throbber_state.calc_next();
+                self.throbber_state.advance();
                 terminal.draw(|f| f.render_widget(&mut *self, f.area()))?;
                 last_tick = Instant::now();
             }
@@ -522,17 +568,20 @@ impl FancyUi {
             .unwrap_or_default();
         let mut running_tests: Vec<_> = self.jobs.running_tests().collect();
         running_tests.sort_by_key(|a| a.1);
-        Table::new(
-            running_tests
-                .into_iter()
-                .rev()
-                .skip(omitted_tests as usize)
-                .map(|(name, t)| format_running_test(name, t)),
-            [Constraint::Fill(1), Constraint::Length(4)],
-        )
-        .block(create_block(format!("Running Tests{}", omitted_trailer)))
-        .gray()
-        .render(area, buf);
+        Widget::render(
+            Table::new(
+                running_tests
+                    .into_iter()
+                    .rev()
+                    .skip(omitted_tests as usize)
+                    .map(|(name, t)| format_running_test(name, t)),
+                [Constraint::Fill(1), Constraint::Length(4)],
+            )
+            .block(create_block(format!("Running Tests{}", omitted_trailer)))
+            .gray(),
+            area,
+            buf,
+        );
     }
 
     fn render_failed_tests(&mut self, area: Rect, buf: &mut Buffer) {
@@ -547,17 +596,20 @@ impl FancyUi {
             .unwrap_or_default();
         let mut failed_tests: Vec<_> = self.jobs.failed_tests().collect();
         failed_tests.sort_by_key(|j| &j.name);
-        Table::new(
-            failed_tests
-                .into_iter()
-                .rev()
-                .skip(omitted_tests as usize)
-                .map(format_failed_test),
-            [Constraint::Fill(1), Constraint::Length(4)],
-        )
-        .block(create_block(format!("Failed Tests{}", omitted_trailer)))
-        .gray()
-        .render(area, buf);
+        Widget::render(
+            Table::new(
+                failed_tests
+                    .into_iter()
+                    .rev()
+                    .skip(omitted_tests as usize)
+                    .map(format_failed_test),
+                [Constraint::Fill(1), Constraint::Length(4)],
+            )
+            .block(create_block(format!("Failed Tests{}", omitted_trailer)))
+            .gray(),
+            area,
+            buf,
+        );
     }
 
     fn render_build_output(&mut self, area: Rect, buf: &mut Buffer) {
@@ -667,14 +719,8 @@ impl FancyUi {
     }
 
     fn render_enqueue_status(&mut self, area: Rect, buf: &mut Buffer) {
-        use ratatui::widgets::StatefulWidget;
-
         let status = self.enqueue_status.as_ref().unwrap();
-        let t = throbber_widgets_tui::Throbber::default()
-            .label(status.clone())
-            .throbber_set(throbber_widgets_tui::BRAILLE_SIX_DOUBLE)
-            .use_type(throbber_widgets_tui::WhichUse::Spin);
-        StatefulWidget::render(t, area, buf, &mut self.throbber_state);
+        StatefulWidget::render(Throbber::new(status), area, buf, &mut self.throbber_state);
     }
 
     fn render_remote_progress(&mut self, area: Rect, buf: &mut Buffer) {
