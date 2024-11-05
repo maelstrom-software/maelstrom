@@ -7,7 +7,7 @@ use crate::{
     heap::{Heap, HeapDeps, HeapIndex},
     root::{Root, RootBuf},
 };
-use anyhow::{Error, Result};
+use anyhow::{bail, Error, Result};
 use bytesize::ByteSize;
 use fs::{FileType, Fs, Metadata};
 use maelstrom_base::{JobId, Sha256Digest};
@@ -32,6 +32,9 @@ const CACHEDIR_TAG: &str = "CACHEDIR.TAG";
 const CACHEDIR_TAG_CONTENTS: [u8; 43] = *b"Signature: 8a477f597d28d172789f06886806bc55";
 const CACHEDIR_TAG_CONTENTS_LEN: usize = CACHEDIR_TAG_CONTENTS.len();
 const CACHEDIR_TAG_CONTENTS_LEN_U64: u64 = CACHEDIR_TAG_CONTENTS_LEN as u64;
+const LOCK_FILE: &str = "lock";
+const REMOVING: &str = "removing";
+const SHA256: &str = "sha256";
 
 /// Type returned from [`Cache::get_artifact`].
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -305,6 +308,7 @@ pub struct CacheDir;
 pub struct EntryPath;
 
 struct CachedirTagPath;
+struct LockFilePath;
 struct RemovingRoot;
 struct RemovingPath;
 struct TmpDir;
@@ -315,7 +319,7 @@ struct SizeFile;
 /// Manage a directory of downloaded, extracted artifacts. Coordinate fetching of these artifacts,
 /// and removing them when they are no longer in use and the amount of space used by the directory
 /// has grown too large.
-pub struct Cache<FsT, KeyT: Key, GetStrategyT: GetStrategy> {
+pub struct Cache<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> {
     fs: FsT,
     root: RootBuf<CacheDir>,
     removing: RootBuf<RemovingRoot>,
@@ -327,6 +331,7 @@ pub struct Cache<FsT, KeyT: Key, GetStrategyT: GetStrategy> {
     bytes_used_target: u64,
     getting: usize,
     log: Logger,
+    _lock_file: FsT::FileLock,
 }
 
 impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategyT> {
@@ -346,12 +351,19 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
         log_initial_message_at_info: bool,
     ) -> Result<(Self, TempFileFactory<FsT>)> {
         let cachedir_tag = root.join::<CachedirTagPath>(CACHEDIR_TAG);
-        let removing = root.join::<RemovingRoot>("removing");
-        let sha256 = root.join::<Sha256Dir>("sha256");
+        let lock_file_path = root.join::<LockFilePath>(LOCK_FILE);
+        let removing = root.join::<RemovingRoot>(REMOVING);
+        let sha256 = root.join::<Sha256Dir>(SHA256);
         let tmp = root.join::<TmpDir>("tmp");
 
         // First, make sure the root directory exists.
         fs.mkdir_recursively(&root)?;
+
+        // Next, get an exclusive lock on the lock file.
+        let Some(lock_file) = fs.possibly_create_file_and_try_exclusive_lock(&lock_file_path)?
+        else {
+            bail!("lock file {lock_file_path:?} is held by a different process");
+        };
 
         // Next, see if the `CACHEDIR.TAG` file exists and is correctly formed. We use this to
         // decide if this is a "new style" cache directory that can be re-used across invocations.
@@ -370,10 +382,13 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
         };
 
         let (cache, temp_file_factory) = if preserve_directory_contents {
-            Self::new_preserve_directory_contents(fs, root, removing, tmp, sha256, size, log)
+            Self::new_preserve_directory_contents(
+                fs, lock_file, root, removing, tmp, sha256, size, log,
+            )
         } else {
             Self::new_clear_directory_contents(
                 fs,
+                lock_file,
                 root,
                 cachedir_tag,
                 removing,
@@ -404,6 +419,7 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
     #[allow(clippy::too_many_arguments)]
     fn new_clear_directory_contents(
         fs: FsT,
+        lock_file: FsT::FileLock,
         root: RootBuf<CacheDir>,
         cachedir_tag: RootBuf<CachedirTagPath>,
         removing: RootBuf<RemovingRoot>,
@@ -416,7 +432,7 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
         ensure_removing_directory(&fs, &root, &removing)?;
 
         // Next, remove everything else in the cache directory.
-        remove_all_from_directory_except(&fs, &removing, &root, ["removing"])?;
+        remove_all_from_directory_except(&fs, &removing, &root, [LOCK_FILE, REMOVING])?;
 
         // Finally, create all of the files all directories that should be there.
         fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS)?;
@@ -438,6 +454,7 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
             bytes_used: 0,
             bytes_used_target: size.into(),
             log,
+            _lock_file: lock_file,
         };
         let temp_file_factory = TempFileFactory { fs, tmp };
         Ok((cache, temp_file_factory))
@@ -446,6 +463,7 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
     #[allow(clippy::too_many_arguments)]
     fn new_preserve_directory_contents(
         fs: FsT,
+        lock_file: FsT::FileLock,
         root: RootBuf<CacheDir>,
         removing: RootBuf<RemovingRoot>,
         tmp: RootBuf<TmpDir>,
@@ -461,7 +479,7 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
             &fs,
             &removing,
             &root,
-            ["removing", "sha256", CACHEDIR_TAG],
+            [LOCK_FILE, REMOVING, SHA256, CACHEDIR_TAG],
         )?;
 
         // Next, create the sha256 and tmp directories.
@@ -560,6 +578,7 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
             bytes_used,
             bytes_used_target: size.into(),
             log,
+            _lock_file: lock_file,
         };
 
         cache.possibly_remove_some_can_error()?;
@@ -1650,6 +1669,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                     "0000000000000001" {
                         foo(b"foo"),
@@ -1673,6 +1693,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                 },
                 sha256 {
@@ -1693,6 +1714,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                 },
                 sha256 {
@@ -1721,6 +1743,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                     "0000000000000001" {
                         foo(b"bar"),
@@ -1752,6 +1775,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                 },
                 sha256 {
@@ -1777,6 +1801,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                 },
                 sha256 {
@@ -1809,6 +1834,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                     "0000000000000001" {
                         foo(b"bar"),
@@ -1842,6 +1868,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                 },
                 sha256 {
@@ -1869,6 +1896,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                 },
                 sha256 {
@@ -1957,6 +1985,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                 },
                 sha256 {
@@ -2009,6 +2038,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                     "0000000000000002" {
                         foo(b"more foo contents"),
@@ -2087,6 +2117,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                     "0000000000000001" {
                         foo(b"more foo contents"),
@@ -2158,6 +2189,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                     "0000000000000001" {
                         foo(b"more foo contents"),
@@ -2249,6 +2281,7 @@ mod tests {
         fixture.assert_fs(fs! {
             z {
                 "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
                 removing {
                     "0000000000000002" {
                         foo(b"more foo contents"),
@@ -2304,5 +2337,116 @@ mod tests {
         fixture.assert_bytes_used(257);
         fixture.get_artifact(apple!(2), jid!(1), GetArtifact::Success);
         fixture.get_artifact(apple!(5), jid!(1), GetArtifact::Success);
+    }
+
+    #[test]
+    fn new_without_cachedir_tag_with_lock_file_contends() {
+        let fixture = Fixture::new(
+            1000,
+            fs! {
+                z {
+                    "lock"(b""),
+                },
+            },
+        );
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
+                removing {},
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        let Err(err) = Cache::<test::Fs, TestKey, TestGetStrategy>::new(
+            fixture.fs.clone(),
+            "/z".parse().unwrap(),
+            ByteSize::b(1).into(),
+            Logger::root(Discard, o!()),
+            false,
+        ) else {
+            panic!("expected error");
+        };
+
+        assert_eq!(
+            err.to_string(),
+            "lock file \"/z/lock\" is held by a different process"
+        );
+    }
+
+    #[test]
+    fn new_without_cachedir_tag_without_lock_file_contends() {
+        let fixture = Fixture::new(1000, fs! {});
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
+                removing {},
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs([]);
+
+        let Err(err) = Cache::<test::Fs, TestKey, TestGetStrategy>::new(
+            fixture.fs.clone(),
+            "/z".parse().unwrap(),
+            ByteSize::b(1).into(),
+            Logger::root(Discard, o!()),
+            false,
+        ) else {
+            panic!("expected error");
+        };
+
+        assert_eq!(
+            err.to_string(),
+            "lock file \"/z/lock\" is held by a different process"
+        );
+    }
+
+    #[test]
+    fn new_with_cachedir_tag_with_lock_file_contends() {
+        let fixture = Fixture::new(
+            1000,
+            fs! {
+                z {
+                    "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                    "lock"(b""),
+                    removing {},
+                    sha256 {
+                        apple {},
+                        orange {},
+                    },
+                    tmp {},
+                },
+            },
+        );
+        fixture.assert_pending_recursive_rmdirs([
+            "/z/removing/0000000000000002",
+            "/z/removing/0000000000000003",
+        ]);
+
+        let Err(err) = Cache::<test::Fs, TestKey, TestGetStrategy>::new(
+            fixture.fs.clone(),
+            "/z".parse().unwrap(),
+            ByteSize::b(1).into(),
+            Logger::root(Discard, o!()),
+            false,
+        ) else {
+            panic!("expected error");
+        };
+
+        assert_eq!(
+            err.to_string(),
+            "lock file \"/z/lock\" is held by a different process"
+        );
     }
 }
