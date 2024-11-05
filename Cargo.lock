@@ -3592,6 +3592,7 @@ version = "0.13.0-dev"
 dependencies = [
  "anstyle",
  "anyhow",
+ "assert_matches",
  "async-trait",
  "async-walkdir",
  "byteorder",

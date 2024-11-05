@@ -1,32 +1,15 @@
 use super::Metadata;
+use fs2::FileExt as _;
 use std::{
     ffi::OsString,
     fmt::Debug,
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::{self, ErrorKind, Read as _, Write as _},
     os::unix::fs as unix_fs,
     path::{Path, PathBuf},
     thread,
 };
 use tempfile::{self, NamedTempFile};
-
-#[derive(Debug)]
-pub struct TempFile(tempfile::TempPath);
-
-impl super::TempFile for TempFile {
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-#[derive(Debug)]
-pub struct TempDir(tempfile::TempDir);
-
-impl super::TempDir for TempDir {
-    fn path(&self) -> &Path {
-        self.0.path()
-    }
-}
 
 /// The standard implementation of CacheFs that uses [std] and [rand].
 #[derive(Clone)]
@@ -65,6 +48,30 @@ impl super::Fs for Fs {
 
     fn create_file(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         File::create_new(path)?.write_all(contents)
+    }
+
+    type FileLock = FileLock;
+
+    fn possibly_create_file_and_try_exclusive_lock(
+        &self,
+        path: &Path,
+    ) -> io::Result<Option<FileLock>> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Some(FileLock { _file: file })),
+            Err(err) => {
+                if err.kind() == fs2::lock_contended_error().kind() {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            }
+        }
     }
 
     fn symlink(&self, target: &Path, link: &Path) -> io::Result<()> {
@@ -117,5 +124,27 @@ impl super::Fs for Fs {
 
     fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> io::Result<()> {
         fs::rename(temp_dir.0.into_path(), target)
+    }
+}
+
+pub struct FileLock {
+    _file: File,
+}
+
+#[derive(Debug)]
+pub struct TempFile(tempfile::TempPath);
+
+impl super::TempFile for TempFile {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+#[derive(Debug)]
+pub struct TempDir(tempfile::TempDir);
+
+impl super::TempDir for TempDir {
+    fn path(&self) -> &Path {
+        self.0.path()
     }
 }

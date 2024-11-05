@@ -172,6 +172,26 @@ impl super::Fs for Fs {
         self.state.borrow_mut().create_file(path, contents)
     }
 
+    type FileLock = FileLock;
+
+    fn possibly_create_file_and_try_exclusive_lock(
+        &self,
+        path: &Path,
+    ) -> Result<Option<Self::FileLock>> {
+        match self
+            .state
+            .borrow_mut()
+            .possibly_create_file_and_try_exclusive_lock(path)
+        {
+            Err(err) => Err(err),
+            Ok(None) => Ok(None),
+            Ok(Some(component_path)) => Ok(Some(FileLock {
+                state: self.state.clone(),
+                component_path,
+            })),
+        }
+    }
+
     fn symlink(&self, target: &Path, link: &Path) -> Result<()> {
         self.state.borrow_mut().symlink(target, link)
     }
@@ -234,6 +254,20 @@ impl error::Error for Error {}
 
 pub type Result<T> = result::Result<T, Error>;
 
+#[derive(Debug)]
+pub struct FileLock {
+    state: Rc<RefCell<State>>,
+    component_path: ComponentPath,
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        self.state
+            .borrow_mut()
+            .release_exclusive_lock(&self.component_path);
+    }
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct TempFile(PathBuf);
 
@@ -281,6 +315,7 @@ struct State {
     root: Entry,
     last_random_number: u64,
     recursive_rmdirs: HashSet<String>,
+    exclusive_locks: HashSet<ComponentPath>,
     fail: bool,
 }
 
@@ -291,6 +326,7 @@ impl State {
             root,
             last_random_number: 0,
             recursive_rmdirs: Default::default(),
+            exclusive_locks: Default::default(),
             fail: false,
         }
     }
@@ -383,7 +419,7 @@ impl State {
             FollowSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
             FollowSymlinks::DanglingSymlink => Err(Error::NoEnt),
             FollowSymlinks::FileAncestor => Err(Error::NotDir),
-            FollowSymlinks::FoundFile(contents) => {
+            FollowSymlinks::FoundFile(contents, _) => {
                 let to_read = contents.len().min(contents_out.len());
                 contents_out[..to_read].copy_from_slice(&contents[..to_read]);
                 Ok(to_read)
@@ -394,7 +430,7 @@ impl State {
     fn read_dir(&self, path: &Path) -> Result<impl Iterator<Item = Result<(OsString, Metadata)>>> {
         self.check_failure()?;
         match self.root.lookup_leaf(path)? {
-            FollowSymlinks::FoundFile(_) | FollowSymlinks::FileAncestor => Err(Error::NotDir),
+            FollowSymlinks::FoundFile(_, _) | FollowSymlinks::FileAncestor => Err(Error::NotDir),
             FollowSymlinks::DanglingSymlink => Err(Error::NoEnt),
             FollowSymlinks::FoundDirectory(entries, _) => Ok(entries
                 .iter()
@@ -413,6 +449,43 @@ impl State {
             Entry::file(contents),
         );
         Ok(())
+    }
+
+    fn possibly_create_file_and_try_exclusive_lock(
+        &mut self,
+        path: &Path,
+    ) -> Result<Option<ComponentPath>> {
+        self.check_failure()?;
+        let component_path = match self.root.lookup(path) {
+            Lookup::NotFound | Lookup::DanglingSymlink => Err(Error::NoEnt),
+            Lookup::FileAncestor => Err(Error::NotDir),
+            Lookup::Found(entry, component_path) => {
+                match self.root.follow_leaf_symlink(entry, component_path) {
+                    FollowSymlinks::DanglingSymlink => Err(Error::NoEnt),
+                    FollowSymlinks::FileAncestor => Err(Error::NotDir),
+                    FollowSymlinks::FoundDirectory(_, _) => Err(Error::IsDir),
+                    FollowSymlinks::FoundFile(_, component_path) => Ok(component_path),
+                }
+            }
+            Lookup::FoundParent(parent_component_path) => {
+                let file_name = path.file_name().unwrap();
+                self.root.append_entry_to_directory(
+                    &parent_component_path,
+                    file_name,
+                    Entry::file(b""),
+                );
+                Ok(parent_component_path.push(file_name.to_str().unwrap()))
+            }
+        }?;
+        if self.exclusive_locks.insert(component_path.clone()) {
+            Ok(Some(component_path))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn release_exclusive_lock(&mut self, component_path: &ComponentPath) {
+        self.exclusive_locks.remove(component_path).assert_is_true();
     }
 
     fn symlink(&mut self, target: &Path, link: &Path) -> Result<()> {
@@ -715,7 +788,7 @@ impl Entry {
                             }
                         }
                     }
-                    FollowSymlinks::FoundFile(_) | FollowSymlinks::FileAncestor => {
+                    FollowSymlinks::FoundFile(_, _) | FollowSymlinks::FileAncestor => {
                         return Lookup::FileAncestor;
                     }
                     FollowSymlinks::DanglingSymlink => {
@@ -740,7 +813,7 @@ impl Entry {
                     return FollowSymlinks::FoundDirectory(entries, component_path);
                 }
                 Self::File { contents } => {
-                    return FollowSymlinks::FoundFile(contents);
+                    return FollowSymlinks::FoundFile(contents, component_path);
                 }
                 Self::Symlink { target } => {
                     component_path = component_path.pop().0;
@@ -865,7 +938,7 @@ enum Lookup<'state> {
 
 enum FollowSymlinks<'state> {
     /// The symlink resolved to a file entry. This contains the entry and the path to it.
-    FoundFile(&'state [u8]),
+    FoundFile(&'state [u8], ComponentPath),
 
     /// The symlink resolved to a directory entry. This contains the entry and the path to it.
     FoundDirectory(&'state BTreeMap<String, Entry>, ComponentPath),
@@ -886,7 +959,7 @@ enum FollowSymlinks<'state> {
 /// will generally resolve a [`Path`] into a [`ComponentPath`] at the beginning of an operation,
 /// and then operate using the [`ComponentPath`] for the rest of the operation. The assumption is
 /// that one we've got it, we can always resolve a [`ComponentPath`] into an [`Entry`].
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 struct ComponentPath(Vec<String>);
 
 impl ComponentPath {
@@ -950,6 +1023,7 @@ mod tests {
         super::{Fs as _, TempDir as _, TempFile as _},
         *,
     };
+    use assert_matches::assert_matches;
     use std::collections::HashMap;
 
     mod fs_macro {
@@ -1365,6 +1439,114 @@ mod tests {
         fs.set_failure(true);
         assert_eq!(
             fs.create_file(Path::new("/foo"), b"contents"),
+            Err(Error::Test)
+        );
+    }
+
+    #[test]
+    fn possibly_create_file_and_try_exclusive_lock_lookup() {
+        let fs = Fs::new(fs! {
+            symlink -> "subdir/foo",
+            subdir {
+                foo(b"abcd"),
+            },
+            subdir_symlink -> "subdir",
+            dangle -> "nowhere",
+            bad_symlink -> "subdir/foo/bar",
+        });
+
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/subdir")),
+            Err(Error::IsDir)
+        );
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/subdir_symlink")),
+            Err(Error::IsDir)
+        );
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/dangle/and/more")),
+            Err(Error::NoEnt)
+        );
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/does/not/exist")),
+            Err(Error::NoEnt)
+        );
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/dangle")),
+            Err(Error::NoEnt)
+        );
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/subdir/foo/bar")),
+            Err(Error::NotDir)
+        );
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/bad_symlink")),
+            Err(Error::NotDir)
+        );
+
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/subdir/foo")),
+            Ok(Some(_))
+        );
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/symlink")),
+            Ok(Some(_))
+        );
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/subdir/bar")),
+            Ok(Some(_))
+        );
+
+        fs.assert_entry(
+            Path::new("/subdir"),
+            fs! {
+                foo(b"abcd"),
+                bar(b""),
+            },
+        );
+    }
+
+    #[test]
+    fn possibly_create_file_and_try_exclusive_lock_contend() {
+        let fs = Fs::new(fs! {
+            symlink -> "foo",
+            foo(b"abcd"),
+        });
+
+        let file_lock = fs
+            .possibly_create_file_and_try_exclusive_lock(Path::new("/foo"))
+            .unwrap()
+            .unwrap();
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/foo")),
+            Ok(None)
+        );
+        drop(file_lock);
+        let file_lock = fs
+            .possibly_create_file_and_try_exclusive_lock(Path::new("/foo"))
+            .unwrap()
+            .unwrap();
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/symlink")),
+            Ok(None)
+        );
+        drop(file_lock);
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/symlink")),
+            Ok(Some(_))
+        );
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/bar")),
+            Ok(Some(_))
+        );
+    }
+
+    #[test]
+    fn possibly_create_file_and_try_exclusive_lock_forced_failure() {
+        let fs = Fs::new(fs! {});
+        fs.set_failure(true);
+        assert_matches!(
+            fs.possibly_create_file_and_try_exclusive_lock(Path::new("/foo")),
             Err(Error::Test)
         );
     }

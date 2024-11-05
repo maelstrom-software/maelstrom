@@ -47,6 +47,7 @@ walkdir.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]
+assert_matches.workspace = true
 concat-idents.workspace = true
 indoc.workspace = true
 maelstrom-simex.workspace = true

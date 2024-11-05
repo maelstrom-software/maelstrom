@@ -44,6 +44,20 @@ pub trait Fs: Clone {
     /// `path`, but its parent directory must be exist.
     fn create_file(&self, path: &Path, contents: &[u8]) -> Result<(), Self::Error>;
 
+    /// Type used to hold an exclusive lock on a file open. The lock should be released when the
+    /// `FileLock` is dropped.
+    type FileLock;
+
+    /// Try to obtain an exclusive lock on `path`. If `path` doesn't exist, this method will try to
+    /// first create an empty file at `path`. If a file exists at `path` and can be opened, or if
+    /// new a file can be created at `path`, then this method will return `Ok`. Then, if an
+    /// exclusive file lock can be obtained, `Ok(Some)` will be returned, otherwise `Ok(None)`. If
+    /// an other error is encountered, then `Err` will be returned.
+    fn possibly_create_file_and_try_exclusive_lock(
+        &self,
+        path: &Path,
+    ) -> Result<Option<Self::FileLock>, Self::Error>;
+
     /// Create a symlink at `link` that points to `target`. There must not be any file or directory
     /// at `link`, but its parent directory must exist.
     fn symlink(&self, target: &Path, link: &Path) -> Result<(), Self::Error>;
