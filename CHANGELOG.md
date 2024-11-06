@@ -11,6 +11,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test runners send SIGKILL to their build processes when exiting early due to `stop-after`.
 - cargo-maelstrom passes `--no-deps` to `cargo metadata` command.
 - cargo-maelstrom now displays warnings after the test summary.
+- The cache code for the worker and broker has been combined and improved. Some
+  notable improvements:
+  - The worker and broker now share the same code.
+    \[[234](https://github.com/maelstrom-software/maelstrom/issues/234)\]
+  - The worker now reuses the cache every time it is invoked. Since this
+    includes the local worker, this means that startup times should be much
+    better for local-only mode.
+    \[[214](https://github.com/maelstrom-software/maelstrom/issues/214)\]
+  - The cache directories now adhere to the cachedir protocol.
+    \[[241](https://github.com/maelstrom-software/maelstrom/issues/241)\]
+  - The cache directories now versioned. If an old version is detected at
+    startup, its contents will be discarded.
+    \[[216](https://github.com/maelstrom-software/maelstrom/issues/216)\]
+    \[[164](https://github.com/maelstrom-software/maelstrom/issues/164)\]
+  - A lock file has been added to the cache directory to ensure that only one
+    worker or broker uses a cache directory at a time.
+    \[[215](https://github.com/maelstrom-software/maelstrom/issues/215)\]
+- Pushed a change to [Ratatui](https://github.com/ratatui/ratatui), our TUI
+  library, to minimize flickering for the CLIs. We've updated our dependencies
+  to use the new version of Ratatui with the change.
+  \[[1342](https://github.com/ratatui/ratatui/pull/1341)\]
+- Change socket code to use keepalive and nodelay options. This should make
+  communication faster and also cause broker and worker to detect connections
+  that silently die.
+  \[[3](https://github.com/maelstrom-software/maelstrom/issues/3)\]
+  \[[4](https://github.com/maelstrom-software/maelstrom/issues/4)\]
+- The connections to the broker from the worker and client for sending
+  artifacts are now reused. Before, each artifact, no matter how small, would
+  result in a new TCP connection.
+  \[[7](https://github.com/maelstrom-software/maelstrom/issues/7)\]
+- The test-runner code has been rewritten to eliminate a few bugs but also to
+  be more testable and extensible.
+  \[[414](https://github.com/maelstrom-software/maelstrom/issues/414)\]
+- We now track file descriptors to minimize the chance of running out of them.
 
 ## [0.12.0] - 2024-09-12
 
