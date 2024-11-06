@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Test runners send SIGKILL to their build processes when exiting early due to `stop-after`.
+  \[[414](https://github.com/maelstrom-software/maelstrom/issues/414)\]
 - cargo-maelstrom passes `--no-deps` to `cargo metadata` command.
 - cargo-maelstrom now displays warnings after the test summary.
 - The cache code for the worker and broker has been combined and improved. Some
@@ -43,7 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   \[[7](https://github.com/maelstrom-software/maelstrom/issues/7)\]
 - The test-runner code has been rewritten to eliminate a few bugs but also to
   be more testable and extensible.
-  \[[414](https://github.com/maelstrom-software/maelstrom/issues/414)\]
 - We now track file descriptors to minimize the chance of running out of them.
 
 ## [0.12.0] - 2024-09-12
