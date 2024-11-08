@@ -137,3 +137,74 @@ on an image.
 
 Then, we say that the default value for `include_shared_libraries` is `true` if
 an only if the test's container is not based on a image.
+
+# Caching
+
+We want to avoid re-evaluating command layers both within a single execution of
+a test runner, as well as between executions. To do so, we need to come up with
+a caching scheme that will let us reuse already-built command layers.
+
+To that end, we introduce the concepts of "expressionization" and "input
+caching", and show how they will be used to implement caching.
+
+Named containers, and more specifically the "pointer concept they introduce,
+means that a container specification is no longer just a simple tree, but
+instead is a directed, acyclic graph (DAG). We can imagine creating an
+expression language to define a tree, but not a DAG. However, for our purposes,
+it will be sufficient to transform any given DAG into a tree by copying the the
+referred-to portion. We can then imagine this being a single expression.
+
+For example, imagine that we had the following:
+```
+A = 2 * 3
+B = A + 21
+C = A - 10
+D = B * C
+```
+
+To "expressionize" `D`, we would recursively expand things to get:
+```
+D = (A + 21) * (A - 10)
+D = ((2 * 3) + 21) * ((2 * 3) - 10)
+```
+
+At this point, `D` is an expression tree.
+
+We can imagine doing the same thing for any given container specification. We
+could expand any container specification to an abstract syntax tree (AST).
+Command layers would result in nested container specifications.
+
+We can then define an input hash operation that takes an AST and turns it into
+a checksum. For each type of AST node type, we define how the input hash is
+computed, assuming all sub-expressions can be recursively turned into input
+hashes. The result is that we can come up with a single input hash for a given
+container specification.
+
+There are some details about how this input hash is computed. Mostly, it'll be
+based on the actual syntax of the specification, but when it comes to layers
+that inspect the file system, it will have to check the file system.
+
+So, on to some specifics. For `image` fields, this will be the checksum already
+stored in the `maelstrom-container-tags.lock` file.
+
+For command layers, it will be computed by hashing the input parameters to the
+command layer along with the input container.
+
+For stubs and symlinks layers, the hash will just be derived from the layer specification.
+
+For tar, paths, and shared-library-dependencies layers, the hash will be
+derived from the specification as well as the actual values of the referenced
+files.
+
+For glob layers, the hash will be derived from the specifiation's
+`PrefixOptions` as well as the actual files' contents and their locations in
+the the file system. If two input hashes match for a glob layer, then the two
+glob layers must evaluate to the same set of files with the same contents. For
+glob layers, it's probably okay to rely on the order provided from the file
+system, as long as it's relatively stable. It's okay to get false negatives: we
+just will have to recompute the layer. We can't accept false positives.
+
+For any layer that references files in the file system, the we can additionally
+cache results for the a single run of the test runner. In other words, we can
+cache the input hashes of these layers within the context of a single process.
+We don't worry about files changing out from under the test runner.
