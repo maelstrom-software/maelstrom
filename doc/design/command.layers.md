@@ -28,7 +28,7 @@ command layer. In its simplest form it would look like this:
 layers = [
     { command = "a-command-with-no-arguments" },
     { command = ["a-command-with-arguments", "first-argument", "second argument"]},
-}
+]
 ```
 
 In its more complex form, each command layer could have these optional fields:
@@ -111,7 +111,7 @@ We propose adding another new layer type: `container`. This is really a
 layers = [
     { container = "container-1" },
     { container = "container-2", recursive = true },
-}
+]
 ```
 
 In the first use, with out the `recursive` field set to `true`, it expands to
