@@ -1,14 +1,15 @@
 +++
-title = "Spawning Processes on Linux"
+title = "Implementing a Container Runtime Part 1: Spawning Processes on Linux"
 authors = ["Remi Bernotavicius <remi@abort.cc>"]
-date = 2024-10-10
+date = 2024-11-12
 weight = 998
 draft = true
 +++
 
 Spawning child processes using your programming language's provided APIs can be very straightforward
-in a modern language. For example in Rust [`std::process:Command`](https://doc.rust-lang.org/std/process/struct.Command.html) provides an
-easy interface.
+in a modern language. For example Rust's
+[`std::process:Command`](https://doc.rust-lang.org/std/process/struct.Command.html) provides an easy
+interface:
 
 ```rust
 use anyhow::Result;
@@ -25,22 +26,24 @@ fn std_command_spawn_wait() -> Result<()> {
 }
 ```
 
-These APIs make it really easy to get things right and are the first thing someone might reach for
-(rightly so!). Sometimes though you maybe find yourself needing to do things that just aren't
-supported by these simple APIs (we found ourselves in this position working on Maelstrom). For
-example maybe you want to use a `pidfd`, or do something with namespaces. Then you might need to dig
-deeper and discover what the underlying APIs are capable of.
+These APIs make it really easy to get things right. They are the first thing you should reach for.
+Sometimes though you maybe find yourself needing to do things that just aren't supported by these
+simple APIs. We found ourselves in this position working on Maelstrom, since we run each test in its
+own set of Linux namespaces. Maybe you too want to do something with namespaces, or maybe you want
+to use a `pidfd`. If that's the case, then you might need to dig deeper and discover what the
+underlying APIs are capable of.
 
 Of course, once you dig deeper, you might quickly find yourself confused. On Linux there are several
-APIs that all spawn a child process. We have `fork`, `vfork`, `posix_spawn` and `clone`. So which
+APIs that all spawn a child process. There is `fork`, `vfork`, `posix_spawn` and `clone`. So which
 one do you pick? How are they different?
 
-This article is going to try to answer those questions. Also by the end I hope to provide a simple
-flow chart for ease of use should you find yourself trying to decide.
+This article tries to answer these questions. Also, at the end I provide a simple
+flow chart that I hope makes it easy for you to decide which approach to take.
 
-In code examples I'm going to be writing Rust (what Maelstrom is written in) and using the
+The code examples I provide will be in Rust (what Maelstrom is written in.) They will use the
 [`maelstrom_linux`](https://github.com/maelstrom-software/maelstrom/tree/main/crates/maelstrom-linux)
-crate which is our own wrapper around `libc` and the kernel. I hope to provide generally applicable
+crate which is our own wrapper around `libc` and the kernel. (This was my preference, but you may
+want to use something else more supported) I hope to provide generally applicable
 information in this article, but I will be approaching it from a perspective of using Rust.
 
 ## The `fork` and `exec` model
@@ -48,10 +51,13 @@ The classic way of spawning a child process on Linux and Unix is to use two sysc
 `fork` and `exec`. `fork` creates a copy of the current process. `exec` loads and executes a new
 program in the current process.
 
-Splitting it up into two different syscalls allows the developer to do a bunch of
-set-up in the child process just by writing regular code. (Having this be separated as two calls
-which each do one thing, and the ability to write this set-up as plain code is sometimes referred to
-as the "elegance" of `fork`)
+Splitting it up into two different syscalls allows the developer to do a bunch of setup in the child
+process just by writing regular code. (Having this be separated as two calls with each doing one
+thing, and the ability to write this setup as plain code is sometimes referred to as the "elegance"
+of `fork`)
+
+The following code snippet runs `echo` with no arguments which acts as a kind of no-op for
+benchmarking purposes.
 
 ```rust
 use anyhow::Result;
@@ -74,9 +80,9 @@ fn fork_execve_wait(dev_null: &impl linux::AsFd) -> Result<()> {
 }
 ```
 
-I will refer to this set-up period in the child before calling `exec` as the "housekeeping". In this
-housekeeping code you can imagine doing a number of different things, most of them are syscalls.
-This can include configuring file descriptors, session, user, group, or namespaces for the child.
+I will refer to this setup period in the child before calling `exec` as the "housekeeping". In this
+housekeeping code you can imagine doing a number of different things, most of them being syscalls.
+This can include configuring file descriptors, sessions, users, groups, or namespaces for the child.
 Also, since `exec` is a separate function, you can choose to not call it and instead just continue
 executing the current program.
 
@@ -125,7 +131,7 @@ our zygote via IPC to spawn any further children we want.
 ```
 
 The zygote remains single-threaded so we can write the housekeeping as before. Having to communicate
-with the zygote is a little annoying, but makes things easy to get right at least from a fork-safety
+with the zygote is a little annoying, but makes things easy to get right at least from a fork safety
 perspective.
 
 ## `fork` is Too Slow!
@@ -142,15 +148,14 @@ memory mapped. It would be great to avoid this slow process of copying the virtu
 altogether which is slow even if your program is not using much memory (like the zygote is.)
 
 ## `vfork` to the Rescue
-The `vfork` syscall is like fork except it doesn't copy the parent's virtual memory mappings and
+The `vfork` syscall is like `fork` except it doesn't copy the parent's virtual memory mappings and
 instead shares the same memory space. The call is very similar to `fork` and seems like it could be
-a drop-in replacement, but its own `man` page cautions against this saying its undefined behavior to
-do anything other than a very restricted housekeeping.
+a drop-in replacement, but its own `man` page cautions against this (see below.)
 
-The child process thread is sharing the exact same stack memory as the parent calling thread (writes
-in the child appear in the parent). Having two different threads (or in this case processes) use the
-same stack at the same time simultaneously, doesn't work. So the calling thread in the parent
-process is suspended until the child calls `exec` or `_exit`.
+The child process thread shares the exact same memory as the parent calling thread (writes in the
+child appear in the parent) including the stack. Having two different threads (or in this case
+processes) use the same stack at the same time simultaneously like this, doesn't work. So the
+calling thread in the parent process is suspended until the child calls `exec` or `_exit`.
 
 ```ascii-art
 +---------+               +---------+         +-------+
@@ -177,17 +182,41 @@ process is suspended until the child calls `exec` or `_exit`.
      |                         |                  |
 ```
 
-The weird thing about this is that the same stack memory will experience the CPU returning from the
-`vfork` call twice (see the two "Returns from vfork" in the diagram). This can really mess things up
-in the calling function in a way that your compiler is not okay with. Apparently C compilers have a
-(at best questionable IMO) way of dealing with it, but we can't call this function from Rust unless
-we use the unstable [`ffi_return_twice`](https://github.com/rust-lang/rust/issues/58314) attribute.
+(We didn’t include a code snippet because we can’t call this function from Rust unless we use the
+unstable [`ffi_return_twice`](https://github.com/rust-lang/rust/issues/58314) attribute)
 
-The weirdness of the "double return" aside, the issue of "fork safety" gets a lot harder with
-`vfork`. To be safe you really can't do too much in the housekeeping as its `man` page says, so we
-loose a lot of the benefit of `fork`. If you try anyway the things that can break include the stuff
-from regular "fork safety" but now you have to also worry about changing memory in the parent in
-ways you didn't intend.
+`vfork` has two new sources of potential issues. The first is the fact that we are sharing the same
+memory space. Care must be taken to not unintentionally modify memory in the parent in some way that
+will cause issues. This drawback is tied directly to the performance improvement we want (avoiding
+copying the virtual memory mappings.)
+
+The second source of potential issues is the fact that the child ends up executing on the same stack
+as the parent. This won’t work in general without some form of support from the compiler. This is
+because we "return twice" from the `vfork` call (see the diagram above.) The gcc
+[`returns_twice`](https://gcc.gnu.org/onlinedocs/gcc-4.7.2/gcc/Function-Attributes.html) attribute
+does this, but it may not provide as much support as you might expect.
+
+Here is a quote from tldp about this <https://tldp.org/HOWTO/Secure-Programs-HOWTO/avoid-vfork.html>
+
+“...it's actually fairly tricky for a process to not interfere with its parent, especially in
+high-level languages. The "not interfering" requirement applies to the actual machine code
+generated, and many compilers generate hidden temporaries and other code structures that cause
+unintended interference. The result: programs using vfork(2) can easily fail when the code changes
+or even when compiler versions change.”
+
+So what are you allowed to do in the housekeeping exactly? Let’s check what the man page says about
+this.
+
+“..the behavior is undefined if the process created by vfork() .. calls any other function before
+successfully calling `_exit(2)` or one of the `exec(3)` family of functions.“
+
+This isn’t very unhelpful either. Clearly calling `_exit` or `exec` (but not every form of `exec` it
+turns out) is okay, but what other housekeeping is okay in practice? It’s not entirely clear, and
+researching across the internet leads to many others showing a fair amount of anxiety about this
+problem
+
+On Linux, the behavior of vfork can be recreated using `clone`, (which we will cover later) in a way
+where we don’t have to share a stack, I believe this is always preferable.
 
 ## `posix_spawn`
 Another way to try to get the speed up we want would be to use `posix_spawn`. The latest version of
@@ -212,19 +241,20 @@ fn posix_spawn_wait(dev_null: &impl linux::AsFd) -> Result<()> {
 
 Calling `posix_spawn` comes with a whole lot less caveats and things to be careful of when compared
 to `fork` and `vfork`. It comes at the cost of loosing the "elegance" of fork. You configure the
-"housekeeping" by using a struct. It is a kind of "housekeeping script" we create which executes
+housekeeping by using a struct. It is a kind of "housekeeping script" we create which executes
 after the fork.
 
-The downside of using `posix_spawn` is that we are locked to whatever its "housekeeping script"
-provides to control our "housekeeping." (See the `posix_spawn` man page for a complete list of
+The downside of using `posix_spawn` is that out housekeeping is limited to doing whatever things
+the housekeeping script has support for. (See the `posix_spawn` man page for a complete list of
 things.)
 
 ## `clone` the API Underpinning it All
-The aforementioned `fork`, `vfork`, and `posix_spawn` all actually call `clone` under the hood in
-glibc. It has the functionality of the previous APIs and bunch of other features.
+The aforementioned `fork`, and `posix_spawn` actually call `clone` under the hood in
+glibc. Also `vfork` inside the kernel ends up calling into the kernel's `clone` code.
+It has the functionality of the previous APIs and bunch of other features.
 
-It can be a fair bit more difficult to use though. Unlike `vfork` it allows the parent to allocate a
-separate stack for the child process, avoiding the "double return" issue.
+It can be a fair bit more difficult to use though. Although, unlike `vfork` it allows the parent to
+allocate a separate stack for the child process, avoiding some of the issues with `vfork`.
 
 ```rust
 use anyhow::Result;
@@ -281,8 +311,8 @@ The `CLONE_VFORK` flag suspends the parent until the child calls `exec` or exits
 allows us to not worry about waiting for the right moment to free the child's stack memory in the
 parent. If we don't pass this flag though, we are able to do other things in the parent in parallel,
 but then we need someway to know when we can free the stack memory. One way is to share a pipe or
-socket with the child which is `CLOEXEC`, once the child calls `exec` (or exits) so too should this
-pipe or socket.
+socket with the child which is `CLOEXEC`, once the child calls `exec` (or exits) this pipe or socket
+will close.
 
 <img src="clone graph.png" alt="Graph of Fork Calls" width="60%"/>
 
@@ -301,8 +331,8 @@ ran clone(CLONE_VM | CLONE_VFORK) + execve + wait 10000 times in 2.883697173s (a
 ```
 
 Rust's `std::process::Command` comes in at the slowest even though it should be comparable to
-`posix_spawn`, this could be due to differences in the housekeeping or other things the code is
-doing.
+`posix_spawn`, this could be due to differences in the housekeeping or other things the `std` code
+is doing.
 
 ## Conclusion
 Lets tie it all together with a flow graph about what to use.
@@ -348,3 +378,6 @@ Lets tie it all together with a flow graph about what to use.
 ## Addendum
 You can check out working code for the snippets and benchmarks
 [here](https://github.com/maelstrom-software/maelstrom/blob/main/crates/xtask/src/clone_benchmark.rs)
+
+Be sure to check back for the next part of this article series where we dive into the code in
+Maelstrom that calls `clone`.
