@@ -215,8 +215,8 @@ turns out) is okay, but what other housekeeping is okay in practice? It’s not 
 researching across the internet leads to many others showing a fair amount of anxiety about this
 problem
 
-On Linux, the behavior of vfork can be recreated using `clone`, (which we will cover later) in a way
-where we don’t have to share a stack, I believe this is always preferable.
+On Linux, the behavior of `vfork` can be recreated using `clone`, (which we will cover later) in a
+way where we don’t have to share a stack, I believe this is always preferable.
 
 ## `posix_spawn`
 Another way to try to get the speed up we want would be to use `posix_spawn`. The latest version of
