@@ -10,28 +10,6 @@ use std::{
     str::{self, FromStr},
 };
 
-#[derive(Debug, PartialEq)]
-pub struct TestDirective<TestFilterT> {
-    pub filter: Option<TestFilterT>,
-    pub container: TestContainer,
-    pub include_shared_libraries: Option<bool>,
-    pub timeout: Option<Option<Timeout>>,
-    pub ignore: Option<bool>,
-}
-
-// The derived Default will put a TestFilterT: Default bound on the implementation
-impl<TestFilterT> Default for TestDirective<TestFilterT> {
-    fn default() -> Self {
-        Self {
-            filter: None,
-            container: Default::default(),
-            include_shared_libraries: None,
-            timeout: None,
-            ignore: None,
-        }
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]
 enum DirectiveField {
@@ -76,46 +54,55 @@ impl DirectiveField {
     }
 }
 
-struct DirectiveVisitor<TestFilterT> {
-    value: TestDirective<TestFilterT>,
+#[derive(Debug, PartialEq)]
+pub struct TestDirective<TestFilterT> {
+    pub filter: Option<TestFilterT>,
+    pub container: TestContainer,
+    pub include_shared_libraries: Option<bool>,
+    pub timeout: Option<Option<Timeout>>,
+    pub ignore: Option<bool>,
 }
 
-impl<TestFilterT> Default for DirectiveVisitor<TestFilterT> {
+// The derived Default will put a TestFilterT: Default bound on the implementation
+impl<TestFilterT> Default for TestDirective<TestFilterT> {
     fn default() -> Self {
         Self {
-            value: Default::default(),
+            filter: None,
+            container: Default::default(),
+            include_shared_libraries: None,
+            timeout: None,
+            ignore: None,
         }
     }
 }
 
-impl<TestFilterT: FromStr> DirectiveVisitor<TestFilterT>
+impl<TestFilterT: FromStr> TestDirective<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
-    fn fill_entry<'de, A>(&mut self, ident: DirectiveField, map: &mut A) -> Result<(), A::Error>
+    fn set_field<'de, A>(&mut self, ident: DirectiveField, map: &mut A) -> Result<(), A::Error>
     where
         A: de::MapAccess<'de>,
     {
         match ident {
             DirectiveField::Filter => {
-                self.value.filter = Some(
+                self.filter = Some(
                     map.next_value::<String>()?
                         .parse()
                         .map_err(de::Error::custom)?,
                 );
             }
             DirectiveField::IncludeSharedLibraries => {
-                self.value.include_shared_libraries = Some(map.next_value()?);
+                self.include_shared_libraries = Some(map.next_value()?);
             }
             DirectiveField::Timeout => {
-                self.value.timeout = Some(Timeout::new(map.next_value()?));
+                self.timeout = Some(Timeout::new(map.next_value()?));
             }
             DirectiveField::Ignore => {
-                self.value.ignore = Some(map.next_value()?);
+                self.ignore = Some(map.next_value()?);
             }
             c => {
-                self.value
-                    .container
+                self.container
                     .set_field(c.into_container_field().unwrap(), map)?;
             }
         }
@@ -123,11 +110,11 @@ where
     }
 }
 
-impl<'de, TestFilterT: FromStr> de::Visitor<'de> for DirectiveVisitor<TestFilterT>
+impl<'de, TestFilterT: FromStr> de::Visitor<'de> for TestDirective<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
-    type Value = TestDirective<TestFilterT>;
+    type Value = Self;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "TestDirective")
@@ -138,10 +125,10 @@ where
         A: de::MapAccess<'de>,
     {
         while let Some(key) = map.next_key()? {
-            self.fill_entry(key, &mut map)?;
+            self.set_field(key, &mut map)?;
         }
 
-        Ok(self.value)
+        Ok(self)
     }
 }
 
@@ -153,7 +140,7 @@ where
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_any(DirectiveVisitor::<TestFilterT>::default())
+        deserializer.deserialize_any(Self::default())
     }
 }
 
