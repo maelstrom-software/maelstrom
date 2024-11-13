@@ -78,14 +78,12 @@ impl DirectiveField {
 
 struct DirectiveVisitor<TestFilterT> {
     value: TestDirective<TestFilterT>,
-    container: TestContainer,
 }
 
 impl<TestFilterT> Default for DirectiveVisitor<TestFilterT> {
     fn default() -> Self {
         Self {
             value: Default::default(),
-            container: Default::default(),
         }
     }
 }
@@ -116,7 +114,8 @@ where
                 self.value.ignore = Some(map.next_value()?);
             }
             c => {
-                self.container
+                self.value
+                    .container
                     .set_field(c.into_container_field().unwrap(), map)?;
             }
         }
@@ -142,7 +141,6 @@ where
             self.fill_entry(key, &mut map)?;
         }
 
-        self.value.container = self.container;
         Ok(self.value)
     }
 }
