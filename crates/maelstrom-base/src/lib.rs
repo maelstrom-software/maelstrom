@@ -25,7 +25,7 @@ use std::{
     str::{self, FromStr},
     time::Duration,
 };
-use strum::EnumIter;
+use strum::{EnumIter, EnumCount};
 
 /// ID of a client connection. These share the same ID space as [`WorkerId`] and [`MonitorId`].
 #[derive(
@@ -92,7 +92,7 @@ pub enum JobDevice {
     Zero,
 }
 
-#[derive(Debug, Deserialize, EnumSetType, Serialize)]
+#[derive(Debug, Deserialize, EnumCount, EnumSetType, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[enumset(serialize_repr = "list")]
 pub enum JobDeviceForTomlAndJson {
@@ -142,7 +142,7 @@ pub struct NonRootUtf8PathBufTryFromError;
 
 impl fmt::Display for NonRootUtf8PathBufTryFromError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "a path of \"/\" not allowed")
+        write!(f, "a path of \"/\" is not allowed")
     }
 }
 
@@ -839,7 +839,7 @@ mod tests {
     }
 
     #[test]
-    fn from_u32() {
+    fn sha256_digest_from_u32() {
         assert_eq!(
             Sha256Digest::from(0x12345678u32),
             Sha256Digest([
@@ -850,7 +850,7 @@ mod tests {
     }
 
     #[test]
-    fn from_u64() {
+    fn sha256_digest_from_u64() {
         assert_eq!(
             Sha256Digest::from(0x123456789ABCDEF0u64),
             Sha256Digest([
@@ -861,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn from_str_ok() {
+    fn sha256_digest_from_str_ok() {
         assert_eq!(
             "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
                 .parse::<Sha256Digest>()
@@ -875,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn from_str_wrong_length() {
+    fn sha256_digest_from_str_wrong_length() {
         assert_eq!(
             "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0"
                 .parse::<Sha256Digest>()
@@ -897,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn from_str_bad_chars() {
+    fn sha256_digest_from_str_bad_chars() {
         assert_eq!(
             " 01112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
                 .parse::<Sha256Digest>()
@@ -913,13 +913,13 @@ mod tests {
     }
 
     #[test]
-    fn display_round_trip() {
+    fn sha256_digest_display_round_trip() {
         let s = "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f";
         assert_eq!(s, s.parse::<Sha256Digest>().unwrap().to_string());
     }
 
     #[test]
-    fn display_padding() {
+    fn sha256_digest_display_padding() {
         let d = "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
             .parse::<Sha256Digest>()
             .unwrap();
@@ -934,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn debug() {
+    fn sha256_digest_debug() {
         let d = "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
             .parse::<Sha256Digest>()
             .unwrap();
@@ -950,6 +950,67 @@ mod tests {
             format!("{d:#?}"),
             "Sha256Digest(101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f)"
         );
+    }
+
+    trait AssertError {
+        fn assert_error(&self, expected: &str);
+    }
+
+    impl AssertError for toml::de::Error {
+        fn assert_error(&self, expected: &str) {
+            let message = self.message();
+            assert!(message.starts_with(expected), "message: {message}");
+        }
+    }
+
+    #[track_caller]
+    fn deserialize_value<T: for<'a> Deserialize<'a>>(file: &str) -> T {
+        T::deserialize(toml::de::ValueDeserializer::new(file)).unwrap()
+    }
+
+    #[track_caller]
+    fn deserialize_value_error<T: for<'a> Deserialize<'a> + Debug>(file: &str) -> toml::de::Error {
+        match T::deserialize(toml::de::ValueDeserializer::new(file)) {
+            Err(err) => err,
+            Ok(val) => panic!("expected a toml error but instead got value: {val:?}"),
+        }
+    }
+
+    #[test]
+    fn job_device_for_toml_and_json_enum_set_deserializes_from_list() {
+        let devices: EnumSet<JobDeviceForTomlAndJson> = deserialize_value(r#"["full", "null"]"#);
+        let devices: EnumSet<_> = devices.into_iter().map(Into::<JobDevice>::into).collect();
+        assert_eq!(devices, enum_set!(JobDevice::Full | JobDevice::Null));
+    }
+
+    #[test]
+    fn job_device_for_toml_and_json_enum_set_deserialize_unknown_field() {
+        deserialize_value_error::<EnumSet<JobDeviceForTomlAndJson>>(r#"["bull", "null"]"#)
+            .assert_error("unknown variant `bull`");
+    }
+
+    #[test]
+    fn job_device_for_toml_and_json_and_job_device_match() {
+        for job_device in JobDevice::iter() {
+            let repr = format!(r#""{}""#, format!("{job_device:?}").to_kebab_case());
+            assert_eq!(
+                JobDevice::from(deserialize_value::<JobDeviceForTomlAndJson>(&repr)),
+                job_device
+            );
+        }
+        assert_eq!(JobDevice::iter().count(), JobDeviceForTomlAndJson::COUNT);
+    }
+
+    #[test]
+    fn non_root_utf8_path_buf_deserialize_not_root() {
+        let path_buf: NonRootUtf8PathBuf = deserialize_value(r#""foo""#);
+        assert_eq!(path_buf, NonRootUtf8PathBuf("foo".into()));
+    }
+
+    #[test]
+    fn non_root_utf8_path_buf_deserialize_root() {
+        deserialize_value_error::<NonRootUtf8PathBuf>(r#""/""#)
+            .assert_error(r#"a path of "/" is not allowed"#);
     }
 
     #[test]
@@ -1028,52 +1089,6 @@ mod tests {
 
         let spec = spec.allocate_tty(None::<JobTty>);
         assert_eq!(spec.must_be_run_locally(), false);
-    }
-
-    trait AssertError {
-        fn assert_error(&self, expected: &str);
-    }
-
-    impl AssertError for toml::de::Error {
-        fn assert_error(&self, expected: &str) {
-            let message = self.message();
-            assert!(message.starts_with(expected), "message: {message}");
-        }
-    }
-
-    fn deserialize_value<T: for<'a> Deserialize<'a>>(file: &str) -> T {
-        T::deserialize(toml::de::ValueDeserializer::new(file)).unwrap()
-    }
-
-    fn deserialize_value_error<T: for<'a> Deserialize<'a> + Debug>(file: &str) -> toml::de::Error {
-        match T::deserialize(toml::de::ValueDeserializer::new(file)) {
-            Err(err) => err,
-            Ok(val) => panic!("expected a toml error but instead got value: {val:?}"),
-        }
-    }
-
-    #[test]
-    fn enumset_job_device_for_toml_and_json_deserialized_as_list() {
-        let devices: EnumSet<JobDeviceForTomlAndJson> = deserialize_value(r#"["full", "null"]"#);
-        let devices: EnumSet<_> = devices.into_iter().map(Into::<JobDevice>::into).collect();
-        assert_eq!(devices, enum_set!(JobDevice::Full | JobDevice::Null));
-    }
-
-    #[test]
-    fn enumset_job_device_for_toml_and_json_deserialize_unknown_field() {
-        deserialize_value_error::<EnumSet<JobDeviceForTomlAndJson>>(r#"["bull", "null"]"#)
-            .assert_error("unknown variant `bull`");
-    }
-
-    #[test]
-    fn job_device_for_toml_and_json_and_job_device_match() {
-        for job_device in JobDevice::iter() {
-            let repr = format!(r#""{}""#, format!("{job_device:?}").to_kebab_case());
-            assert_eq!(
-                JobDevice::from(deserialize_value::<JobDeviceForTomlAndJson>(&repr)),
-                job_device
-            );
-        }
     }
 
     #[test]

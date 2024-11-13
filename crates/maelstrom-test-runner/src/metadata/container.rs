@@ -401,7 +401,7 @@ mod tests {
             assert!(parse_test_container(&format!("mounts = [ {mount} ]"))
                 .unwrap_err()
                 .to_string()
-                .contains("a path of \"/\" not allowed"));
+                .contains(r#"a path of "/" is not allowed"#));
         }
     }
 }
