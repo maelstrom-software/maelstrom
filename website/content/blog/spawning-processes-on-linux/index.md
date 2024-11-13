@@ -347,25 +347,25 @@ Let's tie it all together with a flow graph about what to use.
                                     |
                                     V
                            +---------------------+
-                           |performance critical?|
-                           +---------------------+
-                                    |no
-                                    |
-                                    V
-           +------+    yes   +----------------+
-           | fork | <--------|single threaded?|
-           +------+          +----------------+
-                                    |no
-                                    |
-                                    V
-        +------+   yes   +-----------------------+
-        |zygote|<--------|foolproof to implement?|
-        +------+         +-----------------------+
-                                    |no
-                                    |
-                                    V
-                +------+   yes   +------+
-                |vfork |<--------|POSIX?|
+                           |performance critical?|--\
+                           +---------------------+  |
+                                    |no             |
+                                    |               | yes
+                                    V               |
+           +------+    yes   +----------------+     |
+           | fork | <--------|single threaded?|     |
+           +------+          +----------------+     |
+                                    |no             |
+                                    |               |
+                                    V               |
+        +------+   yes   +-----------------------+  |
+        |zygote|<--------|foolproof to implement?|  |
+        +------+         +-----------------------+  |
+                                    |no             |
+                                    |               |
+                                    V               |
+                +------+   yes   +------+           |
+                |vfork |<--------|POSIX?|<----------/
                 +------+         +------+
                                     |no
                                     |
