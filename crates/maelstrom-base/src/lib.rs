@@ -25,7 +25,7 @@ use std::{
     str::{self, FromStr},
     time::Duration,
 };
-use strum::{EnumIter, EnumCount};
+use strum::{EnumCount, EnumIter};
 
 /// ID of a client connection. These share the same ID space as [`WorkerId`] and [`MonitorId`].
 #[derive(
@@ -1014,6 +1014,106 @@ mod tests {
     }
 
     #[test]
+    fn job_mount_for_toml_and_json_deserialize() {
+        let job_mounts: Vec<JobMountForTomlAndJson> = deserialize_value(
+            r#"[
+                { type = "bind", mount_point = "/mnt", local_path = "/a", read_only = true },
+                { type = "devices", devices = [ "tty", "shm" ] },
+                { type = "devpts", mount_point = "/dev/pts" },
+                { type = "mqueue", mount_point = "/dev/mqueue" },
+                { type = "proc", mount_point = "/proc" },
+                { type = "sys", mount_point = "/sys" },
+                { type = "tmp", mount_point = "/tmp" },
+            ]"#,
+        );
+        let job_mounts: Vec<JobMount> = job_mounts.into_iter().map(|mount| mount.into()).collect();
+        assert_eq!(
+            job_mounts,
+            vec![
+                JobMount::Bind {
+                    mount_point: "/mnt".into(),
+                    local_path: "/a".into(),
+                    read_only: true,
+                },
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Tty | JobDevice::Shm),
+                },
+                JobMount::Devpts {
+                    mount_point: "/dev/pts".into(),
+                },
+                JobMount::Mqueue {
+                    mount_point: "/dev/mqueue".into(),
+                },
+                JobMount::Proc {
+                    mount_point: "/proc".into(),
+                },
+                JobMount::Sys {
+                    mount_point: "/sys".into(),
+                },
+                JobMount::Tmp {
+                    mount_point: "/tmp".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn job_mount_for_toml_and_json_deserialize_invalid() {
+        deserialize_value_error::<JobMountForTomlAndJson>(
+            r#"{ type = "foo", mount_point = "/mnt" }"#,
+        )
+        .assert_error("unknown variant `foo`");
+    }
+
+    #[test]
+    fn job_mount_for_toml_and_json_deserialize_bind_mount_missing_read_only() {
+        let job_mount: JobMountForTomlAndJson =
+            deserialize_value(r#"{ type = "bind", mount_point = "/mnt", local_path = "/a" }"#);
+        let job_mount: JobMount = job_mount.into();
+        assert_eq!(
+            job_mount,
+            JobMount::Bind {
+                mount_point: "/mnt".into(),
+                local_path: "/a".into(),
+                read_only: false,
+            },
+        );
+    }
+
+    #[test]
+    fn job_mount_for_toml_and_json_deserialize_root_mount_point() {
+        let mounts = [
+            r#"{ type = "bind", mount_point = "/", local_path = "/a" }"#,
+            r#"{ type = "devpts", mount_point = "/" }"#,
+            r#"{ type = "mqueue", mount_point = "/" }"#,
+            r#"{ type = "proc", mount_point = "/" }"#,
+            r#"{ type = "sys", mount_point = "/" }"#,
+            r#"{ type = "tmp", mount_point = "/" }"#,
+        ];
+        for mount in mounts {
+            deserialize_value_error::<JobMountForTomlAndJson>(mount)
+                .assert_error(r#"a path of "/" is not allowed"#);
+        }
+    }
+
+    #[test]
+    fn job_network_deserialize() {
+        assert_eq!(
+            deserialize_value::<JobNetwork>(r#""disabled""#),
+            JobNetwork::Disabled
+        );
+        assert_eq!(
+            deserialize_value::<JobNetwork>(r#""loopback""#),
+            JobNetwork::Loopback
+        );
+        assert_eq!(
+            deserialize_value::<JobNetwork>(r#""local""#),
+            JobNetwork::Local
+        );
+        deserialize_value_error::<JobNetwork>(r#""foo""#).assert_error("unknown variant `foo`");
+    }
+
+    #[test]
     fn job_spec_must_be_run_locally_network() {
         let spec = JobSpec::new(
             "foo",
@@ -1089,20 +1189,5 @@ mod tests {
 
         let spec = spec.allocate_tty(None::<JobTty>);
         assert_eq!(spec.must_be_run_locally(), false);
-    }
-
-    #[test]
-    fn bind_mount_no_read_only() {
-        let job_mount: JobMountForTomlAndJson =
-            deserialize_value(r#"{ type = "bind", mount_point = "/mnt", local_path = "/a" }"#);
-        let job_mount: JobMount = job_mount.into();
-        assert_eq!(
-            job_mount,
-            JobMount::Bind {
-                mount_point: Utf8PathBuf::from("/mnt"),
-                local_path: Utf8PathBuf::from("/a"),
-                read_only: false,
-            }
-        );
     }
 }
