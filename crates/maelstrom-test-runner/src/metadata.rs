@@ -3,7 +3,7 @@ mod directive;
 
 use crate::TestFilter;
 use anyhow::{anyhow, Context as _, Result};
-use container::{NamedTestContainer, TestContainer};
+use container::TestContainer;
 use directive::TestDirective;
 use maelstrom_base::{GroupId, JobMount, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::{
@@ -13,6 +13,7 @@ use maelstrom_client::{
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
 use serde::Deserialize;
 use std::{
+    collections::HashMap,
     fmt::Display,
     str::{self, FromStr},
 };
@@ -23,7 +24,7 @@ pub struct AllMetadata<TestFilterT> {
     #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
     directives: Vec<TestDirective<TestFilterT>>,
     #[serde(default)]
-    containers: Vec<NamedTestContainer>,
+    containers: HashMap<String, TestContainer>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -262,6 +263,7 @@ mod tests {
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maelstrom_util::root::RootBuf;
     use maplit::btreemap;
+    use maplit::hashmap;
     use slog::Drain as _;
     use std::io;
     use std::sync::{Arc, Mutex};
@@ -321,7 +323,7 @@ mod tests {
             res,
             AllMetadata {
                 directives: vec![TestDirective::default()],
-                containers: vec![]
+                containers: hashmap! {},
             }
         );
 
@@ -346,7 +348,7 @@ mod tests {
             res,
             AllMetadata {
                 directives: vec![TestDirective::default()],
-                containers: vec![]
+                containers: hashmap! {},
             }
         );
         assert_eq!(log_lines.len(), 0, "{log_lines:?}");
@@ -357,7 +359,7 @@ mod tests {
         assert_eq!(
             AllMetadata::<SimpleFilter> {
                 directives: vec![],
-                containers: vec![]
+                containers: hashmap! {},
             }
             .get_metadata_for_test(&"mod".into(), &"mod".into(), ("foo", &NoCaseMetadata))
             .unwrap(),
