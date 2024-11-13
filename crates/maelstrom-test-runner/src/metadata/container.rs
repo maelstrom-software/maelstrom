@@ -12,7 +12,6 @@ use std::{
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]
 pub enum ContainerField {
-    Name,
     Network,
     EnableWritableFileSystem,
     User,
@@ -46,7 +45,6 @@ pub struct TestContainer {
 
 #[derive(Default)]
 pub struct TestContainerVisitor {
-    name: Option<String>,
     image: Option<String>,
     network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
@@ -67,9 +65,6 @@ impl TestContainerVisitor {
         A: de::MapAccess<'de>,
     {
         match ident {
-            ContainerField::Name => {
-                self.name = Some(map.next_value()?);
-            }
             ContainerField::Network => {
                 self.network = Some(map.next_value()?);
             }
