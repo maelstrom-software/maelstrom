@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 use anyhow::Result;
-use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
+use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{incompatible, Image, ImageUse, LayerSpec, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{
@@ -173,16 +173,15 @@ mod tests {
         toml::from_str(file).map_err(Error::new)
     }
 
-    fn assert_toml_error(err: Error, expected: &str) {
+    #[track_caller]
+    fn container_error_test(toml: &str, expected: &str) {
+        let err = parse_test_container(toml).unwrap_err();
         let err = err.downcast_ref::<TomlError>().unwrap();
         let message = err.message();
         assert!(message.starts_with(expected), "message: {message}");
     }
 
-    fn container_error_test(toml: &str, error: &str) {
-        assert_toml_error(parse_test_container(toml).unwrap_err(), error);
-    }
-
+    #[track_caller]
     fn container_parse_test(toml: &str, expected: TestContainer) {
         assert_eq!(parse_test_container(toml).unwrap(), expected);
     }
@@ -225,5 +224,184 @@ mod tests {
                 ..Default::default()
             },
         );
+    }
+
+    #[test]
+    fn mounts() {
+        container_parse_test(
+            indoc! {r#"
+                mounts = [
+                    { type = "proc", mount_point = "/proc" },
+                    { type = "bind", mount_point = "/bind", local_path = "/local" },
+                    { type = "bind", mount_point = "/bind2", local_path = "/local2", read_only = true },
+                    { type = "devices", devices = ["null", "zero"] },
+                ]
+            "#},
+            TestContainer {
+                mounts: Some(vec![
+                    JobMountForTomlAndJson::Proc {
+                        mount_point: non_root_utf8_path_buf!("/proc"),
+                    },
+                    JobMountForTomlAndJson::Bind {
+                        mount_point: non_root_utf8_path_buf!("/bind"),
+                        local_path: utf8_path_buf!("/local"),
+                        read_only: false,
+                    },
+                    JobMountForTomlAndJson::Bind {
+                        mount_point: non_root_utf8_path_buf!("/bind2"),
+                        local_path: utf8_path_buf!("/local2"),
+                        read_only: true,
+                    },
+                    JobMountForTomlAndJson::Devices {
+                        devices: enum_set!(
+                            JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
+                        ),
+                    },
+                ]),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn added_mounts() {
+        container_parse_test(
+            indoc! {r#"
+                added_mounts = [
+                    { type = "proc", mount_point = "/proc" },
+                    { type = "bind", mount_point = "/bind", local_path = "/local", read_only = true },
+                    { type = "devices", devices = ["null", "zero"] },
+                ]
+            "#},
+            TestContainer {
+                added_mounts: vec![
+                    JobMountForTomlAndJson::Proc {
+                        mount_point: non_root_utf8_path_buf!("/proc"),
+                    },
+                    JobMountForTomlAndJson::Bind {
+                        mount_point: non_root_utf8_path_buf!("/bind"),
+                        local_path: utf8_path_buf!("/local"),
+                        read_only: true,
+                    },
+                    JobMountForTomlAndJson::Devices {
+                        devices: enum_set!(
+                            JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
+                        ),
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn added_mounts_after_mounts() {
+        container_parse_test(
+            indoc! {r#"
+                mounts = [ { type = "proc", mount_point = "/proc" } ]
+                added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
+            "#},
+            TestContainer {
+                mounts: Some(vec![JobMountForTomlAndJson::Proc {
+                    mount_point: non_root_utf8_path_buf!("/proc"),
+                }]),
+                added_mounts: vec![JobMountForTomlAndJson::Tmp {
+                    mount_point: non_root_utf8_path_buf!("/tmp"),
+                }],
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn mounts_after_added_mounts() {
+        container_parse_test(
+            indoc! {r#"
+                added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
+                mounts = [ { type = "proc", mount_point = "/proc" } ]
+            "#},
+            TestContainer {
+                mounts: Some(vec![JobMountForTomlAndJson::Proc {
+                    mount_point: non_root_utf8_path_buf!("/proc"),
+                }]),
+                added_mounts: vec![JobMountForTomlAndJson::Tmp {
+                    mount_point: non_root_utf8_path_buf!("/tmp"),
+                }],
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn unknown_field_in_simple_mount() {
+        container_error_test(
+            indoc! {r#"
+                mounts = [ { type = "proc", mount_point = "/proc", unknown = "true" } ]
+            "#},
+            "unknown field `unknown`, expected",
+        );
+    }
+
+    #[test]
+    fn unknown_field_in_bind_mount() {
+        container_error_test(
+            indoc! {r#"
+                mounts = [ { type = "bind", mount_point = "/bind", local_path = "/a", unknown = "true" } ]
+            "#},
+            "unknown field `unknown`, expected",
+        );
+    }
+
+    #[test]
+    fn missing_field_in_simple_mount() {
+        container_error_test(
+            indoc! {r#"
+                mounts = [ { type = "proc" } ]
+            "#},
+            "missing field `mount_point`",
+        );
+    }
+
+    #[test]
+    fn missing_field_in_bind_mount() {
+        container_error_test(
+            indoc! {r#"
+                mounts = [ { type = "bind", mount_point = "/bind" } ]
+            "#},
+            "missing field `local_path`",
+        );
+    }
+
+    #[test]
+    fn missing_flags_field_in_bind_mount_is_okay() {
+        container_parse_test(
+            indoc! {r#"
+                mounts = [ { type = "bind", mount_point = "/bind", local_path = "/a" } ]
+            "#},
+            TestContainer {
+                mounts: Some(vec![JobMountForTomlAndJson::Bind {
+                    mount_point: non_root_utf8_path_buf!("/bind"),
+                    local_path: utf8_path_buf!("/a"),
+                    read_only: false,
+                }]),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn mount_point_of_root_is_disallowed() {
+        let mounts = [
+            r#"{ type = "bind", mount_point = "/", local_path = "/a" }"#,
+            r#"{ type = "proc", mount_point = "/" }"#,
+            r#"{ type = "tmp", mount_point = "/" }"#,
+            r#"{ type = "sys", mount_point = "/" }"#,
+        ];
+        for mount in mounts {
+            assert!(parse_test_container(&format!("mounts = [ {mount} ]"))
+                .unwrap_err()
+                .to_string()
+                .contains("a path of \"/\" not allowed"));
+        }
     }
 }

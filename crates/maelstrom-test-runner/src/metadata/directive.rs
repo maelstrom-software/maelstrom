@@ -223,6 +223,25 @@ mod tests {
     }
 
     #[test]
+    fn nonzero_timeout() {
+        directive_parse_test(
+            r#"
+            filter = "package.equals(package1) && test.equals(test1)"
+            timeout = 1
+            "#,
+            TestDirective {
+                filter: Some(
+                    "package.equals(package1) && test.equals(test1)"
+                        .parse()
+                        .unwrap(),
+                ),
+                timeout: Some(Timeout::new(1)),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
     fn zero_timeout() {
         directive_parse_test(
             r#"
@@ -239,204 +258,6 @@ mod tests {
                 ..Default::default()
             },
         );
-    }
-
-    #[test]
-    fn mounts() {
-        directive_or_container_parse_test(
-            indoc! {r#"
-                mounts = [
-                    { type = "proc", mount_point = "/proc" },
-                    { type = "bind", mount_point = "/bind", local_path = "/local" },
-                    { type = "bind", mount_point = "/bind2", local_path = "/local2", read_only = true },
-                    { type = "devices", devices = ["null", "zero"] },
-                ]
-            "#},
-            TestDirective {
-                container: TestContainer {
-                    mounts: Some(vec![
-                        JobMountForTomlAndJson::Proc {
-                            mount_point: non_root_utf8_path_buf!("/proc"),
-                        },
-                        JobMountForTomlAndJson::Bind {
-                            mount_point: non_root_utf8_path_buf!("/bind"),
-                            local_path: utf8_path_buf!("/local"),
-                            read_only: false,
-                        },
-                        JobMountForTomlAndJson::Bind {
-                            mount_point: non_root_utf8_path_buf!("/bind2"),
-                            local_path: utf8_path_buf!("/local2"),
-                            read_only: true,
-                        },
-                        JobMountForTomlAndJson::Devices {
-                            devices: enum_set!(
-                                JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
-                            ),
-                        },
-                    ]),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn added_mounts() {
-        directive_or_container_parse_test(
-            indoc! {r#"
-                added_mounts = [
-                    { type = "proc", mount_point = "/proc" },
-                    { type = "bind", mount_point = "/bind", local_path = "/local", read_only = true },
-                    { type = "devices", devices = ["null", "zero"] },
-                ]
-            "#},
-            TestDirective {
-                container: TestContainer {
-                    added_mounts: vec![
-                        JobMountForTomlAndJson::Proc {
-                            mount_point: non_root_utf8_path_buf!("/proc"),
-                        },
-                        JobMountForTomlAndJson::Bind {
-                            mount_point: non_root_utf8_path_buf!("/bind"),
-                            local_path: utf8_path_buf!("/local"),
-                            read_only: true,
-                        },
-                        JobMountForTomlAndJson::Devices {
-                            devices: enum_set!(
-                                JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
-                            ),
-                        },
-                    ],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn added_mounts_after_mounts() {
-        directive_or_container_parse_test(
-            indoc! {r#"
-                mounts = [ { type = "proc", mount_point = "/proc" } ]
-                added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
-            "#},
-            TestDirective {
-                container: TestContainer {
-                    mounts: Some(vec![JobMountForTomlAndJson::Proc {
-                        mount_point: non_root_utf8_path_buf!("/proc"),
-                    }]),
-                    added_mounts: vec![JobMountForTomlAndJson::Tmp {
-                        mount_point: non_root_utf8_path_buf!("/tmp"),
-                    }],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn mounts_after_added_mounts() {
-        directive_or_container_parse_test(
-            indoc! {r#"
-                added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
-                mounts = [ { type = "proc", mount_point = "/proc" } ]
-            "#},
-            TestDirective {
-                container: TestContainer {
-                    mounts: Some(vec![JobMountForTomlAndJson::Proc {
-                        mount_point: non_root_utf8_path_buf!("/proc"),
-                    }]),
-                    added_mounts: vec![JobMountForTomlAndJson::Tmp {
-                        mount_point: non_root_utf8_path_buf!("/tmp"),
-                    }],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn unknown_field_in_simple_mount() {
-        directive_or_container_error_test(
-            indoc! {r#"
-                mounts = [ { type = "proc", mount_point = "/proc", unknown = "true" } ]
-            "#},
-            "unknown field `unknown`, expected",
-        );
-    }
-
-    #[test]
-    fn unknown_field_in_bind_mount() {
-        directive_or_container_error_test(
-            indoc! {r#"
-                mounts = [ { type = "bind", mount_point = "/bind", local_path = "/a", unknown = "true" } ]
-            "#},
-            "unknown field `unknown`, expected",
-        );
-    }
-
-    #[test]
-    fn missing_field_in_simple_mount() {
-        directive_or_container_error_test(
-            indoc! {r#"
-                mounts = [ { type = "proc" } ]
-            "#},
-            "missing field `mount_point`",
-        );
-    }
-
-    #[test]
-    fn missing_field_in_bind_mount() {
-        directive_or_container_error_test(
-            indoc! {r#"
-                mounts = [ { type = "bind", mount_point = "/bind" } ]
-            "#},
-            "missing field `local_path`",
-        );
-    }
-
-    #[test]
-    fn missing_flags_field_in_bind_mount_is_okay() {
-        directive_or_container_parse_test(
-            indoc! {r#"
-                mounts = [ { type = "bind", mount_point = "/bind", local_path = "/a" } ]
-            "#},
-            TestDirective {
-                container: TestContainer {
-                    mounts: Some(vec![JobMountForTomlAndJson::Bind {
-                        mount_point: non_root_utf8_path_buf!("/bind"),
-                        local_path: utf8_path_buf!("/a"),
-                        read_only: false,
-                    }]),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn mount_point_of_root_is_disallowed() {
-        let mounts = [
-            r#"{ type = "bind", mount_point = "/", local_path = "/a" }"#,
-            r#"{ type = "proc", mount_point = "/" }"#,
-            r#"{ type = "tmp", mount_point = "/" }"#,
-            r#"{ type = "sys", mount_point = "/" }"#,
-        ];
-        for mount in mounts {
-            assert!(parse_test_directive(&format!("mounts = [ {mount} ]"))
-                .unwrap_err()
-                .to_string()
-                .contains("a path of \"/\" not allowed"));
-            assert!(parse_test_container(&format!("mounts = [ {mount} ]"))
-                .unwrap_err()
-                .to_string()
-                .contains("a path of \"/\" not allowed"));
-        }
     }
 
     #[test]
