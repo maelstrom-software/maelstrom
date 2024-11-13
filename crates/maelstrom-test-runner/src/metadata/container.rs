@@ -53,11 +53,11 @@ pub struct TestContainerVisitor {
     user: Option<UserId>,
     group: Option<GroupId>,
     layers: Option<PossiblyImage<Vec<LayerSpec>>>,
-    added_layers: Option<Vec<LayerSpec>>,
+    added_layers: Vec<LayerSpec>,
     mounts: Option<Vec<JobMountForTomlAndJson>>,
-    added_mounts: Option<Vec<JobMountForTomlAndJson>>,
+    added_mounts: Vec<JobMountForTomlAndJson>,
     environment: Option<PossiblyImage<BTreeMap<String, String>>>,
-    added_environment: Option<BTreeMap<String, String>>,
+    added_environment: BTreeMap<String, String>,
     working_directory: Option<PossiblyImage<Utf8PathBuf>>,
 }
 
@@ -83,14 +83,10 @@ impl TestContainerVisitor {
                 self.group = Some(map.next_value()?);
             }
             ContainerField::Mounts => {
-                incompatible(
-                    &self.added_mounts,
-                    "field `mounts` cannot be set after `added_mounts`",
-                )?;
                 self.mounts = Some(map.next_value()?);
             }
             ContainerField::AddedMounts => {
-                self.added_mounts = Some(map.next_value()?);
+                self.added_mounts = map.next_value()?;
             }
             ContainerField::Image => {
                 let i = map.next_value::<Image>()?;
@@ -109,20 +105,12 @@ impl TestContainerVisitor {
                                 &self.layers,
                                 "field `image` cannot use `layers` if field `layers` is also set",
                             )?;
-                            incompatible(
-                                &self.added_layers,
-                                "field `image` that uses `layers` cannot be set after `added_layers`",
-                            )?;
                             self.layers = Some(PossiblyImage::Image);
                         }
                         ImageUse::Environment => {
                             incompatible(
                                 &self.environment,
                                 "field `image` cannot use `environment` if field `environment` is also set",
-                            )?;
-                            incompatible(
-                                &self.added_environment,
-                                "field `image` that uses `environment` cannot be set after `added_environment`",
                             )?;
                             self.environment = Some(PossiblyImage::Image);
                         }
@@ -141,28 +129,20 @@ impl TestContainerVisitor {
                     &self.layers,
                     "field `layers` cannot be set after `image` field that uses `layers`",
                 )?;
-                incompatible(
-                    &self.added_layers,
-                    "field `layers` cannot be set after `added_layers`",
-                )?;
                 self.layers = Some(PossiblyImage::Explicit(map.next_value()?));
             }
             ContainerField::AddedLayers => {
-                self.added_layers = Some(map.next_value()?);
+                self.added_layers = map.next_value()?;
             }
             ContainerField::Environment => {
                 incompatible(
                     &self.environment,
                     "field `environment` cannot be set after `image` field that uses `environment`",
                 )?;
-                incompatible(
-                    &self.added_environment,
-                    "field `environment` cannot be set after `added_environment`",
-                )?;
                 self.environment = Some(PossiblyImage::Explicit(map.next_value()?));
             }
             ContainerField::AddedEnvironment => {
-                self.added_environment = Some(map.next_value()?);
+                self.added_environment = map.next_value()?;
             }
         }
         Ok(())
@@ -176,11 +156,11 @@ impl TestContainerVisitor {
             user: self.user,
             group: self.group,
             layers: self.layers,
-            added_layers: self.added_layers.unwrap_or_default(),
+            added_layers: self.added_layers,
             mounts: self.mounts,
-            added_mounts: self.added_mounts.unwrap_or_default(),
+            added_mounts: self.added_mounts,
             environment: self.environment,
-            added_environment: self.added_environment.unwrap_or_default(),
+            added_environment: self.added_environment,
             working_directory: self.working_directory,
         }
     }

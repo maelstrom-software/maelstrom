@@ -181,16 +181,19 @@ mod tests {
         toml::from_str(file).map_err(Error::new)
     }
 
+    #[track_caller]
     fn assert_toml_error(err: Error, expected: &str) {
         let err = err.downcast_ref::<TomlError>().unwrap();
         let message = err.message();
         assert!(message.starts_with(expected), "message: {message}");
     }
 
+    #[track_caller]
     fn directive_error_test(toml: &str, error: &str) {
         assert_toml_error(parse_test_directive(toml).unwrap_err(), error);
     }
 
+    #[track_caller]
     fn directive_or_container_error_test(toml: &str, error: &str) {
         assert_toml_error(parse_test_directive(toml).unwrap_err(), error);
 
@@ -199,10 +202,12 @@ mod tests {
         assert_toml_error(parse_test_container(&toml).unwrap_err(), error);
     }
 
+    #[track_caller]
     fn directive_parse_test(toml: &str, expected: TestDirective<String>) {
         assert_eq!(parse_test_directive(toml).unwrap(), expected);
     }
 
+    #[track_caller]
     fn directive_or_container_parse_test(toml: &str, expected: TestDirective<String>) {
         assert_eq!(parse_test_directive(toml).unwrap(), expected);
         assert_eq!(parse_test_container(&toml).unwrap(), expected.container);
@@ -360,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn mounts_before_added_mounts() {
+    fn added_mounts_after_mounts() {
         directive_or_container_parse_test(
             indoc! {r#"
                 mounts = [ { type = "proc", mount_point = "/proc" } ]
@@ -383,12 +388,23 @@ mod tests {
 
     #[test]
     fn mounts_after_added_mounts() {
-        directive_or_container_error_test(
+        directive_or_container_parse_test(
             indoc! {r#"
                 added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
                 mounts = [ { type = "proc", mount_point = "/proc" } ]
             "#},
-            "field `mounts` cannot be set after `added_mounts`",
+            TestDirective {
+                container: TestContainer {
+                    mounts: Some(vec![JobMountForTomlAndJson::Proc {
+                        mount_point: non_root_utf8_path_buf!("/proc"),
+                    }]),
+                    added_mounts: vec![JobMountForTomlAndJson::Tmp {
+                        mount_point: non_root_utf8_path_buf!("/tmp"),
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         );
     }
 
@@ -959,6 +975,24 @@ mod tests {
     }
 
     #[test]
+    fn layers_after_added_layers() {
+        directive_or_container_parse_test(
+            r#"
+            added_layers = [{ tar = "bar.tar" }]
+            layers = [{ tar = "foo.tar" }]
+            "#,
+            TestDirective {
+                container: TestContainer {
+                    layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                    added_layers: vec![tar_layer!("bar.tar")],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
     fn added_layers_after_image_with_layers() {
         directive_or_container_parse_test(
             r#"
@@ -978,24 +1012,21 @@ mod tests {
     }
 
     #[test]
-    fn layers_after_added_layers() {
-        directive_or_container_error_test(
-            r#"
-            added_layers = [{ tar = "bar.tar" }]
-            layers = [{ tar = "foo.tar" }]
-            "#,
-            "field `layers` cannot be set after `added_layers`",
-        );
-    }
-
-    #[test]
     fn image_with_layers_after_added_layers() {
-        directive_or_container_error_test(
+        directive_or_container_parse_test(
             r#"
-            added_layers = [{ tar = "bar.tar" }]
+            added_layers = [{ tar = "foo.tar" }]
             image = { name = "rust", use = ["layers"] }
             "#,
-            "field `image` that uses `layers` cannot be set after `added_layers`",
+            TestDirective {
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    layers: Some(PossiblyImage::Image),
+                    added_layers: vec![tar_layer!("foo.tar")],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         );
     }
 
@@ -1140,6 +1171,27 @@ mod tests {
     }
 
     #[test]
+    fn environment_after_added_environment() {
+        directive_or_container_parse_test(
+            r#"
+            added_environment = { BAR = "bar" }
+            environment = { FOO = "foo" }
+            "#,
+            TestDirective {
+                container: TestContainer {
+                    environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
+                        string!("FOO"),
+                        string!("foo"),
+                    )]))),
+                    added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
     fn added_environment_after_image_with_environment() {
         directive_or_container_parse_test(
             r#"
@@ -1159,24 +1211,21 @@ mod tests {
     }
 
     #[test]
-    fn environment_after_added_environment() {
-        directive_or_container_error_test(
-            r#"
-            added_environment = { BAR = "bar" }
-            environment = { FOO = "foo" }
-            "#,
-            "field `environment` cannot be set after `added_environment`",
-        );
-    }
-
-    #[test]
     fn image_with_environment_after_added_environment() {
-        directive_or_container_error_test(
+        directive_or_container_parse_test(
             r#"
             added_environment = { BAR = "bar" }
             image = { name = "rust", use = ["environment"] }
             "#,
-            "field `image` that uses `environment` cannot be set after `added_environment`",
+            TestDirective {
+                container: TestContainer {
+                    image: Some(string!("rust")),
+                    environment: Some(PossiblyImage::Image),
+                    added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         );
     }
 }
