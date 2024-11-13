@@ -62,7 +62,7 @@ pub struct TestContainerVisitor {
 }
 
 impl TestContainerVisitor {
-    pub fn fill_entry<'de, A>(&mut self, ident: ContainerField, map: &mut A) -> Result<(), A::Error>
+    pub fn add_field<'de, A>(&mut self, ident: ContainerField, map: &mut A) -> Result<(), A::Error>
     where
         A: de::MapAccess<'de>,
     {
@@ -168,7 +168,7 @@ impl TestContainerVisitor {
         Ok(())
     }
 
-    pub fn into_value(self) -> TestContainer {
+    pub fn build(self) -> TestContainer {
         TestContainer {
             image: self.image,
             network: self.network,
@@ -198,10 +198,10 @@ impl<'de> de::Visitor<'de> for TestContainerVisitor {
         A: de::MapAccess<'de>,
     {
         while let Some(key) = map.next_key()? {
-            self.fill_entry(key, &mut map)?;
+            self.add_field(key, &mut map)?;
         }
 
-        Ok(self.into_value())
+        Ok(self.build())
     }
 }
 

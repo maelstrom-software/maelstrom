@@ -117,7 +117,7 @@ where
             }
             c => {
                 self.container_visitor
-                    .fill_entry(c.into_container_field().unwrap(), map)?;
+                    .add_field(c.into_container_field().unwrap(), map)?;
             }
         }
         Ok(())
@@ -142,7 +142,7 @@ where
             self.fill_entry(key, &mut map)?;
         }
 
-        self.value.container = self.container_visitor.into_value();
+        self.value.container = self.container_visitor.build();
         Ok(self.value)
     }
 }
