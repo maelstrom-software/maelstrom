@@ -564,7 +564,7 @@ mod tests {
             image = { name = "rust", use = ["layers", "working_directory"] }
             working_directory = "/foo"
             "#,
-            "field `working_directory` cannot be set after `image` field that uses `working_directory`"
+            "field `image` cannot use `working_directory` if field `working_directory` is also set",
         );
     }
 
@@ -876,7 +876,7 @@ mod tests {
             image = { name = "rust", use = ["layers", "working_directory"] }
             layers = [{ tar = "foo.tar" }]
             "#,
-            "field `layers` cannot be set after `image` field that uses `layers`",
+            "field `image` cannot use `layers` if field `layers` is also set",
         )
     }
 
@@ -1069,7 +1069,7 @@ mod tests {
             image = { name = "rust", use = ["environment", "working_directory"] }
             environment = { FOO = "foo" }
             "#,
-            "field `environment` cannot be set after `image` field that uses `environment`",
+            "field `image` cannot use `environment` if field `environment` is also set",
         )
     }
 
