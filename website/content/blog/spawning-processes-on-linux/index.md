@@ -27,7 +27,7 @@ fn std_command_spawn_wait() -> Result<()> {
 ```
 
 These APIs make it really easy to get things right. They are the first thing you should reach for.
-Sometimes though you maybe find yourself needing to do things that just aren't supported by these
+Sometimes, though, you may find yourself needing to do things that just aren't supported by these
 simple APIs. We found ourselves in this position working on Maelstrom, since we run each test in its
 own set of Linux namespaces. Maybe you too want to do something with namespaces, or maybe you want
 to use a `pidfd`. If that's the case, then you might need to dig deeper and discover what the
@@ -40,11 +40,11 @@ one do you pick? How are they different?
 This article tries to answer these questions. Also, at the end I provide a simple
 flow chart that I hope makes it easy for you to decide which approach to take.
 
-The code examples I provide will be in Rust (what Maelstrom is written in.) They will use the
+The code examples I provide will be in Rust, which is what Maelstrom is written in, but the
+information should apply to all programming languages. The examples will use the
 [`maelstrom_linux`](https://github.com/maelstrom-software/maelstrom/tree/main/crates/maelstrom-linux)
-crate which is our own wrapper around `libc` and the kernel. (This was my preference, but you may
-want to use something else more supported) I hope to provide generally applicable
-information in this article, but I will be approaching it from a perspective of using Rust.
+crate which is our own wrapper around `libc` and the kernel specific to the Maelstrom project. You
+may want to write your own wrappers or use some crate like [`nix`](https://docs.rs/nix/latest/nix/).
 
 ## The `fork` and `exec` model
 The classic way of spawning a child process on Linux and Unix is to use two syscalls together,
@@ -52,9 +52,9 @@ The classic way of spawning a child process on Linux and Unix is to use two sysc
 program in the current process.
 
 Splitting it up into two different syscalls allows the developer to do a bunch of setup in the child
-process just by writing regular code. (Having this be separated as two calls with each doing one
-thing, and the ability to write this setup as plain code is sometimes referred to as the "elegance"
-of `fork`)
+process just by writing regular code. Having this be separated into two calls with each doing one
+thing, and the ability to write this setup as plain code, is sometimes referred to as the "elegance"
+of `fork`.
 
 The following code snippet runs `echo` with no arguments which acts as a kind of no-op for
 benchmarking purposes.
@@ -130,9 +130,9 @@ our zygote via IPC to spawn any further children we want.
      |                   |                    |           |
 ```
 
-The zygote remains single-threaded so we can write the housekeeping as before. Having to communicate
-with the zygote is a little annoying, but makes things easy to get right at least from a fork safety
-perspective.
+The zygote remains single-threaded so we can write the housekeeping code as before. Having to
+communicate with the zygote is a little annoying, but makes things easy to get right at least from a
+fork safety perspective.
 
 ## `fork` is Too Slow!
 It turns out that `fork` can be pretty slow in some contexts. A large part of the time is spent
@@ -143,9 +143,9 @@ avoid the problem though, because copying the virtual memory of a small process 
 
 <img src="fork graph.png" alt="Graph of Fork Calls" width="60%"/>
 
-The graph is meant to show how the time of the fork call increases linearly with the amount of
-memory mapped. It would be great to avoid this slow process of copying the virtual memory mappings
-altogether which is slow even if your program is not using much memory (like the zygote is.)
+The graph shows how the time of the fork call increases linearly with the amount of memory mapped.
+It would be great to avoid this slow process of copying the virtual memory mappings altogether which
+is slow even if your program is not using much memory (like the zygote is.)
 
 ## `vfork` to the Rescue
 The `vfork` syscall is like `fork` except it doesn't copy the parent's virtual memory mappings and
@@ -210,19 +210,19 @@ this.
 “..the behavior is undefined if the process created by vfork() .. calls any other function before
 successfully calling `_exit(2)` or one of the `exec(3)` family of functions.“
 
-This isn’t very unhelpful either. Clearly calling `_exit` or `exec` (but not every form of `exec` it
+This isn’t very helpful either. Clearly calling `_exit` or `exec` (but not every form of `exec` it
 turns out) is okay, but what other housekeeping is okay in practice? It’s not entirely clear, and
 researching across the internet leads to many others showing a fair amount of anxiety about this
 problem
 
 On Linux, the behavior of `vfork` can be recreated using `clone`, (which we will cover later) in a
-way where we don’t have to share a stack, I believe this is always preferable.
+way where we don’t have to share a stack. This is always preferable.
 
 ## `posix_spawn`
 Another way to try to get the speed up we want would be to use `posix_spawn`. The latest version of
 glibc always does the equivalent of calling `vfork` in its `posix_spawn` implementation.
 
-`posix_spawn` is actually what `std::process::Command` tries to uses internally for most cases.
+`posix_spawn` is actually what `std::process::Command` tries to use internally for most cases.
 
 ```rust
 use anyhow::Result;
@@ -239,22 +239,21 @@ fn posix_spawn_wait(dev_null: &impl linux::AsFd) -> Result<()> {
 }
 ```
 
-Calling `posix_spawn` comes with a whole lot less caveats and things to be careful of when compared
-to `fork` and `vfork`. It comes at the cost of loosing the "elegance" of fork. You configure the
-housekeeping by using a struct. It is a kind of "housekeeping script" we create which executes
-after the fork.
+Calling `posix_spawn` comes with a whole lot fewer caveats and things to be careful of when compared
+to `fork` and `vfork`. It comes at the cost of losing the "elegance" of fork. You configure the
+housekeeping by using a struct. It is a kind of "housekeeping script" we create which executes after
+the fork.
 
-The downside of using `posix_spawn` is that out housekeeping is limited to doing whatever things
-the housekeeping script has support for. (See the `posix_spawn` man page for a complete list of
-things.)
+The downside of using `posix_spawn` is that our housekeeping is limited to doing whatever things the
+housekeeping script has support for. (See the `posix_spawn` man page for a complete list of things.)
 
 ## `clone` the API Underpinning it All
-The aforementioned `fork`, and `posix_spawn` actually call `clone` under the hood in
-glibc. Also `vfork` inside the kernel ends up calling into the kernel's `clone` code.
-It has the functionality of the previous APIs and bunch of other features.
+The aforementioned `fork`, and `posix_spawn` actually call `clone` under the hood in glibc. Also
+`vfork` inside the kernel ends up calling into the kernel's `clone` code.  It has the functionality
+of the previous APIs and a bunch of other features.
 
-It can be a fair bit more difficult to use though. Although, unlike `vfork` it allows the parent to
-allocate a separate stack for the child process, avoiding some of the issues with `vfork`.
+It can be more difficult to use though. Although, unlike `vfork` it allows the parent to allocate a
+separate stack for the child process, avoiding some of the issues with `vfork`.
 
 ```rust
 use anyhow::Result;
@@ -310,7 +309,7 @@ The `CLONE_VM` flag (via `linux::CloneFlags::VM`) avoids copying the virtual mem
 The `CLONE_VFORK` flag suspends the parent until the child calls `exec` or exits. Passing this flag
 allows us to not worry about waiting for the right moment to free the child's stack memory in the
 parent. If we don't pass this flag though, we are able to do other things in the parent in parallel,
-but then we need someway to know when we can free the stack memory. One way is to share a pipe or
+but then we need some way to know when we can free the stack memory. One way is to share a pipe or
 socket with the child which is `CLOEXEC`, once the child calls `exec` (or exits) this pipe or socket
 will close.
 
@@ -319,7 +318,7 @@ will close.
 This graph looks much better than the one for `fork`. It is a pretty constant speed and faster than
 the fastest `fork`!. About the same performance is found with `posix_spawn`.
 
-Finally, lets compare all the options (minus vfork because we can't call it) for a program without
+Finally, let's compare all the options (minus vfork because we can't call it) for a program without
 much memory mapped.
 
 ```shell
@@ -335,7 +334,7 @@ Rust's `std::process::Command` comes in at the slowest even though it should be 
 is doing.
 
 ## Conclusion
-Lets tie it all together with a flow graph about what to use.
+Let's tie it all together with a flow graph about what to use.
 
 ```ascii-art
                                   start
