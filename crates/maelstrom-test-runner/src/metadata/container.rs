@@ -43,24 +43,8 @@ pub struct TestContainer {
     pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
 }
 
-#[derive(Default)]
-pub struct TestContainerVisitor {
-    image: Option<String>,
-    network: Option<JobNetwork>,
-    enable_writable_file_system: Option<bool>,
-    user: Option<UserId>,
-    group: Option<GroupId>,
-    layers: Option<PossiblyImage<Vec<LayerSpec>>>,
-    added_layers: Vec<LayerSpec>,
-    mounts: Option<Vec<JobMountForTomlAndJson>>,
-    added_mounts: Vec<JobMountForTomlAndJson>,
-    environment: Option<PossiblyImage<BTreeMap<String, String>>>,
-    added_environment: BTreeMap<String, String>,
-    working_directory: Option<PossiblyImage<Utf8PathBuf>>,
-}
-
-impl TestContainerVisitor {
-    pub fn add_field<'de, A>(&mut self, ident: ContainerField, map: &mut A) -> Result<(), A::Error>
+impl TestContainer {
+    pub fn set_field<'de, A>(&mut self, ident: ContainerField, map: &mut A) -> Result<(), A::Error>
     where
         A: de::MapAccess<'de>,
     {
@@ -142,27 +126,10 @@ impl TestContainerVisitor {
         }
         Ok(())
     }
-
-    pub fn build(self) -> TestContainer {
-        TestContainer {
-            image: self.image,
-            network: self.network,
-            enable_writable_file_system: self.enable_writable_file_system,
-            user: self.user,
-            group: self.group,
-            layers: self.layers,
-            added_layers: self.added_layers,
-            mounts: self.mounts,
-            added_mounts: self.added_mounts,
-            environment: self.environment,
-            added_environment: self.added_environment,
-            working_directory: self.working_directory,
-        }
-    }
 }
 
-impl<'de> de::Visitor<'de> for TestContainerVisitor {
-    type Value = TestContainer;
+impl<'de> de::Visitor<'de> for TestContainer {
+    type Value = Self;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "TestContainer")
@@ -173,10 +140,10 @@ impl<'de> de::Visitor<'de> for TestContainerVisitor {
         A: de::MapAccess<'de>,
     {
         while let Some(key) = map.next_key()? {
-            self.add_field(key, &mut map)?;
+            self.set_field(key, &mut map)?;
         }
 
-        Ok(self.build())
+        Ok(self)
     }
 }
 
@@ -185,7 +152,7 @@ impl<'de> de::Deserialize<'de> for TestContainer {
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_any(TestContainerVisitor::default())
+        deserializer.deserialize_any(Self::default())
     }
 }
 

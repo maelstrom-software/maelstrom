@@ -1,5 +1,5 @@
 #![allow(unused_imports)]
-use super::container::{ContainerField, TestContainer, TestContainerVisitor};
+use super::container::{ContainerField, TestContainer};
 use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{incompatible, Image, ImageUse, LayerSpec, PossiblyImage};
@@ -78,14 +78,14 @@ impl DirectiveField {
 
 struct DirectiveVisitor<TestFilterT> {
     value: TestDirective<TestFilterT>,
-    container_visitor: TestContainerVisitor,
+    container: TestContainer,
 }
 
 impl<TestFilterT> Default for DirectiveVisitor<TestFilterT> {
     fn default() -> Self {
         Self {
             value: Default::default(),
-            container_visitor: Default::default(),
+            container: Default::default(),
         }
     }
 }
@@ -116,8 +116,8 @@ where
                 self.value.ignore = Some(map.next_value()?);
             }
             c => {
-                self.container_visitor
-                    .add_field(c.into_container_field().unwrap(), map)?;
+                self.container
+                    .set_field(c.into_container_field().unwrap(), map)?;
             }
         }
         Ok(())
@@ -142,7 +142,7 @@ where
             self.fill_entry(key, &mut map)?;
         }
 
-        self.value.container = self.container_visitor.build();
+        self.value.container = self.container;
         Ok(self.value)
     }
 }
