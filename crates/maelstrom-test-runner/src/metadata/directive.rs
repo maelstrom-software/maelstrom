@@ -17,41 +17,8 @@ enum DirectiveField {
     IncludeSharedLibraries,
     Timeout,
     Ignore,
-    Network,
-    EnableWritableFileSystem,
-    User,
-    Group,
-    Mounts,
-    AddedMounts,
-    Image,
-    WorkingDirectory,
-    Layers,
-    AddedLayers,
-    Environment,
-    AddedEnvironment,
-}
-
-impl DirectiveField {
-    fn into_container_field(self) -> Option<ContainerField> {
-        match self {
-            Self::Filter => None,
-            Self::IncludeSharedLibraries => None,
-            Self::Timeout => None,
-            Self::Ignore => None,
-            Self::Network => Some(ContainerField::Network),
-            Self::EnableWritableFileSystem => Some(ContainerField::EnableWritableFileSystem),
-            Self::User => Some(ContainerField::User),
-            Self::Group => Some(ContainerField::Group),
-            Self::Mounts => Some(ContainerField::Mounts),
-            Self::AddedMounts => Some(ContainerField::AddedMounts),
-            Self::Image => Some(ContainerField::Image),
-            Self::WorkingDirectory => Some(ContainerField::WorkingDirectory),
-            Self::Layers => Some(ContainerField::Layers),
-            Self::AddedLayers => Some(ContainerField::AddedLayers),
-            Self::Environment => Some(ContainerField::Environment),
-            Self::AddedEnvironment => Some(ContainerField::AddedEnvironment),
-        }
-    }
+    #[serde(untagged)]
+    ContainerField(ContainerField),
 }
 
 #[derive(Debug, PartialEq)]
@@ -101,9 +68,8 @@ where
             DirectiveField::Ignore => {
                 self.ignore = Some(map.next_value()?);
             }
-            c => {
-                self.container
-                    .set_field(c.into_container_field().unwrap(), map)?;
+            DirectiveField::ContainerField(container_field) => {
+                self.container.set_field(container_field, map)?;
             }
         }
         Ok(())
