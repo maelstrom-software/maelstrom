@@ -40,6 +40,8 @@ one do you pick? How are they different?
 This article tries to answer these questions. Also, at the end I provide a simple
 flow chart that I hope makes it easy for you to decide which approach to take.
 
+<!-- more -->
+
 The code examples I provide will be in Rust, which is what Maelstrom is written in, but the
 information should apply to all programming languages. The examples will use the
 [`maelstrom_linux`](https://github.com/maelstrom-software/maelstrom/tree/main/crates/maelstrom-linux)
