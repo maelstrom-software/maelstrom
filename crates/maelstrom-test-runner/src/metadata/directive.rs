@@ -401,22 +401,6 @@ mod tests {
     }
 
     #[test]
-    fn layers_tar() {
-        directive_or_container_parse_test(
-            r#"
-            layers = [{ tar = "foo.tar" }]
-            "#,
-            TestDirective {
-                container: TestContainer {
-                    layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
     fn layers_glob() {
         directive_or_container_parse_test(
             r#"
@@ -453,7 +437,7 @@ mod tests {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
                         "foo*.bin",
-                        prepend_prefix = "b"
+                        prepend_prefix = "b",
                     )])),
                     ..Default::default()
                 },

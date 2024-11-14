@@ -245,230 +245,75 @@ macro_rules! tar_layer {
 }
 
 #[macro_export]
-macro_rules! glob_layer {
-    (
-        _internal,
-        $glob:expr,
-        $strip_prefix:expr,
-        $prepend_prefix:expr,
-        $canonicalize:expr,
-        $follow_symlinks:expr
-    ) => {
-        ::maelstrom_client::spec::LayerSpec::Glob {
-            glob: ::std::convert::Into::into($glob),
-            prefix_options: ::maelstrom_client::spec::PrefixOptions {
-                strip_prefix: $strip_prefix,
-                prepend_prefix: $prepend_prefix,
-                canonicalize: $canonicalize,
-                follow_symlinks: $follow_symlinks,
-            },
+macro_rules! prefix_options {
+    (@expand [] -> []) => {
+        ::maelstrom_client::spec::PrefixOptions::default()
+    };
+    (@expand [] -> [$($fields:tt)+]) => {
+        ::maelstrom_client::spec::PrefixOptions {
+            $($fields)+,
+            ..::maelstrom_client::spec::PrefixOptions::default()
         }
     };
-    ($glob:expr) => {
-        glob_layer!(_internal, $glob, None, None, false, false)
+    (@expand [
+        strip_prefix = $strip_prefix:expr
+        $(,$($tail:tt)*)?
+    ] -> [$($($options:tt)+)?]) => {
+        $crate::prefix_options!(@expand [$($($tail)*)?] -> [
+            $($($options)+,)?
+            strip_prefix: Some(::std::convert::Into::into($strip_prefix))
+        ])
     };
-    ($glob:expr, strip_prefix = $strip_prefix:expr) => {
-        glob_layer!(
-            _internal,
-            $glob,
-            Some(::std::convert::Into::into($strip_prefix)),
-            None,
-            false,
-            false
-        )
+    (@expand [
+        prepend_prefix = $prepend_prefix:expr
+        $(,$($tail:tt)*)?
+    ] -> [$($($options:tt)+)?]) => {
+        $crate::prefix_options!(@expand [$($($tail)*)?] -> [
+            $($($options)+,)?
+            prepend_prefix: Some(::std::convert::Into::into($prepend_prefix))
+        ])
     };
-    ($glob:expr, prepend_prefix = $prepend_prefix:expr) => {
-        glob_layer!(
-            _internal,
-            $glob,
-            None,
-            Some(::std::convert::Into::into($prepend_prefix)),
-            false,
-            false
-        )
+    (@expand [
+        $field:ident = $value:expr
+        $(,$($tail:tt)*)?
+    ] -> [$($($options:tt)+)?]) => {
+        $crate::prefix_options!(@expand [$($($tail)*)?] -> [
+            $($($options)+,)?
+            $field: $value
+        ])
     };
-    ($glob:expr, canonicalize = $canonicalize:expr) => {
-        glob_layer!(_internal, $glob, None, None, $canonicalize, false)
+    ($($fields:tt)*) => {
+        $crate::prefix_options!(@expand [$($fields)*] -> [])
     };
-    ($glob:expr, follow_symlinks = $follow_symlinks:expr) => {
-        glob_layer!(_internal, $glob, None, None, false, $follow_symlinks)
-    };
-    (
-        $glob:expr,
-        strip_prefix = $strip_prefix:expr,
-        prepend_prefix = $prepend_prefix:expr,
-        canonicalize = $canonicalize:expr,
-        follow_symlinks = $follow_symlinks:expr
-    ) => {
-        glob_layer!(
-            _internal,
-            $glob,
-            Some(::std::convert::Into::into($strip_prefix)),
-            Some(::std::convert::Into::into($prepend_prefix)),
-            $canonicalize
-        )
+}
+
+#[macro_export]
+macro_rules! glob_layer {
+    ($glob:expr $(,$($prefix_options:tt)*)?) => {
+        ::maelstrom_client::spec::LayerSpec::Glob {
+            glob: ::std::convert::Into::into($glob),
+            prefix_options: $crate::prefix_options!($($($prefix_options)*)?),
+        }
     };
 }
 
 #[macro_export]
 macro_rules! paths_layer {
-    (
-        _internal,
-        [$($path:expr),*],
-        $strip_prefix:expr,
-        $prepend_prefix:expr,
-        $canonicalize:expr,
-        $follow_symlinks:expr
-    ) => {
+    ([$($path:expr),*] $(,$($prefix_options:tt)*)?) => {
         ::maelstrom_client::spec::LayerSpec::Paths {
-            paths: vec![$(utf8_path_buf!($path)),*],
-            prefix_options: ::maelstrom_client::spec::PrefixOptions {
-                strip_prefix: $strip_prefix,
-                prepend_prefix: $prepend_prefix,
-                canonicalize: $canonicalize,
-                follow_symlinks: $follow_symlinks,
-            },
+            paths: vec![$(::std::convert::Into::into($path)),*],
+            prefix_options: $crate::prefix_options!($($($prefix_options)*)?),
         }
-    };
-    ([$($path:expr),*]) => {
-        paths_layer!(_internal, [$($path),*], None, None, false, false)
-    };
-    ([$($path:expr),*], strip_prefix = $strip_prefix:expr) => {
-        paths_layer!(
-            _internal,
-            [$($path),*],
-            Some(::std::convert::Into::into($strip_prefix)),
-            None,
-            false,
-            false
-        )
-    };
-    ([$($path:expr),*], prepend_prefix = $prepend_prefix:expr) => {
-        paths_layer!(
-            _internal,
-            [$($path),*],
-            None,
-            Some(::std::convert::Into::into($prepend_prefix)),
-            false,
-            false
-        )
-    };
-    ([$($path:expr),*], canonicalize = $canonicalize:expr) => {
-        paths_layer!(
-            _internal,
-            [$($path),*],
-            None,
-            None,
-            $canonicalize,
-            false
-        )
-    };
-    ([$($path:expr),*], follow_symlinks = $follow_symlinks:expr) => {
-        paths_layer!(
-            _internal,
-            [$($path),*],
-            None,
-            None,
-            false,
-            follow_symlinks
-        )
-    };
-    (
-        [$($path:expr),*],
-        strip_prefix = $strip_prefix:expr,
-        prepend_prefix = $prepend_prefix:expr,
-        canonicalize = $canonicalize:expr,
-        follow_symlinks = $follow_symlinks:expr
-    ) => {
-        paths_layer!(
-            _internal,
-            [$($path),*],
-            Some(::std::convert::Into::into($strip_prefix)),
-            Some(::std::convert::Into::into($prepend_prefix)),
-            $canonicalize,
-            $follow_symlinks
-        )
     };
 }
 
 #[macro_export]
 macro_rules! so_deps_layer {
-    (
-        _internal,
-        [$($path:expr),*],
-        $strip_prefix:expr,
-        $prepend_prefix:expr,
-        $canonicalize:expr,
-        $follow_symlinks:expr
-    ) => {
+    ([$($path:expr),*] $(,$($prefix_options:tt)*)?) => {
         ::maelstrom_client::spec::LayerSpec::SharedLibraryDependencies {
-            binary_paths: vec![$(utf8_path_buf!($path)),*],
-            prefix_options: ::maelstrom_client::spec::PrefixOptions {
-                strip_prefix: $strip_prefix,
-                prepend_prefix: $prepend_prefix,
-                canonicalize: $canonicalize,
-                follow_symlinks: $follow_symlinks,
-            },
+            binary_paths: vec![$(::std::convert::Into::into($path)),*],
+            prefix_options: $crate::prefix_options!($($($prefix_options)*)?),
         }
-    };
-    ([$($path:expr),*]) => {
-        so_deps_layer!(_internal, [$($path),*], None, None, false, false)
-    };
-    ([$($path:expr),*], strip_prefix = $strip_prefix:expr) => {
-        so_deps_layer!(
-            _internal,
-            [$($path),*],
-            Some(::std::convert::Into::into($strip_prefix)),
-            None,
-            false,
-            false
-        )
-    };
-    ([$($path:expr),*], prepend_prefix = $prepend_prefix:expr) => {
-        so_deps_layer!(
-            _internal,
-            [$($path),*],
-            None,
-            Some(::std::convert::Into::into($prepend_prefix)),
-            false,
-            false
-        )
-    };
-    ([$($path:expr),*], canonicalize = $canonicalize:expr) => {
-        so_deps_layer!(
-            _internal,
-            [$($path),*],
-            None,
-            None,
-            $canonicalize,
-            false
-        )
-    };
-    ([$($path:expr),*], follow_symlinks = $follow_symlinks:expr) => {
-        so_deps_layer!(
-            _internal,
-            [$($path),*],
-            None,
-            None,
-            false,
-            follow_symlinks
-        )
-    };
-    (
-        [$($path:expr),*],
-        strip_prefix = $strip_prefix:expr,
-        prepend_prefix = $prepend_prefix:expr,
-        canonicalize = $canonicalize:expr,
-        follow_symlinks = $follow_symlinks:expr
-    ) => {
-        so_deps_layer!(
-            _internal,
-            [$($path),*],
-            Some(::std::convert::Into::into($strip_prefix)),
-            Some(::std::convert::Into::into($prepend_prefix)),
-            $canonicalize,
-            $follow_symlinks
-        )
     };
 }
 

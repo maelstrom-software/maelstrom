@@ -92,7 +92,7 @@ impl LayerCache {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use maelstrom_test::{digest, paths_layer, utf8_path_buf};
+    use maelstrom_test::{digest, paths_layer};
 
     #[tokio::test]
     async fn fill_success() {
