@@ -4,7 +4,7 @@ image.use = ["layers", "environment"]
 added_layers = [
     { glob = "**.py" },
     { paths = ["py/maelstrom_client/maelstrom-client", "crates/maelstrom-worker/src/executor-test-deps.tar"], follow_symlinks = true },
-    { shared-library-dependencies = ["py/maelstrom_client/maelstrom-client"], follow_symlinks = true },
+    { shared_library_dependencies = ["py/maelstrom_client/maelstrom-client"], follow_symlinks = true },
     { stubs = ["/tmp/", "/proc/", "/sys/", "/dev/{full,fuse,null,urandom,random,zero}", "/py/.pytest_cache/", "/root"] }
 ]
 mounts = [

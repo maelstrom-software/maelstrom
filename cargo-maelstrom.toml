@@ -31,7 +31,7 @@ filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
 layers = [
     { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
     { paths = ["<build-dir>/maelstrom-client"], canonicalize = true },
-    { shared-library-dependencies = ["<build-dir>/maelstrom-client"], follow_symlinks = true }
+    { shared_library_dependencies = ["<build-dir>/maelstrom-client"], follow_symlinks = true }
 ]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
@@ -48,7 +48,7 @@ added_layers = [
     { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
     { paths = ["crates/maelstrom-pytest/src/python.tar"], canonicalize = true },
     { paths = ["<build-dir>/maelstrom-pytest"], canonicalize = true },
-    { shared-library-dependencies = ["<build-dir>/maelstrom-pytest"], follow_symlinks = true }
+    { shared_library_dependencies = ["<build-dir>/maelstrom-pytest"], follow_symlinks = true }
 ]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
@@ -65,7 +65,7 @@ image = "docker://golang"
 added_layers = [
     { stubs = ["/{proc,sys,tmp}/", "/dev/{full,fuse,urandom,random,null,zero}"] },
     { paths = ["<build-dir>/maelstrom-go-test"], canonicalize = true },
-    { shared-library-dependencies = ["<build-dir>/maelstrom-go-test"], follow_symlinks = true }
+    { shared_library_dependencies = ["<build-dir>/maelstrom-go-test"], follow_symlinks = true }
 ]
 added_environment = { GOCACHE = "/tmp/" }
 mounts = [
@@ -142,7 +142,7 @@ added_layers = [
     { stubs = ["/dev/{full,fuse,null,ptmx,pts/,random,tty,urandom,zero}"] },
     { symlinks = [ { link = "/dev/ptmx", target = "/dev/pts/ptmx" } ] },
     { paths = ["<build-dir>/cargo-maelstrom"], canonicalize = true },
-    { shared-library-dependencies = ["<build-dir>/cargo-maelstrom"], follow_symlinks = true }
+    { shared_library_dependencies = ["<build-dir>/cargo-maelstrom"], follow_symlinks = true }
 ]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },

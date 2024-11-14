@@ -400,7 +400,7 @@ pub enum LayerSpec {
     Symlinks { symlinks: Vec<SymlinkSpec> },
     #[proto(proto_buf_type = proto::SharedLibraryDependenciesLayer)]
     SharedLibraryDependencies {
-        #[serde(rename = "shared-library-dependencies")]
+        #[serde(rename = "shared_library_dependencies")]
         binary_paths: Vec<Utf8PathBuf>,
         #[serde(flatten)]
         #[proto(option)]
@@ -950,7 +950,7 @@ mod tests {
     fn shared_library_dependencies_layer_spec() {
         layer_spec_parse_test(
             r#"
-            shared-library-dependencies = [ "/foo", "/bar" ]
+            shared_library_dependencies = [ "/foo", "/bar" ]
             "#,
             shared_library_dependencies_layer!(["/foo", "/bar"]),
         );
@@ -960,7 +960,7 @@ mod tests {
     fn shared_library_dependencies_layer_spec_with_prefix_options() {
         layer_spec_parse_test(
             r#"
-            shared-library-dependencies = [ "/foo", "/bar" ]
+            shared_library_dependencies = [ "/foo", "/bar" ]
             strip_prefix = "a"
             prepend_prefix = "b"
             "#,

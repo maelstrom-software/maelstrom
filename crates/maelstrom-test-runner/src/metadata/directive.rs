@@ -568,7 +568,7 @@ mod tests {
         directive_or_container_parse_test(
             r#"
             layers = [
-                { shared-library-dependencies = ["/bin/bash", "/bin/sh"] }
+                { shared_library_dependencies = ["/bin/bash", "/bin/sh"] }
             ]
             "#,
             TestDirective {
@@ -584,7 +584,7 @@ mod tests {
         directive_or_container_parse_test(
             r#"
             layers = [
-                { shared-library-dependencies = ["/bin/bash", "/bin/sh"], prepend_prefix = "/usr" }
+                { shared_library_dependencies = ["/bin/bash", "/bin/sh"], prepend_prefix = "/usr" }
             ]
             "#,
             TestDirective {
@@ -603,7 +603,7 @@ mod tests {
         directive_or_container_parse_test(
             r#"
             layers = [
-                { shared-library-dependencies = ["/bin/bash", "/bin/sh"], canonicalize = true }
+                { shared_library_dependencies = ["/bin/bash", "/bin/sh"], canonicalize = true }
             ]
             "#,
             TestDirective {
