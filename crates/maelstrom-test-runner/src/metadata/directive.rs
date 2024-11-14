@@ -119,8 +119,8 @@ mod tests {
     use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{
-        glob_layer, non_root_utf8_path_buf, paths_layer, so_deps_layer, string, tar_layer,
-        utf8_path_buf,
+        glob_layer, non_root_utf8_path_buf, paths_layer, shared_library_dependencies_layer, string,
+        tar_layer, utf8_path_buf,
     };
     use toml::de::Error as TomlError;
 
@@ -573,10 +573,9 @@ mod tests {
             "#,
             TestDirective {
                 container: TestContainer {
-                    layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!([
-                        "/bin/bash",
-                        "/bin/sh"
-                    ])])),
+                    layers: Some(PossiblyImage::Explicit(vec![
+                        shared_library_dependencies_layer!(["/bin/bash", "/bin/sh"]),
+                    ])),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -590,10 +589,12 @@ mod tests {
             "#,
             TestDirective {
                 container: TestContainer {
-                    layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
-                        ["/bin/bash", "/bin/sh"],
-                        prepend_prefix = "/usr"
-                    )])),
+                    layers: Some(PossiblyImage::Explicit(vec![
+                        shared_library_dependencies_layer!(
+                            ["/bin/bash", "/bin/sh"],
+                            prepend_prefix = "/usr"
+                        ),
+                    ])),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -607,10 +608,12 @@ mod tests {
             "#,
             TestDirective {
                 container: TestContainer {
-                    layers: Some(PossiblyImage::Explicit(vec![so_deps_layer!(
-                        ["/bin/bash", "/bin/sh"],
-                        canonicalize = true
-                    )])),
+                    layers: Some(PossiblyImage::Explicit(vec![
+                        shared_library_dependencies_layer!(
+                            ["/bin/bash", "/bin/sh"],
+                            canonicalize = true
+                        ),
+                    ])),
                     ..Default::default()
                 },
                 ..Default::default()

@@ -164,8 +164,8 @@ mod tests {
     use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{
-        glob_layer, non_root_utf8_path_buf, paths_layer, so_deps_layer, string, tar_layer,
-        utf8_path_buf,
+        glob_layer, non_root_utf8_path_buf, paths_layer, shared_library_dependencies_layer, string,
+        tar_layer, utf8_path_buf,
     };
     use toml::de::Error as TomlError;
 

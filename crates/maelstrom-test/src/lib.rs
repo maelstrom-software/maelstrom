@@ -308,7 +308,7 @@ macro_rules! paths_layer {
 }
 
 #[macro_export]
-macro_rules! so_deps_layer {
+macro_rules! shared_library_dependencies_layer {
     ([$($path:expr),*] $(,$($prefix_options:tt)*)?) => {
         ::maelstrom_client::spec::LayerSpec::SharedLibraryDependencies {
             binary_paths: vec![$(::std::convert::Into::into($path)),*],
