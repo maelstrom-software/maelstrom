@@ -122,22 +122,19 @@ mod tests {
         glob_layer, non_root_utf8_path_buf, paths_layer, shared_library_dependencies_layer, string,
         tar_layer, utf8_path_buf,
     };
-    use toml::de::Error as TomlError;
 
-    fn parse_test_directive(file: &str) -> Result<TestDirective<String>> {
-        toml::from_str(file).map_err(Error::new)
+    fn parse_test_directive(toml: &str) -> Result<TestDirective<String>, toml::de::Error> {
+        toml::from_str(toml)
     }
 
     #[track_caller]
-    fn assert_toml_error(err: Error, expected: &str) {
-        let err = err.downcast_ref::<TomlError>().unwrap();
-        let message = err.message();
-        assert!(message.starts_with(expected), "message: {message}");
-    }
-
-    #[track_caller]
-    fn directive_error_test(toml: &str, error: &str) {
-        assert_toml_error(parse_test_directive(toml).unwrap_err(), error);
+    fn directive_parse_error_test(toml: &str, expected: &str) {
+        let err = parse_test_directive(toml).unwrap_err();
+        let actual = err.message();
+        assert!(
+            actual.starts_with(expected),
+            "expected: {expected}; actual: {actual}"
+        );
     }
 
     #[track_caller]
@@ -147,12 +144,12 @@ mod tests {
 
     #[test]
     fn empty() {
-        assert_eq!(parse_test_directive("").unwrap(), TestDirective::default());
+        directive_parse_test("", TestDirective::default());
     }
 
     #[test]
     fn unknown_field() {
-        directive_error_test(
+        directive_parse_error_test(
             r#"
             unknown = "foo"
             "#,
@@ -162,7 +159,7 @@ mod tests {
 
     #[test]
     fn duplicate_field() {
-        directive_error_test(
+        directive_parse_error_test(
             r#"
             filter = "all"
             filter = "any"
