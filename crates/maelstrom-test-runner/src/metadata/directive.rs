@@ -178,7 +178,6 @@ mod tests {
             enable_writable_file_system = true
             user = 101
             group = 202
-            timeout = 1
             "#,
             TestDirective {
                 filter: Some(
@@ -187,7 +186,6 @@ mod tests {
                         .unwrap(),
                 ),
                 include_shared_libraries: Some(true),
-                timeout: Some(Timeout::new(1)),
                 container: TestContainer {
                     network: Some(JobNetwork::Loopback),
                     enable_writable_file_system: Some(true),
