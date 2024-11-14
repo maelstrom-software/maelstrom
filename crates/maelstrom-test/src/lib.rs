@@ -236,15 +236,6 @@ macro_rules! string_nonempty {
 }
 
 #[macro_export]
-macro_rules! tar_layer {
-    ($path:expr) => {
-        ::maelstrom_client::spec::LayerSpec::Tar {
-            path: ::maelstrom_base::Utf8PathBuf::from($path),
-        }
-    };
-}
-
-#[macro_export]
 macro_rules! prefix_options {
     (@expand [] -> []) => {
         ::maelstrom_client::spec::PrefixOptions::default()
@@ -288,6 +279,15 @@ macro_rules! prefix_options {
 }
 
 #[macro_export]
+macro_rules! tar_layer {
+    ($path:expr) => {
+        ::maelstrom_client::spec::LayerSpec::Tar {
+            path: ::maelstrom_base::Utf8PathBuf::from($path),
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! glob_layer {
     ($glob:expr $(,$($prefix_options:tt)*)?) => {
         ::maelstrom_client::spec::LayerSpec::Glob {
@@ -303,6 +303,29 @@ macro_rules! paths_layer {
         ::maelstrom_client::spec::LayerSpec::Paths {
             paths: vec![$($(::std::convert::Into::into($path)),*)?],
             prefix_options: $crate::prefix_options!($($($prefix_options)*)?),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! stubs_layer {
+    ([$($($stubs:expr),+ $(,)?)?]) => {
+        ::maelstrom_client::spec::LayerSpec::Stubs {
+            stubs: vec![$($(::std::convert::Into::into($stubs)),*)?],
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! symlinks_layer {
+    ([$($($link:literal -> $target:literal),+ $(,)?)?]) => {
+        ::maelstrom_client::spec::LayerSpec::Symlinks {
+            symlinks: vec![$($(
+                ::maelstrom_client::spec::SymlinkSpec {
+                    link: ::std::convert::Into::into($link),
+                    target: ::std::convert::Into::into($target),
+                }
+            ),*)?],
         }
     };
 }

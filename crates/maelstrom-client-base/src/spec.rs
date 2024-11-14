@@ -591,7 +591,10 @@ impl ConvertedImage {
 mod tests {
     use super::*;
     use indoc::indoc;
-    use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer};
+    use maelstrom_test::{
+        glob_layer, path_buf_vec, paths_layer, shared_library_dependencies_layer, string,
+        string_vec, stubs_layer, symlinks_layer, tar_layer,
+    };
     use maplit::btreemap;
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
@@ -861,6 +864,111 @@ mod tests {
                 name: "name".into(),
                 use_: enum_set! {ImageUse::Layers | ImageUse::Environment},
             })
+        );
+    }
+
+    #[track_caller]
+    fn layer_spec_parse_test(toml: &str, expected: LayerSpec) {
+        assert_eq!(toml::from_str::<LayerSpec>(toml).unwrap(), expected);
+    }
+
+    #[test]
+    fn tar_layer_spec() {
+        layer_spec_parse_test(
+            r#"
+            tar = "foo.tar"
+            "#,
+            tar_layer!("foo.tar"),
+        );
+    }
+
+    #[test]
+    fn glob_layer_spec() {
+        layer_spec_parse_test(
+            r#"
+            glob = "foo*.bin"
+            "#,
+            glob_layer!("foo*.bin"),
+        );
+    }
+
+    #[test]
+    fn glob_layer_spec_with_prefix_options() {
+        layer_spec_parse_test(
+            r#"
+            glob = "foo*.bin"
+            strip_prefix = "a"
+            prepend_prefix = "b"
+            "#,
+            glob_layer!("foo*.bin", strip_prefix = "a", prepend_prefix = "b"),
+        );
+    }
+
+    #[test]
+    fn paths_layer_spec() {
+        layer_spec_parse_test(
+            r#"
+            paths = [ "/foo", "/bar" ]
+            "#,
+            paths_layer!(["/foo", "/bar"]),
+        );
+    }
+
+    #[test]
+    fn paths_layer_spec_with_prefix_options() {
+        layer_spec_parse_test(
+            r#"
+            paths = [ "/foo", "/bar" ]
+            strip_prefix = "a"
+            prepend_prefix = "b"
+            "#,
+            paths_layer!(["/foo", "/bar"], strip_prefix = "a", prepend_prefix = "b"),
+        );
+    }
+
+    #[test]
+    fn stubs_layer_spec() {
+        layer_spec_parse_test(
+            r#"
+            stubs = [ "/foo", "/{bar,baz}/" ]
+            "#,
+            stubs_layer!(["/foo", "/{bar,baz}/"]),
+        );
+    }
+
+    #[test]
+    fn symlinks_layer_spec() {
+        layer_spec_parse_test(
+            r#"
+            symlinks = [ { link = "/symlink", target = "/target" } ]
+            "#,
+            symlinks_layer!(["/symlink" -> "/target"]),
+        );
+    }
+
+    #[test]
+    fn shared_library_dependencies_layer_spec() {
+        layer_spec_parse_test(
+            r#"
+            shared-library-dependencies = [ "/foo", "/bar" ]
+            "#,
+            shared_library_dependencies_layer!(["/foo", "/bar"]),
+        );
+    }
+
+    #[test]
+    fn shared_library_dependencies_layer_spec_with_prefix_options() {
+        layer_spec_parse_test(
+            r#"
+            shared-library-dependencies = [ "/foo", "/bar" ]
+            strip_prefix = "a"
+            prepend_prefix = "b"
+            "#,
+            shared_library_dependencies_layer!(
+                ["/foo", "/bar"],
+                strip_prefix = "a",
+                prepend_prefix = "b",
+            ),
         );
     }
 }
