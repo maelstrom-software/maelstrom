@@ -12,9 +12,9 @@ enum State {
 
 /// This struct drives the state machine for the client object.
 ///
-/// When the process starts, the client hasn't yet started. It isn't started until a client RPC
+/// When the process starts, the client hasn't yet started. It doesn't start until a client RPC
 /// tells it to. That RPC provides critical information necessary for starting the client. It also
-/// gives us a way to communicate startup failures back to the client RPC.
+/// gives us a way to communicate startup failures back over the client RPC.
 ///
 /// RPCs arrive independently from each other, so we need to allow exactly one startup RPC to get
 /// the green light to actually attempt to start the client. That startup process make take a
@@ -24,7 +24,7 @@ enum State {
 /// At some point, we may receive an error asynchronously (not associated with a client RPC
 /// request) from the client that tells us that the client has shut down. An example of this is
 /// losing connection with the broker. When this happens, we want to provide a way to interrupt
-/// long-running client RPCs and alow disallow new RPCs. In this implementation, we still allow old
+/// long-running client RPCs and disallow new RPCs. In this implementation, we still allow old
 /// references to the protected client to live as long as they like: we just disallow new ones.
 /// It's up to the client RPCs themselves to detect the error with the client, or to use the
 /// notification mechanism we provide here.
