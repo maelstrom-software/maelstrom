@@ -724,4 +724,34 @@ mod tests {
             },
         );
     }
+
+    #[test]
+    fn image_with_no_use() {
+        container_parse_test(
+            r#"
+            image = { name = "rust" }
+            "#,
+            TestContainer {
+                image: Some(string!("rust")),
+                layers: Some(PossiblyImage::Image),
+                environment: Some(PossiblyImage::Image),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn image_as_string() {
+        container_parse_test(
+            r#"
+            image = "rust"
+            "#,
+            TestContainer {
+                image: Some(string!("rust")),
+                layers: Some(PossiblyImage::Image),
+                environment: Some(PossiblyImage::Image),
+                ..Default::default()
+            },
+        );
+    }
 }

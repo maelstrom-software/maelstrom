@@ -128,10 +128,6 @@ mod tests {
         toml::from_str(file).map_err(Error::new)
     }
 
-    fn parse_test_container(file: &str) -> Result<TestContainer> {
-        toml::from_str(file).map_err(Error::new)
-    }
-
     #[track_caller]
     fn assert_toml_error(err: Error, expected: &str) {
         let err = err.downcast_ref::<TomlError>().unwrap();
@@ -149,15 +145,9 @@ mod tests {
         assert_eq!(parse_test_directive(toml).unwrap(), expected);
     }
 
-    #[track_caller]
-    fn directive_or_container_parse_test(toml: &str, expected: TestDirective<String>) {
-        assert_eq!(parse_test_directive(toml).unwrap(), expected);
-        assert_eq!(parse_test_container(&toml).unwrap(), expected.container);
-    }
-
     #[test]
     fn empty() {
-        assert_eq!(parse_test_directive("").unwrap(), TestDirective::default(),);
+        assert_eq!(parse_test_directive("").unwrap(), TestDirective::default());
     }
 
     #[test]
@@ -246,42 +236,6 @@ mod tests {
                         .unwrap(),
                 ),
                 timeout: Some(None),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn image_with_no_use() {
-        directive_or_container_parse_test(
-            r#"
-            image = { name = "rust" }
-            "#,
-            TestDirective {
-                container: TestContainer {
-                    image: Some(string!("rust")),
-                    layers: Some(PossiblyImage::Image),
-                    environment: Some(PossiblyImage::Image),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn image_as_string() {
-        directive_or_container_parse_test(
-            r#"
-            image = "rust"
-            "#,
-            TestDirective {
-                container: TestContainer {
-                    image: Some(string!("rust")),
-                    layers: Some(PossiblyImage::Image),
-                    environment: Some(PossiblyImage::Image),
-                    ..Default::default()
-                },
                 ..Default::default()
             },
         );
