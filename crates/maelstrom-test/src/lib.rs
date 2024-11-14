@@ -299,9 +299,9 @@ macro_rules! glob_layer {
 
 #[macro_export]
 macro_rules! paths_layer {
-    ([$($path:expr),*] $(,$($prefix_options:tt)*)?) => {
+    ([$($($path:expr),+ $(,)?)?] $(,$($prefix_options:tt)*)?) => {
         ::maelstrom_client::spec::LayerSpec::Paths {
-            paths: vec![$(::std::convert::Into::into($path)),*],
+            paths: vec![$($(::std::convert::Into::into($path)),*)?],
             prefix_options: $crate::prefix_options!($($($prefix_options)*)?),
         }
     };
@@ -309,9 +309,9 @@ macro_rules! paths_layer {
 
 #[macro_export]
 macro_rules! shared_library_dependencies_layer {
-    ([$($path:expr),*] $(,$($prefix_options:tt)*)?) => {
+    ([$($($path:expr),+ $(,)?)?] $(,$($prefix_options:tt)*)?) => {
         ::maelstrom_client::spec::LayerSpec::SharedLibraryDependencies {
-            binary_paths: vec![$(::std::convert::Into::into($path)),*],
+            binary_paths: vec![$($(::std::convert::Into::into($path)),*)?],
             prefix_options: $crate::prefix_options!($($($prefix_options)*)?),
         }
     };

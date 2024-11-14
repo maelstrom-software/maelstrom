@@ -422,7 +422,7 @@ mod tests {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
                         "foo*.bin",
-                        strip_prefix = "a"
+                        strip_prefix = "a",
                     )])),
                     ..Default::default()
                 },
@@ -452,7 +452,7 @@ mod tests {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
                         "foo*.bin",
-                        canonicalize = true
+                        canonicalize = true,
                     )])),
                     ..Default::default()
                 },
@@ -470,7 +470,7 @@ mod tests {
             TestDirective {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![paths_layer!([
-                        "foo.bin", "bar.bin"
+                        "foo.bin", "bar.bin",
                     ])])),
                     ..Default::default()
                 },
@@ -485,7 +485,7 @@ mod tests {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
                         ["foo.bin", "bar.bin"],
-                        strip_prefix = "a"
+                        strip_prefix = "a",
                     )])),
                     ..Default::default()
                 },
@@ -500,7 +500,7 @@ mod tests {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
                         ["foo.bin", "bar.bin"],
-                        prepend_prefix = "a"
+                        prepend_prefix = "a",
                     )])),
                     ..Default::default()
                 },
@@ -515,7 +515,7 @@ mod tests {
                 container: TestContainer {
                     layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
                         ["foo.bin", "bar.bin"],
-                        canonicalize = true
+                        canonicalize = true,
                     )])),
                     ..Default::default()
                 },
@@ -592,7 +592,7 @@ mod tests {
                     layers: Some(PossiblyImage::Explicit(vec![
                         shared_library_dependencies_layer!(
                             ["/bin/bash", "/bin/sh"],
-                            prepend_prefix = "/usr"
+                            prepend_prefix = "/usr",
                         ),
                     ])),
                     ..Default::default()
@@ -611,7 +611,7 @@ mod tests {
                     layers: Some(PossiblyImage::Explicit(vec![
                         shared_library_dependencies_layer!(
                             ["/bin/bash", "/bin/sh"],
-                            canonicalize = true
+                            canonicalize = true,
                         ),
                     ])),
                     ..Default::default()
