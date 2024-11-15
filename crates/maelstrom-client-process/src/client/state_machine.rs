@@ -1,6 +1,5 @@
-use anyhow::{anyhow, bail, Error, Result};
-use std::cell::UnsafeCell;
-use tokio::sync::watch::Sender;
+use anyhow::{anyhow, Error, Result};
+use std::{cell::UnsafeCell, sync::Mutex};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum State {
@@ -30,7 +29,7 @@ enum State {
 pub struct StateMachine<ActiveT> {
     active: UnsafeCell<Option<ActiveT>>,
     failed: UnsafeCell<Option<String>>,
-    sender: Sender<State>,
+    state: Mutex<State>,
 }
 
 unsafe impl<ActiveT: Send> Sync for StateMachine<ActiveT> {}
@@ -40,7 +39,7 @@ impl<ActiveT> Default for StateMachine<ActiveT> {
         Self {
             active: UnsafeCell::new(None),
             failed: UnsafeCell::new(None),
-            sender: Sender::new(State::Latent),
+            state: Mutex::new(State::Latent),
         }
     }
 }
@@ -51,17 +50,13 @@ impl<ActiveT> StateMachine<ActiveT> {
     /// [`ActivationHandle`] will be returned to be used to indicate the outcome of the startup
     /// attempt.
     pub fn try_to_begin_activation(&self) -> Result<ActivationHandle<'_, ActiveT>> {
-        if !self.sender.send_if_modified(|state| {
-            if *state == State::Latent {
-                *state = State::Activating;
-                true
-            } else {
-                false
-            }
-        }) {
-            bail!("client already started");
+        let mut state = self.state.lock().unwrap();
+        if *state == State::Latent {
+            *state = State::Activating;
+            Ok(ActivationHandle(self))
+        } else {
+            Err(anyhow!("client already started"))
         }
-        Ok(ActivationHandle(self))
     }
 
     fn active_value(&self, state: State) -> Result<&ActiveT> {
@@ -81,7 +76,8 @@ impl<ActiveT> StateMachine<ActiveT> {
     /// to `Failed`, this reference will continue to be valid. We don't destroy the started value
     /// until the state machine is destroyed.
     pub fn active(&self) -> Result<&ActiveT> {
-        self.active_value(*self.sender.borrow())
+        let state = self.state.lock().unwrap();
+        self.active_value(*state)
     }
 
     /// Can only be called when in [`State::Failed`]. Return the failure string in an
@@ -98,16 +94,15 @@ impl<ActiveT> StateMachine<ActiveT> {
     ///
     /// To fail during activation, use [`ActivationHandle::fail`] instead.
     pub fn fail(&self, err: String) -> bool {
-        self.sender.send_if_modified(move |state| {
-            if *state == State::Active {
-                let failed_ptr = self.failed.get();
-                unsafe { *failed_ptr = Some(err) };
-                *state = State::Failed;
-                true
-            } else {
-                false
-            }
-        })
+        let mut state = self.state.lock().unwrap();
+        if *state == State::Active {
+            let failed_ptr = self.failed.get();
+            unsafe { *failed_ptr = Some(err) };
+            *state = State::Failed;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -119,24 +114,22 @@ impl<'a, ActiveT> ActivationHandle<'a, ActiveT> {
     /// the state machine, and references to it will be given out when future callers ask for the
     /// active value.
     pub fn activate(self, active: ActiveT) {
-        self.0.sender.send_modify(|state| {
-            assert_eq!(*state, State::Activating);
-            let active_ptr = self.0.active.get();
-            unsafe { *active_ptr = Some(active) };
-            *state = State::Active;
-        });
+        let mut state = self.0.state.lock().unwrap();
+        assert_eq!(*state, State::Activating);
+        let active_ptr = self.0.active.get();
+        unsafe { *active_ptr = Some(active) };
+        *state = State::Active;
     }
 
     /// Tell the state machine that activation failed. The given `err` will be returned in an
     /// [`anyhow::Error`] anytime futurer callers try to activate or get a reference to the
     /// active value.
     pub fn fail(self, err: String) {
-        self.0.sender.send_modify(|state| {
-            assert_eq!(*state, State::Activating);
-            let failed_ptr = self.0.failed.get();
-            unsafe { *failed_ptr = Some(err) };
-            *state = State::Failed;
-        });
+        let mut state = self.0.state.lock().unwrap();
+        assert_eq!(*state, State::Activating);
+        let failed_ptr = self.0.failed.get();
+        unsafe { *failed_ptr = Some(err) };
+        *state = State::Failed;
     }
 }
 
