@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Error, Result};
-use std::{cell::UnsafeCell, future::Future};
-use tokio::sync::watch::{Receiver, Sender};
+use std::cell::UnsafeCell;
+use tokio::sync::watch::Sender;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum State {
@@ -23,11 +23,10 @@ enum State {
 ///
 /// At some point, we may receive an error asynchronously (not associated with a client RPC
 /// request) from the client that tells us that the client has shut down. An example of this is
-/// losing connection with the broker. When this happens, we want to provide a way to interrupt
-/// long-running client RPCs and disallow new RPCs. In this implementation, we still allow old
-/// references to the protected client to live as long as they like: we just disallow new ones.
-/// It's up to the client RPCs themselves to detect the error with the client, or to use the
-/// notification mechanism we provide here.
+/// losing connection with the broker. When this happens, we want to disallow new RPCs. In this
+/// implementation, we still allow old references to the protected client to live as long as they
+/// like: we just disallow new ones. It's up to the client RPCs themselves to detect the error with
+/// the client.
 pub struct StateMachine<ActiveT> {
     active: UnsafeCell<Option<ActiveT>>,
     failed: UnsafeCell<Option<String>>,
@@ -83,29 +82,6 @@ impl<ActiveT> StateMachine<ActiveT> {
     /// until the state machine is destroyed.
     pub fn active(&self) -> Result<&ActiveT> {
         self.active_value(*self.sender.borrow())
-    }
-
-    /// Like [`Self::active`], but also return a [`ActiveWatcher`] that can be used to interrupt
-    /// long-running requests when the state machine transitions to failed. The issue here is that
-    /// some sorts of out-of-band failures of the client may result in the client just "stopping"
-    /// and not resolving requests one way or the other. A watcher can be used to detect this
-    /// situation and abort an outstanding request.
-    #[allow(dead_code)]
-    pub fn active_with_watcher(&self) -> Result<(&ActiveT, ActiveWatcher<'_, ActiveT>)> {
-        // We need to be careful to use the copy of our state from the receiver when we call
-        // `active_value` so that we don't miss a message when we then go and wait on that
-        // receiver.
-        let receiver = self.sender.subscribe();
-        let idx = *receiver.borrow();
-        self.active_value(idx).map(|started| {
-            (
-                started,
-                ActiveWatcher {
-                    state_machine: self,
-                    receiver,
-                },
-            )
-        })
     }
 
     /// Can only be called when in [`State::Failed`]. Return the failure string in an
@@ -164,44 +140,9 @@ impl<'a, ActiveT> ActivationHandle<'a, ActiveT> {
     }
 }
 
-#[allow(dead_code)]
-pub struct ActiveWatcher<'a, ActiveT> {
-    state_machine: &'a StateMachine<ActiveT>,
-    receiver: Receiver<State>,
-}
-
-impl<'a, ActiveT> ActiveWatcher<'a, ActiveT> {
-    /// Wait for `future`, interrupting if the state machine fails.
-    ///
-    /// If the future successfully yields a value, that value will be yielded in turn. However, if
-    /// the future yields an error, that error will be ignored. The assumption is that the error is
-    /// a result of the underlying client shutting down (like closing a channel sender). Instead,
-    /// we wait for the state machine to transition to the failed state, then yield that error.
-    ///
-    /// If the future never yields a value, but the state machine transitions to failed, then the
-    /// state machine error will be yielded.
-    #[allow(dead_code)]
-    pub async fn wait<F, T, E>(mut self, future: F) -> Result<T>
-    where
-        F: Future<Output = std::result::Result<T, E>>,
-    {
-        tokio::select! {
-            Ok(result) = future => {
-                Ok(result)
-            }
-            _ = self.receiver.changed() => {
-                assert_eq!(*self.receiver.borrow(), State::Failed);
-                Err(self.state_machine.failed_error())
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{sync::Arc, time::Duration};
-    use tokio::{sync::oneshot::channel, task, time::sleep};
 
     #[test]
     fn active_while_latent() {
@@ -210,7 +151,7 @@ mod tests {
             sm.active().unwrap_err().to_string(),
             "client not yet started"
         );
-        let Err(err) = sm.active_with_watcher() else {
+        let Err(err) = sm.active() else {
             panic!("error expected");
         };
         assert_eq!(err.to_string(), "client not yet started");
@@ -224,7 +165,7 @@ mod tests {
             sm.active().unwrap_err().to_string(),
             "client not yet started"
         );
-        let Err(err) = sm.active_with_watcher() else {
+        let Err(err) = sm.active() else {
             panic!("error expected");
         };
         assert_eq!(err.to_string(), "client not yet started");
@@ -239,7 +180,7 @@ mod tests {
             sm.active().unwrap_err().to_string(),
             "client not yet started"
         );
-        let Err(err) = sm.active_with_watcher() else {
+        let Err(err) = sm.active() else {
             panic!("error expected");
         };
         assert_eq!(err.to_string(), "client not yet started");
@@ -258,7 +199,7 @@ mod tests {
             sm.active().unwrap_err().to_string(),
             "client not yet started"
         );
-        let Err(err) = sm.active_with_watcher() else {
+        let Err(err) = sm.active() else {
             panic!("error expected");
         };
         assert_eq!(err.to_string(), "client not yet started");
@@ -287,7 +228,7 @@ mod tests {
         let ah = sm.try_to_begin_activation().unwrap();
         ah.activate("active!".to_string());
         assert_eq!(sm.active().unwrap(), "active!");
-        assert_eq!(sm.active_with_watcher().unwrap().0, "active!");
+        assert_eq!(sm.active().unwrap(), "active!");
     }
 
     #[test]
@@ -329,7 +270,7 @@ mod tests {
             sm.active().unwrap_err().to_string(),
             "client failed with error: failure!"
         );
-        let Err(err) = sm.active_with_watcher() else {
+        let Err(err) = sm.active() else {
             panic!("error expected");
         };
         assert_eq!(err.to_string(), "client failed with error: failure!");
@@ -345,7 +286,7 @@ mod tests {
             sm.active().unwrap_err().to_string(),
             "client failed with error: failure!"
         );
-        let Err(err) = sm.active_with_watcher() else {
+        let Err(err) = sm.active() else {
             panic!("error expected");
         };
         assert_eq!(err.to_string(), "client failed with error: failure!");
@@ -413,71 +354,5 @@ mod tests {
             sm.active().unwrap_err().to_string(),
             "client failed with error: failure!"
         );
-    }
-
-    #[tokio::test]
-    async fn active_watcher_wait_fail_before_wait() {
-        let sm = StateMachine::<()>::default();
-        let ah = sm.try_to_begin_activation().unwrap();
-        ah.activate(());
-
-        let aw = sm.active_with_watcher().unwrap().1;
-        sm.fail("failure!".to_string());
-        let (_tx, rx) = channel::<()>();
-        assert_eq!(
-            aw.wait(rx).await.unwrap_err().to_string(),
-            "client failed with error: failure!"
-        );
-    }
-
-    #[tokio::test]
-    async fn active_watcher_wait_fail_during_wait() {
-        let sm = Arc::new(StateMachine::<()>::default());
-        let ah = sm.try_to_begin_activation().unwrap();
-        ah.activate(());
-
-        let aw = sm.active_with_watcher().unwrap().1;
-        let (_tx, rx) = channel::<()>();
-        let sm_clone = sm.clone();
-        task::spawn(async move {
-            sleep(Duration::from_millis(20)).await;
-            sm_clone.fail("failure!".to_string());
-        });
-        assert_eq!(
-            aw.wait(rx).await.unwrap_err().to_string(),
-            "client failed with error: failure!"
-        );
-    }
-
-    #[tokio::test]
-    async fn active_watcher_wait_future_error_ignored() {
-        let sm = Arc::new(StateMachine::<()>::default());
-        let ah = sm.try_to_begin_activation().unwrap();
-        ah.activate(());
-
-        let aw = sm.active_with_watcher().unwrap().1;
-        let (tx, rx) = channel::<()>();
-        let sm_clone = sm.clone();
-        task::spawn(async move {
-            sleep(Duration::from_millis(20)).await;
-            sm_clone.fail("failure!".to_string());
-        });
-        drop(tx);
-        assert_eq!(
-            aw.wait(rx).await.unwrap_err().to_string(),
-            "client failed with error: failure!"
-        );
-    }
-
-    #[tokio::test]
-    async fn active_watcher_wait_success() {
-        let sm = StateMachine::<()>::default();
-        let ah = sm.try_to_begin_activation().unwrap();
-        ah.activate(());
-
-        let aw = sm.active_with_watcher().unwrap().1;
-        let (tx, rx) = channel();
-        tx.send(42).unwrap();
-        assert_eq!(aw.wait(rx).await.unwrap(), 42);
     }
 }
