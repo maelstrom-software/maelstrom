@@ -59,8 +59,12 @@ impl<ActiveT> StateMachine<ActiveT> {
         }
     }
 
-    fn active_value(&self, state: State) -> Result<&ActiveT> {
-        match state {
+    /// Get a reference to the "guarded" started value. This is the actual client object. This
+    /// reference is valid as long as the state machine is. Even if the state machine transitions
+    /// to `Failed`, this reference will continue to be valid. We don't destroy the started value
+    /// until the state machine is destroyed.
+    pub fn active(&self) -> Result<&ActiveT> {
+        match *self.state.lock().unwrap() {
             State::Latent | State::Activating => Err(anyhow!("client not yet started")),
             State::Active => {
                 let started_ptr = self.active.get();
@@ -69,15 +73,6 @@ impl<ActiveT> StateMachine<ActiveT> {
             }
             State::Failed => Err(self.failed_error()),
         }
-    }
-
-    /// Get a reference to the "guarded" started value. This is the actual client object. This
-    /// reference is valid as long as the state machine is. Even if the state machine transitions
-    /// to `Failed`, this reference will continue to be valid. We don't destroy the started value
-    /// until the state machine is destroyed.
-    pub fn active(&self) -> Result<&ActiveT> {
-        let state = self.state.lock().unwrap();
-        self.active_value(*state)
     }
 
     /// Can only be called when in [`State::Failed`]. Return the failure string in an
