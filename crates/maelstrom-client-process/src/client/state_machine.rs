@@ -28,39 +28,32 @@ enum State {
 /// references to the protected client to live as long as they like: we just disallow new ones.
 /// It's up to the client RPCs themselves to detect the error with the client, or to use the
 /// notification mechanism we provide here.
-pub struct StateMachine<LatentT, ActiveT> {
-    latent: UnsafeCell<Option<LatentT>>,
+pub struct StateMachine<ActiveT> {
     active: UnsafeCell<Option<ActiveT>>,
     failed: UnsafeCell<Option<String>>,
     sender: Sender<State>,
 }
 
-unsafe impl<LatentT: Send, ActiveT: Send> Sync for StateMachine<LatentT, ActiveT> {}
+unsafe impl<ActiveT: Send> Sync for StateMachine<ActiveT> {}
 
-impl<LatentT, ActiveT> StateMachine<LatentT, ActiveT> {
-    /// Initialize the state machine, providing some extra information that will be passed to the
-    /// starter.
-    pub fn new(latent: LatentT) -> Self {
+impl<ActiveT> Default for StateMachine<ActiveT> {
+    fn default() -> Self {
         Self {
-            latent: UnsafeCell::new(Some(latent)),
             active: UnsafeCell::new(None),
             failed: UnsafeCell::new(None),
             sender: Sender::new(State::Latent),
         }
     }
+}
 
+impl<ActiveT> StateMachine<ActiveT> {
     /// Attempt to become the starter. This will return an error unless the state machine is in the
-    /// `Latent` state and this is the first attempt to start it. Upon success, two things
-    /// will be returned: the extra information provided to [`Self::new`] as well as a
-    /// [`ActivationHandle`] to be used to indicate the outcome of the startup attempt.
-    pub fn try_to_begin_activation(
-        &self,
-    ) -> Result<(LatentT, ActivationHandle<'_, LatentT, ActiveT>)> {
-        let mut latent: Option<LatentT> = None;
+    /// `Latent` state and this is the first attempt to start it. Upon success an
+    /// [`ActivationHandle`] will be returned to be used to indicate the outcome of the startup
+    /// attempt.
+    pub fn try_to_begin_activation(&self) -> Result<ActivationHandle<'_, ActiveT>> {
         if !self.sender.send_if_modified(|state| {
             if *state == State::Latent {
-                let latent_ptr = self.latent.get();
-                latent = unsafe { &mut *latent_ptr }.take();
                 *state = State::Activating;
                 true
             } else {
@@ -69,7 +62,7 @@ impl<LatentT, ActiveT> StateMachine<LatentT, ActiveT> {
         }) {
             bail!("client already started");
         }
-        Ok((latent.unwrap(), ActivationHandle(self)))
+        Ok(ActivationHandle(self))
     }
 
     fn active_value(&self, state: State) -> Result<&ActiveT> {
@@ -98,7 +91,7 @@ impl<LatentT, ActiveT> StateMachine<LatentT, ActiveT> {
     /// and not resolving requests one way or the other. A watcher can be used to detect this
     /// situation and abort an outstanding request.
     #[allow(dead_code)]
-    pub fn active_with_watcher(&self) -> Result<(&ActiveT, ActiveWatcher<'_, LatentT, ActiveT>)> {
+    pub fn active_with_watcher(&self) -> Result<(&ActiveT, ActiveWatcher<'_, ActiveT>)> {
         // We need to be careful to use the copy of our state from the receiver when we call
         // `active_value` so that we don't miss a message when we then go and wait on that
         // receiver.
@@ -143,9 +136,9 @@ impl<LatentT, ActiveT> StateMachine<LatentT, ActiveT> {
 }
 
 /// Returned by [`StateMachine::try_to_begin_activation`]. See that method for details.
-pub struct ActivationHandle<'a, LatentT, ActiveT>(&'a StateMachine<LatentT, ActiveT>);
+pub struct ActivationHandle<'a, ActiveT>(&'a StateMachine<ActiveT>);
 
-impl<'a, LatentT, ActiveT> ActivationHandle<'a, LatentT, ActiveT> {
+impl<'a, ActiveT> ActivationHandle<'a, ActiveT> {
     /// Tell the state machine that activation succeeded. The given `active` will then be stored in
     /// the state machine, and references to it will be given out when future callers ask for the
     /// active value.
@@ -172,12 +165,12 @@ impl<'a, LatentT, ActiveT> ActivationHandle<'a, LatentT, ActiveT> {
 }
 
 #[allow(dead_code)]
-pub struct ActiveWatcher<'a, LatentT, ActiveT> {
-    state_machine: &'a StateMachine<LatentT, ActiveT>,
+pub struct ActiveWatcher<'a, ActiveT> {
+    state_machine: &'a StateMachine<ActiveT>,
     receiver: Receiver<State>,
 }
 
-impl<'a, LatentT, ActiveT> ActiveWatcher<'a, LatentT, ActiveT> {
+impl<'a, ActiveT> ActiveWatcher<'a, ActiveT> {
     /// Wait for `future`, interrupting if the state machine fails.
     ///
     /// If the future successfully yields a value, that value will be yielded in turn. However, if
@@ -212,7 +205,7 @@ mod tests {
 
     #[test]
     fn active_while_latent() {
-        let sm = StateMachine::<(), ()>::new(());
+        let sm = StateMachine::<()>::default();
         assert_eq!(
             sm.active().unwrap_err().to_string(),
             "client not yet started"
@@ -225,7 +218,7 @@ mod tests {
 
     #[test]
     fn fail_while_latent() {
-        let sm = StateMachine::<(), ()>::new(());
+        let sm = StateMachine::<()>::default();
         assert!(!sm.fail("foo".to_string()));
         assert_eq!(
             sm.active().unwrap_err().to_string(),
@@ -238,15 +231,9 @@ mod tests {
     }
 
     #[test]
-    fn try_to_begin_activation_gets_latent_value() {
-        let sm = StateMachine::<usize, ()>::new(42);
-        assert_eq!(sm.try_to_begin_activation().unwrap().0, 42);
-    }
-
-    #[test]
     fn active_while_activating() {
-        let sm = StateMachine::<(), String>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<String>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
 
         assert_eq!(
             sm.active().unwrap_err().to_string(),
@@ -263,8 +250,8 @@ mod tests {
 
     #[test]
     fn fail_while_activating() {
-        let sm = StateMachine::<(), String>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<String>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
 
         assert!(!sm.fail("foo".to_string()));
         assert_eq!(
@@ -282,8 +269,8 @@ mod tests {
 
     #[test]
     fn try_to_begin_activation_while_activating() {
-        let sm = StateMachine::<(), String>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<String>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
 
         let Err(err) = sm.try_to_begin_activation() else {
             panic!("error expected");
@@ -296,8 +283,8 @@ mod tests {
 
     #[test]
     fn active_while_active() {
-        let sm = StateMachine::<(), String>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<String>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate("active!".to_string());
         assert_eq!(sm.active().unwrap(), "active!");
         assert_eq!(sm.active_with_watcher().unwrap().0, "active!");
@@ -305,8 +292,8 @@ mod tests {
 
     #[test]
     fn try_to_begin_activation_while_active() {
-        let sm = StateMachine::<(), String>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<String>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate("active!".to_string());
 
         let Err(err) = sm.try_to_begin_activation() else {
@@ -319,8 +306,8 @@ mod tests {
 
     #[test]
     fn fail_while_active() {
-        let sm = StateMachine::<(), ()>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<()>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate(());
 
         assert!(sm.fail("failure!".to_string()));
@@ -333,8 +320,8 @@ mod tests {
 
     #[test]
     fn active_while_failed() {
-        let sm = StateMachine::<(), ()>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<()>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate(());
         assert!(sm.fail("failure!".to_string()));
 
@@ -350,8 +337,8 @@ mod tests {
 
     #[test]
     fn active_while_failed_activating() {
-        let sm = StateMachine::<(), ()>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<()>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.fail("failure!".to_string());
 
         assert_eq!(
@@ -366,8 +353,8 @@ mod tests {
 
     #[test]
     fn try_to_begin_activation_while_failed() {
-        let sm = StateMachine::<(), ()>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<()>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate(());
         assert!(sm.fail("failure!".to_string()));
 
@@ -384,8 +371,8 @@ mod tests {
 
     #[test]
     fn try_to_begin_activation_while_failed_activating() {
-        let sm = StateMachine::<(), ()>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<()>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.fail("failure!".to_string());
 
         let Err(err) = sm.try_to_begin_activation() else {
@@ -401,8 +388,8 @@ mod tests {
 
     #[test]
     fn fail_while_failed() {
-        let sm = StateMachine::<(), ()>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<()>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate(());
         assert!(sm.fail("failure!".to_string()));
 
@@ -416,8 +403,8 @@ mod tests {
 
     #[test]
     fn fail_while_failed_activating() {
-        let sm = StateMachine::<(), ()>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<()>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.fail("failure!".to_string());
 
         assert!(!sm.fail("foo".to_string()));
@@ -430,8 +417,8 @@ mod tests {
 
     #[tokio::test]
     async fn active_watcher_wait_fail_before_wait() {
-        let sm = StateMachine::<(), ()>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<()>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate(());
 
         let aw = sm.active_with_watcher().unwrap().1;
@@ -445,8 +432,8 @@ mod tests {
 
     #[tokio::test]
     async fn active_watcher_wait_fail_during_wait() {
-        let sm = Arc::new(StateMachine::<(), ()>::new(()));
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = Arc::new(StateMachine::<()>::default());
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate(());
 
         let aw = sm.active_with_watcher().unwrap().1;
@@ -464,8 +451,8 @@ mod tests {
 
     #[tokio::test]
     async fn active_watcher_wait_future_error_ignored() {
-        let sm = Arc::new(StateMachine::<(), ()>::new(()));
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = Arc::new(StateMachine::<()>::default());
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate(());
 
         let aw = sm.active_with_watcher().unwrap().1;
@@ -484,8 +471,8 @@ mod tests {
 
     #[tokio::test]
     async fn active_watcher_wait_success() {
-        let sm = StateMachine::<(), ()>::new(());
-        let ah = sm.try_to_begin_activation().unwrap().1;
+        let sm = StateMachine::<()>::default();
+        let ah = sm.try_to_begin_activation().unwrap();
         ah.activate(());
 
         let aw = sm.active_with_watcher().unwrap().1;

@@ -54,7 +54,7 @@ use tokio::{
 
 #[derive(Clone)]
 pub struct Client {
-    state_machine: Arc<StateMachine<(), ClientState>>,
+    state_machine: Arc<StateMachine<ClientState>>,
     clean_up: Arc<CleanUpWork>,
 }
 
@@ -214,7 +214,7 @@ const MAX_IN_FLIGHT_LAYER_BUILDS: usize = 10;
 impl Client {
     pub fn new() -> Self {
         Self {
-            state_machine: Arc::new(StateMachine::new(())),
+            state_machine: Arc::new(StateMachine::default()),
             clean_up: Default::default(),
         }
     }
@@ -433,7 +433,7 @@ impl Client {
             ))
         }
 
-        let (_, activation_handle) = self.state_machine.try_to_begin_activation()?;
+        let activation_handle = self.state_machine.try_to_begin_activation()?;
 
         let result = try_to_start(
             log,
