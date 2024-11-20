@@ -1,11 +1,12 @@
 pub mod task;
 
 use maelstrom_base::{
-    self as base, ArtifactType, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, NonEmpty,
+    ArtifactType, GroupId, JobMount, JobNetwork, JobRootOverlay, JobSpec, JobTty, NonEmpty,
     Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
-    self, ContainerRef, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageSpec, LayerSpec,
+    ContainerRef, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageSpec,
+    JobSpec as ClientJobSpec, LayerSpec,
 };
 use maelstrom_util::ext::OptionExt as _;
 use std::{
@@ -26,11 +27,7 @@ pub trait Deps {
         initial: BTreeMap<String, String>,
         specs: Vec<EnvironmentSpec>,
     ) -> Result<Vec<String>, Self::Error>;
-    fn job_prepared(
-        &self,
-        handle: Self::PrepareJobHandle,
-        result: Result<base::JobSpec, Self::Error>,
-    );
+    fn job_prepared(&self, handle: Self::PrepareJobHandle, result: Result<JobSpec, Self::Error>);
     fn container_added(&self, handle: Self::AddContainerHandle, old: Option<ContainerSpec>);
     fn get_image(&self, name: String);
     fn build_layer(&self, spec: LayerSpec);
@@ -38,7 +35,7 @@ pub trait Deps {
 
 pub enum Message<DepsT: Deps> {
     AddContainer(DepsT::AddContainerHandle, String, ContainerSpec),
-    PrepareJob(DepsT::PrepareJobHandle, spec::JobSpec),
+    PrepareJob(DepsT::PrepareJobHandle, ClientJobSpec),
     GotImage(String, Result<ConvertedImage, DepsT::Error>),
     GotLayer(
         LayerSpec,
@@ -94,7 +91,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
         }
     }
 
-    fn receive_prepare_job(&mut self, handle: DepsT::PrepareJobHandle, spec: spec::JobSpec) {
+    fn receive_prepare_job(&mut self, handle: DepsT::PrepareJobHandle, spec: ClientJobSpec) {
         let container = match spec.container {
             ContainerRef::Name(name) => {
                 let Some(container) = self.containers.get(&name) else {
@@ -204,7 +201,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
         &mut self,
         handle: DepsT::AddContainerHandle,
         name: String,
-        spec: spec::ContainerSpec,
+        spec: ContainerSpec,
     ) {
         self.deps
             .container_added(handle, self.containers.insert(name, spec));
@@ -405,7 +402,7 @@ impl<DepsT: Deps> Job<DepsT> {
     fn into_handle_and_spec(
         self,
         deps: &DepsT,
-    ) -> (DepsT::PrepareJobHandle, Result<base::JobSpec, DepsT::Error>) {
+    ) -> (DepsT::PrepareJobHandle, Result<JobSpec, DepsT::Error>) {
         assert!(self.is_ready());
         (
             self.handle,
@@ -415,7 +412,7 @@ impl<DepsT: Deps> Job<DepsT> {
                 ))
             } else {
                 deps.evaluate_environment(self.initial_environment, self.environment)
-                    .map(|environment| base::JobSpec {
+                    .map(|environment| JobSpec {
                         program: self.program,
                         arguments: self.arguments,
                         environment,
