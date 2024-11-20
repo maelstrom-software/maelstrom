@@ -5,7 +5,7 @@ use crate::{
     router,
 };
 use anyhow::Result;
-use maelstrom_base::{self as base};
+use maelstrom_base::JobSpec;
 use maelstrom_client_base::spec::{
     self, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageConfig, LayerSpec,
 };
@@ -69,8 +69,8 @@ pub struct Adapter {
 }
 
 impl Deps for Adapter {
-    type PrepareJobHandle = oneshot::Sender<Result<base::JobSpec, Self::Error>>;
-    type AddContainerHandle = oneshot::Sender<Option<ContainerSpec>>;
+    type PrepareJobHandle = oneshot::Sender<Result<JobSpec, Self::Error>>;
+    type AddContainerHandle = oneshot::Sender<Result<Option<ContainerSpec>, Self::Error>>;
     type Error = String;
 
     fn error_from_string(err: String) -> Self::Error {
@@ -85,16 +85,16 @@ impl Deps for Adapter {
         spec::environment_eval(initial, specs, spec::std_env_lookup).map_err(|err| err.to_string())
     }
 
-    fn job_prepared(
-        &self,
-        handle: Self::PrepareJobHandle,
-        result: Result<base::JobSpec, Self::Error>,
-    ) {
+    fn job_prepared(&self, handle: Self::PrepareJobHandle, result: Result<JobSpec, Self::Error>) {
         let _ = handle.send(result);
     }
 
-    fn container_added(&self, handle: Self::AddContainerHandle, old: Option<ContainerSpec>) {
-        let _ = handle.send(old);
+    fn container_added(
+        &self,
+        handle: Self::AddContainerHandle,
+        result: Result<Option<ContainerSpec>, Self::Error>,
+    ) {
+        let _ = handle.send(result);
     }
 
     fn get_image(&self, name: String) {

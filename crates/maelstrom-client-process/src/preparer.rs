@@ -28,7 +28,11 @@ pub trait Deps {
         specs: Vec<EnvironmentSpec>,
     ) -> Result<Vec<String>, Self::Error>;
     fn job_prepared(&self, handle: Self::PrepareJobHandle, result: Result<JobSpec, Self::Error>);
-    fn container_added(&self, handle: Self::AddContainerHandle, old: Option<ContainerSpec>);
+    fn container_added(
+        &self,
+        handle: Self::AddContainerHandle,
+        old: Result<Option<ContainerSpec>, Self::Error>,
+    );
     fn get_image(&self, name: String);
     fn build_layer(&self, spec: LayerSpec);
 }
@@ -108,9 +112,8 @@ impl<DepsT: Deps> Preparer<DepsT> {
             ContainerRef::Inline(container) => container,
         };
 
-        if let Err(err) = container.check_for_local_network_and_sys_mount() {
-            self.deps
-                .job_prepared(handle, Err(DepsT::error_from_string(err)));
+        if let Err(err) = Self::check_for_local_network_and_sys_mount(&container) {
+            self.deps.job_prepared(handle, Err(err));
             return;
         }
 
@@ -203,8 +206,12 @@ impl<DepsT: Deps> Preparer<DepsT> {
         name: String,
         spec: ContainerSpec,
     ) {
-        self.deps
-            .container_added(handle, self.containers.insert(name, spec));
+        let result = if let Err(err) = Self::check_for_local_network_and_sys_mount(&spec) {
+            Err(err)
+        } else {
+            Ok(self.containers.insert(name, spec))
+        };
+        self.deps.container_added(handle, result);
     }
 
     fn receive_got_image(&mut self, name: &str, result: Result<ConvertedImage, DepsT::Error>) {
@@ -367,6 +374,23 @@ impl<DepsT: Deps> Preparer<DepsT> {
     ) {
         if let Some(spec) = spec_map.remove(&ijid) {
             deps.job_prepared(spec.handle, Err(err));
+        }
+    }
+
+    fn check_for_local_network_and_sys_mount(spec: &ContainerSpec) -> Result<(), DepsT::Error> {
+        if spec.network == JobNetwork::Local
+            && spec
+                .mounts
+                .iter()
+                .any(|m| matches!(m, JobMount::Sys { .. }))
+        {
+            Err(DepsT::error_from_string(
+                "A \"sys\" mount is not compatible with local networking. \
+                Check the documentation for the \"network\" field of \"JobSpec\"."
+                    .into(),
+            ))
+        } else {
+            Ok(())
         }
     }
 }

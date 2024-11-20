@@ -30,7 +30,7 @@ use state_machine::StateMachine;
 use std::{collections::HashSet, future::Future, path::Path, pin::Pin, sync::Arc};
 use tokio::{
     net::TcpStream,
-    sync::{mpsc, Mutex, Semaphore},
+    sync::{mpsc, oneshot, Mutex, Semaphore},
     task::{self, JoinHandle, JoinSet},
 };
 
@@ -440,7 +440,7 @@ impl Client {
         let state = self.state_machine.active()?;
         debug!(state.log, "run_job"; "spec" => ?spec);
 
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let (sender, receiver) = oneshot::channel();
         state
             .preparer_sender
             .send(preparer::Message::PrepareJob(sender, spec))?;
@@ -458,16 +458,12 @@ impl Client {
         let state = self.state_machine.active()?;
         debug!(state.log, "add_container"; "name" => ?name, "container" => ?container);
 
-        container
-            .check_for_local_network_and_sys_mount()
-            .map_err(Error::msg)?;
-
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let (sender, receiver) = oneshot::channel();
         state
             .preparer_sender
             .send(preparer::Message::AddContainer(sender, name, container))?;
 
-        if let Some(existing) = receiver.await? {
+        if let Some(existing) = receiver.await?.map_err(Error::msg)? {
             debug!(state.log, "add_container replacing existing"; "existing" => ?existing);
         }
 

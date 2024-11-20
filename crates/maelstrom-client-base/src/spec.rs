@@ -183,23 +183,6 @@ pub struct ContainerSpec {
     pub group: Option<GroupId>,
 }
 
-impl ContainerSpec {
-    pub fn check_for_local_network_and_sys_mount(&self) -> Result<(), String> {
-        if self.network == JobNetwork::Local
-            && self
-                .mounts
-                .iter()
-                .any(|m| matches!(m, JobMount::Sys { .. }))
-        {
-            Err("A \"sys\" mount is not compatible with local networking. \
-                Check the documentation for the \"network\" field of \"JobSpec\"."
-                .into())
-        } else {
-            Ok(())
-        }
-    }
-}
-
 #[derive(IntoProtoBuf, TryFromProtoBuf, From, Clone, Debug, PartialEq, Eq)]
 #[proto(
     proto_buf_type = "proto::ContainerRef",
