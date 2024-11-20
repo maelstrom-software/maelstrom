@@ -4,6 +4,7 @@ use crate::{
     progress::{LazyProgress, ProgressTracker},
     router,
 };
+use anyhow::Result;
 use maelstrom_base::{self as base};
 use maelstrom_client_base::spec::{
     self, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageConfig, LayerSpec,
@@ -14,7 +15,7 @@ use slog::Logger;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::{
     sync::{
-        mpsc::{UnboundedReceiver, UnboundedSender},
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
         oneshot, Mutex, Semaphore,
     },
     task::{self, JoinSet},
@@ -23,9 +24,13 @@ use tokio::{
 pub type Sender = UnboundedSender<Message<Adapter>>;
 pub type Receiver = UnboundedReceiver<Message<Adapter>>;
 
+pub fn channel() -> (Sender, Receiver) {
+    mpsc::unbounded_channel()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn start(
-    join_set: &mut JoinSet<anyhow::Result<()>>,
+    join_set: &mut JoinSet<Result<()>>,
     sender: Sender,
     receiver: Receiver,
     container_image_depot: Arc<ContainerImageDepot>,
@@ -131,7 +136,7 @@ impl Deps for Adapter {
                 let (artifact_path, artifact_type) =
                     layer_builder.build_layer(spec_clone, &uploader).await?;
                 let artifact_digest = uploader.upload(&artifact_path).await?;
-                Result::<_, anyhow::Error>::Ok((artifact_digest, artifact_type))
+                Result::<_>::Ok((artifact_digest, artifact_type))
             };
             let _ = sender_clone.send(Message::GotLayer(
                 spec,

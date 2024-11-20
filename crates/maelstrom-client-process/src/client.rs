@@ -327,7 +327,7 @@ impl Client {
                 processed_artifact_digests: HashSet::default(),
             }));
 
-            let (preparer_sender, preparer_receiver) = mpsc::unbounded_channel();
+            let (preparer_sender, preparer_receiver) = preparer::task::channel();
 
             preparer::task::start(
                 &mut join_set,
