@@ -2,6 +2,7 @@ mod artifact_pusher;
 mod client;
 mod digest_repo;
 mod log;
+mod preparer;
 mod progress;
 mod router;
 mod rpc;

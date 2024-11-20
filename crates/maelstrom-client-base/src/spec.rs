@@ -7,7 +7,7 @@
 pub mod substitute;
 
 use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{Error, Result};
 use derive_more::From;
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
@@ -15,12 +15,12 @@ use maelstrom_base::{
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Deserializer, Serialize};
-use std::time::Duration;
 use std::{
     collections::{BTreeMap, HashMap},
     env::{self, VarError},
     path::PathBuf,
     result,
+    time::Duration,
 };
 use tuple::Map as _;
 
@@ -184,19 +184,19 @@ pub struct ContainerSpec {
 }
 
 impl ContainerSpec {
-    pub fn check_for_local_network_and_sys_mount(&self) -> Result<()> {
+    pub fn check_for_local_network_and_sys_mount(&self) -> Result<(), String> {
         if self.network == JobNetwork::Local
             && self
                 .mounts
                 .iter()
                 .any(|m| matches!(m, JobMount::Sys { .. }))
         {
-            bail!(
-                "A \"sys\" mount is not compatible with local networking. \
+            Err("A \"sys\" mount is not compatible with local networking. \
                 Check the documentation for the \"network\" field of \"JobSpec\"."
-            );
+                .into())
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 
@@ -518,6 +518,7 @@ pub enum PossiblyImage<T> {
 
 /// A convenience struct for extracting parts of an OCI image for use in a
 /// [`maelstrom_base::JobSpec`].
+#[derive(Clone)]
 pub struct ConvertedImage {
     name: String,
     layers: Vec<PathBuf>,
@@ -543,13 +544,13 @@ impl ConvertedImage {
 
     /// Return an iterator of layers for the image. If there is no image, the iterator will be
     /// empty.
-    pub fn layers(&self) -> Result<Vec<LayerSpec>> {
+    pub fn layers(&self) -> Result<Vec<LayerSpec>, String> {
         self.layers
             .iter()
             .map(|p| {
                 Ok(LayerSpec::Tar {
                     path: Utf8PathBuf::from_path_buf(p.to_owned()).map_err(|_| {
-                        anyhow!("image {} has a non-UTF-8 layer path {p:?}", self.name())
+                        format!("image {} has a non-UTF-8 layer path {p:?}", self.name())
                     })?,
                 })
             })
@@ -558,32 +559,32 @@ impl ConvertedImage {
 
     /// Return a [`BTreeMap`] of environment variables for the image. If the image doesn't have any
     /// environment variables, this will return an error.
-    pub fn environment(&self) -> Result<BTreeMap<String, String>> {
+    pub fn environment(&self) -> Result<BTreeMap<String, String>, String> {
         Ok(BTreeMap::from_iter(
             self.environment
                 .as_ref()
-                .ok_or_else(|| anyhow!("image {} has no environment to use", self.name()))?
+                .ok_or_else(|| format!("image {} has no environment to use", self.name()))?
                 .iter()
                 .map(|var| {
                     var.split_once('=')
                         .map(|pair| pair.map(str::to_string))
                         .ok_or_else(|| {
-                            anyhow!(
+                            format!(
                                 "image {} has an invalid environment variable {var}",
                                 self.name(),
                             )
                         })
                 })
-                .collect::<Result<Vec<_>>>()?,
+                .collect::<Result<Vec<_>, _>>()?,
         ))
     }
 
     /// Return the working directory for the image. If the image doesn't have a working directory,
     /// this will return an error.
-    pub fn working_directory(&self) -> Result<Utf8PathBuf> {
+    pub fn working_directory(&self) -> Result<Utf8PathBuf, String> {
         self.working_directory
             .clone()
-            .ok_or_else(|| anyhow!("image {} has no working directory to use", self.name()))
+            .ok_or_else(|| format!("image {} has no working directory to use", self.name()))
     }
 }
 
@@ -644,14 +645,6 @@ mod tests {
         }
     }
 
-    fn assert_error(err: anyhow::Error, expected: &str) {
-        let message = format!("{err}");
-        assert!(
-            message == expected,
-            "message: {message:?}, expected: {expected:?}"
-        );
-    }
-
     #[test]
     fn good_image_option() {
         let io = ConvertedImage::new("image1", images("image1"));
@@ -673,11 +666,11 @@ mod tests {
     #[test]
     fn image_option_no_environment_and_no_working_directory() {
         let io = ConvertedImage::new("empty", images("empty"));
-        assert_error(
+        assert_eq!(
             io.environment().unwrap_err(),
             "image empty has no environment to use",
         );
-        assert_error(
+        assert_eq!(
             io.working_directory().unwrap_err(),
             "image empty has no working directory to use",
         );
@@ -686,7 +679,7 @@ mod tests {
     #[test]
     fn image_option_invalid_environment_variable() {
         let io = ConvertedImage::new("invalid-env", images("invalid-env"));
-        assert_error(
+        assert_eq!(
             io.environment().unwrap_err(),
             "image invalid-env has an invalid environment variable FOO",
         );
@@ -695,11 +688,8 @@ mod tests {
     #[test]
     fn image_option_invalid_layer_path() {
         let io = ConvertedImage::new("invalid-layer-path", images("invalid-layer-path"));
-        let Err(err) = io.layers() else {
-            panic!("");
-        };
-        assert_error(
-            err,
+        assert_eq!(
+            io.layers().unwrap_err(),
             r#"image invalid-layer-path has a non-UTF-8 layer path "\xFF""#,
         );
     }

@@ -1,33 +1,22 @@
-mod layer_builder;
-mod layer_cache;
+pub mod layer_builder;
 mod state_machine;
 
 use crate::{
-    artifact_pusher,
-    digest_repo::DigestRepository,
-    progress::{LazyProgress, ProgressTracker},
-    router,
+    artifact_pusher, digest_repo::DigestRepository, preparer, progress::ProgressTracker, router,
 };
-use anyhow::{anyhow, bail, Context as _, Error, Result};
-use assert_matches::assert_matches;
+use anyhow::{anyhow, Context as _, Error, Result};
 use async_trait::async_trait;
 use layer_builder::LayerBuilder;
-use layer_cache::{CacheResult, LayerCache};
 use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
-    ArtifactType, Sha256Digest,
+    Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::{
-        environment_eval, std_env_lookup, ContainerRef, ContainerSpec, ConvertedImage, ImageConfig,
-        JobSpec, LayerSpec,
-    },
+    spec::{self, ContainerSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
     StateDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
-use maelstrom_container::{
-    self as container, ContainerImage, ContainerImageDepot, ContainerImageDepotDir,
-};
+use maelstrom_container::{self as container, ContainerImageDepot, ContainerImageDepotDir};
 use maelstrom_util::{
     async_fs,
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -38,14 +27,7 @@ use maelstrom_util::{
 use maelstrom_worker::local_worker;
 use slog::{debug, warn, Logger};
 use state_machine::StateMachine;
-use std::future::Future;
-use std::pin::Pin;
-use std::{
-    collections::{HashMap, HashSet},
-    mem,
-    path::Path,
-    sync::Arc,
-};
+use std::{collections::HashSet, future::Future, path::Path, pin::Pin, sync::Arc};
 use tokio::{
     net::TcpStream,
     sync::{mpsc, Mutex, Semaphore},
@@ -60,20 +42,15 @@ pub struct Client {
 
 struct ClientState {
     router_sender: router::Sender,
-    layer_builder: Arc<LayerBuilder>,
     artifact_upload_tracker: ProgressTracker,
     image_download_tracker: ProgressTracker,
-    container_image_depot: ContainerImageDepot,
     log: Logger,
-    locked: Arc<Mutex<ClientStateLocked>>,
-    layer_building_semaphore: Arc<Semaphore>,
+    preparer_sender: preparer::task::Sender,
 }
 
-struct ClientStateLocked {
-    digest_repo: DigestRepository,
-    processed_artifact_digests: HashSet<Sha256Digest>,
-    cached_layers: LayerCache,
-    containers: HashMap<String, ContainerSpec>,
+pub struct ClientStateLocked {
+    pub digest_repo: DigestRepository,
+    pub processed_artifact_digests: HashSet<Sha256Digest>,
 }
 
 #[derive(Default)]
@@ -96,14 +73,14 @@ impl CleanUpWork {
 }
 
 #[derive(Clone)]
-struct Uploader {
-    log: slog::Logger,
-    router_sender: router::Sender,
-    locked: Arc<Mutex<ClientStateLocked>>,
+pub struct Uploader {
+    pub log: slog::Logger,
+    pub router_sender: router::Sender,
+    pub locked: Arc<Mutex<ClientStateLocked>>,
 }
 
 impl Uploader {
-    async fn upload(&self, path: &Path) -> Result<Sha256Digest> {
+    pub async fn upload(&self, path: &Path) -> Result<Sha256Digest> {
         debug!(self.log, "add_artifact"; "path" => ?path);
 
         let fs = async_fs::Fs::new();
@@ -133,75 +110,6 @@ impl Uploader {
 impl<'a> maelstrom_util::manifest::DataUpload for &'a Uploader {
     async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
         Uploader::upload(self, path).await
-    }
-}
-
-impl ClientState {
-    fn build_layer(&self, layer: LayerSpec) {
-        let uploader = Uploader {
-            log: self.log.clone(),
-            router_sender: self.router_sender.clone(),
-            locked: self.locked.clone(),
-        };
-        let layer_builder = self.layer_builder.clone();
-        let sem = self.layer_building_semaphore.clone();
-        let locked = self.locked.clone();
-        task::spawn(async move {
-            let build_fn = async {
-                let _permit = sem.acquire().await.unwrap();
-                let (artifact_path, artifact_type) =
-                    layer_builder.build_layer(layer.clone(), &uploader).await?;
-                let artifact_digest = uploader.upload(&artifact_path).await?;
-                Result::<_>::Ok((artifact_digest, artifact_type))
-            };
-            let res = build_fn.await;
-            locked.lock().await.cached_layers.fill(&layer, res);
-        });
-    }
-
-    async fn get_layers(
-        &self,
-        layers: Vec<LayerSpec>,
-    ) -> Result<Vec<(Sha256Digest, ArtifactType)>> {
-        debug!(self.log, "get_layers"; "layers" => ?layers);
-
-        let mut locked = self.locked.lock().await;
-        let mut cache_results: Vec<_> = layers
-            .iter()
-            .map(|layer| locked.cached_layers.get(layer))
-            .collect();
-        drop(locked);
-
-        // Kick off tasks to build any layers that need to be
-        for (result, layer) in cache_results.iter_mut().zip(&layers) {
-            if let CacheResult::Build(r) = result {
-                *result = CacheResult::Wait(r.clone());
-                self.build_layer(layer.clone());
-            }
-        }
-
-        // Wait for any layers being built to complete
-        for result in &mut cache_results {
-            if let CacheResult::Wait(w) = result {
-                let res = w.recv().await?;
-                *result = CacheResult::Success(res);
-            }
-        }
-
-        // Now we should have all the layers
-        Ok(cache_results
-            .into_iter()
-            .map(|r| assert_matches!(r, CacheResult::Success(r) => r))
-            .collect())
-    }
-
-    async fn get_container_image(&self, name: &str) -> Result<ContainerImage> {
-        let dl_name = name.to_owned();
-        let tracker = self.image_download_tracker.clone();
-        let prog = LazyProgress::new(move |size| tracker.new_task(&dl_name, size));
-        self.container_image_depot
-            .get_container_image(name, prog)
-            .await
     }
 }
 
@@ -408,25 +316,39 @@ impl Client {
                 &log,
             )?;
 
+            let layer_builder = Arc::new(LayerBuilder::new(
+                cache_dir,
+                project_dir,
+                MANIFEST_INLINE_LIMIT,
+            ));
+            let layer_building_semaphore = Arc::new(Semaphore::new(MAX_IN_FLIGHT_LAYER_BUILDS));
+            let locked = Arc::new(Mutex::new(ClientStateLocked {
+                digest_repo,
+                processed_artifact_digests: HashSet::default(),
+            }));
+
+            let (preparer_sender, preparer_receiver) = mpsc::unbounded_channel();
+
+            preparer::task::start(
+                &mut join_set,
+                preparer_sender.clone(),
+                preparer_receiver,
+                Arc::new(container_image_depot),
+                image_download_tracker.clone(),
+                layer_builder,
+                layer_building_semaphore,
+                log.clone(),
+                locked,
+                router_sender.clone(),
+            );
+
             Ok((
                 ClientState {
                     router_sender,
-                    layer_builder: Arc::new(LayerBuilder::new(
-                        cache_dir,
-                        project_dir,
-                        MANIFEST_INLINE_LIMIT,
-                    )),
                     artifact_upload_tracker,
                     image_download_tracker,
-                    container_image_depot,
                     log,
-                    locked: Arc::new(Mutex::new(ClientStateLocked {
-                        digest_repo,
-                        processed_artifact_digests: HashSet::default(),
-                        cached_layers: LayerCache::new(),
-                        containers: HashMap::new(),
-                    })),
-                    layer_building_semaphore: Arc::new(Semaphore::new(MAX_IN_FLIGHT_LAYER_BUILDS)),
+                    preparer_sender,
                 },
                 join_set,
                 local_worker_handle,
@@ -513,90 +435,42 @@ impl Client {
 
     pub async fn run_job(
         &self,
-        spec: JobSpec,
+        spec: spec::JobSpec,
     ) -> Result<futures::channel::mpsc::UnboundedReceiver<JobStatus>> {
         let state = self.state_machine.active()?;
-        let (sender, receiver) = futures::channel::mpsc::unbounded();
         debug!(state.log, "run_job"; "spec" => ?spec);
 
-        let container = match spec.container {
-            ContainerRef::Name(n) => {
-                let locked = state.locked.lock().await;
-                locked
-                    .containers
-                    .get(&n)
-                    .ok_or_else(|| anyhow!("container {n:?} unknown"))?
-                    .clone()
-            }
-            ContainerRef::Inline(c) => {
-                c.check_for_local_network_and_sys_mount()?;
-                c
-            }
-        };
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        state
+            .preparer_sender
+            .send(preparer::Message::PrepareJob(sender, spec))?;
+        let spec = receiver.await?.map_err(Error::msg)?;
 
-        let mut layers = container.layers;
-        let mut initial_env = Default::default();
-        let mut image_working_directory = None;
-        if let Some(image_spec) = container.image {
-            let image = state.get_container_image(&image_spec.name).await?;
-            let image_config = ImageConfig {
-                layers: image.layers.clone(),
-                environment: image.env().cloned(),
-                working_directory: image.working_dir().map(From::from),
-            };
-            let image = ConvertedImage::new(&image_spec.name, image_config);
-            if image_spec.use_layers {
-                let end = mem::replace(&mut layers, image.layers()?);
-                layers.extend(end);
-            }
-            if image_spec.use_environment {
-                initial_env = image.environment()?;
-            }
-            if image_spec.use_working_directory {
-                image_working_directory = Some(image.working_directory()?);
-            }
-        }
-        if image_working_directory.is_some() && container.working_directory.is_some() {
-            bail!("can't provide both `working_directory` and `image.use_working_directory`");
-        }
-
-        let working_directory = image_working_directory.or(container.working_directory);
-        let converted_layers = state.get_layers(layers).await?;
-
-        let spec = maelstrom_base::JobSpec {
-            program: spec.program,
-            arguments: spec.arguments,
-            environment: environment_eval(initial_env, container.environment, std_env_lookup)?,
-            layers: converted_layers
-                .try_into()
-                .map_err(|_| anyhow!("missing layers"))?,
-            mounts: container.mounts,
-            network: container.network,
-            root_overlay: container.root_overlay,
-            working_directory,
-            user: container.user,
-            group: container.group,
-            timeout: spec.timeout,
-            estimated_duration: spec.estimated_duration,
-            allocate_tty: spec.allocate_tty,
-            priority: spec.priority,
-        };
+        let (sender, receiver) = futures::channel::mpsc::unbounded();
         state
             .router_sender
             .send(router::Message::RunJob(spec, sender))?;
+
         Ok(receiver)
     }
 
     pub async fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {
         let state = self.state_machine.active()?;
-        let mut locked = state.locked.lock().await;
-
-        container.check_for_local_network_and_sys_mount()?;
-
         debug!(state.log, "add_container"; "name" => ?name, "container" => ?container);
-        if let Some(existing) = locked.containers.insert(name, container) {
+
+        container
+            .check_for_local_network_and_sys_mount()
+            .map_err(Error::msg)?;
+
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        state
+            .preparer_sender
+            .send(preparer::Message::AddContainer(sender, name, container))?;
+
+        if let Some(existing) = receiver.await? {
             debug!(state.log, "add_container replacing existing"; "existing" => ?existing);
         }
+
         Ok(())
     }
 

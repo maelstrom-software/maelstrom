@@ -45,6 +45,15 @@ pub enum Message<DepsT: Deps> {
     LocalWorkerStartArtifactFetch(Sha256Digest),
 }
 
+struct Router<DepsT: Deps> {
+    deps: DepsT,
+    standalone: bool,
+    artifacts: HashMap<Sha256Digest, PathBuf>,
+    next_client_job_id: u32,
+    jobs: HashMap<ClientJobId, JobEntry<DepsT::JobHandle>>,
+    completed_jobs: u64,
+}
+
 struct JobEntry<HandleT> {
     handle: HandleT,
     status: Option<JobRunningStatus>,
@@ -57,15 +66,6 @@ impl<HandleT> JobEntry<HandleT> {
             status: None,
         }
     }
-}
-
-struct Router<DepsT: Deps> {
-    deps: DepsT,
-    standalone: bool,
-    artifacts: HashMap<Sha256Digest, PathBuf>,
-    next_client_job_id: u32,
-    jobs: HashMap<ClientJobId, JobEntry<DepsT::JobHandle>>,
-    completed_jobs: u64,
 }
 
 impl<DepsT: Deps> Router<DepsT> {
