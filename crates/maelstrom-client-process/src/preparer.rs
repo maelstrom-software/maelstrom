@@ -16,9 +16,10 @@ use std::{
 };
 
 pub trait Deps {
+    type Error: Clone;
+
     type PrepareJobHandle;
     type AddContainerHandle;
-    type Error: Clone;
 
     fn error_from_string(err: String) -> Self::Error;
 
@@ -137,6 +138,13 @@ impl<DepsT: Deps> Preparer<DepsT> {
         let (pending_image, get_image) = {
             match container.image {
                 Some(ImageSpec {
+                    name: _,
+                    use_layers: false,
+                    use_environment: false,
+                    use_working_directory: false,
+                })
+                | None => (None, None),
+                Some(ImageSpec {
                     name,
                     use_layers: layers,
                     use_environment: environment,
@@ -149,7 +157,6 @@ impl<DepsT: Deps> Preparer<DepsT> {
                     }),
                     Some(name),
                 ),
-                None => (None, None),
             }
         };
 
@@ -471,5 +478,1087 @@ impl<DepsT: Deps> Job<DepsT> {
         self.pending_image.is_none()
             && self.image_layers.iter().all(Option::is_some)
             && self.layers.iter().all(Option::is_some)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Message::*, *};
+    use maelstrom_base::{nonempty, WindowSize};
+    use maelstrom_client::spec;
+    use maelstrom_client_base::spec::ImageConfig;
+    use maelstrom_test::{digest, millis, string, tar_layer};
+    use std::{cell::RefCell, ffi::OsStr, rc::Rc};
+    use TestMessage::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum TestMessage {
+        JobPrepared(u32, Result<JobSpec, String>),
+        ContainerAdded(u32, Result<Option<ContainerSpec>, String>),
+        GetImage(String),
+        BuildLayer(LayerSpec),
+    }
+
+    struct TestState {
+        messages: Vec<TestMessage>,
+    }
+
+    impl Deps for Rc<RefCell<TestState>> {
+        type Error = String;
+        type PrepareJobHandle = u32;
+        type AddContainerHandle = u32;
+
+        fn error_from_string(err: String) -> Self::Error {
+            err
+        }
+
+        fn evaluate_environment(
+            &self,
+            initial: BTreeMap<String, String>,
+            specs: Vec<EnvironmentSpec>,
+        ) -> Result<Vec<String>, Self::Error> {
+            spec::environment_eval(initial, specs, |_| Ok(None)).map_err(|err| err.to_string())
+        }
+
+        fn job_prepared(
+            &self,
+            handle: Self::PrepareJobHandle,
+            result: Result<JobSpec, Self::Error>,
+        ) {
+            self.borrow_mut()
+                .messages
+                .push(TestMessage::JobPrepared(handle, result));
+        }
+
+        fn container_added(
+            &self,
+            handle: Self::AddContainerHandle,
+            result: Result<Option<ContainerSpec>, Self::Error>,
+        ) {
+            self.borrow_mut()
+                .messages
+                .push(TestMessage::ContainerAdded(handle, result));
+        }
+
+        fn get_image(&self, name: String) {
+            self.borrow_mut().messages.push(TestMessage::GetImage(name));
+        }
+
+        fn build_layer(&self, spec: LayerSpec) {
+            self.borrow_mut()
+                .messages
+                .push(TestMessage::BuildLayer(spec));
+        }
+    }
+
+    struct Fixture {
+        test_state: Rc<RefCell<TestState>>,
+        preparer: Preparer<Rc<RefCell<TestState>>>,
+    }
+
+    impl Default for Fixture {
+        fn default() -> Self {
+            let test_state = Rc::new(RefCell::new(TestState {
+                messages: Vec::default(),
+            }));
+            let preparer = Preparer::new(test_state.clone());
+            Fixture {
+                test_state,
+                preparer,
+            }
+        }
+    }
+
+    impl Fixture {
+        #[track_caller]
+        fn expect_messages_in_any_order(&mut self, mut expected: Vec<TestMessage>) {
+            expected.sort();
+            let messages = &mut self.test_state.borrow_mut().messages;
+            messages.sort();
+            if expected == *messages {
+                messages.clear();
+                return;
+            }
+            panic!(
+                "Expected messages didn't match actual messages in any order.\n\
+                Expected: {expected:#?}\n\
+                Actual: {messages:#?}\n\
+                Diff: {}",
+                colored_diff::PrettyDifference {
+                    expected: &format!("{expected:#?}"),
+                    actual: &format!("{messages:#?}")
+                }
+            );
+        }
+    }
+
+    macro_rules! container_spec {
+        (@expand [] -> []) => {
+            ContainerSpec {
+                image: Default::default(),
+                layers: Default::default(),
+                root_overlay: Default::default(),
+                environment: Default::default(),
+                working_directory: Default::default(),
+                mounts: Default::default(),
+                network: Default::default(),
+                user: Default::default(),
+                group: Default::default(),
+            }
+        };
+        (@expand [] -> [$($fields:tt)+]) => {
+            ContainerSpec {
+                $($fields)+,
+                .. container_spec!(@expand [] -> [])
+            }
+        };
+        (@expand [image: $image:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? image: Some($image)])
+        };
+        (@expand [layers: [$($layer:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: vec![$($layer)*]])
+        };
+        (@expand [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? root_overlay: $root_overlay])
+        };
+        (@expand [environment: [$($environment:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: vec![$($environment)*]])
+        };
+        (@expand [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? working_directory: Some($dir.into())])
+        };
+        (@expand [mounts: [$($mount:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? mounts: vec![$($mount)*]])
+        };
+        (@expand [network: $network:ident $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? network: JobNetwork::$network])
+        };
+        (@expand [user: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? user: Some(UserId::new($user))])
+        };
+        (@expand [group: $group:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? group: Some(GroupId::new($group))])
+        };
+        ($($field_in:tt)*) => {
+            container_spec!(@expand [$($field_in)*] -> [])
+        };
+    }
+
+    macro_rules! client_job_spec {
+        (@expand [$program:expr] [] -> []) => {
+            ClientJobSpec {
+                container: ContainerRef::Inline(container_spec!{}),
+                program: $program.into(),
+                arguments: Default::default(),
+                timeout: Default::default(),
+                estimated_duration: Default::default(),
+                allocate_tty: Default::default(),
+                priority: Default::default(),
+            }
+        };
+        (@expand [$($required:tt)+] [] -> [$($fields:tt)+]) => {
+            ClientJobSpec {
+                $($fields)+,
+                .. client_job_spec!(@expand [$($required)+] [] -> [])
+            }
+        };
+        (@expand [$($required:tt)+] [container: $container:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            client_job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? container: $container])
+        };
+        (@expand [$($required:tt)+] [arguments: [$($arg:expr),*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            client_job_spec!(@expand [$($required)+] [$($($field_in)*)?] -> [
+                $($($field_out)+,)? arguments: vec![$($arg.into()),*]
+            ])
+        };
+        (@expand [$($required:tt)+] [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            client_job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? timeout: Timeout::new($timeout)])
+        };
+        (@expand [$($required:tt)+] [estimated_duration: $duration:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            client_job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? estimated_duration: Some($duration)])
+        };
+        (@expand [$($required:tt)+] [allocate_tty: $tty:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            client_job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? allocate_tty: Some($tty)])
+        };
+        (@expand [$($required:tt)+] [priority: $priority:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            client_job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? priority: $priority])
+        };
+        ($program:expr $(,$($field_in:tt)*)?) => {
+            client_job_spec!(@expand [$program] [$($($field_in)*)?] -> [])
+        };
+    }
+
+    macro_rules! job_spec {
+        (@expand [$program:expr, [$($layer:expr),+ $(,)?]] [] -> []) => {
+            JobSpec {
+                program: $program.into(),
+                arguments: Default::default(),
+                environment: Default::default(),
+                layers: nonempty![$($layer),+],
+                mounts: Default::default(),
+                network: Default::default(),
+                root_overlay: Default::default(),
+                working_directory: Default::default(),
+                user: Default::default(),
+                group: Default::default(),
+                timeout: Default::default(),
+                estimated_duration: Default::default(),
+                allocate_tty: Default::default(),
+                priority: Default::default(),
+            }
+        };
+        (@expand [$($required:tt)+] [] -> [$($fields:tt)+]) => {
+            JobSpec {
+                $($fields)+,
+                .. job_spec!(@expand [$($required)+] [] -> [])
+            }
+        };
+        (@expand [$($required:tt)+] [arguments: [$($($argument:expr),+ $(,)?)?] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? arguments: vec![$($($argument.into()),+)?]
+            ])
+        };
+        (@expand [$($required:tt)+] [environment: [$($($var:expr),+ $(,)?)?] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? environment: vec![$($($var.into()),+)?]
+            ])
+        };
+        (@expand [$($required:tt)+] [mounts: [$($mount:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? mounts: vec![$($mount)*]])
+        };
+        (@expand [$($required:tt)+] [network: $network:ident $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? network: JobNetwork::$network])
+        };
+        (@expand [$($required:tt)+] [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? root_overlay: $root_overlay])
+        };
+        (@expand [$($required:tt)+] [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? working_directory: Some($dir.into())])
+        };
+        (@expand [$($required:tt)+] [user: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? user: Some(UserId::new($user))])
+        };
+        (@expand [$($required:tt)+] [group: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? group: Some(GroupId::new($user))])
+        };
+        (@expand [$($required:tt)+] [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? timeout: Timeout::new($timeout)])
+        };
+        (@expand [$($required:tt)+] [estimated_duration: $duration:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? estimated_duration: Some($duration)])
+        };
+        (@expand [$($required:tt)+] [allocate_tty: $tty:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? allocate_tty: Some($tty)])
+        };
+        (@expand [$($required:tt)+] [priority: $priority:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+                [$($($field_out)+,)? priority: $priority])
+        };
+        ($program:expr, [$($layer:expr),+ $(,)?] $(,$($field_in:tt)*)?) => {
+            job_spec!(@expand [$program, [$($layer),+]] [$($($field_in)*)?] -> [])
+        };
+    }
+
+    macro_rules! tar_digest {
+        ($digest:expr) => {
+            (digest!($digest), ArtifactType::Tar)
+        };
+    }
+
+    macro_rules! named_container {
+        ($name:expr) => {
+            ContainerRef::Name($name.into())
+        };
+    }
+
+    macro_rules! inline_container {
+        ($($fields:tt)*) => {
+            ContainerRef::Inline(container_spec!{$($fields)*})
+        }
+    }
+
+    macro_rules! sys_mount {
+        ($mount_point:expr) => {
+            JobMount::Sys {
+                mount_point: $mount_point.into(),
+            }
+        };
+    }
+
+    macro_rules! proc_mount {
+        ($mount_point:expr) => {
+            JobMount::Proc {
+                mount_point: $mount_point.into(),
+            }
+        };
+    }
+
+    macro_rules! tmp_mount {
+        ($mount_point:expr) => {
+            JobMount::Tmp {
+                mount_point: $mount_point.into(),
+            }
+        };
+    }
+
+    macro_rules! image_spec {
+        (@expand [$name:expr] [] -> []) => {
+            ImageSpec {
+                name: $name.into(),
+                use_layers: false,
+                use_environment: false,
+                use_working_directory: false,
+            }
+        };
+        (@expand [$name:expr] [] -> [$($field_out:tt)+]) => {
+            ImageSpec {
+                $($field_out)+,
+                .. image_spec!(@expand [$name] [] -> [])
+            }
+        };
+        (@expand [$name:expr] [layers $(,$($field_in:ident)*)?] -> [$($($field_out:tt)+)?]) => {
+            image_spec!(@expand [$name] [$($($field_in)*)?] -> [$($($field_out)+,)? use_layers: true])
+        };
+        (@expand [$name:expr] [environment $(,$($field_in:ident)*)?] -> [$($($field_out:tt)+)?]) => {
+            image_spec!(@expand [$name] [$($($field_in)*)?] -> [$($($field_out)+,)? use_environment: true])
+        };
+        (@expand [$name:expr] [working_directory $(,$($field_in:ident)*)?] -> [$($($field_out:tt)+)?]) => {
+            image_spec!(@expand [$name] [$($($field_in)*)?] -> [$($($field_out)+,)? use_working_directory: true])
+        };
+        ($name:expr $(, $($use:ident),+ $(,)?)?) => {
+            image_spec!(@expand [$name] [$($($use),+)?] -> [])
+        };
+    }
+
+    macro_rules! converted_image {
+        (@expand [$name:expr] [] -> []) => {
+            ConvertedImage::new($name.into(), ImageConfig::default())
+        };
+        (@expand [$name:expr] [] -> [$($field_out:tt)+]) => {
+            ConvertedImage::new($name.into(), ImageConfig {
+                $($field_out)+,
+                .. ImageConfig::default()
+            })
+        };
+        (@expand [$name:expr] [layers: [$($($layer:expr),+ $(,)?)?] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            converted_image!(@expand [$name] [$($($field_in)*)?] -> [
+                $($($field_out)+,)? layers: vec![$($($layer.into()),+)?]
+            ])
+        };
+        (@expand [$name:expr] [environment: [$($($var:expr),+ $(,)?)?] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            converted_image!(@expand [$name] [$($($field_in)*)?] -> [
+                $($($field_out)+,)? environment: Some(vec![$($($var.into()),+)?])
+            ])
+        };
+        (@expand [$name:expr] [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+            converted_image!(@expand [$name] [$($($field_in)*)?] -> [
+                $($($field_out)+,)? working_directory: Some($working_directory.into())
+            ])
+        };
+        ($name:expr $(,$($field_in:tt)*)?) => {
+            converted_image!(@expand [$name] [$($($field_in)*)?] -> [])
+        };
+    }
+
+    macro_rules! environment_spec {
+        ($extend:expr $(, $($($key:expr => $value:expr),+ $(,)?)?)?) => {
+            EnvironmentSpec {
+                extend: $extend.into(),
+                vars: BTreeMap::from([$($($(($key.into(), $value.into())),+)?)?]),
+            }
+        }
+    }
+
+    macro_rules! script_test {
+        ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });* $(;)?) => {
+            #[test]
+            fn $test_name() {
+                let mut fixture = Fixture::default();
+                $(
+                    fixture.preparer.receive_message($in_msg);
+                    fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
+                )*
+            }
+        };
+    }
+
+    script_test! {
+        prepare_job_no_layers,
+        PrepareJob(1, client_job_spec!{"foo"}) => {
+            JobPrepared(1, Err(string!("job specification has no layers"))),
+        };
+    }
+
+    script_test! {
+        prepare_job_inline_container_with_local_network_and_sys_mount,
+        PrepareJob(
+            2,
+            client_job_spec! {
+                "foo",
+                container: inline_container! {
+                    network: Local,
+                    mounts: [ sys_mount!("/mnt") ],
+                },
+            },
+        ) => {
+            JobPrepared(
+                2,
+                Err(string!(
+                    "A \"sys\" mount is not compatible with local networking. \
+                    Check the documentation for the \"network\" field of \"JobSpec\"."
+                ))
+            ),
+        };
+    }
+
+    script_test! {
+        prepare_job_unknown_named_container,
+        PrepareJob(3, client_job_spec!{"foo", container: named_container!{"foo"}}) => {
+            JobPrepared(3, Err(string!("container \"foo\" unknown"))),
+        };
+    }
+
+    script_test! {
+        prepare_job_one_layer,
+        PrepareJob(
+            1,
+            client_job_spec!{
+                "foo",
+                arguments: ["arg1", "arg2"],
+                container: inline_container!{
+                    layers: [tar_layer!("foo.tar")],
+                },
+            },
+        ) => {
+            BuildLayer(tar_layer!("foo.tar")),
+        };
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(42))) => {
+            JobPrepared(1, Ok(job_spec!("foo", [tar_digest!(42)], arguments: ["arg1", "arg2"]))),
+        };
+    }
+
+    script_test! {
+        prepare_job_two_layers,
+        PrepareJob(
+            1,
+            client_job_spec!{
+                "foo",
+                container: inline_container! {
+                    layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                },
+            },
+        ) => {
+            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer!("bar.tar")),
+        };
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(2))) => {
+            JobPrepared(1, Ok(job_spec!("foo", [ tar_digest!(2), tar_digest!(1) ]))),
+        };
+    }
+
+    script_test! {
+        prepare_job_two_jobs_1,
+        PrepareJob(
+            1,
+            client_job_spec!{
+                "foo",
+                container: inline_container! {
+                    layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                },
+            },
+        ) => {
+            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer!("bar.tar")),
+        };
+        PrepareJob(
+            2,
+            client_job_spec!{
+                "bar",
+                container: inline_container! {
+                    layers: [ tar_layer!("foo.tar"), tar_layer!("baz.tar") ],
+                },
+            },
+        ) => {
+            BuildLayer(tar_layer!("baz.tar")),
+        };
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(2))) => {
+            JobPrepared(1, Ok(job_spec!("foo", [ tar_digest!(2), tar_digest!(1) ]))),
+        };
+        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {
+            JobPrepared(2, Ok(job_spec!("bar", [ tar_digest!(2), tar_digest!(3) ]))),
+        };
+    }
+
+    script_test! {
+        prepare_job_two_jobs_2,
+        PrepareJob(
+            1,
+            client_job_spec!{
+                "foo",
+                container: inline_container! {
+                    layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                },
+            },
+        ) => {
+            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer!("bar.tar")),
+        };
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        PrepareJob(
+            2,
+            client_job_spec!{
+                "bar",
+                container: inline_container! {
+                    layers: [ tar_layer!("foo.tar"), tar_layer!("baz.tar") ],
+                },
+            },
+        ) => {
+            BuildLayer(tar_layer!("baz.tar")),
+        };
+        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {
+            JobPrepared(2, Ok(job_spec!("bar", [ tar_digest!(1), tar_digest!(3) ]))),
+        };
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {
+            JobPrepared(1, Ok(job_spec!("foo", [ tar_digest!(1), tar_digest!(2) ]))),
+        };
+    }
+
+    script_test! {
+        prepare_job_two_jobs_3,
+        PrepareJob(
+            1,
+            client_job_spec!{
+                "foo",
+                container: inline_container! {
+                    layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                },
+            },
+        ) => {
+            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer!("bar.tar")),
+        };
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {
+            JobPrepared(1, Ok(job_spec!("foo", [ tar_digest!(1), tar_digest!(2) ]))),
+        };
+        PrepareJob(
+            2,
+            client_job_spec!{
+                "bar",
+                container: inline_container! {
+                    layers: [ tar_layer!("bar.tar"), tar_layer!("foo.tar") ],
+                },
+            },
+        ) => {
+            JobPrepared(2, Ok(job_spec!("bar", [ tar_digest!(2), tar_digest!(1) ]))),
+        };
+    }
+
+    script_test! {
+        prepare_job_jobs_with_error,
+
+        AddContainer(0, string!("c1"), container_spec! {
+            layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+        }) => {
+            ContainerAdded(0, Ok(None)),
+        };
+        AddContainer(1, string!("c3"), container_spec! {
+            layers: [ tar_layer!("bar.tar"), tar_layer!("baz.tar") ],
+        }) => {
+            ContainerAdded(1, Ok(None)),
+        };
+        PrepareJob(1, client_job_spec!{"one", container: named_container!("c1") }) => {
+            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer!("bar.tar")),
+        };
+        PrepareJob(
+            2,
+            client_job_spec!{
+                "two",
+                container: inline_container! {
+                    layers: [ tar_layer!("foo.tar"), tar_layer!("baz.tar") ],
+                },
+            },
+        ) => {
+            BuildLayer(tar_layer!("baz.tar")),
+        };
+        PrepareJob(3, client_job_spec!{ "three", container: named_container!("c3") }) => {};
+
+        GotLayer(tar_layer!("foo.tar"), Err(string!("foo.tar error"))) => {
+            JobPrepared(1, Err(string!("foo.tar error"))),
+            JobPrepared(2, Err(string!("foo.tar error"))),
+        };
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {};
+        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {
+            JobPrepared(3, Ok(job_spec!("three", [ tar_digest!(2), tar_digest!(3) ]))),
+        };
+
+        PrepareJob(
+            4,
+            client_job_spec!{
+                "four",
+                container: inline_container! {
+                    layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                },
+            },
+        ) => {
+            JobPrepared(4, Err(string!("foo.tar error"))),
+        };
+        PrepareJob(5, client_job_spec!{ "five", container: named_container!("c3") }) => {
+            JobPrepared(5, Ok(job_spec!("five", [ tar_digest!(2), tar_digest!(3) ]))),
+        };
+    }
+
+    script_test! {
+        prepare_job_jobs_with_images,
+
+        AddContainer(0, string!("c1"), container_spec! {
+            image: image_spec!("image1", layers),
+            layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+        }) => {
+            ContainerAdded(0, Ok(None)),
+        };
+        PrepareJob(1, client_job_spec!{"one", container: named_container!("c1") }) => {
+            GetImage(string!("image1")),
+            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer!("bar.tar")),
+        };
+        GotImage(string!("image1"), Ok(converted_image!("image1", layers: [ "image1/1.tar", "image1/2.tar" ]))) => {
+            BuildLayer(tar_layer!("image1/1.tar")),
+            BuildLayer(tar_layer!("image1/2.tar")),
+        };
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(4))) => {};
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(3))) => {};
+        GotLayer(tar_layer!("image1/2.tar"), Ok(tar_digest!(12))) => {};
+        GotLayer(tar_layer!("image1/1.tar"), Ok(tar_digest!(11))) => {
+            JobPrepared(1, Ok(job_spec!("one", [
+                tar_digest!(11), tar_digest!(12), tar_digest!(3), tar_digest!(4),
+            ]))),
+        };
+
+        PrepareJob(2, client_job_spec!{"two", container: inline_container!{
+            image: image_spec!("image2", layers),
+            layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+        } }) => {
+            GetImage(string!("image2")),
+        };
+        PrepareJob(3, client_job_spec!{"three", container: inline_container!{
+            image: image_spec!("image1", layers),
+            layers: [ tar_layer!("foo.tar"), tar_layer!("baz.tar") ],
+        } }) => {
+            BuildLayer(tar_layer!("baz.tar")),
+        };
+        GotImage(string!("image2"), Ok(converted_image!("image2", layers: [ "image1/1.tar", "image2/2.tar" ]))) => {
+            BuildLayer(tar_layer!("image2/2.tar")),
+        };
+        GotLayer(tar_layer!("image2/2.tar"), Ok(tar_digest!(22))) => {
+            JobPrepared(2, Ok(job_spec!("two", [
+                tar_digest!(11), tar_digest!(22), tar_digest!(3), tar_digest!(4),
+            ]))),
+        };
+        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(5))) => {
+            JobPrepared(3, Ok(job_spec!("three", [
+                tar_digest!(11), tar_digest!(12), tar_digest!(3), tar_digest!(5),
+            ]))),
+        };
+
+        PrepareJob(4, client_job_spec!{"four", container: named_container!("c1")}) => {
+            JobPrepared(4, Ok(job_spec!("four", [
+                tar_digest!(11), tar_digest!(12), tar_digest!(3), tar_digest!(4),
+            ]))),
+        };
+    }
+
+    script_test! {
+        prepare_job_jobs_with_empty_image_use,
+
+        AddContainer(0, string!("c1"), container_spec! {
+            image: image_spec!("image1"),
+            layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+        }) => {
+            ContainerAdded(0, Ok(None)),
+        };
+        PrepareJob(1, client_job_spec!{"one", container: named_container!("c1") }) => {
+            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer!("bar.tar")),
+        };
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(3))) => {};
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(4))) => {
+            JobPrepared(1, Ok(job_spec!("one", [ tar_digest!(3), tar_digest!(4) ]))),
+        };
+    }
+
+    script_test! {
+        prepare_job_jobs_with_image_errors,
+
+        PrepareJob(1, client_job_spec!{"one", container: inline_container!{
+            image: image_spec!("image", layers),
+        }}) => {
+            GetImage(string!("image")),
+        };
+        PrepareJob(2, client_job_spec!{"two", container: inline_container!{
+            image: image_spec!("image", working_directory),
+            layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
+        }}) => {
+            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer!("bar.tar")),
+        };
+        PrepareJob(3, client_job_spec!{"three", container: inline_container!{
+            layers: [tar_layer!("foo.tar")],
+        }}) => {};
+
+        GotImage(string!("image"), Err(string!("image error"))) => {
+            JobPrepared(1, Err(string!("image error"))),
+            JobPrepared(2, Err(string!("image error"))),
+        };
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {};
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {
+            JobPrepared(3, Ok(job_spec!("three", [tar_digest!(1)]))),
+        };
+
+        PrepareJob(4, client_job_spec!{"four", container: inline_container!{
+            image: image_spec!("image", layers),
+            layers: [tar_layer!("baz.tar")],
+        }}) => {
+            BuildLayer(tar_layer!("baz.tar")),
+            JobPrepared(4, Err(string!("image error"))),
+        };
+        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {};
+    }
+
+    script_test! {
+        prepare_job_all_fields,
+
+        AddContainer(0, string!("container"), container_spec! {
+            layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
+            root_overlay: JobRootOverlay::Tmp,
+            environment: [
+                environment_spec!{false, "FOO" => "foo", "BAR" => "bar"},
+                environment_spec!{true, "FOO" => "frob", "BAZ" => "baz"},
+            ],
+            working_directory: "/root",
+            mounts: [
+                proc_mount!("/proc"),
+                tmp_mount!("/tmp"),
+            ],
+            network: Local,
+            user: 100,
+            group: 101,
+        }) => {
+            ContainerAdded(0, Ok(None)),
+        };
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: named_container!("container"),
+            arguments: ["arg1", "arg2"],
+            timeout: 10,
+            estimated_duration: millis!(100),
+            allocate_tty: JobTty::new(b"123456", WindowSize::new(50, 100)),
+            priority: 42,
+        }) => {
+            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer!("bar.tar")),
+        };
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {
+            JobPrepared(1, Ok(job_spec!{
+                "one",
+                [tar_digest!(1), tar_digest!(2)],
+                arguments: ["arg1", "arg2"],
+                environment: [
+                    "BAR=bar",
+                    "BAZ=baz",
+                    "FOO=frob",
+                ],
+                mounts: [
+                    proc_mount!("/proc"),
+                    tmp_mount!("/tmp"),
+                ],
+                network: Local,
+                root_overlay: JobRootOverlay::Tmp,
+                working_directory: "/root",
+                user: 100,
+                group: 101,
+                timeout: 10,
+                estimated_duration: millis!(100),
+                allocate_tty: JobTty::new(b"123456", WindowSize::new(50, 100)),
+                priority: 42,
+            })),
+        };
+    }
+
+    script_test! {
+        prepare_job_environment_from_image_missing,
+
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: inline_container! {
+                image: image_spec!("image", environment),
+                layers: [tar_layer!("foo.tar")],
+            },
+        }) => {
+            GetImage(string!("image")),
+            BuildLayer(tar_layer!("foo.tar")),
+        };
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotImage(string!("image"), Ok(converted_image!("image", layers: ["image1/1.tar"]))) => {
+            JobPrepared(1, Err(string!("image image has no environment to use"))),
+        };
+    }
+
+    script_test! {
+        prepare_job_environment_from_image,
+
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: inline_container! {
+                image: image_spec!("image", environment),
+                layers: [tar_layer!("foo.tar")],
+            },
+        }) => {
+            GetImage(string!("image")),
+            BuildLayer(tar_layer!("foo.tar")),
+        };
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotImage(string!("image"), Ok(converted_image!{
+            "image",
+            layers: ["image1/1.tar"],
+            environment: ["FOO=foo", "BAR=bar" ]
+        })) => {
+            JobPrepared(1, Ok(job_spec!{
+                "one",
+                [tar_digest!(1)],
+                environment: ["BAR=bar", "FOO=foo"],
+            })),
+        };
+
+        PrepareJob(2, client_job_spec!{
+            "two",
+            container: inline_container! {
+                image: image_spec!("image", environment),
+                layers: [tar_layer!("foo.tar")],
+                environment: [
+                    environment_spec!{false, "OLD_FOO" => "old_$prev{FOO}", "BAZ" => "$prev{BAR}"},
+                    environment_spec!{true, "FOO" => "food" },
+                ],
+            },
+        }) => {
+            JobPrepared(2, Ok(job_spec!{
+                "two",
+                [tar_digest!(1)],
+                environment: ["BAZ=bar", "FOO=food", "OLD_FOO=old_foo"],
+            })),
+        };
+    }
+
+    script_test! {
+        prepare_job_environment_from_image_vs_not,
+
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: inline_container! {
+                image: image_spec!("image", environment),
+                layers: [tar_layer!("foo.tar")],
+                environment: [environment_spec!{true, "BAZ" => "baz" }],
+            },
+        }) => {
+            GetImage(string!("image")),
+            BuildLayer(tar_layer!("foo.tar")),
+        };
+
+        PrepareJob(2, client_job_spec!{
+            "two",
+            container: inline_container! {
+                layers: [tar_layer!("foo.tar")],
+                environment: [environment_spec!{true, "BAZ" => "baz" }],
+            },
+        }) => {};
+
+        GotImage(string!("image"), Ok(converted_image!{
+            "image",
+            layers: ["image1/1.tar"],
+            environment: ["FOO=foo", "BAR=bar"],
+        })) => {};
+
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {
+            JobPrepared(1, Ok(job_spec!{
+                "one",
+                [tar_digest!(1)],
+                environment: ["BAR=bar", "BAZ=baz", "FOO=foo"],
+            })),
+            JobPrepared(2, Ok(job_spec!{
+                "two",
+                [tar_digest!(1)],
+                environment: ["BAZ=baz"],
+            })),
+        };
+    }
+
+    script_test! {
+        prepare_job_environment_error,
+
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: inline_container! {
+                layers: [tar_layer!("foo.tar")],
+                environment: [environment_spec!{true, "OLD_FOO" => "old_$prev{FOO}"}],
+            },
+        }) => {
+            BuildLayer(tar_layer!("foo.tar")),
+        };
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {
+            JobPrepared(1, Err(string!(r#"unknown variable "FOO""#))),
+        };
+
+        PrepareJob(2, client_job_spec!{
+            "two",
+            container: inline_container! {
+                layers: [tar_layer!("foo.tar")],
+                environment: [environment_spec!{true, "FOO" => "$env{FOO}"}],
+            },
+        }) => {
+            JobPrepared(2, Err(string!(r#"unknown variable "FOO""#))),
+        };
+    }
+
+    script_test! {
+        prepare_job_working_directory_from_image,
+
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: inline_container! {
+                image: image_spec!("image", working_directory),
+                layers: [tar_layer!("foo.tar")],
+            },
+        }) => {
+            GetImage(string!("image")),
+            BuildLayer(tar_layer!("foo.tar")),
+        };
+
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+
+        GotImage(string!("image"), Ok(converted_image!{
+            "image",
+            working_directory: "/root",
+        })) => {
+            JobPrepared(1, Ok(job_spec!{
+                "one",
+                [tar_digest!(1)],
+                working_directory: "/root",
+            })),
+        };
+    }
+
+    script_test! {
+        prepare_job_working_directory_from_image_and_specified_directly,
+
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: inline_container! {
+                image: image_spec!("image", working_directory),
+                layers: [tar_layer!("foo.tar")],
+                working_directory: "/root2",
+            },
+        }) => {
+            GetImage(string!("image")),
+            BuildLayer(tar_layer!("foo.tar")),
+        };
+
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+
+        GotImage(string!("image"), Ok(converted_image!{
+            "image",
+            working_directory: "/root",
+        })) => {
+            JobPrepared(1, Err(string!("can't provide both `working_directory` and `image.use_working_directory`"))),
+        };
+    }
+
+    script_test! {
+        prepare_job_working_directory_from_image_missing_working_directory,
+
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: inline_container! {
+                image: image_spec!("image", working_directory),
+                layers: [tar_layer!("foo.tar")],
+            },
+        }) => {
+            GetImage(string!("image")),
+            BuildLayer(tar_layer!("foo.tar")),
+        };
+
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+
+        GotImage(string!("image"), Ok(converted_image!{"image"})) => {
+            JobPrepared(1, Err(string!("image image has no working directory to use"))),
+        };
+    }
+
+    script_test! {
+        prepare_job_layers_from_image_bad_path,
+
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: inline_container! {
+                image: image_spec!("image", layers),
+            },
+        }) => {
+            GetImage(string!("image")),
+        };
+
+        GotImage(string!("image"), Ok(converted_image!{
+            "image",
+            layers: [
+                unsafe { OsStr::from_encoded_bytes_unchecked(b"\xff\xff\xff\xff") },
+            ],
+        })) => {
+            JobPrepared(1, Err(string!(r#"image image has a non-UTF-8 layer path "\xFF\xFF\xFF\xFF""#))),
+        };
+    }
+
+    script_test! {
+        add_container_duplicate,
+        AddContainer(0, string!("foo"), container_spec!{ network: Loopback }) => {
+            ContainerAdded(0, Ok(None)),
+        };
+        AddContainer(1, string!("foo"), container_spec!{ network: Local }) => {
+            ContainerAdded(1, Ok(Some(container_spec!{ network: Loopback }))),
+        };
+    }
+
+    script_test! {
+        add_container_with_local_network_and_sys_mount,
+        AddContainer(
+            0,
+            string!("foo"),
+            container_spec! {
+                network: Local,
+                mounts: [ sys_mount!("/mnt") ],
+            }
+        ) => {
+            ContainerAdded(
+                0,
+                Err(string!(
+                    "A \"sys\" mount is not compatible with local networking. \
+                    Check the documentation for the \"network\" field of \"JobSpec\"."
+                ))
+            ),
+        };
     }
 }

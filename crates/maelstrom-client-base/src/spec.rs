@@ -168,7 +168,7 @@ pub fn environment_eval(
         .collect())
 }
 
-#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq)]
+#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[proto(proto_buf_type = "proto::ContainerSpec")]
 pub struct ContainerSpec {
     pub image: Option<ImageSpec>,
@@ -318,7 +318,9 @@ impl JobSpec {
     Deserialize,
     Eq,
     Hash,
+    Ord,
     PartialEq,
+    PartialOrd,
     Serialize,
 )]
 #[proto(proto_buf_type = "proto::PrefixOptions")]
@@ -340,7 +342,9 @@ pub struct PrefixOptions {
     Deserialize,
     Eq,
     Hash,
+    Ord,
     PartialEq,
+    PartialOrd,
     Serialize,
 )]
 #[proto(proto_buf_type = "proto::SymlinkSpec")]
@@ -350,7 +354,17 @@ pub struct SymlinkSpec {
 }
 
 #[derive(
-    Clone, Debug, Deserialize, Eq, Hash, IntoProtoBuf, PartialEq, Serialize, TryFromProtoBuf,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    IntoProtoBuf,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    TryFromProtoBuf,
 )]
 #[proto(
     proto_buf_type = "proto::LayerSpec",

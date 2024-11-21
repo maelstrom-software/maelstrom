@@ -84,7 +84,7 @@ layers = [{ stubs = ["/tmp/"] }]
 mounts = [{ type = "tmp", mount_point = "/tmp" }]
 
 [[directives]]
-filter = "package.equals(maelstrom-client-process)"
+filter = "package.equals(maelstrom-client-process) && name.ends_with(shared_library_dependencies_test)"
 added_layers = [
     { glob = "crates/maelstrom-client-process/src/client/layer_builder/so_test_files/**", canonicalize = true },
     { paths = ["/lib64/ld-linux-x86-64.so.2"], follow_symlinks = true }
