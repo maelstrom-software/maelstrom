@@ -30,7 +30,7 @@ use tokio::{
 ///
 /// This limit is put in place to try to have some control on the amount of tasks and memory being
 /// used by a FUSE connection.
-pub const MAX_INFLIGHT: usize = 20;
+pub const MAX_PENDING: usize = 20;
 
 /// The handle returned by [`fuse_mount_namespace`]. It can be used make the child exit (thus
 /// removing the mount) also it provides a way to get the path to the mount (via `/proc/`)
@@ -260,7 +260,7 @@ impl<FileSystemT> DispatchingFs<FileSystemT> {
     fn new(handler: FileSystemT) -> Self {
         Self {
             handler: Arc::new(handler),
-            sem: Arc::new(Semaphore::new(MAX_INFLIGHT / 2)),
+            sem: Arc::new(Semaphore::new(MAX_PENDING / 2)),
         }
     }
 }
@@ -270,7 +270,7 @@ impl<FileSystemT: FuseFileSystem + Send + Sync + 'static> fuser::Filesystem
 {
     async fn destroy(&mut self) {
         self.sem
-            .acquire_many(MAX_INFLIGHT as u32 / 2)
+            .acquire_many(MAX_PENDING as u32 / 2)
             .await
             .unwrap()
             .forget();

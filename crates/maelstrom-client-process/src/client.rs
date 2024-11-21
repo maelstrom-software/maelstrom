@@ -30,7 +30,7 @@ use state_machine::StateMachine;
 use std::{collections::HashSet, future::Future, path::Path, pin::Pin, sync::Arc};
 use tokio::{
     net::TcpStream,
-    sync::{mpsc, oneshot, Mutex, Semaphore},
+    sync::{mpsc, oneshot, Mutex},
     task::{self, JoinHandle, JoinSet},
 };
 
@@ -117,7 +117,7 @@ impl<'a> maelstrom_util::manifest::DataUpload for &'a Uploader {
 const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 
 /// Maximum number of layers to build simultaneously
-const MAX_IN_FLIGHT_LAYER_BUILDS: usize = 10;
+const MAX_PENDING_LAYER_BUILDS: usize = 10;
 
 impl Client {
     pub fn new() -> Self {
@@ -171,7 +171,7 @@ impl Client {
 
             let extra = 1 /* rpc connection */ +
                 /* 1 for the manifest, 1 for file we are reading, 1 for directory we are listing */
-                MAX_IN_FLIGHT_LAYER_BUILDS * 3 +
+                MAX_PENDING_LAYER_BUILDS * 3 +
                 artifact_pusher::MAX_CLIENT_UPLOADS * 2; // 1 for the socket, 1 for the file.
             local_worker::check_open_file_limit(&log, slots, extra as u64)?;
 
@@ -321,7 +321,6 @@ impl Client {
                 project_dir,
                 MANIFEST_INLINE_LIMIT,
             ));
-            let layer_building_semaphore = Arc::new(Semaphore::new(MAX_IN_FLIGHT_LAYER_BUILDS));
             let locked = Arc::new(Mutex::new(ClientStateLocked {
                 digest_repo,
                 processed_artifact_digests: HashSet::default(),
@@ -331,12 +330,12 @@ impl Client {
 
             preparer::task::start(
                 &mut join_set,
+                MAX_PENDING_LAYER_BUILDS.try_into().unwrap(),
                 preparer_sender.clone(),
                 preparer_receiver,
                 Arc::new(container_image_depot),
                 image_download_tracker.clone(),
                 layer_builder,
-                layer_building_semaphore,
                 log.clone(),
                 locked,
                 router_sender.clone(),

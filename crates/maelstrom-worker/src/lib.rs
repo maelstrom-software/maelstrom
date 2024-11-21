@@ -39,7 +39,7 @@ use types::{
     BrokerSender, BrokerSocketOutgoingSender, Cache, DispatcherReceiver, DispatcherSender,
 };
 
-const MAX_IN_FLIGHT_LAYERS_BUILDS: usize = 10;
+const MAX_PENDING_LAYERS_BUILDS: usize = 10;
 const MAX_ARTIFACT_FETCHES: usize = 1;
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
@@ -136,12 +136,12 @@ pub fn check_open_file_limit(log: &Logger, slots: Slots, extra: u64) -> Result<(
 fn open_file_max(slots: Slots) -> u64 {
     let existing_open_files: u64 = 3 /* stdout, stdin, stderr */;
     let per_slot_estimate: u64 = 6 /* unix socket, FUSE connection, (stdout, stderr) * 2 */ +
-        maelstrom_fuse::MAX_INFLIGHT as u64 /* each FUSE request opens a file */;
+        maelstrom_fuse::MAX_PENDING as u64 /* each FUSE request opens a file */;
     existing_open_files
         + (maelstrom_layer_fs::READER_CACHE_SIZE * 2) // 1 for socket, 1 for the file
         + MAX_ARTIFACT_FETCHES as u64
         + per_slot_estimate * u16::from(slots) as u64
-        + (MAX_IN_FLIGHT_LAYERS_BUILDS * maelstrom_layer_fs::LAYER_BUILDING_FILE_MAX) as u64
+        + (MAX_PENDING_LAYERS_BUILDS * maelstrom_layer_fs::LAYER_BUILDING_FILE_MAX) as u64
 }
 
 fn round_to_multiple(n: u64, k: u64) -> u64 {

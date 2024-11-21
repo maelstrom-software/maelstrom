@@ -12,11 +12,11 @@ use maelstrom_client_base::spec::{
 use maelstrom_container::ContainerImageDepot;
 use maelstrom_util::sync;
 use slog::Logger;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc};
 use tokio::{
     sync::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
-        oneshot, Mutex, Semaphore,
+        oneshot, Mutex,
     },
     task::{self, JoinSet},
 };
@@ -31,12 +31,12 @@ pub fn channel() -> (Sender, Receiver) {
 #[allow(clippy::too_many_arguments)]
 pub fn start(
     join_set: &mut JoinSet<Result<()>>,
+    max_pending_layer_builds: NonZeroUsize,
     sender: Sender,
     receiver: Receiver,
     container_image_depot: Arc<ContainerImageDepot>,
     image_download_tracker: ProgressTracker,
     layer_builder: Arc<LayerBuilder>,
-    layer_building_semaphore: Arc<Semaphore>,
     log: Logger,
     locked: Arc<Mutex<ClientStateLocked>>,
     router_sender: router::Sender,
@@ -46,12 +46,11 @@ pub fn start(
         image_download_tracker,
         sender,
         layer_builder,
-        layer_building_semaphore,
         log,
         locked,
         router_sender,
     };
-    let mut preparer = Preparer::new(adapter);
+    let mut preparer = Preparer::new(adapter, max_pending_layer_builds);
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
         preparer.receive_message(msg)
     }));
@@ -62,7 +61,6 @@ pub struct Adapter {
     pub image_download_tracker: ProgressTracker,
     pub sender: Sender,
     pub layer_builder: Arc<LayerBuilder>,
-    pub layer_building_semaphore: Arc<Semaphore>,
     pub log: Logger,
     pub locked: Arc<Mutex<ClientStateLocked>>,
     pub router_sender: router::Sender,
@@ -127,12 +125,10 @@ impl Deps for Adapter {
             locked: self.locked.clone(),
         };
         let layer_builder = self.layer_builder.clone();
-        let sem = self.layer_building_semaphore.clone();
         let sender_clone = self.sender.clone();
         task::spawn(async move {
             let spec_clone = spec.clone();
             let build_fn = async {
-                let _permit = sem.acquire().await.unwrap();
                 let (artifact_path, artifact_type) =
                     layer_builder.build_layer(spec_clone, &uploader).await?;
                 let artifact_digest = uploader.upload(&artifact_path).await?;

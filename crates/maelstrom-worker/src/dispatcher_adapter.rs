@@ -4,7 +4,7 @@ use crate::{
     layer_fs,
     manifest_digest_cache::ManifestDigestCache,
     types::{DispatcherSender, TempFileFactory},
-    MAX_IN_FLIGHT_LAYERS_BUILDS,
+    MAX_PENDING_LAYERS_BUILDS,
 };
 use anyhow::Result;
 use maelstrom_base::{ArtifactType, JobError, JobId, JobSpec, Sha256Digest};
@@ -68,7 +68,7 @@ impl DispatcherAdapter {
             dispatcher_sender,
             log,
             layer_building_semaphore: Arc::new(tokio::sync::Semaphore::new(
-                MAX_IN_FLIGHT_LAYERS_BUILDS,
+                MAX_PENDING_LAYERS_BUILDS,
             )),
             temp_file_factory,
         })

@@ -10,8 +10,9 @@ use maelstrom_client_base::spec::{
 };
 use maelstrom_util::ext::OptionExt as _;
 use std::{
-    collections::{hash_map::Entry, BTreeMap, HashMap},
+    collections::{hash_map::Entry, BTreeMap, HashMap, VecDeque},
     mem,
+    num::NonZeroUsize,
     time::Duration,
 };
 
@@ -50,6 +51,7 @@ pub enum Message<DepsT: Deps> {
 
 pub struct Preparer<DepsT: Deps> {
     deps: DepsT,
+    layer_builds: LayerBuilds,
     containers: HashMap<String, ContainerSpec>,
     images: HashMap<String, ImageEntry<DepsT>>,
     layers: HashMap<LayerSpec, LayerEntry<DepsT>>,
@@ -67,10 +69,45 @@ enum LayerEntry<DepsT: Deps> {
     Getting(Vec<(bool, u64, usize)>),
 }
 
+struct LayerBuilds {
+    max_pending: NonZeroUsize,
+    pending: usize,
+    waiting: VecDeque<LayerSpec>,
+}
+
+impl LayerBuilds {
+    fn new(max_pending: NonZeroUsize) -> Self {
+        Self {
+            max_pending,
+            pending: 0,
+            waiting: Default::default(),
+        }
+    }
+
+    fn push<DepsT: Deps>(&mut self, deps: &DepsT, layer: LayerSpec) {
+        if self.pending < self.max_pending.into() {
+            self.pending += 1;
+            deps.build_layer(layer);
+        } else {
+            self.waiting.push_back(layer);
+        }
+    }
+
+    fn pop<DepsT: Deps>(&mut self, deps: &DepsT) {
+        if let Some(layer) = self.waiting.pop_front() {
+            deps.build_layer(layer);
+        } else {
+            self.pending = self.pending.checked_sub(1).unwrap();
+            assert!(self.pending < self.max_pending.into());
+        }
+    }
+}
+
 impl<DepsT: Deps> Preparer<DepsT> {
-    pub fn new(deps: DepsT) -> Self {
+    pub fn new(deps: DepsT, max_pending_layer_builds: NonZeroUsize) -> Self {
         Self {
             deps,
+            layer_builds: LayerBuilds::new(max_pending_layer_builds),
             containers: Default::default(),
             images: Default::default(),
             layers: Default::default(),
@@ -123,6 +160,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
 
         let layers = match Self::evaluate_layers(
             &self.deps,
+            &mut self.layer_builds,
             &mut self.layers,
             container.layers,
             ijid,
@@ -264,6 +302,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
         if image_use.layers {
             job.image_layers = Self::evaluate_layers(
                 &self.deps,
+                &mut self.layer_builds,
                 &mut self.layers,
                 image.layers().map_err(DepsT::error_from_string)?,
                 ijid,
@@ -298,6 +337,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
 
     fn evaluate_layers(
         deps: &DepsT,
+        layer_builds: &mut LayerBuilds,
         layer_map: &mut HashMap<LayerSpec, LayerEntry<DepsT>>,
         layers: Vec<LayerSpec>,
         ijid: u64,
@@ -318,7 +358,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
                     }
                 },
                 Entry::Vacant(entry) => {
-                    deps.build_layer(entry.key().clone());
+                    layer_builds.push(deps, entry.key().clone());
                     entry.insert(LayerEntry::Getting(vec![(image, ijid, idx)]));
                     Ok(None)
                 }
@@ -338,33 +378,36 @@ impl<DepsT: Deps> Preparer<DepsT> {
             LayerEntry::Got(_) => {
                 panic!(r#"received `got_layer` for layer {spec:?} which we already have"#);
             }
-            LayerEntry::Getting(waiting) => match result {
-                Ok((digest, artifact_type)) => {
-                    for (image, ijid, idx) in waiting {
-                        let Entry::Occupied(mut job_entry) = self.jobs.entry(ijid) else {
-                            continue;
-                        };
-                        let job = job_entry.get_mut();
+            LayerEntry::Getting(waiting) => {
+                self.layer_builds.pop(&self.deps);
+                match result {
+                    Ok((digest, artifact_type)) => {
+                        for (image, ijid, idx) in waiting {
+                            let Entry::Occupied(mut job_entry) = self.jobs.entry(ijid) else {
+                                continue;
+                            };
+                            let job = job_entry.get_mut();
 
-                        *(if image {
-                            &mut job.image_layers
-                        } else {
-                            &mut job.layers
-                        })
-                        .get_mut(idx)
-                        .unwrap() = Some((digest.clone(), artifact_type));
+                            *(if image {
+                                &mut job.image_layers
+                            } else {
+                                &mut job.layers
+                            })
+                            .get_mut(idx)
+                            .unwrap() = Some((digest.clone(), artifact_type));
 
-                        if job.is_ready() {
-                            Self::start_job(&self.deps, job_entry.remove());
+                            if job.is_ready() {
+                                Self::start_job(&self.deps, job_entry.remove());
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        for (_, ijid, _) in waiting {
+                            Self::job_error(&self.deps, &mut self.jobs, ijid, err.clone());
                         }
                     }
                 }
-                Err(err) => {
-                    for (_, ijid, _) in waiting {
-                        Self::job_error(&self.deps, &mut self.jobs, ijid, err.clone());
-                    }
-                }
-            },
+            }
         }
     }
 
@@ -558,18 +601,22 @@ mod tests {
 
     impl Default for Fixture {
         fn default() -> Self {
+            Self::new(NonZeroUsize::new(usize::MAX).unwrap())
+        }
+    }
+
+    impl Fixture {
+        fn new(max_pending_layer_builds: NonZeroUsize) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
                 messages: Vec::default(),
             }));
-            let preparer = Preparer::new(test_state.clone());
+            let preparer = Preparer::new(test_state.clone(), max_pending_layer_builds);
             Fixture {
                 test_state,
                 preparer,
             }
         }
-    }
 
-    impl Fixture {
         #[track_caller]
         fn expect_messages_in_any_order(&mut self, mut expected: Vec<TestMessage>) {
             expected.sort();
@@ -883,15 +930,18 @@ mod tests {
     }
 
     macro_rules! script_test {
-        ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });* $(;)?) => {
+        ($test_name:ident, $fixture:expr, $($in_msg:expr => { $($out_msg:expr),* $(,)? });* $(;)?) => {
             #[test]
             fn $test_name() {
-                let mut fixture = Fixture::default();
+                let mut fixture = $fixture;
                 $(
                     fixture.preparer.receive_message($in_msg);
                     fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
                 )*
             }
+        };
+        ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });* $(;)?) => {
+            script_test! { $test_name, Fixture::default(), $($in_msg => { $($out_msg),* });* }
         };
     }
 
@@ -1529,6 +1579,64 @@ mod tests {
             ],
         })) => {
             JobPrepared(1, Err(string!(r#"image image has a non-UTF-8 layer path "\xFF\xFF\xFF\xFF""#))),
+        };
+    }
+
+    script_test! {
+        prepare_job_pending_builds_limited,
+        Fixture::new(NonZeroUsize::new(1).unwrap()),
+
+        PrepareJob(1, client_job_spec!{
+            "one",
+            container: inline_container! {
+                layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
+            },
+        }) => {
+            BuildLayer(tar_layer!("foo.tar")),
+        };
+
+        PrepareJob(2, client_job_spec!{
+            "two",
+            container: inline_container! {
+                layers: [tar_layer!("foo.tar"), tar_layer!("baz.tar")],
+            },
+        }) => {};
+
+        GotLayer(tar_layer!("foo.tar"), Err(string!("foo.tar error"))) => {
+            BuildLayer(tar_layer!("bar.tar")),
+            JobPrepared(1, Err(string!("foo.tar error"))),
+            JobPrepared(2, Err(string!("foo.tar error"))),
+        };
+
+        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {
+            BuildLayer(tar_layer!("baz.tar")),
+        };
+
+        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {};
+
+        PrepareJob(3, client_job_spec!{
+            "three",
+            container: inline_container! {
+                layers: [
+                    tar_layer!("bar.tar"),
+                    tar_layer!("baz.tar"),
+                    tar_layer!("qux.tar"),
+                    tar_layer!("frob.tar"),
+                ],
+            },
+        }) => {
+            BuildLayer(tar_layer!("qux.tar")),
+        };
+
+        GotLayer(tar_layer!("qux.tar"), Ok(tar_digest!(4))) => {
+            BuildLayer(tar_layer!("frob.tar")),
+        };
+
+        GotLayer(tar_layer!("frob.tar"), Ok(tar_digest!(5))) => {
+            JobPrepared(3, Ok(job_spec!{
+                "three",
+                [tar_digest!(2), tar_digest!(3), tar_digest!(4), tar_digest!(5)],
+            })),
         };
     }
 
