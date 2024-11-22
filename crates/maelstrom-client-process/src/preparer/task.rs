@@ -96,25 +96,29 @@ impl Deps for Adapter {
     }
 
     fn get_image(&self, name: String) {
-        let name_clone = name.clone();
-        let tracker_clone = self.image_download_tracker.clone();
-        let lazy_progress =
-            LazyProgress::new(move |size| tracker_clone.new_task(&name_clone, size));
-        let depot_clone = self.container_image_depot.clone();
-        let sender_clone = self.sender.clone();
+        let tracker = self.image_download_tracker.clone();
+        let depot = self.container_image_depot.clone();
+        let sender = self.sender.clone();
         task::spawn(async move {
-            let result = depot_clone.get_container_image(&name, lazy_progress).await;
-            let _ = sender_clone.send(Message::GotImage(
-                name.clone(),
-                result.map_err(|err| err.to_string()).map(|image| {
-                    let image_config = ImageConfig {
-                        layers: image.layers.clone(),
-                        environment: image.env().cloned(),
-                        working_directory: image.working_dir().map(From::from),
-                    };
-                    ConvertedImage::new(&name, image_config)
-                }),
-            ));
+            let name_clone = name.clone();
+            let lazy_progress = LazyProgress::new(move |size| tracker.new_task(&name_clone, size));
+            let result = depot
+                .get_container_image(&name, lazy_progress)
+                .await
+                .map_err(|err| err.to_string())
+                .map(|image| {
+                    let (layers, environment, working_directory) =
+                        image.into_layers_environment_and_working_directory();
+                    ConvertedImage::new(
+                        &name,
+                        ImageConfig {
+                            layers,
+                            environment,
+                            working_directory,
+                        },
+                    )
+                });
+            let _ = sender.send(Message::GotImage(name, result));
         });
     }
 

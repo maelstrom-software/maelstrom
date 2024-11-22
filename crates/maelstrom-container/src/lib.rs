@@ -16,6 +16,7 @@ use combine::{
     satisfy, sep_by, token, Parser, Stream,
 };
 use futures::stream::TryStreamExt as _;
+use maelstrom_base::Utf8PathBuf;
 use maelstrom_util::{
     async_fs::{self as fs, Fs},
     io::Sha256Stream,
@@ -253,6 +254,16 @@ impl ContainerImage {
             .config
             .as_ref()
             .and_then(|c| c.working_dir.as_ref())
+    }
+
+    pub fn into_layers_environment_and_working_directory(
+        self,
+    ) -> (Vec<PathBuf>, Option<Vec<String>>, Option<Utf8PathBuf>) {
+        let (environment, working_directory) = match self.config.config {
+            None => (None, None),
+            Some(config) => (Some(config.env), config.working_dir.map(From::from)),
+        };
+        (self.layers, environment, working_directory)
     }
 }
 
