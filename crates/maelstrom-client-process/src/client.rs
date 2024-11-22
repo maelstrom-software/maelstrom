@@ -316,11 +316,7 @@ impl Client {
                 &log,
             )?;
 
-            let layer_builder = Arc::new(LayerBuilder::new(
-                cache_dir,
-                project_dir,
-                MANIFEST_INLINE_LIMIT,
-            ));
+            let layer_builder = LayerBuilder::new(cache_dir, project_dir, MANIFEST_INLINE_LIMIT);
             let locked = Arc::new(Mutex::new(ClientStateLocked {
                 digest_repo,
                 processed_artifact_digests: HashSet::default(),
@@ -333,7 +329,7 @@ impl Client {
                 MAX_PENDING_LAYER_BUILDS.try_into().unwrap(),
                 preparer_sender.clone(),
                 preparer_receiver,
-                Arc::new(container_image_depot),
+                container_image_depot,
                 image_download_tracker.clone(),
                 layer_builder,
                 log.clone(),
