@@ -48,9 +48,9 @@ struct ClientState {
     preparer_sender: preparer::task::Sender,
 }
 
-pub struct ClientStateLocked {
-    pub digest_repo: DigestRepository,
-    pub processed_artifact_digests: HashSet<Sha256Digest>,
+struct ClientStateLocked {
+    digest_repo: DigestRepository,
+    processed_artifact_digests: HashSet<Sha256Digest>,
 }
 
 #[derive(Default)]
@@ -74,9 +74,9 @@ impl CleanUpWork {
 
 #[derive(Clone)]
 pub struct Uploader {
-    pub log: slog::Logger,
-    pub router_sender: router::Sender,
-    pub locked: Arc<Mutex<ClientStateLocked>>,
+    log: slog::Logger,
+    router_sender: router::Sender,
+    locked: Arc<Mutex<ClientStateLocked>>,
 }
 
 impl Uploader {
@@ -321,6 +321,11 @@ impl Client {
                 digest_repo,
                 processed_artifact_digests: HashSet::default(),
             }));
+            let uploader = Uploader {
+                log: log.clone(),
+                router_sender: router_sender.clone(),
+                locked,
+            };
 
             let (preparer_sender, preparer_receiver) = preparer::task::channel();
 
@@ -332,9 +337,7 @@ impl Client {
                 container_image_depot,
                 image_download_tracker.clone(),
                 layer_builder,
-                log.clone(),
-                locked,
-                router_sender.clone(),
+                uploader,
             );
 
             Ok((

@@ -1,8 +1,7 @@
 use super::{Deps, Message, Preparer};
 use crate::{
-    client::{layer_builder::LayerBuilder, ClientStateLocked, Uploader},
+    client::{layer_builder::LayerBuilder, Uploader},
     progress::{LazyProgress, ProgressTracker},
-    router,
 };
 use anyhow::Result;
 use maelstrom_base::JobSpec;
@@ -11,12 +10,11 @@ use maelstrom_client_base::spec::{
 };
 use maelstrom_container::ContainerImageDepot;
 use maelstrom_util::sync;
-use slog::Logger;
 use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc};
 use tokio::{
     sync::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
-        oneshot, Mutex,
+        oneshot,
     },
     task::{self, JoinSet},
 };
@@ -37,18 +35,14 @@ pub fn start(
     container_image_depot: ContainerImageDepot,
     image_download_tracker: ProgressTracker,
     layer_builder: LayerBuilder,
-    log: Logger,
-    locked: Arc<Mutex<ClientStateLocked>>,
-    router_sender: router::Sender,
+    uploader: Uploader,
 ) {
     let adapter = Adapter {
         container_image_depot: Arc::new(container_image_depot),
         image_download_tracker,
         sender,
         layer_builder: Arc::new(layer_builder),
-        log,
-        locked,
-        router_sender,
+        uploader,
     };
     let mut preparer = Preparer::new(adapter, max_pending_layer_builds);
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
@@ -60,10 +54,8 @@ pub struct Adapter {
     pub container_image_depot: Arc<ContainerImageDepot>,
     pub image_download_tracker: ProgressTracker,
     pub sender: Sender,
+    pub uploader: Uploader,
     pub layer_builder: Arc<LayerBuilder>,
-    pub log: Logger,
-    pub locked: Arc<Mutex<ClientStateLocked>>,
-    pub router_sender: router::Sender,
 }
 
 impl Deps for Adapter {
@@ -123,11 +115,7 @@ impl Deps for Adapter {
     }
 
     fn build_layer(&self, spec: LayerSpec) {
-        let uploader = Uploader {
-            log: self.log.clone(),
-            router_sender: self.router_sender.clone(),
-            locked: self.locked.clone(),
-        };
+        let uploader = self.uploader.clone();
         let layer_builder = self.layer_builder.clone();
         let sender_clone = self.sender.clone();
         task::spawn(async move {
