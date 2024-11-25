@@ -139,6 +139,9 @@ impl<DepsT: Deps> Router<DepsT> {
                 self.deps
                     .start_artifact_transfer_to_broker(digest, path.to_owned());
             }
+            Message::Broker(BrokerToClient::ArtifactTransferredResponse(_digest, _result)) => {
+                todo!()
+            }
             Message::LocalWorker(WorkerToBroker::JobResponse(jid, result)) => {
                 self.receive_job_response(jid.cjid, result);
             }

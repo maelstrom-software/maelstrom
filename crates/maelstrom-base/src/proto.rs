@@ -43,6 +43,7 @@ pub enum BrokerToClient {
     JobResponse(ClientJobId, JobOutcomeResult),
     JobStatusUpdate(ClientJobId, JobBrokerStatus),
     TransferArtifact(Sha256Digest),
+    ArtifactTransferredResponse(Sha256Digest, Result<(), String>),
 }
 
 /// Message sent from a client to the broker. After sending the initial [`Hello`], a client will
@@ -51,6 +52,7 @@ pub enum BrokerToClient {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ClientToBroker {
     JobRequest(ClientJobId, JobSpec),
+    ArtifactTransferred(Sha256Digest),
 }
 
 /// Message sent from the broker to a monitor. The broker won't send a message until it has

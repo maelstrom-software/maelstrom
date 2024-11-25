@@ -286,6 +286,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::FromClient(cid, ClientToBroker::JobRequest(cjid, spec)) => {
                 self.receive_client_job_request(deps, cid, cjid, spec)
             }
+            Message::FromClient(_cid, ClientToBroker::ArtifactTransferred(_digest)) => todo!(),
             Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
             }
