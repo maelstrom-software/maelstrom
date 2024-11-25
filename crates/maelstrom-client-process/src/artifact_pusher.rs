@@ -33,11 +33,20 @@ async fn push_one_artifact(
     broker_addr: BrokerAddr,
     path: PathBuf,
     digest: Sha256Digest,
+    success_callback: Box<dyn FnOnce() + Send + Sync>,
     log: &Logger,
 ) -> Result<(TcpStream, ())> {
-    push_one_artifact_inner(stream, upload_tracker, broker_addr, &path, digest, log)
-        .await
-        .with_context(|| format!("pushing artifact {}", path.display()))
+    push_one_artifact_inner(
+        stream,
+        upload_tracker,
+        broker_addr,
+        &path,
+        digest,
+        success_callback,
+        log,
+    )
+    .await
+    .with_context(|| format!("pushing artifact {}", path.display()))
 }
 
 async fn push_one_artifact_inner(
@@ -46,6 +55,7 @@ async fn push_one_artifact_inner(
     broker_addr: BrokerAddr,
     path: &Path,
     digest: Sha256Digest,
+    success_callback: Box<dyn FnOnce() + Send + Sync>,
     log: &Logger,
 ) -> Result<(TcpStream, ())> {
     let mut stream = match stream {
@@ -76,13 +86,17 @@ async fn push_one_artifact_inner(
     let BrokerToArtifactPusher(resp) =
         net::read_message_from_async_socket(&mut stream, log).await?;
 
-    resp.map(|()| (stream, ()))
-        .map_err(|e| anyhow!("Error from broker: {e}"))
+    resp.map_err(|e| anyhow!("Error from broker: {e}"))?;
+
+    success_callback();
+
+    Ok((stream, ()))
 }
 
 pub struct Message {
     pub path: PathBuf,
     pub digest: Sha256Digest,
+    pub success_callback: Box<dyn FnOnce() + Send + Sync>,
 }
 
 pub type Sender = UnboundedSender<Message>;
@@ -119,13 +133,22 @@ pub fn start_task(
                     res.unwrap()?; // We don't expect JoinErrors.
                 },
                 res = receiver.recv() => {
-                    let Some(Message{path, digest}) = res else { break; };
+                    let Some(Message { path, digest, success_callback } ) = res else { break; };
                     let log = log.clone();
                     let pool = pool.clone();
                     let upload_tracker = upload_tracker.clone();
                     join_set.spawn(async move {
-                        pool.call_with_item(
-                            |stream| push_one_artifact(stream, upload_tracker, broker_addr, path, digest, &log)).await
+                        pool.call_with_item(|stream| {
+                            push_one_artifact(
+                                stream,
+                                upload_tracker,
+                                broker_addr,
+                                path,
+                                digest,
+                                success_callback,
+                                &log
+                            )
+                        }).await
                     });
                 }
             }

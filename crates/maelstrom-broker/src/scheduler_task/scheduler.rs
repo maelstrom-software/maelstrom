@@ -274,6 +274,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             queued_jobs: BinaryHeap::default(),
             worker_heap: Heap::default(),
             job_statistics: JobStatisticsTimeSeries::default(),
+            tcp_upload_landing_pad: Default::default(),
         }
     }
 
@@ -286,7 +287,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::FromClient(cid, ClientToBroker::JobRequest(cjid, spec)) => {
                 self.receive_client_job_request(deps, cid, cjid, spec)
             }
-            Message::FromClient(_cid, ClientToBroker::ArtifactTransferred(_digest)) => todo!(),
+            Message::FromClient(cid, ClientToBroker::ArtifactTransferred(digest)) => {
+                self.receive_artifact_transfered(deps, cid, digest)
+            }
             Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
             }
@@ -302,7 +305,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::FromMonitor(mid, MonitorToBroker::StatisticsRequest) => {
                 self.receive_monitor_statistics_request(deps, mid)
             }
-            Message::GotArtifact(digest, file) => self.receive_got_artifact(deps, digest, file),
+            Message::GotArtifact(digest, file) => self.receive_got_artifact(digest, file),
             Message::GetArtifactForWorker(digest, sender) => {
                 self.receive_get_artifact_for_worker(deps, digest, sender)
             }
@@ -469,7 +472,7 @@ impl Ord for QueuedJob {
     }
 }
 
-pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
+pub struct Scheduler<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
     pub(crate) cache: CacheT,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
@@ -477,6 +480,7 @@ pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
     queued_jobs: BinaryHeap<QueuedJob>,
     worker_heap: Heap<WorkerMap<DepsT>>,
     job_statistics: JobStatisticsTimeSeries,
+    tcp_upload_landing_pad: HashMap<Sha256Digest, CacheT::TempFile>,
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
@@ -733,14 +737,37 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         deps.send_message_to_monitor(self.monitors.get_mut(&mid).unwrap(), resp);
     }
 
-    fn receive_got_artifact(
+    fn receive_got_artifact(&mut self, digest: Sha256Digest, file: CacheT::TempFile) {
+        self.tcp_upload_landing_pad.insert(digest, file);
+    }
+
+    fn receive_artifact_transfered(
         &mut self,
         deps: &mut DepsT,
+        cid: ClientId,
         digest: Sha256Digest,
-        file: CacheT::TempFile,
     ) {
+        let Some(file) = self.tcp_upload_landing_pad.remove(&digest) else {
+            let client = self.clients.0.get_mut(&cid).unwrap();
+            deps.send_message_to_client(
+                &mut client.sender,
+                BrokerToClient::ArtifactTransferredResponse(
+                    digest,
+                    Err("transferred artifact not found".into()),
+                ),
+            );
+            return;
+        };
+        let jids = self.cache.got_artifact(&digest, file);
+
+        let client = self.clients.0.get_mut(&cid).unwrap();
+        deps.send_message_to_client(
+            &mut client.sender,
+            BrokerToClient::ArtifactTransferredResponse(digest.clone(), Ok(())),
+        );
+
         let mut just_enqueued = HashSet::default();
-        for jid in self.cache.got_artifact(&digest, file) {
+        for jid in jids {
             let client = self.clients.0.get_mut(&jid.cid).unwrap();
             let job = client.jobs.get_mut(&jid.cjid).unwrap();
             job.acquired_artifacts
@@ -1840,11 +1867,15 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![43], "/z/tmp/foo".into()) => {
+        GotArtifact(digest![43], "/z/tmp/foo".into()) => {};
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
             CacheGotArtifact(digest![43], "/z/tmp/foo".into()),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
         };
-        GotArtifact(digest![44], "/z/tmp/bar".into()) => {
+        GotArtifact(digest![44], "/z/tmp/bar".into()) => {};
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![44])) => {
             CacheGotArtifact(digest![44], "/z/tmp/bar".into()),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![44], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Tar), (43, Tar), (44, Tar)]])),
         };
 
@@ -1901,8 +1932,10 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![42], "/z/tmp/bar".into()) => {
+        GotArtifact(digest![42], "/z/tmp/bar".into()) => {};
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
             CacheGotArtifact(digest![42], "/z/tmp/bar".into()),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Tar), (42, Tar)]])),
         };
 
@@ -1933,8 +1966,10 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![42], "/z/tmp/foo".into()) => {
+        GotArtifact(digest![42], "/z/tmp/foo".into()) => {};
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
             CacheGotArtifact(digest![42], "/z/tmp/foo".into()),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
             ReadManifest(digest![42], jid![1, 2]),
         };
 
@@ -1945,8 +1980,10 @@ mod tests {
 
         FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
 
-        GotArtifact(digest![43], "/z/tmp/bar".into()) => {
+        GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
             CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Manifest)]])),
         };
 
@@ -1978,8 +2015,10 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
         };
 
-        GotArtifact(digest![42], "/z/tmp/foo".into()) => {
+        GotArtifact(digest![42], "/z/tmp/foo".into()) => {};
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
             CacheGotArtifact(digest![42], "/z/tmp/foo".into()),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
             ReadManifest(digest![42], jid![1, 2]),
         };
 
@@ -1992,8 +2031,10 @@ mod tests {
 
         FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
 
-        GotArtifact(digest![43], "/z/tmp/bar".into()) => {
+        GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
             CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Manifest)]])),
         };
 
@@ -2035,8 +2076,10 @@ mod tests {
 
         FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
 
-        GotArtifact(digest![43], "/z/tmp/bar".into()) => {
+        GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
             CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Manifest)]])),
         };
 
@@ -2078,8 +2121,10 @@ mod tests {
 
         FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
 
-        GotArtifact(digest![43], "/z/tmp/bar".into()) => {
+        GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
             CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [(42, Manifest)]])),
         };
 

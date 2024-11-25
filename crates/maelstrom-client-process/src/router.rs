@@ -5,7 +5,7 @@ use maelstrom_base::{
     ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::{JobRunningStatus, JobStatus};
-use maelstrom_util::{ext::OptionExt as _, sync};
+use maelstrom_util::ext::OptionExt as _;
 use maelstrom_worker::local_worker;
 use std::{collections::HashMap, path::PathBuf};
 use tokio::{
@@ -96,7 +96,7 @@ impl<DepsT: Deps> Router<DepsT> {
         self.completed_jobs += 1;
     }
 
-    fn receive_message(&mut self, message: Message<DepsT>) {
+    fn receive_message(&mut self, message: Message<DepsT>) -> Result<()> {
         match message {
             Message::AddArtifact(path, digest) => {
                 self.artifacts.insert(digest, path);
@@ -133,14 +133,20 @@ impl<DepsT: Deps> Router<DepsT> {
             }
             Message::Broker(BrokerToClient::TransferArtifact(digest)) => {
                 assert!(!self.standalone);
-                let path = self.artifacts.get(&digest).unwrap_or_else(|| {
-                    panic!("got request for unknown artifact with digest {digest}")
-                });
+                let path = self.artifacts.get(&digest).ok_or_else(|| {
+                    anyhow!("got request for unknown artifact with digest {digest}")
+                })?;
                 self.deps
                     .start_artifact_transfer_to_broker(digest, path.to_owned());
             }
-            Message::Broker(BrokerToClient::ArtifactTransferredResponse(_digest, _result)) => {
-                todo!()
+            Message::Broker(BrokerToClient::ArtifactTransferredResponse(digest, result)) => {
+                assert!(!self.standalone);
+                let path = self.artifacts.get(&digest).ok_or_else(|| {
+                    anyhow!("got request for unknown artifact with digest {digest}")
+                })?;
+                result.map_err(|err| {
+                    anyhow!("error transferring artifact: {}: {err}", path.display())
+                })?;
             }
             Message::LocalWorker(WorkerToBroker::JobResponse(jid, result)) => {
                 self.receive_job_response(jid.cjid, result);
@@ -160,7 +166,8 @@ impl<DepsT: Deps> Router<DepsT> {
                     .send_artifact_fetch_completed_to_local_worker(digest, result);
             }
             Message::Shutdown(error) => self.deps.shutdown_local_worker(error),
-        }
+        };
+        Ok(())
     }
 }
 
@@ -198,9 +205,16 @@ impl Deps for Adapter {
     }
 
     fn start_artifact_transfer_to_broker(&self, digest: Sha256Digest, path: PathBuf) {
-        let _ = self
-            .artifact_pusher_sender
-            .send(artifact_pusher::Message { digest, path });
+        let broker_sender = self.broker_sender.clone();
+        let cb_digest = digest.clone();
+        let success_callback = Box::new(move || {
+            let _ = broker_sender.send(ClientToBroker::ArtifactTransferred(cb_digest));
+        });
+        let _ = self.artifact_pusher_sender.send(artifact_pusher::Message {
+            digest,
+            path,
+            success_callback,
+        });
     }
 
     fn send_enqueue_job_to_local_worker(&self, jid: JobId, spec: JobSpec) {
@@ -239,16 +253,19 @@ pub fn channel() -> (Sender, Receiver) {
 pub fn start_task(
     join_set: &mut JoinSet<Result<()>>,
     standalone: bool,
-    receiver: Receiver,
+    mut receiver: Receiver,
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: artifact_pusher::Sender,
     local_worker_sender: local_worker::Sender,
 ) {
     let adapter = Adapter::new(broker_sender, artifact_pusher_sender, local_worker_sender);
     let mut router = Router::new(adapter, standalone);
-    join_set.spawn(sync::channel_reader(receiver, move |msg| {
-        router.receive_message(msg)
-    }));
+    join_set.spawn(async move {
+        while let Some(msg) = receiver.recv().await {
+            router.receive_message(msg)?
+        }
+        Ok(())
+    });
 }
 
 #[cfg(test)]
@@ -324,15 +341,31 @@ mod tests {
     struct Fixture {
         test_state: Rc<RefCell<TestState>>,
         router: Router<Rc<RefCell<TestState>>>,
+        error: Option<String>,
+        expected_error: Option<String>,
     }
 
     impl Fixture {
-        fn new<'a>(standalone: bool) -> Self {
+        fn new<'a>(standalone: bool, expected_error: Option<String>) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
                 messages: Vec::default(),
             }));
             let router = Router::new(test_state.clone(), standalone);
-            Fixture { test_state, router }
+            Fixture {
+                test_state,
+                router,
+                error: None,
+                expected_error,
+            }
+        }
+
+        fn receive_message(&mut self, message: Message<Rc<RefCell<TestState>>>) {
+            assert!(self.error.is_none());
+            self.error = self
+                .router
+                .receive_message(message)
+                .err()
+                .map(|e| e.to_string());
         }
 
         fn expect_messages_in_any_order(&mut self, mut expected: Vec<TestMessage>) {
@@ -356,13 +389,19 @@ mod tests {
         }
     }
 
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            assert_eq!(self.expected_error, self.error);
+        }
+    }
+
     macro_rules! script_test {
         ($test_name:ident, $fixture:expr, $($in_msg:expr => { $($out_msg:expr),* $(,)? });* $(;)?) => {
             #[test]
             fn $test_name() {
                 let mut fixture = $fixture;
                 $(
-                    fixture.router.receive_message($in_msg);
+                    fixture.receive_message($in_msg);
                     fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
                 )*
             }
@@ -371,7 +410,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_unknown_standalone,
-        Fixture::new(true),
+        Fixture::new(true, None),
         LocalWorkerStartArtifactFetch(digest!(1)) => {
             ArtifactFetchCompletedToLocalWorker(
                 digest!(1),
@@ -382,7 +421,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_known_standalone,
-        Fixture::new(true),
+        Fixture::new(true, None),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1)) => {
             ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(path_buf!("bar"))),
@@ -391,7 +430,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_last_add_artifact_wins_standalone,
-        Fixture::new(true),
+        Fixture::new(true, None),
         AddArtifact(path_buf!("baz"), digest!(1)) => {};
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1)) => {
@@ -401,7 +440,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_unknown_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         LocalWorkerStartArtifactFetch(digest!(1)) => {
             ArtifactFetchCompletedToLocalWorker(
                 digest!(1),
@@ -412,7 +451,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_fetch_known_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1)) => {
             ArtifactFetchCompletedToLocalWorker(digest!(1), Ok(path_buf!("bar"))),
@@ -421,7 +460,7 @@ mod tests {
 
     script_test! {
         local_worker_start_artifact_last_add_artifact_wins_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         AddArtifact(path_buf!("baz"), digest!(1)) => {};
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         LocalWorkerStartArtifactFetch(digest!(1)) => {
@@ -432,10 +471,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn broker_transfer_artifact_standalone() {
-        let mut fixture = Fixture::new(true);
-        fixture
-            .router
-            .receive_message(Broker(TransferArtifact(digest!(1))));
+        let mut fixture = Fixture::new(true, None);
+        fixture.receive_message(Broker(TransferArtifact(digest!(1))));
     }
 
     #[test]
@@ -443,34 +480,44 @@ mod tests {
         expected = "got request for unknown artifact with digest 0000000000000000000000000000000000000000000000000000000000000001"
     )]
     fn broker_transfer_artifact_unknown_clustered() {
-        let mut fixture = Fixture::new(false);
-        fixture
-            .router
-            .receive_message(Broker(TransferArtifact(digest!(1))));
+        let mut fixture = Fixture::new(false, None);
+        fixture.receive_message(Broker(TransferArtifact(digest!(1))));
     }
 
     script_test! {
         broker_transfer_artifact_known_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         Broker(TransferArtifact(digest!(1))) => {
             StartArtifactTransferToBroker(digest!(1), path_buf!("bar")),
         };
+        Broker(ArtifactTransferredResponse(digest!(1), Ok(()))) => {}
+    }
+
+    script_test! {
+        broker_transfer_artifact_known_clustered_error,
+        Fixture::new(false, Some("error transferring artifact: bar: test error".into())),
+        AddArtifact(path_buf!("bar"), digest!(1)) => {};
+        Broker(TransferArtifact(digest!(1))) => {
+            StartArtifactTransferToBroker(digest!(1), path_buf!("bar")),
+        };
+        Broker(ArtifactTransferredResponse(digest!(1), Err("test error".into()))) => {}
     }
 
     script_test! {
         broker_transfer_artifact_last_add_artifact_wins_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         AddArtifact(path_buf!("baz"), digest!(1)) => {};
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         Broker(TransferArtifact(digest!(1))) => {
             StartArtifactTransferToBroker(digest!(1), path_buf!("bar")),
         };
+        Broker(ArtifactTransferredResponse(digest!(1), Ok(()))) => {}
     }
 
     script_test! {
         run_job_standalone,
-        Fixture::new(true),
+        Fixture::new(true, None),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
@@ -481,7 +528,7 @@ mod tests {
 
     script_test! {
         run_job_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
@@ -491,7 +538,7 @@ mod tests {
     }
     script_test! {
         run_job_must_be_local_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
@@ -503,22 +550,18 @@ mod tests {
     #[test]
     #[should_panic(expected = "received response for unknown job 1")]
     fn job_response_from_local_worker_unknown_standalone() {
-        let mut fixture = Fixture::new(true);
+        let mut fixture = Fixture::new(true, None);
         // Give it a job just so it doesn't crash subracting the job counts.
-        fixture
-            .router
-            .receive_message(RunJob(spec!(0, Tar), cjid!(0)));
-        fixture
-            .router
-            .receive_message(LocalWorker(WorkerToBroker::JobResponse(
-                jid!(0, 1),
-                Ok(outcome!(0)),
-            )));
+        fixture.receive_message(RunJob(spec!(0, Tar), cjid!(0)));
+        fixture.receive_message(LocalWorker(WorkerToBroker::JobResponse(
+            jid!(0, 1),
+            Ok(outcome!(0)),
+        )));
     }
 
     script_test! {
         job_response_from_local_worker_known_standalone,
-        Fixture::new(true),
+        Fixture::new(true, None),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
@@ -530,22 +573,18 @@ mod tests {
     #[test]
     #[should_panic(expected = "received response for unknown job 1")]
     fn job_response_from_local_worker_unknown_clustered() {
-        let mut fixture = Fixture::new(false);
+        let mut fixture = Fixture::new(false, None);
         // Give it a job just so it doesn't crash subracting the job counts.
-        fixture
-            .router
-            .receive_message(RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)));
-        fixture
-            .router
-            .receive_message(LocalWorker(WorkerToBroker::JobResponse(
-                jid!(0, 1),
-                Ok(outcome!(0)),
-            )));
+        fixture.receive_message(RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)));
+        fixture.receive_message(LocalWorker(WorkerToBroker::JobResponse(
+            jid!(0, 1),
+            Ok(outcome!(0)),
+        )));
     }
 
     script_test! {
         job_response_from_local_worker_known_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar).network(JobNetwork::Local)),
         };
@@ -557,45 +596,37 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn job_response_from_broker_unknown_standalone() {
-        let mut fixture = Fixture::new(true);
-        fixture
-            .router
-            .receive_message(Broker(BrokerToClient::JobResponse(
-                cjid!(0),
-                Ok(outcome!(0)),
-            )));
+        let mut fixture = Fixture::new(true, None);
+        fixture.receive_message(Broker(BrokerToClient::JobResponse(
+            cjid!(0),
+            Ok(outcome!(0)),
+        )));
     }
 
     #[test]
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn job_response_from_broker_known_standalone() {
-        let mut fixture = Fixture::new(true);
-        fixture
-            .router
-            .receive_message(RunJob(spec!(0, Tar), cjid!(0)));
-        fixture
-            .router
-            .receive_message(Broker(BrokerToClient::JobResponse(
-                cjid!(0),
-                Ok(outcome!(0)),
-            )));
+        let mut fixture = Fixture::new(true, None);
+        fixture.receive_message(RunJob(spec!(0, Tar), cjid!(0)));
+        fixture.receive_message(Broker(BrokerToClient::JobResponse(
+            cjid!(0),
+            Ok(outcome!(0)),
+        )));
     }
 
     #[test]
     #[should_panic(expected = "received response for unknown job 0")]
     fn job_response_from_broker_unknown_clustered() {
-        let mut fixture = Fixture::new(false);
-        fixture
-            .router
-            .receive_message(Broker(BrokerToClient::JobResponse(
-                cjid!(0),
-                Ok(outcome!(0)),
-            )));
+        let mut fixture = Fixture::new(false, None);
+        fixture.receive_message(Broker(BrokerToClient::JobResponse(
+            cjid!(0),
+            Ok(outcome!(0)),
+        )));
     }
 
     script_test! {
         job_response_from_broker_known_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
@@ -606,7 +637,7 @@ mod tests {
 
     script_test! {
         shutdown_standalone,
-        Fixture::new(true),
+        Fixture::new(true, None),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
         };
@@ -620,7 +651,7 @@ mod tests {
 
     script_test! {
         shutdown_clustered,
-        Fixture::new(false),
+        Fixture::new(false, None),
         RunJob(spec!(0, Tar), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0, Tar)),
         };
