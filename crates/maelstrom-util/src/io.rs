@@ -5,11 +5,13 @@ use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
 use lru::LruCache;
 use maelstrom_base::Sha256Digest;
 use maelstrom_linux::{self as linux};
+use pin_project::pin_project;
 use sha2::{Digest as _, Sha256};
 use slog::{warn, Logger};
 use std::{
     cmp,
     fs::File,
+    future::Future,
     io::{self, Chain, Read, Repeat, Take, Write},
     num::NonZeroUsize,
     os::fd::{self, AsRawFd},
@@ -881,9 +883,41 @@ pub fn copy_using_splice(
     Ok(copied)
 }
 
+#[pin_project(project = LazyReadProj)]
+pub enum LazyRead<InitT, ReadT> {
+    Uninitialized(#[pin] InitT),
+    Initialized(#[pin] ReadT),
+}
+
+impl<InitT, ReadT> LazyRead<InitT, ReadT> {
+    pub fn new(init: InitT) -> Self {
+        Self::Uninitialized(init)
+    }
+}
+
+impl<InitT: Future<Output = io::Result<ReadT>>, ReadT: AsyncRead> AsyncRead
+    for LazyRead<InitT, ReadT>
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        dst: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match self.as_mut().project() {
+            LazyReadProj::Uninitialized(init_fut) => {
+                let read = ready!(init_fut.poll(cx))?;
+                self.set(Self::Initialized(read));
+                self.poll_read(cx, dst)
+            }
+            LazyReadProj::Initialized(read) => pin!(read).poll_read(cx, dst),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncReadExt as _;
 
     fn calculate_read_hash(mut input: &[u8]) -> Sha256Digest {
         let mut reader = Sha256Stream::new(&mut input);
@@ -1291,5 +1325,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn lazy_async_read_success() {
+        let mut read = LazyRead::new(Box::pin(async move { Ok(&[1u8, 2, 3, 4][..]) }));
+        let mut buf = vec![0u8; 4];
+        read.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf[..], &[1, 2, 3, 4][..]);
+    }
+
+    #[tokio::test]
+    async fn lazy_async_read_error() {
+        let mut read = LazyRead::new(Box::pin(async move {
+            io::Result::<&[u8]>::Err(io::Error::new(io::ErrorKind::Other, "test error"))
+        }));
+        let mut buf = vec![0u8; 4];
+        read.read_exact(&mut buf).await.unwrap_err();
     }
 }
