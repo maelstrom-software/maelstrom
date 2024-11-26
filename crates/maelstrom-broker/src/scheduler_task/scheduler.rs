@@ -62,7 +62,7 @@ pub trait SchedulerDeps {
 /// The incoming messages, or events, for [`Scheduler`].
 ///
 /// If [`Scheduler`] weren't implement as an async state machine, these would be its methods.
-pub enum Message<DepsT: SchedulerDeps, TempFileT: TempFile> {
+pub enum Message<DepsT: SchedulerDeps, TempFileT> {
     /// The given client connected, and messages can be sent to it on the given sender.
     ClientConnected(ClientId, DepsT::ClientSender),
 
