@@ -96,10 +96,7 @@ impl<ReadT: io::Read + io::Seek> Iterator for ManifestReader<ReadT> {
     }
 }
 
-pub struct AsyncManifestReader<ReadT> {
-    r: ReadT,
-    stream_end: u64,
-}
+pub struct AsyncManifestReader<ReadT>(tokio::io::Take<ReadT>);
 
 impl<ReadT: AsyncRead + AsyncSeek + Unpin> AsyncManifestReader<ReadT> {
     pub async fn new(mut r: ReadT) -> io::Result<Self> {
@@ -108,19 +105,26 @@ impl<ReadT: AsyncRead + AsyncSeek + Unpin> AsyncManifestReader<ReadT> {
         let stream_end = r.stream_position().await?;
         r.seek(io::SeekFrom::Start(stream_start)).await?;
 
+        Self::new_with_size(r, stream_end).await
+    }
+}
+
+impl<ReadT: AsyncRead + Unpin> AsyncManifestReader<ReadT> {
+    pub async fn new_with_size(r: ReadT, size: u64) -> io::Result<Self> {
+        let mut r = r.take(size);
         let version: ManifestVersion = decode_async(&mut r).await?;
         if version != ManifestVersion::default() {
             return Err(io::Error::new(io::ErrorKind::Other, "bad manifest version"));
         }
 
-        Ok(Self { r, stream_end })
+        Ok(Self(r))
     }
 
     pub async fn next(&mut self) -> io::Result<Option<ManifestEntry>> {
-        if self.r.stream_position().await? == self.stream_end {
+        if self.0.limit() == 0 {
             return Ok(None);
         }
-        Ok(Some(decode_async(&mut self.r).await?))
+        Ok(Some(decode_async(&mut self.0).await?))
     }
 }
 
