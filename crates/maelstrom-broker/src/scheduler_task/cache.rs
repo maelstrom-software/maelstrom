@@ -37,28 +37,32 @@ impl GetStrategy for BrokerGetStrategy {
     }
 }
 
-/// The required interface for the cache that is provided to the [`Scheduler`]. This mirrors the
-/// API for [`Cache`]. We keep them separate so that we can test the [`Scheduler`] more easily.
+/// The required interface for the cache that is provided to the [`Scheduler`].
 ///
 /// Unlike with [`SchedulerDeps`], all of these functions are immediate. In production, the
-/// [`Cache`] is owned by the [`Scheduler`] and the two live on the same task. So these methods
-/// sometimes return actual values which can be handled immediately, unlike [`SchedulerDeps`].
+/// [`SchedulerCache`] is owned by the [`Scheduler`] and the two live on the same task. So these
+/// methods sometimes return actual values which can be handled immediately, unlike
+/// [`SchedulerDeps`].
 pub trait SchedulerCache {
     type TempFile: TempFile;
 
-    /// See [`Cache::get_artifact`].
+    /// Try to get the artifact from the cache. This increases the refcount by one.
+    /// - If [`GetArtifact::Success`] is returned, the artifact is in the cache.
+    /// - If [`GetArtifact::Wait`] is returned, the artifact is being fetched, and the given job id
+    ///   will be returned from [`SchedulerCache::got_artifact`]
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact;
 
-    /// See [`Cache::got_artifact`].
+    /// Enter something into the cache.
     fn got_artifact(&mut self, digest: &Sha256Digest, file: Self::TempFile) -> Vec<JobId>;
 
-    /// See [`Cache::decrement_refcount`].
+    /// Decrement the refcount for the given artifact.
     fn decrement_refcount(&mut self, digest: &Sha256Digest);
 
-    /// See [`Cache::client_disconnected`].
+    /// Any artifacts that are being fetched have any job ids matching the given client id removed.
     fn client_disconnected(&mut self, cid: ClientId);
 
-    /// See [`Cache::get_artifact_for_worker`].
+    /// Get the path and size of a given artifact if it has a non-zero refcount, `None` otherwise.
+    /// If the refcount is non-zero, it is increased by one.
     fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)>;
 }
 
