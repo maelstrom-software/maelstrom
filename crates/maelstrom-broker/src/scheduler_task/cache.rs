@@ -1,8 +1,5 @@
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
-use maelstrom_util::cache::{
-    fs::{Fs, TempFile},
-    Cache, GetArtifact, GetStrategy, GotArtifact, Key,
-};
+use maelstrom_util::cache::{fs::Fs, Cache, GetArtifact, GetStrategy, GotArtifact, Key};
 use ref_cast::RefCast;
 use std::path::PathBuf;
 
@@ -44,7 +41,7 @@ impl GetStrategy for BrokerGetStrategy {
 /// methods sometimes return actual values which can be handled immediately, unlike
 /// [`SchedulerDeps`].
 pub trait SchedulerCache {
-    type TempFile: TempFile;
+    type TempFile;
 
     /// Try to get the artifact from the cache. This increases the refcount by one.
     /// - If [`GetArtifact::Success`] is returned, the artifact is in the cache.
