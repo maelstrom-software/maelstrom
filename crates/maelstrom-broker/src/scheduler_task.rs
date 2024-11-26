@@ -1,3 +1,4 @@
+mod cache;
 mod scheduler;
 
 pub use maelstrom_util::cache::CacheDir;
@@ -9,7 +10,7 @@ use maelstrom_base::{
 };
 use maelstrom_util::{
     async_fs,
-    cache::{self, Cache, TempFileFactory},
+    cache::{fs as cache_fs, Cache, TempFileFactory},
     config::common::CacheSize,
     manifest::AsyncManifestReader,
     root::RootBuf,
@@ -112,7 +113,7 @@ impl CacheManifestReader {
         while let Ok((manifest_digest, job_id)) = self.receiver.try_recv() {
             let sender = self.sender.clone();
             let manifest_path = cache
-                .cache_path(scheduler::BrokerKey::ref_cast(&manifest_digest))
+                .cache_path(cache::BrokerKey::ref_cast(&manifest_digest))
                 .into_path_buf();
             self.tasks.spawn(async move {
                 let result = read_manifest_from_path(sender.clone(), manifest_path, job_id).await;
@@ -131,18 +132,18 @@ impl CacheManifestReader {
 /// The production scheduler message type. Some [Message] arms contain a
 /// [SchedulerDeps], so it's defined as a generic type. But in this module, we only use
 /// one implementation of [SchedulerDeps].
-pub type SchedulerMessage = Message<PassThroughDeps, cache::fs::std::TempFile>;
+pub type SchedulerMessage = Message<PassThroughDeps, cache_fs::std::TempFile>;
 
 /// This type is used often enough to warrant an alias.
 pub type SchedulerSender = tokio_mpsc::UnboundedSender<SchedulerMessage>;
 
-type TaskCache = Cache<cache::fs::std::Fs, scheduler::BrokerKey, scheduler::BrokerGetStrategy>;
+type TaskCache = Cache<cache_fs::std::Fs, cache::BrokerKey, cache::BrokerGetStrategy>;
 
 pub struct SchedulerTask {
     scheduler: Scheduler<TaskCache, PassThroughDeps>,
     sender: SchedulerSender,
     receiver: tokio_mpsc::UnboundedReceiver<SchedulerMessage>,
-    temp_file_factory: TempFileFactory<cache::fs::std::Fs>,
+    temp_file_factory: TempFileFactory<cache_fs::std::Fs>,
     manifest_reader: CacheManifestReader,
     deps: PassThroughDeps,
 }
@@ -151,7 +152,7 @@ impl SchedulerTask {
     pub fn new(cache_root: RootBuf<CacheDir>, cache_size: CacheSize, log: Logger) -> Self {
         let (sender, receiver) = tokio_mpsc::unbounded_channel();
         let (cache, temp_file_factory) =
-            Cache::new(cache::fs::std::Fs, cache_root, cache_size, log, true).unwrap();
+            Cache::new(cache_fs::std::Fs, cache_root, cache_size, log, true).unwrap();
 
         let (manifest_reader_sender, manifest_reader_receiver) = tokio_mpsc::unbounded_channel();
         let manifest_reader = CacheManifestReader::new(manifest_reader_receiver, sender.clone());
@@ -171,7 +172,7 @@ impl SchedulerTask {
         &self.sender
     }
 
-    pub fn temp_file_factory(&self) -> &TempFileFactory<cache::fs::std::Fs> {
+    pub fn temp_file_factory(&self) -> &TempFileFactory<cache_fs::std::Fs> {
         &self.temp_file_factory
     }
 
