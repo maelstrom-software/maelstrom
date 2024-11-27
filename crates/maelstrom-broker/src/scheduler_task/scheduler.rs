@@ -2,6 +2,7 @@
 //! workers.
 
 use crate::scheduler_task::cache::SchedulerCache;
+use crate::scheduler_task::ManifestReadRequest;
 use maelstrom_base::{
     proto::{
         BrokerToClient, BrokerToMonitor, BrokerToWorker, ClientToBroker, MonitorToBroker,
@@ -44,6 +45,8 @@ pub trait SchedulerDeps {
     type WorkerSender;
     type MonitorSender;
     type WorkerArtifactFetcherSender;
+    type ArtifactStream;
+    type ManifestReaderSender;
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
     fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker);
     fn send_message_to_monitor(
@@ -56,7 +59,11 @@ pub trait SchedulerDeps {
         sender: &mut Self::WorkerArtifactFetcherSender,
         message: Option<(PathBuf, u64)>,
     );
-    fn read_manifest(&mut self, manifest_digest: Sha256Digest, job_id: JobId);
+    fn read_manifest(
+        &mut self,
+        sender: &mut Self::ManifestReaderSender,
+        request: ManifestReadRequest<Self::ArtifactStream>,
+    );
 }
 
 /// The incoming messages, or events, for [`Scheduler`].
@@ -175,10 +182,14 @@ impl<DepsT: SchedulerDeps, TempFileT: TempFile> Debug for Message<DepsT, TempFil
     }
 }
 
-impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
+impl<CacheT, DepsT> Scheduler<CacheT, DepsT>
+where
+    CacheT: SchedulerCache,
+    DepsT: SchedulerDeps<ArtifactStream = CacheT::ArtifactStream>,
+{
     /// Create a new scheduler with the given [`SchedulerCache`]. Note that [`SchedulerDeps`] are
     /// passed in to `Self::receive_message`.
-    pub fn new(cache: CacheT) -> Self {
+    pub fn new(cache: CacheT, manifest_reader_sender: DepsT::ManifestReaderSender) -> Self {
         Scheduler {
             cache,
             clients: ClientMap(HashMap::default()),
@@ -188,6 +199,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             worker_heap: Heap::default(),
             job_statistics: JobStatisticsTimeSeries::default(),
             tcp_upload_landing_pad: Default::default(),
+            manifest_reader_sender,
         }
     }
 
@@ -386,7 +398,7 @@ impl Ord for QueuedJob {
 }
 
 pub struct Scheduler<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
-    pub(crate) cache: CacheT,
+    cache: CacheT,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
     monitors: HashMap<MonitorId, DepsT::MonitorSender>,
@@ -394,9 +406,14 @@ pub struct Scheduler<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
     worker_heap: Heap<WorkerMap<DepsT>>,
     job_statistics: JobStatisticsTimeSeries,
     tcp_upload_landing_pad: HashMap<Sha256Digest, CacheT::TempFile>,
+    manifest_reader_sender: DepsT::ManifestReaderSender,
 }
 
-impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
+impl<CacheT, DepsT> Scheduler<CacheT, DepsT>
+where
+    CacheT: SchedulerCache,
+    DepsT: SchedulerDeps<ArtifactStream = CacheT::ArtifactStream>,
+{
     fn possibly_start_jobs(&mut self, deps: &mut DepsT, mut just_enqueued: HashSet<JobId>) {
         while !self.queued_jobs.is_empty() && !self.workers.0.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
@@ -478,7 +495,16 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                     .insert(digest.clone())
                     .assert_is_true();
                 if is_manifest.is_manifest() {
-                    deps.read_manifest(digest.clone(), jid);
+                    let (manifest_stream, size) = self.cache.read_artifact(&digest);
+                    deps.read_manifest(
+                        &mut self.manifest_reader_sender,
+                        ManifestReadRequest {
+                            manifest_stream,
+                            digest: digest.clone(),
+                            size,
+                            job_id: jid,
+                        },
+                    );
                     job.manifests_being_read
                         .insert(digest.clone())
                         .assert_is_true();
@@ -689,7 +715,16 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             let is_manifest = job.missing_artifacts.remove(&digest.clone()).unwrap();
 
             if is_manifest.is_manifest() {
-                deps.read_manifest(digest.clone(), jid);
+                let (manifest_stream, size) = self.cache.read_artifact(&digest);
+                deps.read_manifest(
+                    &mut self.manifest_reader_sender,
+                    ManifestReadRequest {
+                        manifest_stream,
+                        digest: digest.clone(),
+                        size,
+                        job_id: jid,
+                    },
+                );
                 job.manifests_being_read
                     .insert(digest.clone())
                     .assert_is_true();
@@ -833,7 +868,8 @@ mod tests {
         CacheDecrementRefcount(Sha256Digest),
         CacheClientDisconnected(ClientId),
         CacheGetArtifactForWorker(Sha256Digest),
-        ReadManifest(Sha256Digest, JobId),
+        CacheReadArtifact(Sha256Digest),
+        ReadManifest(ManifestReadRequest<TestArtifactStream>),
     }
 
     use TestMessage::*;
@@ -842,6 +878,7 @@ mod tests {
     struct TestWorkerSender(WorkerId);
     struct TestMonitorSender(MonitorId);
     struct TestWorkerArtifactFetcherSender(u32);
+    struct TestManifestReaderSender;
 
     #[derive(Default)]
     struct TestState {
@@ -852,8 +889,18 @@ mod tests {
         get_artifact_for_worker_returns: HashMap<Sha256Digest, Vec<Option<(PathBuf, u64)>>>,
     }
 
+    #[derive(Clone, Debug, PartialEq)]
+    struct TestArtifactStream(Sha256Digest);
+
+    macro_rules! artifact {
+        ($v:expr) => {
+            TestArtifactStream(digest!($v))
+        };
+    }
+
     impl SchedulerCache for Rc<RefCell<TestState>> {
         type TempFile = test::TempFile;
+        type ArtifactStream = TestArtifactStream;
 
         fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
             self.borrow_mut()
@@ -899,6 +946,13 @@ mod tests {
                 .unwrap()
                 .remove(0)
         }
+
+        fn read_artifact(&mut self, digest: &Sha256Digest) -> (TestArtifactStream, u64) {
+            self.borrow_mut()
+                .messages
+                .push(CacheReadArtifact(digest.clone()));
+            (TestArtifactStream(digest.clone()), 10)
+        }
     }
 
     impl SchedulerDeps for Rc<RefCell<TestState>> {
@@ -906,6 +960,8 @@ mod tests {
         type WorkerSender = TestWorkerSender;
         type MonitorSender = TestMonitorSender;
         type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
+        type ArtifactStream = TestArtifactStream;
+        type ManifestReaderSender = TestManifestReaderSender;
 
         fn send_message_to_client(
             &mut self,
@@ -943,10 +999,12 @@ mod tests {
                 .push(ToWorkerArtifactFetcher(sender.0, message));
         }
 
-        fn read_manifest(&mut self, manifest_digest: Sha256Digest, job_id: JobId) {
-            self.borrow_mut()
-                .messages
-                .push(ReadManifest(manifest_digest, job_id));
+        fn read_manifest(
+            &mut self,
+            _sender: &mut TestManifestReaderSender,
+            req: ManifestReadRequest<TestArtifactStream>,
+        ) {
+            self.borrow_mut().messages.push(ReadManifest(req));
         }
     }
 
@@ -960,7 +1018,7 @@ mod tests {
             let test_state = Rc::new(RefCell::new(TestState::default()));
             Fixture {
                 test_state: test_state.clone(),
-                scheduler: Scheduler::new(test_state),
+                scheduler: Scheduler::new(test_state, TestManifestReaderSender),
             }
         }
     }
@@ -1883,7 +1941,13 @@ mod tests {
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
             CacheGotArtifact(digest![42], "/z/tmp/foo".into()),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
-            ReadManifest(digest![42], jid![1, 2]),
+            CacheReadArtifact(digest![42]),
+            ReadManifest(ManifestReadRequest {
+                manifest_stream: artifact![42],
+                size: 10,
+                digest: digest![42],
+                job_id: jid![1, 2],
+            }),
         };
 
         GotManifestEntry(digest![43], jid![1, 2]) => {
@@ -1932,7 +1996,13 @@ mod tests {
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
             CacheGotArtifact(digest![42], "/z/tmp/foo".into()),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
-            ReadManifest(digest![42], jid![1, 2]),
+            CacheReadArtifact(digest![42]),
+            ReadManifest(ManifestReadRequest {
+                manifest_stream: artifact![42],
+                size: 10,
+                digest: digest![42],
+                job_id: jid![1, 2],
+            }),
         };
 
         GotManifestEntry(digest![43], jid![1, 2]) => {
@@ -1975,7 +2045,13 @@ mod tests {
 
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [(42, Manifest)]])) => {
             CacheGetArtifact(jid![1, 2], digest![42]),
-            ReadManifest(digest![42], jid![1, 2]),
+            CacheReadArtifact(digest![42]),
+            ReadManifest(ManifestReadRequest {
+                manifest_stream: artifact![42],
+                size: 10,
+                digest: digest![42],
+                job_id: jid![1, 2],
+            }),
             ToClient(
                 cid![1],
                 BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)
@@ -2020,7 +2096,13 @@ mod tests {
 
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [(42, Manifest)]])) => {
             CacheGetArtifact(jid![1, 2], digest![42]),
-            ReadManifest(digest![42], jid![1, 2]),
+            CacheReadArtifact(digest![42]),
+            ReadManifest(ManifestReadRequest {
+                manifest_stream: artifact![42],
+                size: 10,
+                digest: digest![42],
+                job_id: jid![1, 2],
+            }),
             ToClient(
                 cid![1],
                 BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)
@@ -2065,7 +2147,13 @@ mod tests {
 
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [(42, Manifest)]])) => {
             CacheGetArtifact(jid![1, 2], digest![42]),
-            ReadManifest(digest![42], jid![1, 2]),
+            CacheReadArtifact(digest![42]),
+            ReadManifest(ManifestReadRequest {
+                manifest_stream: artifact![42],
+                size: 10,
+                digest: digest![42],
+                job_id: jid![1, 2],
+            }),
             ToClient(
                 cid![1],
                 BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)
@@ -2104,7 +2192,13 @@ mod tests {
 
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [(42, Manifest)]])) => {
             CacheGetArtifact(jid![1, 2], digest![42]),
-            ReadManifest(digest![42], jid![1, 2]),
+            CacheReadArtifact(digest![42]),
+            ReadManifest(ManifestReadRequest {
+                manifest_stream: artifact![42],
+                size: 10,
+                digest: digest![42],
+                job_id: jid![1, 2],
+            }),
             ToClient(
                 cid![1],
                 BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)

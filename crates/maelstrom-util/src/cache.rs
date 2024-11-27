@@ -776,6 +776,17 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
         }
     }
 
+    /// Assuming that a reference count is already is already held for the artifact, return the
+    /// size of the artifact, otherwise return None.
+    #[must_use]
+    pub fn try_get_size(&mut self, key: &KeyT) -> Option<u64> {
+        if let Some(Entry::InUse { bytes_used, .. }) = self.entries.get_mut(key) {
+            Some(*bytes_used)
+        } else {
+            None
+        }
+    }
+
     /// Notify the cache that a reference to an artifact is no longer needed.
     pub fn decrement_ref_count(&mut self, key: &KeyT) {
         let entry = self

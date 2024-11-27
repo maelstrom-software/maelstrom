@@ -9,32 +9,29 @@ use maelstrom_base::{
     JobId, Sha256Digest,
 };
 use maelstrom_util::{
-    async_fs,
     cache::{fs as cache_fs, Cache, TempFileFactory},
     config::common::CacheSize,
     manifest::AsyncManifestReader,
     root::RootBuf,
     sync,
 };
-use ref_cast::RefCast;
 use scheduler::{Message, Scheduler, SchedulerDeps};
 use slog::Logger;
 use std::{path::PathBuf, sync::mpsc as std_mpsc};
+use tokio::io::AsyncRead;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::task::JoinSet;
 
-#[derive(Debug)]
-pub struct PassThroughDeps {
-    manifest_reader_sender: tokio_mpsc::UnboundedSender<(Sha256Digest, JobId)>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManifestReadRequest<ArtifactStreamT> {
+    manifest_stream: ArtifactStreamT,
+    size: u64,
+    digest: Sha256Digest,
+    job_id: JobId,
 }
 
-impl PassThroughDeps {
-    fn new(manifest_reader_sender: tokio_mpsc::UnboundedSender<(Sha256Digest, JobId)>) -> Self {
-        Self {
-            manifest_reader_sender,
-        }
-    }
-}
+#[derive(Debug)]
+pub struct PassThroughDeps;
 
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.
@@ -43,6 +40,9 @@ impl SchedulerDeps for PassThroughDeps {
     type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
     type MonitorSender = tokio_mpsc::UnboundedSender<BrokerToMonitor>;
     type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
+    type ArtifactStream = <SchedulerCache as cache::SchedulerCache>::ArtifactStream;
+    type ManifestReaderSender =
+        tokio_mpsc::UnboundedSender<ManifestReadRequest<Self::ArtifactStream>>;
 
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient) {
         sender.send(message).ok();
@@ -68,27 +68,29 @@ impl SchedulerDeps for PassThroughDeps {
         sender.send(message).ok();
     }
 
-    fn read_manifest(&mut self, manifest_digest: Sha256Digest, job_id: JobId) {
-        self.manifest_reader_sender
-            .send((manifest_digest, job_id))
-            .ok();
+    fn read_manifest(
+        &mut self,
+        sender: &mut Self::ManifestReaderSender,
+        req: ManifestReadRequest<Self::ArtifactStream>,
+    ) {
+        sender.send(req).ok();
     }
 }
 
 #[derive(Debug)]
-struct CacheManifestReader {
+struct CacheManifestReader<ArtifactStreamT> {
     tasks: JoinSet<()>,
-    receiver: tokio_mpsc::UnboundedReceiver<(Sha256Digest, JobId)>,
+    receiver: tokio_mpsc::UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
     sender: SchedulerSender,
 }
 
-async fn read_manifest_from_path(
+async fn read_manifest<ArtifactStreamT: AsyncRead + Unpin>(
     sender: SchedulerSender,
-    manifest_path: PathBuf,
+    stream: ArtifactStreamT,
+    size: u64,
     job_id: JobId,
 ) -> anyhow::Result<()> {
-    let fs = async_fs::Fs::new();
-    let mut reader = AsyncManifestReader::new(fs.open_file(manifest_path).await?).await?;
+    let mut reader = AsyncManifestReader::new_with_size(stream, size).await?;
     while let Some(entry) = reader.next().await? {
         if let ManifestEntryData::File(ManifestFileData::Digest(digest)) = entry.data {
             sender.send(Message::GotManifestEntry(digest, job_id)).ok();
@@ -97,9 +99,11 @@ async fn read_manifest_from_path(
     Ok(())
 }
 
-impl CacheManifestReader {
+impl<ArtifactStreamT: AsyncRead + Unpin + Send + Sync + 'static>
+    CacheManifestReader<ArtifactStreamT>
+{
     fn new(
-        receiver: tokio_mpsc::UnboundedReceiver<(Sha256Digest, JobId)>,
+        receiver: tokio_mpsc::UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
         sender: SchedulerSender,
     ) -> Self {
         Self {
@@ -109,19 +113,15 @@ impl CacheManifestReader {
         }
     }
 
-    fn kick_off_manifest_readings(&mut self, cache: &TaskCache) {
-        while let Ok((manifest_digest, job_id)) = self.receiver.try_recv() {
+    async fn run(&mut self) {
+        while let Some(req) = self.receiver.recv().await {
             let sender = self.sender.clone();
-            let manifest_path = cache
-                .cache_path(cache::BrokerKey::ref_cast(&manifest_digest))
-                .into_path_buf();
             self.tasks.spawn(async move {
-                let result = read_manifest_from_path(sender.clone(), manifest_path, job_id).await;
+                let result =
+                    read_manifest(sender.clone(), req.manifest_stream, req.size, req.job_id).await;
                 sender
                     .send(Message::FinishedReadingManifest(
-                        manifest_digest,
-                        job_id,
-                        result,
+                        req.digest, req.job_id, result,
                     ))
                     .ok();
             });
@@ -137,15 +137,13 @@ pub type SchedulerMessage = Message<PassThroughDeps, cache_fs::std::TempFile>;
 /// This type is used often enough to warrant an alias.
 pub type SchedulerSender = tokio_mpsc::UnboundedSender<SchedulerMessage>;
 
-type TaskCache = Cache<cache_fs::std::Fs, cache::BrokerKey, cache::BrokerGetStrategy>;
+type SchedulerCache = Cache<cache_fs::std::Fs, cache::BrokerKey, cache::BrokerGetStrategy>;
 
 pub struct SchedulerTask {
-    scheduler: Scheduler<TaskCache, PassThroughDeps>,
+    scheduler: Scheduler<SchedulerCache, PassThroughDeps>,
     sender: SchedulerSender,
     receiver: tokio_mpsc::UnboundedReceiver<SchedulerMessage>,
     temp_file_factory: TempFileFactory<cache_fs::std::Fs>,
-    manifest_reader: CacheManifestReader,
-    deps: PassThroughDeps,
 }
 
 impl SchedulerTask {
@@ -155,16 +153,15 @@ impl SchedulerTask {
             Cache::new(cache_fs::std::Fs, cache_root, cache_size, log, true).unwrap();
 
         let (manifest_reader_sender, manifest_reader_receiver) = tokio_mpsc::unbounded_channel();
-        let manifest_reader = CacheManifestReader::new(manifest_reader_receiver, sender.clone());
-        let deps = PassThroughDeps::new(manifest_reader_sender);
+        let mut manifest_reader =
+            CacheManifestReader::new(manifest_reader_receiver, sender.clone());
+        tokio::task::spawn(async move { manifest_reader.run().await });
 
         SchedulerTask {
-            scheduler: Scheduler::new(cache),
+            scheduler: Scheduler::new(cache, manifest_reader_sender),
             sender,
             receiver,
             temp_file_factory,
-            manifest_reader,
-            deps,
         }
     }
 
@@ -189,9 +186,7 @@ impl SchedulerTask {
     /// give us a way to return an error, for precisely this reason.
     pub async fn run(mut self) {
         sync::channel_reader(self.receiver, |msg| {
-            self.scheduler.receive_message(&mut self.deps, msg);
-            self.manifest_reader
-                .kick_off_manifest_readings(&self.scheduler.cache);
+            self.scheduler.receive_message(&mut PassThroughDeps, msg);
         })
         .await
         .unwrap();
