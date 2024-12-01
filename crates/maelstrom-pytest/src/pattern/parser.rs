@@ -285,9 +285,9 @@ impl MarkersSelector {
 
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum SimpleExpression {
-    #[from(types(OrExpression))]
+    #[from(OrExpression)]
     Or(Box<OrExpression>),
-    #[from(types(SimpleSelectorName))]
+    #[from(SimpleSelectorName, SimpleSelector)]
     SimpleSelector(SimpleSelector),
     #[from]
     CompoundSelector(CompoundSelector),
@@ -325,13 +325,14 @@ fn not_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = 
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum NotExpression {
     Not(Box<NotExpression>),
-    #[from(types(
-        SimpleSelector,
-        SimpleSelectorName,
+    #[from(
         CompoundSelector,
+        MarkersSelector,
         OrExpression,
-        MarkersSelector
-    ))]
+        SimpleExpression,
+        SimpleSelector,
+        SimpleSelectorName
+    )]
     Simple(SimpleExpression),
 }
 
@@ -371,14 +372,15 @@ fn diff_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output =
 pub enum AndExpression {
     And(NotExpression, Box<AndExpression>),
     Diff(NotExpression, Box<AndExpression>),
-    #[from(types(
+    #[from(
+        CompoundSelector,
+        MarkersSelector,
+        NotExpression,
         OrExpression,
         SimpleExpression,
         SimpleSelector,
-        SimpleSelectorName,
-        MarkersSelector,
-        CompoundSelector
-    ))]
+        SimpleSelectorName
+    )]
     Not(NotExpression),
 }
 
@@ -407,14 +409,15 @@ fn or_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = &
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum OrExpression {
     Or(AndExpression, Box<OrExpression>),
-    #[from(types(
+    #[from(
+        AndExpression,
         NotExpression,
         SimpleExpression,
         SimpleSelector,
         SimpleSelectorName,
         MarkersSelector,
         CompoundSelector
-    ))]
+    )]
     And(AndExpression),
 }
 
@@ -430,7 +433,7 @@ impl OrExpression {
 }
 
 #[derive(Debug, PartialEq, Eq, From)]
-#[from(types(NotExpression, AndExpression))]
+#[from(NotExpression, AndExpression, OrExpression)]
 pub(crate) struct Pattern(pub OrExpression);
 
 impl Pattern {

@@ -58,7 +58,7 @@ console = "0.15"
 console_error_panic_hook = "0.1.7"
 crossterm = { version = "0.28.0", default-features = false }
 darling = "0.20"
-derive_more = "0.99"
+derive_more = { version = "1", features = ["add", "constructor", "debug", "add_assign", "display", "into", "from"] }
 eframe = "0.26"
 egui = "0.26"
 egui-toast = "0.12"

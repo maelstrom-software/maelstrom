@@ -228,7 +228,7 @@ impl FromStr for InlineLimit {
 #[pocket_definition(export)]
 #[derive(Clone, Copy, Deserialize, Into)]
 #[serde(try_from = "u16")]
-#[into(types(usize, u32))]
+#[into(usize, u16, u32)]
 pub struct Slots(u16);
 
 impl Slots {

@@ -274,7 +274,7 @@ impl SimpleSelectorName {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, From)]
-#[from(types(CompoundSelectorName))]
+#[from(CompoundSelectorName, SimpleSelectorName)]
 pub struct SimpleSelector {
     pub name: SimpleSelectorName,
 }
@@ -289,9 +289,9 @@ impl SimpleSelector {
 
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum SimpleExpression {
-    #[from(types(OrExpression))]
+    #[from(OrExpression)]
     Or(Box<OrExpression>),
-    #[from(types(SimpleSelectorName, CompoundSelectorName))]
+    #[from(SimpleSelectorName, SimpleSelector, CompoundSelectorName)]
     SimpleSelector(SimpleSelector),
     #[from]
     CompoundSelector(CompoundSelector),
@@ -326,7 +326,13 @@ fn not_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = 
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum NotExpression {
     Not(Box<NotExpression>),
-    #[from(types(SimpleSelector, SimpleSelectorName, CompoundSelector, OrExpression))]
+    #[from(
+        SimpleSelector,
+        SimpleExpression,
+        SimpleSelectorName,
+        CompoundSelector,
+        OrExpression
+    )]
     Simple(SimpleExpression),
 }
 
@@ -366,13 +372,14 @@ fn diff_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output =
 pub enum AndExpression {
     And(NotExpression, Box<AndExpression>),
     Diff(NotExpression, Box<AndExpression>),
-    #[from(types(
+    #[from(
+        CompoundSelector,
+        NotExpression,
         OrExpression,
         SimpleExpression,
         SimpleSelector,
-        SimpleSelectorName,
-        CompoundSelector
-    ))]
+        SimpleSelectorName
+    )]
     Not(NotExpression),
 }
 
@@ -401,13 +408,14 @@ fn or_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = &
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum OrExpression {
     Or(AndExpression, Box<OrExpression>),
-    #[from(types(
+    #[from(
+        AndExpression,
+        CompoundSelector,
         NotExpression,
         SimpleExpression,
         SimpleSelector,
-        SimpleSelectorName,
-        CompoundSelector
-    ))]
+        SimpleSelectorName
+    )]
     And(AndExpression),
 }
 
@@ -423,7 +431,7 @@ impl OrExpression {
 }
 
 #[derive(Debug, PartialEq, Eq, From)]
-#[from(types(NotExpression, AndExpression))]
+#[from(NotExpression, AndExpression, OrExpression)]
 pub(crate) struct Pattern(pub OrExpression);
 
 impl Pattern {

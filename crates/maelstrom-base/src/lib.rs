@@ -330,7 +330,7 @@ impl GroupId {
 #[derive(
     Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Into,
 )]
-#[into(types(u32))]
+#[into(u32)]
 pub struct Timeout(NonZeroU32);
 
 impl Timeout {
