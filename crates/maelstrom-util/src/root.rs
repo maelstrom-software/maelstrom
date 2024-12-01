@@ -1,14 +1,16 @@
+use derive_more::Debug;
 use serde::{de::Deserializer, Deserialize};
 use std::{
     borrow::{Borrow, ToOwned},
-    fmt::{self, Debug, Formatter},
     marker::PhantomData,
     ops::Deref,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
+#[derive(Debug)]
 #[repr(transparent)]
+#[debug("{inner:?}")]
 pub struct Root<T: ?Sized> {
     phantom: PhantomData<T>,
     inner: Path,
@@ -61,13 +63,9 @@ impl<T> ToOwned for Root<T> {
     }
 }
 
-impl<T> Debug for Root<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.inner.fmt(f)
-    }
-}
-
+#[derive(Debug)]
 #[repr(transparent)]
+#[debug("{inner:?}")]
 pub struct RootBuf<T: ?Sized> {
     phantom: PhantomData<T>,
     inner: PathBuf,
@@ -122,12 +120,6 @@ impl<T> Borrow<Root<T>> for RootBuf<T> {
 impl<T> Clone for RootBuf<T> {
     fn clone(&self) -> Self {
         Self::new(self.inner.clone())
-    }
-}
-
-impl<T> Debug for RootBuf<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.inner.fmt(f)
     }
 }
 

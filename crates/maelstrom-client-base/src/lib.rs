@@ -12,7 +12,7 @@ extern crate self as maelstrom_client;
 
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
-use derive_more::{From, Into};
+use derive_more::{Debug, From, Into};
 use maelstrom_base::{
     stats::JobState, ClientJobId, JobBrokerStatus, JobOutcomeResult, JobWorkerStatus,
 };
@@ -23,7 +23,6 @@ use maelstrom_util::{
     root::RootBuf,
 };
 use serde::Deserialize;
-use std::fmt;
 
 /// The project directory is used for two things. First, any relative paths in layer specifications
 /// are resolved based on this path. Second, it's where the client process looks for the
@@ -73,20 +72,15 @@ pub struct IntrospectResponse {
     pub image_downloads: Vec<RemoteProgress>,
 }
 
-#[derive(Clone, Deserialize, From, Into, TryFromProtoBuf, IntoProtoBuf)]
+#[derive(Clone, Debug, Deserialize, From, Into, TryFromProtoBuf, IntoProtoBuf)]
 #[proto(proto_buf_type = bool, try_from_into)]
 #[serde(transparent)]
+#[debug("{_0:?}")]
 pub struct AcceptInvalidRemoteContainerTlsCerts(bool);
 
 impl AcceptInvalidRemoteContainerTlsCerts {
     pub fn into_inner(self) -> bool {
         self.0
-    }
-}
-
-impl fmt::Debug for AcceptInvalidRemoteContainerTlsCerts {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
     }
 }
 

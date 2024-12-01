@@ -18,11 +18,11 @@ use crate::fuser::ll::{
 };
 use crate::fuser::{FileAttr, FileType};
 use async_trait::async_trait;
+use derive_more::Debug;
 use libc::c_int;
 use maelstrom_linux::Fd;
 use std::convert::AsRef;
 use std::ffi::OsStr;
-use std::fmt;
 use std::io::IoSlice;
 use std::time::Duration;
 
@@ -42,12 +42,6 @@ pub trait ReplySender: Send + Sync + Unpin + 'static {
     ) -> std::io::Result<()>;
 }
 
-impl fmt::Debug for Box<dyn ReplySender> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "Box<ReplySender>")
-    }
-}
-
 /// Generic reply trait
 pub trait Reply {
     /// Create a new reply for the given request
@@ -62,6 +56,7 @@ pub(crate) struct ReplyRaw {
     /// Unique id of the request to reply to
     unique: ll::RequestId,
     /// Closure to call for sending the reply
+    #[debug(skip)]
     sender: Option<Box<dyn ReplySender>>,
 }
 
@@ -664,7 +659,7 @@ impl ReplyLseek {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Debug, *};
     use crate::fuser::{FileAttr, FileType};
     use std::io::IoSlice;
     use std::time::{Duration, UNIX_EPOCH};

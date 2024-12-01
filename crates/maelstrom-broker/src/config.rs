@@ -1,21 +1,17 @@
 use crate::scheduler_task::CacheDir;
-use anyhow::Result;
-use derive_more::From;
+use derive_more::{Debug, From};
 use maelstrom_macro::Config;
 use maelstrom_util::{
     config::common::{CacheSize, LogLevel},
     root::RootBuf,
 };
 use serde::Deserialize;
-use std::{
-    fmt::{self, Debug, Formatter},
-    result,
-    str::FromStr,
-};
+use std::{result, str::FromStr};
 use xdg::BaseDirectories;
 
-#[derive(Deserialize, From)]
+#[derive(Deserialize, Debug, From)]
 #[serde(from = "u16")]
+#[debug("{_0:?}")]
 pub struct BrokerPort(u16);
 
 impl BrokerPort {
@@ -28,12 +24,6 @@ impl BrokerPort {
     }
 }
 
-impl Debug for BrokerPort {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        Debug::fmt(&self.0, f)
-    }
-}
-
 impl FromStr for BrokerPort {
     type Err = <u16 as FromStr>::Err;
     fn from_str(slots: &str) -> result::Result<Self, Self::Err> {
@@ -41,8 +31,9 @@ impl FromStr for BrokerPort {
     }
 }
 
-#[derive(Deserialize, From)]
+#[derive(Deserialize, Debug, From)]
 #[serde(from = "u16")]
+#[debug("{_0:?}")]
 pub struct HttpPort(u16);
 
 impl HttpPort {
@@ -52,12 +43,6 @@ impl HttpPort {
 
     pub fn into_inner(self) -> u16 {
         self.0
-    }
-}
-
-impl Debug for HttpPort {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        Debug::fmt(&self.0, f)
     }
 }
 

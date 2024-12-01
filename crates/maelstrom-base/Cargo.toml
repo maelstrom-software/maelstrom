@@ -16,6 +16,7 @@ derive_more.workspace = true
 enum-map.workspace = true
 enumset.workspace = true
 hex.workspace = true
+indoc.workspace = true
 maelstrom-macro.workspace = true
 nonempty.workspace = true
 serde.workspace = true

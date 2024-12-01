@@ -1,18 +1,12 @@
 use crate::{Sha256Digest, Utf8PathBuf};
+use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::fmt;
 
+#[derive(Debug)]
+#[debug("{_0:o}")]
 struct OctalFmt<T>(T);
-
-impl<T> fmt::Debug for OctalFmt<T>
-where
-    T: fmt::Octal,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Octal::fmt(&self.0, f)
-    }
-}
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct Mode(pub u32);
@@ -32,6 +26,7 @@ impl From<Mode> for u32 {
 #[test]
 fn mode_fmt() {
     assert_eq!(format!("{:?}", Mode(0o1755)), "Mode(1755)");
+    assert_eq!(format!("{:05?}", Mode(0o1755)), "Mode(01755)");
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]

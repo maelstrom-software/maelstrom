@@ -1,10 +1,11 @@
 #![allow(bindings_with_variant_name)]
 
 use ascii::AsAsciiStr as _;
+use derive_more::Debug;
 use maelstrom_util::config::common::StringError;
 use serde::Deserialize;
 use std::{
-    fmt::{self, Debug, Display, Formatter},
+    fmt::{self, Display, Formatter},
     str::FromStr,
 };
 
@@ -109,7 +110,8 @@ pub fn parse_escape_char(input: &str) -> Result<u8, StringError> {
     }
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[debug("{_0:?}")]
 pub struct EscapeChar(u8);
 
 impl EscapeChar {
@@ -125,12 +127,6 @@ impl EscapeChar {
 impl From<u8> for EscapeChar {
     fn from(byte: u8) -> Self {
         Self(byte)
-    }
-}
-
-impl Debug for EscapeChar {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Debug::fmt(&self.0, f)
     }
 }
 

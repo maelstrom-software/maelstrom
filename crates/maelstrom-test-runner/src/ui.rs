@@ -4,6 +4,7 @@ mod simple;
 
 use crate::{LoggingOutput, NotRunEstimate};
 use anyhow::Result;
+use derive_more::Debug;
 use derive_more::{From, Into};
 use maelstrom_base::stats::{JobState, JobStateCounts};
 use maelstrom_client::{IntrospectResponse, JobRunningStatus};
@@ -205,7 +206,8 @@ pub struct UiJobEnqueued {
     pub name: String,
 }
 
-pub struct LogRecord(slog_async::AsyncRecord);
+#[derive(Debug)]
+pub struct LogRecord(#[debug(ignore)] slog_async::AsyncRecord);
 
 // The tests compare UiMessages but slog_async::AsyncRecord isn't comparable, so we hack around
 // that here.
@@ -216,12 +218,6 @@ impl PartialEq<Self> for LogRecord {
 }
 
 impl Eq for LogRecord {}
-
-impl fmt::Debug for LogRecord {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LogRecord(..)")
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum UiMessage {

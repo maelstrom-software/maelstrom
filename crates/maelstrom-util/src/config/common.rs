@@ -1,6 +1,6 @@
 use bytesize::ByteSize;
 use clap::ValueEnum;
-use derive_more::{From, Into};
+use derive_more::{Debug, Display, From, Into};
 use maelstrom_macro::pocket_definition;
 use serde::{
     de::{self, Deserializer, Visitor},
@@ -8,9 +8,7 @@ use serde::{
 };
 use slog::Level;
 use std::{
-    error,
-    fmt::{self, Debug, Display, Formatter},
-    io,
+    error, fmt, io,
     net::{SocketAddr, ToSocketAddrs},
     num::ParseIntError,
     result,
@@ -19,8 +17,10 @@ use std::{
 use strum::EnumString;
 
 #[pocket_definition(export)]
-#[derive(Clone, Copy, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Display, PartialEq, Serialize)]
 #[serde(transparent)]
+#[debug("{_0:?}")]
+#[display("{_0}")]
 pub struct BrokerAddr(SocketAddr);
 
 impl BrokerAddr {
@@ -62,18 +62,6 @@ impl From<BrokerAddr> for String {
     }
 }
 
-impl Display for BrokerAddr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl Debug for BrokerAddr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Debug::fmt(&self.0, f)
-    }
-}
-
 impl<'de> Deserialize<'de> for BrokerAddr {
     fn deserialize<D>(deserializer: D) -> Result<BrokerAddr, D::Error>
     where
@@ -102,18 +90,13 @@ impl<'de> Deserialize<'de> for BrokerAddr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Display)]
+#[display("{_0}")]
 pub struct StringError(pub String);
 
 impl StringError {
     pub fn new<T: ToString>(inner: T) -> Self {
         Self(inner.to_string())
-    }
-}
-
-impl Display for StringError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        Display::fmt(&self.0, f)
     }
 }
 
@@ -136,27 +119,17 @@ macro_rules! byte_size_u64_from_impls {
 impl error::Error for StringError {}
 
 #[pocket_definition(export)]
-#[derive(Clone, Copy, Deserialize, Eq, PartialEq, From, Into)]
+#[derive(Clone, Copy, Debug, Display, Deserialize, Eq, PartialEq, From, Into)]
 #[serde(transparent)]
+#[debug("{_0:?}")]
+#[display("{_0}")]
 pub struct CacheSize(#[serde(with = "bytesize_serde")] ByteSize);
 
 byte_size_u64_from_impls!(CacheSize);
 
-impl Debug for CacheSize {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Debug::fmt(&self.0, f)
-    }
-}
-
 impl Default for CacheSize {
     fn default() -> Self {
         Self(ByteSize::gb(1))
-    }
-}
-
-impl Display for CacheSize {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
     }
 }
 
@@ -192,27 +165,17 @@ impl LogLevel {
 }
 
 #[pocket_definition(export)]
-#[derive(Clone, Copy, Deserialize, Eq, PartialEq, From, Into)]
+#[derive(Clone, Copy, Debug, Display, Deserialize, Eq, PartialEq, From, Into)]
+#[debug("{_0:?}")]
+#[display("{_0}")]
 #[serde(transparent)]
 pub struct InlineLimit(#[serde(with = "bytesize_serde")] ByteSize);
 
 byte_size_u64_from_impls!(InlineLimit);
 
-impl Debug for InlineLimit {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Debug::fmt(&self.0, f)
-    }
-}
-
 impl Default for InlineLimit {
     fn default() -> Self {
         Self(ByteSize::mb(1))
-    }
-}
-
-impl Display for InlineLimit {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
     }
 }
 
@@ -226,9 +189,11 @@ impl FromStr for InlineLimit {
 }
 
 #[pocket_definition(export)]
-#[derive(Clone, Copy, Deserialize, Into)]
+#[derive(Clone, Copy, Debug, Display, Deserialize, Into)]
 #[serde(try_from = "u16")]
 #[into(usize, u16, u32)]
+#[debug("{_0:?}")]
+#[display("{_0}")]
 pub struct Slots(u16);
 
 impl Slots {
@@ -272,21 +237,9 @@ macro_rules! slots_try_from_impl {
 
 slots_try_from_impl!(usize, u32);
 
-impl Debug for Slots {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Debug::fmt(&self.0, f)
-    }
-}
-
 impl Default for Slots {
     fn default() -> Self {
         Self::try_from(num_cpus::get()).unwrap()
-    }
-}
-
-impl Display for Slots {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
     }
 }
 
@@ -298,26 +251,19 @@ impl FromStr for Slots {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Display)]
 pub enum SlotsFromStrError {
+    #[display("{_0}")]
     Parse(ParseIntError),
+    #[display("{_0}")]
     Bounds(String),
-}
-
-impl Display for SlotsFromStrError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            Self::Parse(inner) => Display::fmt(inner, f),
-            Self::Bounds(inner) => write!(f, "{inner}"),
-        }
-    }
 }
 
 impl error::Error for SlotsFromStrError {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Debug, *};
     use serde_test::{assert_de_tokens, assert_tokens, Configure, Token};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 

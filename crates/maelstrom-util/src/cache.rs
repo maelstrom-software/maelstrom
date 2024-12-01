@@ -9,6 +9,7 @@ use crate::{
 };
 use anyhow::{bail, Error, Result};
 use bytesize::ByteSize;
+use derive_more::Debug;
 use fs::{FileType, Fs, Metadata};
 use maelstrom_base::{JobId, Sha256Digest};
 use slog::{debug, info, warn, Logger};
@@ -16,7 +17,6 @@ use std::{
     cmp::Ordering,
     collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
     ffi::{OsStr, OsString},
-    fmt::{self, Debug, Formatter},
     hash::Hash,
     iter::IntoIterator,
     mem,
@@ -57,7 +57,8 @@ pub enum GetArtifact {
 }
 
 /// Type passed to [`Cache::got_artifact_success`].
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+#[debug(bound(FsT::TempFile: Debug, FsT::TempDir: Debug))]
 pub enum GotArtifact<FsT: Fs> {
     Symlink { target: PathBuf },
     File { source: FsT::TempFile },
@@ -75,30 +76,6 @@ impl<FsT: Fs> GotArtifact<FsT> {
 
     pub fn directory(source: FsT::TempDir, size: u64) -> Self {
         Self::Directory { source, size }
-    }
-}
-
-impl<FsT: Fs> Debug for GotArtifact<FsT>
-where
-    FsT::TempFile: Debug,
-    FsT::TempDir: Debug,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Symlink { target } => f
-                .debug_struct("GotArtifact::Symlink")
-                .field("target", target)
-                .finish(),
-            Self::File { source } => f
-                .debug_struct("GotArtifact::File")
-                .field("source", source)
-                .finish(),
-            Self::Directory { source, size } => f
-                .debug_struct("GotArtifact::File")
-                .field("source", source)
-                .field("size", size)
-                .finish(),
-        }
     }
 }
 
@@ -1041,7 +1018,7 @@ mod tests {
             test::{self, Entry},
             Metadata, TempDir as _, TempFile as _,
         },
-        *,
+        Debug, *,
     };
     use crate::fs;
     use maelstrom_test::*;

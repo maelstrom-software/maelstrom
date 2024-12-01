@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result};
+use derive_more::Debug;
 use fs2::FileExt as _;
 use std::{
-    fmt,
     io::{self},
     os::fd::{AsRawFd, RawFd},
     path::{Path, PathBuf},
@@ -109,6 +109,8 @@ impl Iterator for ReadDir {
     }
 }
 
+#[derive(Debug)]
+#[debug("{inner:?}")]
 pub struct DirEntry {
     inner: std::fs::DirEntry,
 }
@@ -130,12 +132,6 @@ impl DirEntry {
                 path: self.path(),
             })
             .with_context(|| format!("metadata(\"{}\")", self.path().display()))
-    }
-}
-
-impl fmt::Debug for DirEntry {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.inner.fmt(f)
     }
 }
 

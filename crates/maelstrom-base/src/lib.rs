@@ -11,14 +11,14 @@ pub use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 pub use enumset::{enum_set, EnumSet};
 pub use nonempty::{nonempty, NonEmpty};
 
-use derive_more::{Constructor, Display, From, Into};
+use derive_more::{Constructor, Debug, Display, From, Into};
 use enumset::EnumSetType;
 use hex::{self, FromHexError};
 use maelstrom_macro::pocket_definition;
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
-    fmt::{self, Debug, Formatter},
+    fmt::{self, Formatter},
     hash::Hash,
     num::NonZeroU32,
     result::Result,
@@ -137,14 +137,9 @@ impl<'de> Deserialize<'de> for NonRootUtf8PathBuf {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Display)]
+#[display("a path of \"/\" is not allowed")]
 pub struct NonRootUtf8PathBufTryFromError;
-
-impl fmt::Display for NonRootUtf8PathBufTryFromError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "a path of \"/\" is not allowed")
-    }
-}
 
 impl Error for NonRootUtf8PathBufTryFromError {}
 
@@ -521,55 +516,29 @@ pub enum JobTerminationStatus {
 
 /// The result for stdout or stderr for a job.
 #[pocket_definition(export)]
-#[derive(Clone, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Display, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobOutputResult {
     /// There was no output.
     None,
 
     /// The output is contained in the provided slice.
-    Inline(Box<[u8]>),
+    #[display("{}", String::from_utf8_lossy(_0))]
+    Inline(#[debug("{}", String::from_utf8_lossy(_0))] Box<[u8]>),
 
     /// The output was truncated to the provided slice, the size of which is based on the job
     /// request. The actual size of the output is also provided, though the remaining bytes will
     /// have been thrown away.
-    Truncated { first: Box<[u8]>, truncated: u64 },
+    #[display("{}<{truncated} bytes truncated>", String::from_utf8_lossy(first))]
+    Truncated {
+        #[debug("{}", String::from_utf8_lossy(first))]
+        first: Box<[u8]>,
+        truncated: u64,
+    },
     /*
      * To come:
     /// The output was stored in a digest, and is of the provided size.
     External(Sha256Digest, u64),
     */
-}
-
-impl Debug for JobOutputResult {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            JobOutputResult::None => f.debug_tuple("None").finish(),
-            JobOutputResult::Inline(bytes) => {
-                let pretty_bytes = String::from_utf8_lossy(bytes);
-                f.debug_tuple("Inline").field(&pretty_bytes).finish()
-            }
-            JobOutputResult::Truncated { first, truncated } => {
-                let pretty_first = String::from_utf8_lossy(first);
-                f.debug_struct("Truncated")
-                    .field("first", &pretty_first)
-                    .field("truncated", truncated)
-                    .finish()
-            }
-        }
-    }
-}
-
-impl fmt::Display for JobOutputResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            JobOutputResult::None => Ok(()),
-            JobOutputResult::Inline(bytes) => fmt::Display::fmt(&String::from_utf8_lossy(bytes), f),
-            JobOutputResult::Truncated { first, truncated } => {
-                fmt::Display::fmt(&String::from_utf8_lossy(first), f)?;
-                fmt::Display::fmt(&format!("<{truncated} bytes truncated>"), f)
-            }
-        }
-    }
 }
 
 /// The output and duration of a job that ran for some amount of time. This is generated regardless
@@ -681,8 +650,10 @@ impl MonitorId {
 }
 
 /// A SHA-256 digest.
-#[derive(Clone, Constructor, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct Sha256Digest([u8; 32]);
+#[derive(
+    Clone, Constructor, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
+pub struct Sha256Digest(#[debug("{self}")] [u8; 32]);
 
 impl Sha256Digest {
     /// Verify that two digests match. If not, return a [`Sha256DigestVerificationError`].
@@ -702,14 +673,9 @@ impl Sha256Digest {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Display)]
+#[display("failed to convert to SHA-256 digest")]
 pub struct Sha256DigestTryFromError;
-
-impl fmt::Display for Sha256DigestTryFromError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "failed to convert to SHA-256 digest")
-    }
-}
 
 impl Error for Sha256DigestTryFromError {}
 
@@ -760,14 +726,9 @@ impl fmt::Display for Sha256Digest {
     }
 }
 
-impl Debug for Sha256Digest {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.pad(&format!("Sha256Digest({})", self))
-    }
-}
-
 /// Error indicating that two digests that should have matched didn't.
-#[derive(Debug)]
+#[derive(Debug, Display)]
+#[display("mismatched SHA-256 digest (expected {expected}, found {actual})")]
 pub struct Sha256DigestVerificationError {
     pub actual: Sha256Digest,
     pub expected: Sha256Digest,
@@ -779,16 +740,6 @@ impl Sha256DigestVerificationError {
     }
 }
 
-impl fmt::Display for Sha256DigestVerificationError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "mismatched SHA-256 digest (expected {}, found {})",
-            self.expected, self.actual,
-        )
-    }
-}
-
 impl Error for Sha256DigestVerificationError {}
 
 #[cfg(test)]
@@ -796,6 +747,7 @@ mod tests {
     use super::*;
     use enumset::enum_set;
     use heck::ToKebabCase;
+    use indoc::indoc;
     use strum::IntoEnumIterator as _;
 
     #[test]
@@ -944,11 +896,15 @@ mod tests {
         );
         assert_eq!(
             format!("{d:80?}"),
-            "Sha256Digest(101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f)  "
+            "Sha256Digest(101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f)"
         );
         assert_eq!(
             format!("{d:#?}"),
-            "Sha256Digest(101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f)"
+            indoc! {
+                "Sha256Digest(
+                    101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f,
+                )"
+            }
         );
     }
 
