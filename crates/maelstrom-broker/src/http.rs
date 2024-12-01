@@ -114,9 +114,9 @@ async fn websocket_writer(
 
 /// Looping reading from `socket` and writing to `scheduler_sender`. If an error is encountered,
 /// return immediately.
-async fn websocket_reader(
+async fn websocket_reader<TempFileT>(
     mut socket: SplitStream<WebSocketStream<Upgraded>>,
-    scheduler_sender: SchedulerSender,
+    scheduler_sender: SchedulerSender<TempFileT>,
     id: MonitorId,
 ) {
     while let Some(Ok(Message::Binary(msg))) = socket.next().await {
@@ -133,12 +133,14 @@ async fn websocket_reader(
 }
 
 /// Task main loop for handing a websocket. This just calls into [connection::connection_main].
-async fn websocket_main(
+async fn websocket_main<TempFileT>(
     websocket: HyperWebsocket,
-    scheduler_sender: SchedulerSender,
+    scheduler_sender: SchedulerSender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
-) {
+) where
+    TempFileT: Send + 'static,
+{
     let Ok(websocket) = websocket.await else {
         return;
     };
@@ -161,14 +163,17 @@ async fn websocket_main(
     debug!(log, "received websocket monitor disconnect")
 }
 
-struct Handler {
+struct Handler<TempFileT> {
     tar_handler: Arc<TarHandler>,
-    scheduler_sender: SchedulerSender,
+    scheduler_sender: SchedulerSender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
 }
 
-impl Service<Request<Body>> for Handler {
+impl<TempFileT> Service<Request<Body>> for Handler<TempFileT>
+where
+    TempFileT: Send + Sync + 'static,
+{
     type Response = Response<Body>;
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response>> + Send>>;
@@ -199,12 +204,14 @@ impl Service<Request<Body>> for Handler {
     }
 }
 
-pub async fn listener_main(
+pub async fn listener_main<TempFileT>(
     listener: TcpListener,
-    scheduler_sender: SchedulerSender,
+    scheduler_sender: SchedulerSender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
-) {
+) where
+    TempFileT: Send + Sync + 'static,
+{
     let mut http = Http::new();
     http.http1_only(true);
     http.http1_keep_alive(true);

@@ -1,23 +1,26 @@
-use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
+use crate::{
+    scheduler_task::{SchedulerMessage, SchedulerSender},
+    TempFileFactory,
+};
 use anyhow::Result;
 use maelstrom_base::proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
 use maelstrom_util::{
-    cache::{
-        fs::{std::Fs, TempFile as _},
-        TempFileFactory,
-    },
+    cache::fs::TempFile as _,
     io::{FixedSizeReader, Sha256Stream},
     net,
 };
 use slog::{debug, Logger};
 use std::{fs::File, io, net::TcpStream};
 
-fn handle_one_message(
+fn handle_one_message<TempFileFactoryT: TempFileFactory>(
     msg: ArtifactPusherToBroker,
     socket: &mut TcpStream,
-    scheduler_sender: &SchedulerSender,
-    temp_file_factory: &TempFileFactory<Fs>,
-) -> Result<()> {
+    scheduler_sender: &SchedulerSender<TempFileFactoryT::TempFile>,
+    temp_file_factory: &TempFileFactoryT,
+) -> Result<()>
+where
+    TempFileFactoryT::TempFile: Send + Sync + 'static,
+{
     let ArtifactPusherToBroker(digest, size) = msg;
     let temp_file = temp_file_factory.temp_file()?;
     let mut temp_file_inner = File::create(temp_file.path())?;
@@ -31,12 +34,15 @@ fn handle_one_message(
     Ok(())
 }
 
-fn connection_loop(
+fn connection_loop<TempFileFactoryT: TempFileFactory>(
     mut socket: TcpStream,
-    scheduler_sender: &SchedulerSender,
-    temp_file_factory: &TempFileFactory<Fs>,
+    scheduler_sender: &SchedulerSender<TempFileFactoryT::TempFile>,
+    temp_file_factory: &TempFileFactoryT,
     log: &Logger,
-) -> Result<()> {
+) -> Result<()>
+where
+    TempFileFactoryT::TempFile: Send + Sync + 'static,
+{
     loop {
         let msg = net::read_message_from_socket(&mut socket, log)?;
         let result = handle_one_message(msg, &mut socket, scheduler_sender, temp_file_factory);
@@ -46,12 +52,15 @@ fn connection_loop(
     }
 }
 
-pub fn connection_main(
+pub fn connection_main<TempFileFactoryT: TempFileFactory>(
     socket: TcpStream,
-    scheduler_sender: SchedulerSender,
-    temp_file_factory: TempFileFactory<Fs>,
+    scheduler_sender: SchedulerSender<TempFileFactoryT::TempFile>,
+    temp_file_factory: TempFileFactoryT,
     log: Logger,
-) -> Result<()> {
+) -> Result<()>
+where
+    TempFileFactoryT::TempFile: Send + Sync + 'static,
+{
     debug!(log, "artifact pusher connected");
     let err = connection_loop(socket, &scheduler_sender, &temp_file_factory, &log).unwrap_err();
     debug!(log, "artifact pusher disconnected"; "error" => %err);

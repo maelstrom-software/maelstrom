@@ -1,6 +1,7 @@
 mod cache;
 mod scheduler;
 
+pub use cache::SchedulerCache;
 pub use maelstrom_util::cache::CacheDir;
 
 use maelstrom_base::{
@@ -8,15 +9,9 @@ use maelstrom_base::{
     proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker},
     JobId, Sha256Digest,
 };
-use maelstrom_util::{
-    cache::{fs as cache_fs, Cache, TempFileFactory},
-    config::common::CacheSize,
-    manifest::AsyncManifestReader,
-    root::RootBuf,
-    sync,
-};
-use scheduler::{Message, MessageM, Scheduler, SchedulerDeps};
-use slog::Logger;
+use maelstrom_util::{manifest::AsyncManifestReader, sync};
+use scheduler::{Message, Scheduler, SchedulerDeps};
+use std::marker::PhantomData;
 use std::{path::PathBuf, sync::mpsc as std_mpsc};
 use tokio::io::AsyncRead;
 use tokio::sync::mpsc as tokio_mpsc;
@@ -31,16 +26,16 @@ pub struct ManifestReadRequest<ArtifactStreamT> {
 }
 
 #[derive(Debug)]
-pub struct PassThroughDeps;
+pub struct PassThroughDeps<ArtifactStreamT>(PhantomData<ArtifactStreamT>);
 
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.
-impl SchedulerDeps for PassThroughDeps {
+impl<ArtifactStreamT> SchedulerDeps for PassThroughDeps<ArtifactStreamT> {
     type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
     type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
     type MonitorSender = tokio_mpsc::UnboundedSender<BrokerToMonitor>;
     type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
-    type ArtifactStream = <SchedulerCache as cache::SchedulerCache>::ArtifactStream;
+    type ArtifactStream = ArtifactStreamT;
     type ManifestReaderSender =
         tokio_mpsc::UnboundedSender<ManifestReadRequest<Self::ArtifactStream>>;
 
@@ -78,14 +73,14 @@ impl SchedulerDeps for PassThroughDeps {
 }
 
 #[derive(Debug)]
-struct CacheManifestReader<ArtifactStreamT> {
+struct CacheManifestReader<ArtifactStreamT, TempFileT> {
     tasks: JoinSet<()>,
     receiver: tokio_mpsc::UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
-    sender: SchedulerSender,
+    sender: SchedulerSender<TempFileT>,
 }
 
-async fn read_manifest<ArtifactStreamT: AsyncRead + Unpin>(
-    sender: SchedulerSender,
+async fn read_manifest<ArtifactStreamT: AsyncRead + Unpin, TempFileT>(
+    sender: SchedulerSender<TempFileT>,
     stream: ArtifactStreamT,
     size: u64,
     job_id: JobId,
@@ -99,12 +94,14 @@ async fn read_manifest<ArtifactStreamT: AsyncRead + Unpin>(
     Ok(())
 }
 
-impl<ArtifactStreamT: AsyncRead + Unpin + Send + Sync + 'static>
-    CacheManifestReader<ArtifactStreamT>
+impl<ArtifactStreamT: AsyncRead + Unpin + Send + Sync + 'static, TempFileT>
+    CacheManifestReader<ArtifactStreamT, TempFileT>
+where
+    TempFileT: Send + 'static,
 {
     fn new(
         receiver: tokio_mpsc::UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
-        sender: SchedulerSender,
+        sender: SchedulerSender<TempFileT>,
     ) -> Self {
         Self {
             tasks: JoinSet::new(),
@@ -129,28 +126,37 @@ impl<ArtifactStreamT: AsyncRead + Unpin + Send + Sync + 'static>
     }
 }
 
-/// The production scheduler message type. Some [Message] arms contain a
-/// [SchedulerDeps], so it's defined as a generic type. But in this module, we only use
-/// one implementation of [SchedulerDeps].
-pub type SchedulerMessage = MessageM<PassThroughDeps, cache_fs::std::TempFile>;
+pub type BrokerSchedulerCache = maelstrom_util::cache::Cache<
+    maelstrom_util::cache::fs::std::Fs,
+    cache::BrokerKey,
+    cache::BrokerGetStrategy,
+>;
+
+/// The production scheduler message type.
+pub type SchedulerMessage<TempFileT> = Message<
+    tokio_mpsc::UnboundedSender<BrokerToClient>,
+    tokio_mpsc::UnboundedSender<BrokerToWorker>,
+    tokio_mpsc::UnboundedSender<BrokerToMonitor>,
+    std_mpsc::Sender<Option<(PathBuf, u64)>>,
+    TempFileT,
+>;
 
 /// This type is used often enough to warrant an alias.
-pub type SchedulerSender = tokio_mpsc::UnboundedSender<SchedulerMessage>;
+pub type SchedulerSender<TempFileT> = tokio_mpsc::UnboundedSender<SchedulerMessage<TempFileT>>;
 
-type SchedulerCache = Cache<cache_fs::std::Fs, cache::BrokerKey, cache::BrokerGetStrategy>;
-
-pub struct SchedulerTask {
-    scheduler: Scheduler<SchedulerCache, PassThroughDeps>,
-    sender: SchedulerSender,
-    receiver: tokio_mpsc::UnboundedReceiver<SchedulerMessage>,
-    temp_file_factory: TempFileFactory<cache_fs::std::Fs>,
+pub struct SchedulerTask<CacheT: SchedulerCache> {
+    scheduler: Scheduler<CacheT, PassThroughDeps<CacheT::ArtifactStream>>,
+    sender: SchedulerSender<CacheT::TempFile>,
+    receiver: tokio_mpsc::UnboundedReceiver<SchedulerMessage<CacheT::TempFile>>,
 }
 
-impl SchedulerTask {
-    pub fn new(cache_root: RootBuf<CacheDir>, cache_size: CacheSize, log: Logger) -> Self {
+impl<CacheT: SchedulerCache> SchedulerTask<CacheT>
+where
+    CacheT::ArtifactStream: tokio::io::AsyncRead + Unpin + Send + Sync + 'static,
+    CacheT::TempFile: Send + Sync + 'static,
+{
+    pub fn new(cache: CacheT) -> Self {
         let (sender, receiver) = tokio_mpsc::unbounded_channel();
-        let (cache, temp_file_factory) =
-            Cache::new(cache_fs::std::Fs, cache_root, cache_size, log, true).unwrap();
 
         let (manifest_reader_sender, manifest_reader_receiver) = tokio_mpsc::unbounded_channel();
         let mut manifest_reader =
@@ -161,16 +167,11 @@ impl SchedulerTask {
             scheduler: Scheduler::new(cache, manifest_reader_sender),
             sender,
             receiver,
-            temp_file_factory,
         }
     }
 
-    pub fn scheduler_sender(&self) -> &SchedulerSender {
+    pub fn scheduler_sender(&self) -> &SchedulerSender<CacheT::TempFile> {
         &self.sender
-    }
-
-    pub fn temp_file_factory(&self) -> &TempFileFactory<cache_fs::std::Fs> {
-        &self.temp_file_factory
     }
 
     /// Main loop for the scheduler. This should be run on a task of its own. There should be
@@ -185,8 +186,9 @@ impl SchedulerTask {
     /// ignore the error in that case. Besides, the [scheduler::SchedulerDeps] interface doesn't
     /// give us a way to return an error, for precisely this reason.
     pub async fn run(mut self) {
+        let mut deps = PassThroughDeps(PhantomData);
         sync::channel_reader(self.receiver, |msg| {
-            self.scheduler.receive_message(&mut PassThroughDeps, msg);
+            self.scheduler.receive_message(&mut deps, msg);
         })
         .await
         .unwrap();

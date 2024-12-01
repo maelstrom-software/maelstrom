@@ -1,17 +1,14 @@
 use crate::{
     artifact_fetcher, artifact_pusher,
     scheduler_task::{SchedulerMessage, SchedulerSender},
-    IdVendor,
+    IdVendor, TempFileFactory,
 };
 use anyhow::Result;
 use maelstrom_base::{
     proto::{ClientToBroker, Hello},
     ClientId, MonitorId, WorkerId,
 };
-use maelstrom_util::{
-    cache::{fs::std::Fs, TempFileFactory},
-    net::{self, AsRawFdExt},
-};
+use maelstrom_util::net::{self, AsRawFdExt};
 use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};
 use std::{future::Future, sync::Arc, thread};
@@ -62,12 +59,15 @@ use tokio::{
 ///   messages from the supplied scheduler receiver and write them to the socket-like object. The
 ///   scheduler receiver will be a newly-created FromSchedulerMessageT receiver
 ///
-pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFutureT>(
-    scheduler_sender: SchedulerSender,
+pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFutureT, TempFileT>(
+    scheduler_sender: SchedulerSender<TempFileT>,
     id: IdT,
-    connected_msg_builder: impl FnOnce(IdT, UnboundedSender<FromSchedulerMessageT>) -> SchedulerMessage,
-    disconnected_msg_builder: impl FnOnce(IdT) -> SchedulerMessage,
-    socket_reader_main: impl FnOnce(SchedulerSender) -> ReaderFutureT,
+    connected_msg_builder: impl FnOnce(
+        IdT,
+        UnboundedSender<FromSchedulerMessageT>,
+    ) -> SchedulerMessage<TempFileT>,
+    disconnected_msg_builder: impl FnOnce(IdT) -> SchedulerMessage<TempFileT>,
+    socket_reader_main: impl FnOnce(SchedulerSender<TempFileT>) -> ReaderFutureT,
     socket_writer_main: impl FnOnce(UnboundedReceiver<FromSchedulerMessageT>) -> WriterFutureT,
 ) where
     IdT: Copy + Send + 'static,
@@ -102,13 +102,16 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
     scheduler_sender.send(disconnected_msg_builder(id)).ok();
 }
 
-async fn unassigned_connection_main(
+async fn unassigned_connection_main<TempFileFactoryT>(
     socket: TcpStream,
-    scheduler_sender: SchedulerSender,
+    scheduler_sender: SchedulerSender<TempFileFactoryT::TempFile>,
     id_vendor: Arc<IdVendor>,
-    temp_file_factory: TempFileFactory<Fs>,
+    temp_file_factory: TempFileFactoryT,
     log: Logger,
-) {
+) where
+    TempFileFactoryT: TempFileFactory + Send + 'static,
+    TempFileFactoryT::TempFile: Send + Sync + 'static,
+{
     let mut socket = match socket.set_socket_options() {
         Ok(socket) => socket,
         Err(err) => {
@@ -234,13 +237,16 @@ async fn unassigned_connection_main(
 /// Main loop for the listener. This should be run on a task of its own. There should be at least
 /// one of these in a broker process. It will only return when it encounters an error. Until then,
 /// it listens on a socket and spawns new tasks for each client or worker that connects.
-pub async fn listener_main(
+pub async fn listener_main<TempFileFactoryT>(
     listener: TcpListener,
-    scheduler_sender: SchedulerSender,
+    scheduler_sender: SchedulerSender<TempFileFactoryT::TempFile>,
     id_vendor: Arc<IdVendor>,
-    temp_file_factory: TempFileFactory<Fs>,
+    temp_file_factory: TempFileFactoryT,
     log: Logger,
-) {
+) where
+    TempFileFactoryT: TempFileFactory + Send + 'static,
+    TempFileFactoryT::TempFile: Send + Sync + 'static,
+{
     loop {
         match listener.accept().await {
             Ok((socket, peer_addr)) => {
