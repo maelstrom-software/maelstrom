@@ -1,9 +1,7 @@
 use crate::{
-    metadata::TestMetadata,
-    test_db::{TestDb, TestDbStore, TestDbStoreDeps},
-    ui::{self},
-    BuildDir, CollectTests, NoCaseMetadata, SimpleFilter, StringArtifactKey, StringPackage,
-    TestArtifact, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    metadata::TestMetadata, ui, BuildDir, CollectTests, NoCaseMetadata, SimpleFilter,
+    StringArtifactKey, StringPackage, TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,
+    WaitStatus,
 };
 use anyhow::Result;
 use derive_more::From;
@@ -11,40 +9,15 @@ use maelstrom_base::{
     stats::JobState, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobTerminationStatus,
     Utf8PathBuf,
 };
-use maelstrom_client::spec::{JobSpec, LayerSpec};
+use maelstrom_client::spec::LayerSpec;
 use maelstrom_util::{fs::Fs, process::ExitCode, root::RootBuf};
-use pretty_assertions::assert_eq;
 use std::{
-    cell::RefCell,
     collections::HashSet,
-    fmt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
     time::Duration,
 };
 
 pub struct BinDir;
-
-#[derive(Clone, Default)]
-pub struct FakeTestCompleteCallback(
-    pub Arc<Mutex<Option<Box<dyn FnOnce() + Send + Sync + 'static>>>>,
-);
-
-impl FakeTestCompleteCallback {
-    pub fn set(&self, handler: impl FnOnce() + Send + Sync + 'static) {
-        *self.0.lock().unwrap() = Some(Box::new(handler));
-    }
-
-    fn call(&self) {
-        (self.0.lock().unwrap().take().unwrap())();
-    }
-}
-
-impl fmt::Debug for FakeTestCompleteCallback {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt("<callback>", f)
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct FakeTestCase {
@@ -53,25 +26,6 @@ pub struct FakeTestCase {
     pub desired_state: JobState,
     pub expected_estimated_duration: Option<Duration>,
     pub outcome: JobOutcome,
-    pub complete_at_end: bool,
-    pub cb: FakeTestCompleteCallback,
-}
-
-impl FakeTestCase {
-    fn timing(&self) -> Duration {
-        let (JobOutcome::TimedOut(JobEffects { duration, .. })
-        | JobOutcome::Completed(JobCompleted {
-            effects: JobEffects { duration, .. },
-            ..
-        })) = self.outcome;
-        duration
-    }
-
-    pub fn maybe_complete(&self) {
-        if self.complete_at_end {
-            self.cb.call();
-        }
-    }
 }
 
 impl Default for FakeTestCase {
@@ -89,8 +43,6 @@ impl Default for FakeTestCase {
                     duration: Duration::from_secs(1),
                 },
             }),
-            complete_at_end: false,
-            cb: Default::default(),
         }
     }
 }
@@ -101,89 +53,13 @@ pub struct FakeTestBinary {
     pub tests: Vec<FakeTestCase>,
 }
 
-impl FakeTestBinary {
-    fn artifact_key(&self) -> StringArtifactKey {
-        self.name.as_str().into()
-    }
-}
-
 #[derive(Clone, Debug, Default)]
-pub struct FakeTests {
-    pub test_binaries: Vec<FakeTestBinary>,
+struct FakeTests {
+    test_binaries: Vec<FakeTestBinary>,
 }
 
 impl FakeTests {
-    pub fn create_binaries(&self, fs: &Fs, bin_path: &Path) {
-        for bin in &self.test_binaries {
-            let dest = bin_path.join(&bin.name);
-            if !fs.exists(&dest) {
-                fs.symlink("/proc/self/exe", dest).unwrap();
-            }
-        }
-    }
-
-    pub fn update_db(
-        &self,
-        mut db: TestDb<StringArtifactKey, NoCaseMetadata>,
-    ) -> TestDb<StringArtifactKey, NoCaseMetadata> {
-        struct FakeTestDbStoreDeps {
-            bytes: RefCell<Option<Vec<u8>>>,
-        }
-        impl TestDbStoreDeps for FakeTestDbStoreDeps {
-            fn read_to_string_if_exists(&self, _path: impl AsRef<Path>) -> Result<Option<String>> {
-                Ok(self
-                    .bytes
-                    .borrow()
-                    .clone()
-                    .map(|bytes| String::from_utf8(bytes).unwrap()))
-            }
-            fn create_dir_all(&self, _path: impl AsRef<Path>) -> Result<()> {
-                Ok(())
-            }
-            fn write(&self, _path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
-                self.bytes.borrow_mut().replace(contents.as_ref().to_vec());
-                Ok(())
-            }
-        }
-        db.retain_packages_and_artifacts(
-            self.test_binaries
-                .iter()
-                .map(|binary| (binary.name.as_str(), [binary.artifact_key()])),
-        );
-        for binary in &self.test_binaries {
-            db.update_artifact_cases(
-                &binary.name,
-                binary.artifact_key(),
-                binary
-                    .tests
-                    .iter()
-                    .map(|case| (case.name.clone(), NoCaseMetadata)),
-            );
-            for case in &binary.tests {
-                db.update_case(
-                    &binary.name,
-                    &binary.artifact_key(),
-                    &case.name,
-                    !matches!(
-                        &case.outcome,
-                        JobOutcome::Completed(JobCompleted {
-                            status: JobTerminationStatus::Exited(0),
-                            ..
-                        })
-                    ),
-                    case.timing(),
-                );
-            }
-        }
-        let db_store_deps = FakeTestDbStoreDeps {
-            bytes: RefCell::new(None),
-        };
-        let db_store = TestDbStore::new(db_store_deps, RootBuf::new(PathBuf::from("")));
-        db_store.save(db).unwrap();
-        db_store.load().unwrap()
-    }
-
-    pub fn packages(&self) -> Vec<FakeTestPackage> {
+    fn packages(&self) -> Vec<FakeTestPackage> {
         self.test_binaries
             .iter()
             .map(|b| FakeTestPackage {
@@ -236,29 +112,11 @@ impl FakeTests {
             .collect()
     }
 
-    pub fn find_case_for_spec(&self, spec: JobSpec) -> &FakeTestCase {
-        let binary_name = spec.program.file_name().unwrap();
-        let binary = self.find_binary(binary_name);
-        let case_name = spec
-            .arguments
-            .iter()
-            .find(|a| !a.starts_with("--"))
-            .unwrap();
-        let case = binary.tests.iter().find(|c| &c.name == case_name).unwrap();
-        assert_eq!(&spec.estimated_duration, &case.expected_estimated_duration);
-        case
-    }
-
     fn find_binary(&self, binary_name: &str) -> &FakeTestBinary {
         self.test_binaries
             .iter()
             .find(|b| b.name == binary_name)
             .unwrap_or_else(|| panic!("binary {binary_name} not found"))
-    }
-
-    pub fn find_case(&self, binary_name: &str, case: &str) -> &FakeTestCase {
-        let binary = self.find_binary(binary_name);
-        binary.tests.iter().find(|c| &c.name == case).unwrap()
     }
 }
 
@@ -278,7 +136,7 @@ impl Wait for WaitForNothing {
 }
 
 pub struct TestCollector {
-    pub tests: FakeTests,
+    tests: FakeTests,
     pub bin_path: RootBuf<BinDir>,
     pub target_dir: RootBuf<BuildDir>,
 }
