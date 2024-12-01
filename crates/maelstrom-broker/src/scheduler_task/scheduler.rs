@@ -24,7 +24,6 @@ use maelstrom_util::{
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap, HashSet},
-    fmt::{self, Debug, Formatter},
     path::PathBuf,
     time::Duration,
 };
@@ -77,6 +76,7 @@ pub type MessageM<DepsT, TempFileT> = Message<
 /// The incoming messages, or events, for [`Scheduler`].
 ///
 /// If [`Scheduler`] weren't implement as an async state machine, these would be its methods.
+#[derive(Debug)]
 pub enum Message<
     ClientSenderT,
     WorkerSenderT,
@@ -135,75 +135,6 @@ pub enum Message<
     /// Finished reading the manifest either due to reaching EOF or an error and no more dependent
     /// digests messages will be sent.
     FinishedReadingManifest(Sha256Digest, JobId, anyhow::Result<()>),
-}
-
-impl<ClientSenderT, WorkerSenderT, MonitorSenderT, WorkerArtifactFetcherSenderT, TempFileT> Debug
-    for Message<
-        ClientSenderT,
-        WorkerSenderT,
-        MonitorSenderT,
-        WorkerArtifactFetcherSenderT,
-        TempFileT,
-    >
-where
-    TempFileT: Debug,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Message::ClientConnected(cid, _sender) => {
-                f.debug_tuple("ClientConnected").field(cid).finish()
-            }
-            Message::ClientDisconnected(cid) => {
-                f.debug_tuple("ClientDisconnected").field(cid).finish()
-            }
-            Message::FromClient(cid, msg) => {
-                f.debug_tuple("FromClient").field(cid).field(msg).finish()
-            }
-            Message::WorkerConnected(wid, slots, _sender) => f
-                .debug_tuple("WorkerConnected")
-                .field(wid)
-                .field(slots)
-                .finish(),
-            Message::WorkerDisconnected(wid) => {
-                f.debug_tuple("WorkerDisconnected").field(wid).finish()
-            }
-            Message::FromWorker(wid, msg) => {
-                f.debug_tuple("FromWorker").field(wid).field(msg).finish()
-            }
-            Message::MonitorConnected(mid, _sender) => {
-                f.debug_tuple("MonitorConnected").field(mid).finish()
-            }
-            Message::MonitorDisconnected(mid) => {
-                f.debug_tuple("MonitorDisconnected").field(mid).finish()
-            }
-            Message::FromMonitor(mid, msg) => {
-                f.debug_tuple("FromMonitor").field(mid).field(msg).finish()
-            }
-            Message::GotArtifact(digest, file) => f
-                .debug_tuple("GotArtifact")
-                .field(digest)
-                .field(file)
-                .finish(),
-            Message::GetArtifactForWorker(digest, _sender) => {
-                f.debug_tuple("GetArtifactForWorker").field(digest).finish()
-            }
-            Message::DecrementRefcount(digest) => {
-                f.debug_tuple("DecrementRefcount").field(digest).finish()
-            }
-            Message::StatisticsHeartbeat => f.debug_tuple("StatisticsHeartbeat").finish(),
-            Message::GotManifestEntry(entry_digest, job_id) => f
-                .debug_tuple("GotManifestEntry")
-                .field(entry_digest)
-                .field(job_id)
-                .finish(),
-            Message::FinishedReadingManifest(manifest_digest, job_id, result) => f
-                .debug_tuple("FinishedReadingManifest")
-                .field(manifest_digest)
-                .field(job_id)
-                .field(result)
-                .finish(),
-        }
-    }
 }
 
 impl<CacheT, DepsT> Scheduler<CacheT, DepsT>
