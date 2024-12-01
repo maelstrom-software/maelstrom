@@ -15,7 +15,7 @@ use maelstrom_util::{
     root::RootBuf,
     sync,
 };
-use scheduler::{Message, Scheduler, SchedulerDeps};
+use scheduler::{Message, MessageM, Scheduler, SchedulerDeps};
 use slog::Logger;
 use std::{path::PathBuf, sync::mpsc as std_mpsc};
 use tokio::io::AsyncRead;
@@ -132,7 +132,7 @@ impl<ArtifactStreamT: AsyncRead + Unpin + Send + Sync + 'static>
 /// The production scheduler message type. Some [Message] arms contain a
 /// [SchedulerDeps], so it's defined as a generic type. But in this module, we only use
 /// one implementation of [SchedulerDeps].
-pub type SchedulerMessage = Message<PassThroughDeps, cache_fs::std::TempFile>;
+pub type SchedulerMessage = MessageM<PassThroughDeps, cache_fs::std::TempFile>;
 
 /// This type is used often enough to warrant an alias.
 pub type SchedulerSender = tokio_mpsc::UnboundedSender<SchedulerMessage>;

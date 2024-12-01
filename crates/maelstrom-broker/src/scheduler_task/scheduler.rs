@@ -16,7 +16,7 @@ use maelstrom_base::{
     JobWorkerStatus, MonitorId, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
-    cache::{fs::TempFile, GetArtifact},
+    cache::GetArtifact,
     duration,
     ext::{BoolExt as _, OptionExt as _},
     heap::{Heap, HeapDeps, HeapIndex},
@@ -66,12 +66,26 @@ pub trait SchedulerDeps {
     );
 }
 
+pub type MessageM<DepsT, TempFileT> = Message<
+    <DepsT as SchedulerDeps>::ClientSender,
+    <DepsT as SchedulerDeps>::WorkerSender,
+    <DepsT as SchedulerDeps>::MonitorSender,
+    <DepsT as SchedulerDeps>::WorkerArtifactFetcherSender,
+    TempFileT,
+>;
+
 /// The incoming messages, or events, for [`Scheduler`].
 ///
 /// If [`Scheduler`] weren't implement as an async state machine, these would be its methods.
-pub enum Message<DepsT: SchedulerDeps, TempFileT> {
+pub enum Message<
+    ClientSenderT,
+    WorkerSenderT,
+    MonitorSenderT,
+    WorkerArtifactFetcherSenderT,
+    TempFileT,
+> {
     /// The given client connected, and messages can be sent to it on the given sender.
-    ClientConnected(ClientId, DepsT::ClientSender),
+    ClientConnected(ClientId, ClientSenderT),
 
     /// The given client disconnected.
     ClientDisconnected(ClientId),
@@ -81,7 +95,7 @@ pub enum Message<DepsT: SchedulerDeps, TempFileT> {
 
     /// The given worker connected. It has the given number of slots and messages can be sent to it
     /// on the given sender.
-    WorkerConnected(WorkerId, usize, DepsT::WorkerSender),
+    WorkerConnected(WorkerId, usize, WorkerSenderT),
 
     /// The given worker disconnected.
     WorkerDisconnected(WorkerId),
@@ -90,7 +104,7 @@ pub enum Message<DepsT: SchedulerDeps, TempFileT> {
     FromWorker(WorkerId, WorkerToBroker),
 
     /// The given monitor connected, and messages can be sent to it on the given sender.
-    MonitorConnected(MonitorId, DepsT::MonitorSender),
+    MonitorConnected(MonitorId, MonitorSenderT),
 
     /// The given monitor disconnected.
     MonitorDisconnected(MonitorId),
@@ -105,7 +119,7 @@ pub enum Message<DepsT: SchedulerDeps, TempFileT> {
     /// A worker has requested the given artifact be sent to it over the given sender. After the
     /// contents are sent to the worker, the refcount needs to be decremented with a
     /// [`Message::DecrementRefcount`] message.
-    GetArtifactForWorker(Sha256Digest, DepsT::WorkerArtifactFetcherSender),
+    GetArtifactForWorker(Sha256Digest, WorkerArtifactFetcherSenderT),
 
     /// A worker has been sent an artifact, and we can now release the refcount that was keeping
     /// the artifact from being removed while being transferred.
@@ -123,7 +137,17 @@ pub enum Message<DepsT: SchedulerDeps, TempFileT> {
     FinishedReadingManifest(Sha256Digest, JobId, anyhow::Result<()>),
 }
 
-impl<DepsT: SchedulerDeps, TempFileT: TempFile> Debug for Message<DepsT, TempFileT> {
+impl<ClientSenderT, WorkerSenderT, MonitorSenderT, WorkerArtifactFetcherSenderT, TempFileT> Debug
+    for Message<
+        ClientSenderT,
+        WorkerSenderT,
+        MonitorSenderT,
+        WorkerArtifactFetcherSenderT,
+        TempFileT,
+    >
+where
+    TempFileT: Debug,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Message::ClientConnected(cid, _sender) => {
@@ -205,7 +229,7 @@ where
 
     /// Process an individual [`Message`]. This function doesn't block as the scheduler is
     /// implemented as an async state machine.
-    pub fn receive_message(&mut self, deps: &mut DepsT, msg: Message<DepsT, CacheT::TempFile>) {
+    pub fn receive_message(&mut self, deps: &mut DepsT, msg: MessageM<DepsT, CacheT::TempFile>) {
         match msg {
             Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
             Message::ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
@@ -1059,7 +1083,7 @@ mod tests {
             );
         }
 
-        fn receive_message(&mut self, msg: Message<Rc<RefCell<TestState>>, test::TempFile>) {
+        fn receive_message(&mut self, msg: MessageM<Rc<RefCell<TestState>>, test::TempFile>) {
             self.scheduler.receive_message(&mut self.test_state, msg);
         }
     }
