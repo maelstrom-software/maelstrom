@@ -151,7 +151,7 @@ where
     }
 }
 
-impl<'a, ProgressIndicatorT> io::Write for ProgressSlogRecordDecorator<'a, ProgressIndicatorT>
+impl<ProgressIndicatorT> io::Write for ProgressSlogRecordDecorator<'_, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
@@ -170,8 +170,8 @@ where
     }
 }
 
-impl<'a, ProgressIndicatorT> slog_term::RecordDecorator
-    for ProgressSlogRecordDecorator<'a, ProgressIndicatorT>
+impl<ProgressIndicatorT> slog_term::RecordDecorator
+    for ProgressSlogRecordDecorator<'_, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
@@ -232,7 +232,7 @@ impl<'a, ProgressIndicatorT> ProgressSlogDecorator<'a, ProgressIndicatorT> {
     }
 }
 
-impl<'a, ProgressIndicatorT> slog_term::Decorator for ProgressSlogDecorator<'a, ProgressIndicatorT>
+impl<ProgressIndicatorT> slog_term::Decorator for ProgressSlogDecorator<'_, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {

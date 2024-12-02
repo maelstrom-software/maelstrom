@@ -874,7 +874,7 @@ mod tests {
                 .push(CacheGotArtifact(digest.clone(), file));
             self.borrow_mut()
                 .got_artifact_returns
-                .get_mut(&digest)
+                .get_mut(digest)
                 .unwrap()
                 .remove(0)
         }

@@ -304,7 +304,7 @@ impl CollectTests for TestCollector {
 
     fn was_test_ignored(case_str: &str, lines: &[String]) -> bool {
         lines
-            .into_iter()
+            .iter()
             .any(|line| line == &format!("fixture: ignoring test {case_str}"))
     }
 

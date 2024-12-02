@@ -277,7 +277,6 @@ mod tests {
             String::from_utf8(self.0.lock().unwrap().clone())
                 .unwrap()
                 .split('\n')
-                .into_iter()
                 .filter(|l| !l.trim().is_empty())
                 .map(|l| serde_json::from_str(l).unwrap())
                 .collect()

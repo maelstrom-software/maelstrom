@@ -180,7 +180,7 @@ impl<'clock, ClockT> Executor<'clock, ClockT> {
     }
 }
 
-impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
+impl<ClockT: Clock> Executor<'_, ClockT> {
     /// Run a process (i.e. job).
     ///
     /// On success, this function returns when the process has completed, with a [`JobCompleted`].
@@ -385,7 +385,7 @@ impl<'bump, 'arg> ChildProcess<'bump, 'arg> {
     }
 }
 
-impl<'bump, 'arg> Drop for ChildProcess<'bump, 'arg> {
+impl Drop for ChildProcess<'_, '_> {
     fn drop(&mut self) {
         if let Some(child_pidfd) = &self.child_pidfd {
             // The pidfd_send_signal really shouldn't ever give us an error. But even if it does
@@ -413,7 +413,7 @@ enum Stdio {
     },
 }
 
-impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
+impl<ClockT: Clock> Executor<'_, ClockT> {
     // Set up the network namespace. It's possible that we won't even create a new network
     // namespace, if JobNetwork::Local is specified.
     //
@@ -2691,7 +2691,7 @@ mod tests {
         let temp_dir_path = temp_file.path().parent().unwrap();
         let pwd = env::current_dir().unwrap();
         let temp_dir_relative_path =
-            Utf8PathBuf::from_path_buf(pathdiff::diff_paths(&temp_dir_path, pwd).unwrap()).unwrap();
+            Utf8PathBuf::from_path_buf(pathdiff::diff_paths(temp_dir_path, pwd).unwrap()).unwrap();
         let fs = async_fs::Fs::new();
         fs.write(temp_file.path(), b"hello\n").await.unwrap();
         Test::new(
@@ -2762,7 +2762,7 @@ mod tests {
     async fn expect(mut socket: impl AsyncRead + Unpin, expected: &[u8]) {
         fn escaped_string(bytes: &[u8]) -> String {
             bytes
-                .into_iter()
+                .iter()
                 .copied()
                 .flat_map(ascii::escape_default)
                 .map(|c| char::from_u32(c.into()).unwrap())

@@ -777,16 +777,15 @@ mod tests {
         }
 
         fn from_str(s: &str) -> Self {
-            if s.starts_with("wh:") {
-                Self::whiteout(&s[3..])
-            } else if s.starts_with("hl:") {
-                let mut split = s[3..].split(" -> ");
+            if let Some(st) = s.strip_prefix("wh:") {
+                Self::whiteout(st)
+            } else if let Some(st) = s.strip_prefix("hl:") {
+                let mut split = st.split(" -> ");
                 Self::link(split.next().unwrap(), split.next().unwrap())
-            } else if s.starts_with("sym:") {
-                let mut split = s[4..].split(" -> ");
+            } else if let Some(st) = s.strip_prefix("sym:") {
+                let mut split = st.split(" -> ");
                 Self::link(split.next().unwrap(), split.next().unwrap())
-            } else if s.starts_with("opq:") {
-                let path = &s[4..];
+            } else if let Some(path) = s.strip_prefix("opq:") {
                 assert!(path.ends_with('/'), "{path:?}");
                 Self::opaque_dir(path)
             } else if s.ends_with('/') {

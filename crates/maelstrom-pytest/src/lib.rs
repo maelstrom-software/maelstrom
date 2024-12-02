@@ -169,7 +169,7 @@ struct PytestTestCollector<'client> {
     test_layers: Mutex<HashMap<ImageSpec, LayerSpec>>,
 }
 
-impl<'client> PytestTestCollector<'client> {
+impl PytestTestCollector<'_> {
     fn get_pip_packages(
         &self,
         image_spec: ImageSpec,
@@ -426,7 +426,7 @@ impl TestPackage for PytestPackage {
     }
 }
 
-impl<'client> CollectTests for PytestTestCollector<'client> {
+impl CollectTests for PytestTestCollector<'_> {
     const ENQUEUE_MESSAGE: &'static str = "collecting tests...";
 
     type BuildHandle = pytest::WaitHandle;

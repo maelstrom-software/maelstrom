@@ -104,7 +104,7 @@ impl<ActiveT> StateMachine<ActiveT> {
 /// Returned by [`StateMachine::try_to_begin_activation`]. See that method for details.
 pub struct ActivationHandle<'a, ActiveT>(&'a StateMachine<ActiveT>);
 
-impl<'a, ActiveT> ActivationHandle<'a, ActiveT> {
+impl<ActiveT> ActivationHandle<'_, ActiveT> {
     /// Tell the state machine that activation succeeded. The given `active` will then be stored in
     /// the state machine, and references to it will be given out when future callers ask for the
     /// active value.

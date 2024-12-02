@@ -68,7 +68,7 @@ impl<'de> Deserialize<'de> for BrokerAddr {
         D: Deserializer<'de>,
     {
         struct BrokerAddrVisitor;
-        impl<'de> Visitor<'de> for BrokerAddrVisitor {
+        impl Visitor<'_> for BrokerAddrVisitor {
             type Value = BrokerAddr;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

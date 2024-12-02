@@ -1,4 +1,4 @@
-///! This example is taken from the fuser project
+//! This example is taken from the fuser project
 use anyhow::Result;
 use maelstrom_fuse::{
     AttrResponse, DirEntry, EntryResponse, ErrnoResult, FileAttr, FileType, FuseFileSystem,
@@ -103,13 +103,13 @@ impl FuseFileSystem for HelloFs {
 
     type ReadDirStream<'a> = futures::stream::Iter<std::vec::IntoIter<ErrnoResult<DirEntry>>>;
 
-    async fn read_dir<'a>(
-        &'a self,
+    async fn read_dir(
+        &self,
         _req: Request,
         ino: u64,
         _fh: u64,
         offset: i64,
-    ) -> ErrnoResult<Self::ReadDirStream<'a>> {
+    ) -> ErrnoResult<Self::ReadDirStream<'_>> {
         if ino != 1 {
             return Err(Errno::ENOENT);
         }

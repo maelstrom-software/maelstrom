@@ -215,9 +215,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
     }
 }
 
-impl<'deps, 'scope, MainAppDepsT: MainAppDeps> Deps
-    for MainAppDepsAdapter<'deps, 'scope, MainAppDepsT>
-{
+impl<MainAppDepsT: MainAppDeps> Deps for MainAppDepsAdapter<'_, '_, MainAppDepsT> {
     type TestCollector = MainAppDepsT::TestCollector;
 
     fn start_collection(

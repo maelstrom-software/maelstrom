@@ -123,7 +123,7 @@ impl<'lines> UiSlogRecordDecorator<'lines> {
     }
 }
 
-impl<'lines> io::Write for UiSlogRecordDecorator<'lines> {
+impl io::Write for UiSlogRecordDecorator<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut buf = buf.to_owned();
         let total_len = buf.len();
@@ -148,7 +148,7 @@ impl<'lines> io::Write for UiSlogRecordDecorator<'lines> {
     }
 }
 
-impl<'lines> slog_term::RecordDecorator for UiSlogRecordDecorator<'lines> {
+impl slog_term::RecordDecorator for UiSlogRecordDecorator<'_> {
     fn reset(&mut self) -> io::Result<()> {
         self.lines.push_entry(SlogEntry::EndStyle);
         Ok(())
@@ -194,7 +194,7 @@ impl<'lines> UiSlogDecorator<'lines> {
     }
 }
 
-impl<'lines> slog_term::Decorator for UiSlogDecorator<'lines> {
+impl slog_term::Decorator for UiSlogDecorator<'_> {
     fn with_record<F>(
         &self,
         record: &slog::Record,
@@ -339,7 +339,7 @@ impl<'a> Throbber<'a> {
     }
 }
 
-impl<'a> StatefulWidget for Throbber<'a> {
+impl StatefulWidget for Throbber<'_> {
     type State = ThrobberState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {

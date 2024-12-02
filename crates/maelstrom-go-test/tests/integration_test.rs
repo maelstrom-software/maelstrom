@@ -57,7 +57,7 @@ fn do_maelstrom_go_test_test(
         false,
         ui,
         &mut stderr,
-        &Root::<ProjectDir>::new(&project_dir),
+        Root::<ProjectDir>::new(project_dir),
     )
     .unwrap();
 

@@ -214,7 +214,7 @@ impl TryFromProtoBuf for String {
     }
 }
 
-impl<'a> IntoProtoBuf for &'a Path {
+impl IntoProtoBuf for &Path {
     type ProtoBufType = Vec<u8>;
 
     fn into_proto_buf(self) -> Vec<u8> {

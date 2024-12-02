@@ -456,14 +456,14 @@ fn test_regular_output_not_skipped() {
 
 #[test]
 fn test_empty_output_not_skipped() {
-    let ignored = GoTestCollector::was_test_ignored("TestAdd", &vec![]);
+    let ignored = GoTestCollector::was_test_ignored("TestAdd", &[]);
     assert!(!ignored);
 }
 
 #[test]
 fn test_single_line_not_skipped() {
     let ignored =
-        GoTestCollector::was_test_ignored("TestAdd", &vec!["--- SKIP: TestAdd (0.00s)".into()]);
+        GoTestCollector::was_test_ignored("TestAdd", &["--- SKIP: TestAdd (0.00s)".into()]);
     assert!(!ignored);
 }
 
@@ -673,7 +673,7 @@ fn remove_fixture_output_example_test() {
     );
 }
 
-impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
+impl MainAppDeps for DefaultMainAppDeps<'_> {
     fn client(&self) -> &Client {
         self.client
     }

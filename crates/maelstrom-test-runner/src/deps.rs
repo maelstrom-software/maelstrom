@@ -401,10 +401,12 @@ impl TestFilter for SimpleFilter {
             Self::Package(m) => Some(&package.0 == m),
             Self::ArtifactEndsWith(m) => artifact.map(|a| a.0.ends_with(m)),
             Self::Not(f) => f.filter(package, artifact, case).map(|v| !v),
-            Self::Or(p) => p.into_iter().fold(Some(false), |acc, x| {
+            #[allow(clippy::manual_try_fold)]
+            Self::Or(p) => p.iter().fold(Some(false), |acc, x| {
                 maybe_or(acc, x.filter(package, artifact, case))
             }),
-            Self::And(p) => p.into_iter().fold(Some(true), |acc, x| {
+            #[allow(clippy::manual_try_fold)]
+            Self::And(p) => p.iter().fold(Some(true), |acc, x| {
                 maybe_and(acc, x.filter(package, artifact, case))
             }),
         }

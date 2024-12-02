@@ -35,6 +35,7 @@ pub trait Fs: Clone {
     /// "..". There must be a directory at `path`, or an error will be returned. If `path` resolves
     /// to a symlink, it will be resolved, recursively, until a directory is found or an error
     /// occurs.
+    #[allow(clippy::type_complexity)]
     fn read_dir(
         &self,
         path: &Path,

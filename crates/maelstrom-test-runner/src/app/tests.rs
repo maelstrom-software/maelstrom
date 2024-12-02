@@ -402,7 +402,7 @@ fn fake_pkg<'a>(name: &str, artifacts: impl IntoIterator<Item = &'a str>) -> Fak
     }
 }
 
-fn fake_artifact<'a>(name: &str, pkg: &str) -> FakeTestArtifact {
+fn fake_artifact(name: &str, pkg: &str) -> FakeTestArtifact {
     FakeTestArtifact {
         name: name.into(),
         // this test file doesn't make use of this field
@@ -1987,8 +1987,8 @@ script_test_with_error_simex! {
 script_test_with_error_simex! {
     filtering_package_and_test,
     @ filter = SimpleFilter::And(vec![
-        SimpleFilter::Package("bar_pkg".into()).into(),
-        SimpleFilter::Name("test_a".into()).into(),
+        SimpleFilter::Package("bar_pkg".into()),
+        SimpleFilter::Name("test_a".into()),
     ]).into(),
     expected_test_db_out = [
         TestDbEntry::success("bar_pkg", "bar_test", "test_a", nonempty![Duration::from_secs(1)]),

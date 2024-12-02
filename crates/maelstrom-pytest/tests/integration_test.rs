@@ -127,7 +127,7 @@ fn do_maelstrom_pytest_test(
         false,
         ui,
         &mut stderr,
-        &Root::<ProjectDir>::new(&project_dir),
+        Root::<ProjectDir>::new(&project_dir),
     )
     .unwrap();
 

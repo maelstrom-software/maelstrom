@@ -691,8 +691,8 @@ struct Fetcher<'dispatcher, DepsT, ArtifactFetcherT, CacheT> {
     jid: JobId,
 }
 
-impl<'dispatcher, DepsT, ArtifactFetcherT, CacheT> tracker::Fetcher
-    for Fetcher<'dispatcher, DepsT, ArtifactFetcherT, CacheT>
+impl<DepsT, ArtifactFetcherT, CacheT> tracker::Fetcher
+    for Fetcher<'_, DepsT, ArtifactFetcherT, CacheT>
 where
     DepsT: Deps,
     ArtifactFetcherT: ArtifactFetcher,
@@ -776,6 +776,7 @@ mod tests {
     use std::{cell::RefCell, rc::Rc, time::Duration};
     use BrokerToWorker::*;
 
+    #[allow(clippy::large_enum_variant)]
     #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
     enum TestMessage {
         StartJob(JobId, JobSpec, PathBuf),
@@ -938,6 +939,7 @@ mod tests {
 
     struct Fixture {
         test_state: Rc<RefCell<TestState>>,
+        #[allow(clippy::type_complexity)]
         dispatcher: Dispatcher<
             Rc<RefCell<TestState>>,
             Rc<RefCell<TestState>>,

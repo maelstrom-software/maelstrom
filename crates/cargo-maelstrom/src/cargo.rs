@@ -510,6 +510,28 @@ impl ManifestOptions {
     }
 }
 
+pub fn read_metadata(
+    cargo_feature_selection_options: &FeatureSelectionOptions,
+    cargo_manifest_options: &ManifestOptions,
+) -> Result<CargoMetadata> {
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version=1"])
+        .args(cargo_feature_selection_options.iter())
+        .args(cargo_manifest_options.iter())
+        .output()
+        .context("getting cargo metadata")?;
+    if !output.status.success() {
+        bail!(String::from_utf8(output.stderr)
+            .context("reading stderr")?
+            .trim_end()
+            .trim_start_matches("error: ")
+            .to_owned());
+    }
+    let cargo_metadata: CargoMetadata =
+        serde_json::from_slice(&output.stdout).context("parsing cargo metadata")?;
+    Ok(cargo_metadata)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -975,26 +997,4 @@ mod tests {
             ]),
         );
     }
-}
-
-pub fn read_metadata(
-    cargo_feature_selection_options: &FeatureSelectionOptions,
-    cargo_manifest_options: &ManifestOptions,
-) -> Result<CargoMetadata> {
-    let output = std::process::Command::new("cargo")
-        .args(["metadata", "--no-deps", "--format-version=1"])
-        .args(cargo_feature_selection_options.iter())
-        .args(cargo_manifest_options.iter())
-        .output()
-        .context("getting cargo metadata")?;
-    if !output.status.success() {
-        bail!(String::from_utf8(output.stderr)
-            .context("reading stderr")?
-            .trim_end()
-            .trim_start_matches("error: ")
-            .to_owned());
-    }
-    let cargo_metadata: CargoMetadata =
-        serde_json::from_slice(&output.stdout).context("parsing cargo metadata")?;
-    Ok(cargo_metadata)
 }

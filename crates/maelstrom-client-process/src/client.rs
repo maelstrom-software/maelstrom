@@ -107,7 +107,7 @@ impl Uploader {
 }
 
 #[async_trait]
-impl<'a> maelstrom_util::manifest::DataUpload for &'a Uploader {
+impl maelstrom_util::manifest::DataUpload for &Uploader {
     async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
         Uploader::upload(self, path).await
     }

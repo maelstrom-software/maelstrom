@@ -1075,16 +1075,16 @@ mod tests {
             "foo",
             nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
         );
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
 
         let spec = spec.network(JobNetwork::Loopback);
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
 
         let spec = spec.network(JobNetwork::Local);
-        assert_eq!(spec.must_be_run_locally(), true);
+        assert!(spec.must_be_run_locally());
 
         let spec = spec.network(JobNetwork::Disabled);
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
     }
 
     #[test]
@@ -1093,7 +1093,7 @@ mod tests {
             "foo",
             nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
         );
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
 
         let spec = spec.mounts([
             JobMount::Sys {
@@ -1105,10 +1105,10 @@ mod tests {
                 read_only: false,
             },
         ]);
-        assert_eq!(spec.must_be_run_locally(), true);
+        assert!(spec.must_be_run_locally());
 
         let spec = spec.mounts([]);
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
     }
 
     #[test]
@@ -1117,19 +1117,19 @@ mod tests {
             "foo",
             nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
         );
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
 
         let spec = spec.root_overlay(JobRootOverlay::None);
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
 
         let spec = spec.root_overlay(JobRootOverlay::Tmp);
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
 
         let spec = spec.root_overlay(JobRootOverlay::Local {
             upper: "upper".into(),
             work: "work".into(),
         });
-        assert_eq!(spec.must_be_run_locally(), true);
+        assert!(spec.must_be_run_locally());
     }
 
     #[test]
@@ -1138,12 +1138,12 @@ mod tests {
             "foo",
             nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
         );
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
 
         let spec = spec.allocate_tty(Some(JobTty::new(b"\0abcde", WindowSize::new(20, 80))));
-        assert_eq!(spec.must_be_run_locally(), true);
+        assert!(spec.must_be_run_locally());
 
         let spec = spec.allocate_tty(None::<JobTty>);
-        assert_eq!(spec.must_be_run_locally(), false);
+        assert!(!spec.must_be_run_locally());
     }
 }

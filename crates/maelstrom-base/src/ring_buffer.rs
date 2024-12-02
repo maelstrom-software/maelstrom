@@ -179,7 +179,7 @@ fn debug_fmt() {
 
 struct RingBufferElements<'a, T>(&'a RingBuffer<T>);
 
-impl<'a, T> Serialize for RingBufferElements<'a, T>
+impl<T> Serialize for RingBufferElements<'_, T>
 where
     T: Serialize,
 {

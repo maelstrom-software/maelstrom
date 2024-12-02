@@ -25,7 +25,7 @@ impl<'a> SliceFmt<'a> {
     }
 }
 
-impl<'a> core::fmt::Write for SliceFmt<'a> {
+impl core::fmt::Write for SliceFmt<'_> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let bytes = s.as_bytes();
         if self.slice.len() - self.offset < bytes.len() {
@@ -58,7 +58,7 @@ impl<'a> FdSlot<'a> {
     }
 }
 
-impl<'a> linux::AsFd for FdSlot<'a> {
+impl linux::AsFd for FdSlot<'_> {
     fn fd(&self) -> Fd {
         self.get()
     }
@@ -184,7 +184,7 @@ pub enum Syscall<'a> {
     },
 }
 
-impl<'a> Syscall<'a> {
+impl Syscall<'_> {
     fn call(&mut self, write_sock: &linux::UnixStream) -> result::Result<(), Errno> {
         match self {
             Syscall::Bind { fd, addr } => linux::bind(fd, addr),

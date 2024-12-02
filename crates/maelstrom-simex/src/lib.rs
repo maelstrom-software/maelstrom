@@ -478,7 +478,7 @@ pub struct Map<'a, F> {
     f: F,
 }
 
-impl<'a, F, T> Iterator for Map<'a, F>
+impl<F, T> Iterator for Map<'_, F>
 where
     F: for<'b> FnMut(Simulation<'b>) -> T,
 {
@@ -489,7 +489,7 @@ where
     }
 }
 
-impl<'a, F, T> FusedIterator for Map<'a, F> where F: for<'b> FnMut(Simulation<'b>) -> T {}
+impl<F, T> FusedIterator for Map<'_, F> where F: for<'b> FnMut(Simulation<'b>) -> T {}
 
 /*   ____ _                          _   _
  *  / ___| |__   ___   ___  ___  ___| \ | |
@@ -509,7 +509,7 @@ pub struct ChooseN<'a, 'b, T> {
     iter: T,
 }
 
-impl<'a, 'b, T> Iterator for ChooseN<'a, 'b, T>
+impl<T> Iterator for ChooseN<'_, '_, T>
 where
     T: ExactSizeIterator,
 {
@@ -537,9 +537,9 @@ where
     }
 }
 
-impl<'a, 'b, T> FusedIterator for ChooseN<'a, 'b, T> where T: ExactSizeIterator {}
+impl<T> FusedIterator for ChooseN<'_, '_, T> where T: ExactSizeIterator {}
 
-impl<'a, 'b, T> ExactSizeIterator for ChooseN<'a, 'b, T>
+impl<T> ExactSizeIterator for ChooseN<'_, '_, T>
 where
     T: ExactSizeIterator,
 {
@@ -578,7 +578,7 @@ where
     iter: Fuse<T>,
 }
 
-impl<'a, 'b, T> Iterator for ChooseNUnknownSize<'a, 'b, T>
+impl<T> Iterator for ChooseNUnknownSize<'_, '_, T>
 where
     T: Iterator,
 {
@@ -628,7 +628,7 @@ where
     }
 }
 
-impl<'a, 'b, T> FusedIterator for ChooseNUnknownSize<'a, 'b, T> where T: Iterator {}
+impl<T> FusedIterator for ChooseNUnknownSize<'_, '_, T> where T: Iterator {}
 
 /*  _            _
  * | |_ ___  ___| |_ ___

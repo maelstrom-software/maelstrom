@@ -502,7 +502,7 @@ fn simple_expr() {
         assert!(parse_str!(SimpleExpression, a).is_err());
     }
     for n in ["file", "markers", "name", "node_id", "package"] {
-        test_it_err(&format!("{n}"));
+        test_it_err(n);
         test_it_err(&format!("{n}()"));
     }
 }

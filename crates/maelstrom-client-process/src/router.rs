@@ -346,7 +346,7 @@ mod tests {
     }
 
     impl Fixture {
-        fn new<'a>(standalone: bool, expected_error: Option<String>) -> Self {
+        fn new(standalone: bool, expected_error: Option<String>) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
                 messages: Vec::default(),
             }));

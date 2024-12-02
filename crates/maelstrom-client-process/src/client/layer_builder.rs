@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl<'a> DataUpload for &'a TestUploader {
+    impl DataUpload for &TestUploader {
         async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
             let fs = async_fs::Fs::new();
             let data = fs.read(&path).await?;
@@ -935,7 +935,7 @@ mod tests {
 
         let manifest = fix
             .build_layer(LayerSpec::SharedLibraryDependencies {
-                binary_paths: vec![test_binary.into()],
+                binary_paths: vec![test_binary],
                 prefix_options: PrefixOptions {
                     follow_symlinks: true,
                     ..Default::default()

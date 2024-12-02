@@ -11,14 +11,14 @@ pub trait GetPath {
     fn path(&self) -> &Path;
 }
 
-impl<'a, T: GetPath> GetPath for &'a mut T {
+impl<T: GetPath> GetPath for &mut T {
     fn path(&self) -> &Path {
         let self_: &T = self;
         self_.path()
     }
 }
 
-impl<'a, T: GetPath> GetPath for &'a T {
+impl<T: GetPath> GetPath for &T {
     fn path(&self) -> &Path {
         let self_: &T = self;
         self_.path()
@@ -409,7 +409,7 @@ impl<'fs> Walker<'fs> {
     }
 }
 
-impl<'fs> Iterator for Walker<'fs> {
+impl Iterator for Walker<'_> {
     type Item = Result<PathBuf>;
 
     fn next(&mut self) -> Option<Result<PathBuf>> {
@@ -444,7 +444,7 @@ impl<'fs, 'glob> GlobWalker<'fs, 'glob> {
     }
 }
 
-impl<'fs, 'glob> Iterator for GlobWalker<'fs, 'glob> {
+impl Iterator for GlobWalker<'_, '_> {
     type Item = Result<PathBuf>;
 
     fn next(&mut self) -> Option<Result<PathBuf>> {
@@ -519,7 +519,7 @@ impl AsRawFd for File<'_> {
     }
 }
 
-impl<'fs> File<'fs> {
+impl File<'_> {
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -578,7 +578,7 @@ impl io::Write for File<'_> {
     }
 }
 
-impl<'a> io::Write for &'a File<'_> {
+impl io::Write for &File<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         (&self.inner).write(buf)
     }
@@ -592,7 +592,7 @@ impl<'a> io::Write for &'a File<'_> {
     }
 }
 
-impl<'a> io::Read for &'a File<'_> {
+impl io::Read for &File<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         (&self.inner).read(buf)
     }
@@ -618,7 +618,7 @@ impl io::Seek for File<'_> {
     }
 }
 
-impl<'a> io::Seek for &'a File<'_> {
+impl io::Seek for &File<'_> {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         (&self.inner).seek(pos)
     }
