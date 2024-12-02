@@ -518,32 +518,32 @@ mod tests {
     script_test! {
         run_job_standalone,
         Fixture::new(true, None),
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
+        RunJob(spec!(0), cjid!(0)) => {
+            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0)),
         };
-        RunJob(spec!(1, Tar), cjid!(1)) => {
-            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar)),
+        RunJob(spec!(1), cjid!(1)) => {
+            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1)),
         };
     }
 
     script_test! {
         run_job_clustered,
         Fixture::new(false, None),
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            JobRequestToBroker(cjid!(0), spec!(0, Tar)),
+        RunJob(spec!(0), cjid!(0)) => {
+            JobRequestToBroker(cjid!(0), spec!(0)),
         };
-        RunJob(spec!(1, Tar), cjid!(1)) => {
-            JobRequestToBroker(cjid!(1), spec!(1, Tar)),
+        RunJob(spec!(1), cjid!(1)) => {
+            JobRequestToBroker(cjid!(1), spec!(1)),
         };
     }
     script_test! {
         run_job_must_be_local_clustered,
         Fixture::new(false, None),
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            JobRequestToBroker(cjid!(0), spec!(0, Tar)),
+        RunJob(spec!(0), cjid!(0)) => {
+            JobRequestToBroker(cjid!(0), spec!(0)),
         };
-        RunJob(spec!(1, Tar).network(JobNetwork::Local), cjid!(1)) => {
-            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar).network(JobNetwork::Local)),
+        RunJob(spec!(1).network(JobNetwork::Local), cjid!(1)) => {
+            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1).network(JobNetwork::Local)),
         };
     }
 
@@ -552,7 +552,7 @@ mod tests {
     fn job_response_from_local_worker_unknown_standalone() {
         let mut fixture = Fixture::new(true, None);
         // Give it a job just so it doesn't crash subracting the job counts.
-        fixture.receive_message(RunJob(spec!(0, Tar), cjid!(0)));
+        fixture.receive_message(RunJob(spec!(0), cjid!(0)));
         fixture.receive_message(LocalWorker(WorkerToBroker::JobResponse(
             jid!(0, 1),
             Ok(outcome!(0)),
@@ -562,8 +562,8 @@ mod tests {
     script_test! {
         job_response_from_local_worker_known_standalone,
         Fixture::new(true, None),
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
+        RunJob(spec!(0), cjid!(0)) => {
+            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0)),
         };
         LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
             JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
@@ -575,7 +575,7 @@ mod tests {
     fn job_response_from_local_worker_unknown_clustered() {
         let mut fixture = Fixture::new(false, None);
         // Give it a job just so it doesn't crash subracting the job counts.
-        fixture.receive_message(RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)));
+        fixture.receive_message(RunJob(spec!(0).network(JobNetwork::Local), cjid!(0)));
         fixture.receive_message(LocalWorker(WorkerToBroker::JobResponse(
             jid!(0, 1),
             Ok(outcome!(0)),
@@ -585,8 +585,8 @@ mod tests {
     script_test! {
         job_response_from_local_worker_known_clustered,
         Fixture::new(false, None),
-        RunJob(spec!(0, Tar).network(JobNetwork::Local), cjid!(0)) => {
-            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar).network(JobNetwork::Local)),
+        RunJob(spec!(0).network(JobNetwork::Local), cjid!(0)) => {
+            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0).network(JobNetwork::Local)),
         };
         LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
             JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
@@ -607,7 +607,7 @@ mod tests {
     #[should_panic(expected = "assertion failed: !self.standalone")]
     fn job_response_from_broker_known_standalone() {
         let mut fixture = Fixture::new(true, None);
-        fixture.receive_message(RunJob(spec!(0, Tar), cjid!(0)));
+        fixture.receive_message(RunJob(spec!(0), cjid!(0)));
         fixture.receive_message(Broker(BrokerToClient::JobResponse(
             cjid!(0),
             Ok(outcome!(0)),
@@ -627,8 +627,8 @@ mod tests {
     script_test! {
         job_response_from_broker_known_clustered,
         Fixture::new(false, None),
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            JobRequestToBroker(cjid!(0), spec!(0, Tar)),
+        RunJob(spec!(0), cjid!(0)) => {
+            JobRequestToBroker(cjid!(0), spec!(0)),
         };
         Broker(BrokerToClient::JobResponse(cjid!(0), Ok(outcome!(0)))) => {
             JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
@@ -638,11 +638,11 @@ mod tests {
     script_test! {
         shutdown_standalone,
         Fixture::new(true, None),
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
+        RunJob(spec!(0), cjid!(0)) => {
+            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0)),
         };
-        RunJob(spec!(1, Tar), cjid!(1)) => {
-            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar)),
+        RunJob(spec!(1), cjid!(1)) => {
+            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1)),
         };
         Shutdown(anyhow!("test error")) => {
             ShutdownLocalWorker("test error".into())
@@ -652,11 +652,11 @@ mod tests {
     script_test! {
         shutdown_clustered,
         Fixture::new(false, None),
-        RunJob(spec!(0, Tar), cjid!(0)) => {
-            JobRequestToBroker(cjid!(0), spec!(0, Tar)),
+        RunJob(spec!(0), cjid!(0)) => {
+            JobRequestToBroker(cjid!(0), spec!(0)),
         };
-        RunJob(spec!(1, Tar), cjid!(1)) => {
-            JobRequestToBroker(cjid!(1), spec!(1, Tar)),
+        RunJob(spec!(1), cjid!(1)) => {
+            JobRequestToBroker(cjid!(1), spec!(1)),
         };
         Shutdown(anyhow!("test error")) => {
             ShutdownLocalWorker("test error".into())

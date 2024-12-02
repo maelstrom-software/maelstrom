@@ -32,39 +32,39 @@ macro_rules! jid {
 
 #[macro_export]
 macro_rules! spec {
-    [1, $type:ident] => {
+    [1] => {
         maelstrom_base::JobSpec::new(
             "test_1",
-            maelstrom_base::nonempty![(maelstrom_base::digest!(1), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![maelstrom_base::tar_digest!(1)]
         )
     };
-    [2, $type:ident] => {
+    [2] => {
         maelstrom_base::JobSpec::new(
             "test_2",
-            maelstrom_base::nonempty![(maelstrom_base::digest!(2), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![maelstrom_base::tar_digest!(2)]
         ).arguments(["arg_1"])
     };
-    [3, $type:ident] => {
+    [3] => {
         maelstrom_base::JobSpec::new(
             "test_3",
-            maelstrom_base::nonempty![(maelstrom_base::digest!(3), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![maelstrom_base::tar_digest!(3)]
         ).arguments(["arg_1", "arg_2"])
     };
-    [4, $type:ident] => {
+    [4] => {
         maelstrom_base::JobSpec::new(
             "test_4",
-            maelstrom_base::nonempty![(maelstrom_base::digest!(4), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![maelstrom_base::tar_digest!(4)]
         ).arguments(["arg_1", "arg_2", "arg_3"])
     };
-    [$n:literal, $type:ident] => {
+    [$n:literal] => {
         maelstrom_base::JobSpec::new(
             concat!("test_", stringify!($n)),
-            maelstrom_base::nonempty![(maelstrom_base::digest!($n), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![maelstrom_base::tar_digest!($n)]
         ).arguments(["arg_1"])
     };
     [$n:literal, [$($digest:expr),*]] => {
         {
-            let mut spec = spec![$n, Tar];
+            let mut spec = spec!($n);
             spec.layers = maelstrom_base::nonempty![$($digest),*];
             spec
         }
