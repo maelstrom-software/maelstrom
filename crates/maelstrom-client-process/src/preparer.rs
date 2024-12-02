@@ -527,7 +527,7 @@ impl<DepsT: Deps> Job<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use maelstrom_base::{job_spec, WindowSize};
+    use maelstrom_base::{job_spec, tar_digest, WindowSize};
     use maelstrom_client::spec;
     use maelstrom_client_base::spec::ImageConfig;
     use maelstrom_test::{millis, string, tar_layer};
@@ -736,12 +736,6 @@ mod tests {
         };
         ($program:expr $(,$($field_in:tt)*)?) => {
             client_job_spec!(@expand [$program] [$($($field_in)*)?] -> [])
-        };
-    }
-
-    macro_rules! tar_digest {
-        ($digest:expr) => {
-            (maelstrom_base::digest!($digest), ArtifactType::Tar)
         };
     }
 

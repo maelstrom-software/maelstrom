@@ -72,6 +72,20 @@ pub enum ArtifactType {
     Manifest,
 }
 
+#[macro_export]
+macro_rules! tar_digest {
+    ($digest:expr) => {
+        ($crate::digest!($digest), $crate::ArtifactType::Tar)
+    };
+}
+
+#[macro_export]
+macro_rules! manifest_digest {
+    ($digest:expr) => {
+        ($crate::digest!($digest), $crate::ArtifactType::Manifest)
+    };
+}
+
 /// An absolute job ID that includes a [`ClientId`] for disambiguation.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct JobId {
@@ -1142,7 +1156,7 @@ mod tests {
 
     #[test]
     fn job_spec_must_be_run_locally_network() {
-        let spec = JobSpec::new("foo", nonempty![(digest!(0), ArtifactType::Tar)]);
+        let spec = JobSpec::new("foo", nonempty![tar_digest!(0)]);
         assert!(!spec.must_be_run_locally());
 
         let spec = spec.network(JobNetwork::Loopback);
@@ -1157,7 +1171,7 @@ mod tests {
 
     #[test]
     fn job_spec_must_be_run_locally_mounts() {
-        let spec = JobSpec::new("foo", nonempty![(digest!(0), ArtifactType::Tar)]);
+        let spec = JobSpec::new("foo", nonempty![tar_digest!(0)]);
         assert!(!spec.must_be_run_locally());
 
         let spec = spec.mounts([
@@ -1178,7 +1192,7 @@ mod tests {
 
     #[test]
     fn job_spec_must_be_run_locally_root_overlay() {
-        let spec = JobSpec::new("foo", nonempty![(digest!(0), ArtifactType::Tar)]);
+        let spec = JobSpec::new("foo", nonempty![tar_digest!(0)]);
         assert!(!spec.must_be_run_locally());
 
         let spec = spec.root_overlay(JobRootOverlay::None);
@@ -1196,7 +1210,7 @@ mod tests {
 
     #[test]
     fn job_spec_must_be_run_locally_allocate_tty() {
-        let spec = JobSpec::new("foo", nonempty![(digest!(0), ArtifactType::Tar)]);
+        let spec = JobSpec::new("foo", nonempty![tar_digest!(0)]);
         assert!(!spec.must_be_run_locally());
 
         let spec = spec.allocate_tty(Some(JobTty::new(b"\0abcde", WindowSize::new(20, 80))));

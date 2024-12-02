@@ -62,12 +62,10 @@ macro_rules! spec {
             maelstrom_base::nonempty![(maelstrom_base::digest!($n), maelstrom_base::ArtifactType::$type)]
         ).arguments(["arg_1"])
     };
-    [$n:literal, [$(($digest:expr, $type:ident)),*]] => {
+    [$n:literal, [$($digest:expr),*]] => {
         {
             let mut spec = spec![$n, Tar];
-            spec.layers = maelstrom_base::nonempty![
-                $((maelstrom_base::digest!($digest), maelstrom_base::ArtifactType::$type)),*
-            ];
+            spec.layers = maelstrom_base::nonempty![$($digest),*];
             spec
         }
     }

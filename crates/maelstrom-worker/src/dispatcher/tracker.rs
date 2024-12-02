@@ -378,7 +378,7 @@ impl LayerTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::{digest, nonempty};
+    use maelstrom_base::{digest, manifest_digest, nonempty, tar_digest};
     use maelstrom_test::path_buf;
     use maelstrom_util::ext::BoolExt as _;
     use maplit::hashset;
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn one_layer_everything_in_cache_into_path_and_cache_keys() {
-        let layers = nonempty![(digest!(1), ArtifactType::Tar)];
+        let layers = nonempty![tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [(digest!(1), FetcherResult::Got(path_buf!("/blob/1")))],
             [(digest!(1), FetcherResult::Got(path_buf!("/fs_b/1")))],
@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn one_layer_manifest_everything_in_cache_into_path_and_cache_keys() {
-        let layers = nonempty![(digest!(1), ArtifactType::Manifest)];
+        let layers = nonempty![manifest_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn one_layer_pending_then_got_into_path_and_cache_keys() {
-        let layers = nonempty![(digest!(1), ArtifactType::Tar)];
+        let layers = nonempty![tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [(digest!(1), FetcherResult::Pending)],
             [(digest!(1), FetcherResult::Pending)],
@@ -535,7 +535,7 @@ mod tests {
 
     #[test]
     fn one_layer_manifest_pending_then_got_into_path_and_cache_keys() {
-        let layers = nonempty![(digest!(1), ArtifactType::Manifest)];
+        let layers = nonempty![manifest_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Pending),
@@ -570,10 +570,7 @@ mod tests {
 
     #[test]
     fn two_layers_everything_in_cache_into_path_and_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![tar_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
@@ -609,10 +606,7 @@ mod tests {
 
     #[test]
     fn two_layers_one_manifest_everything_in_cache_into_path_and_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Manifest)
-        ];
+        let layers = nonempty![tar_digest!(2), manifest_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
@@ -658,10 +652,7 @@ mod tests {
 
     #[test]
     fn two_layers_one_artifact_gotten_one_pending_into_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![tar_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Pending),
@@ -685,10 +676,7 @@ mod tests {
 
     #[test]
     fn two_layers_one_artifact_gotten_with_pending_manifest_one_pending_into_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Manifest),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![manifest_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Pending),
@@ -720,10 +708,7 @@ mod tests {
 
     #[test]
     fn two_layers_one_artifact_gotten_one_pending_then_got_into_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![tar_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Pending),
@@ -753,10 +738,7 @@ mod tests {
 
     #[test]
     fn two_layers_one_artifact_gotten_one_manifest_pending_then_got_into_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Manifest),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![manifest_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Pending),
@@ -797,10 +779,7 @@ mod tests {
 
     #[test]
     fn two_layers_one_bottom_layer_gotten_one_pending_into_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![tar_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
@@ -828,10 +807,7 @@ mod tests {
 
     #[test]
     fn two_layers_one_bottom_layer_gotten_one_pending_then_gotten_into_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![tar_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
@@ -861,10 +837,7 @@ mod tests {
 
     #[test]
     fn two_layers_bottom_layers_in_cache_upper_layer_pending_into_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![tar_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
@@ -893,10 +866,7 @@ mod tests {
 
     #[test]
     fn two_layers_bottom_layers_in_cache_upper_layer_pending_then_gotten_into_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![tar_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
@@ -927,10 +897,7 @@ mod tests {
 
     #[test]
     fn two_layers_everything_pending_then_gotten_into_path_and_cache_keys() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![tar_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Pending),
@@ -970,11 +937,7 @@ mod tests {
 
     #[test]
     fn three_layers_everything_in_cache_into_path_and_cache_keys() {
-        let layers = nonempty![
-            (digest!(3), ArtifactType::Tar),
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
-        ];
+        let layers = nonempty![tar_digest!(3), tar_digest!(2), tar_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
@@ -1022,9 +985,9 @@ mod tests {
     #[test]
     fn three_manifest_layers_with_duplicates() {
         let layers = nonempty![
-            (digest!(3), ArtifactType::Manifest),
-            (digest!(2), ArtifactType::Manifest),
-            (digest!(1), ArtifactType::Manifest)
+            manifest_digest!(3),
+            manifest_digest!(2),
+            manifest_digest!(1),
         ];
         let mut fetcher = TestFetcher::new(
             [
@@ -1097,12 +1060,12 @@ mod tests {
     #[test]
     fn six_layers_with_duplicates_three_pending_then_got_into_path_and_cache_keys() {
         let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar),
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar),
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Tar)
+            tar_digest!(2),
+            tar_digest!(1),
+            tar_digest!(2),
+            tar_digest!(1),
+            tar_digest!(2),
+            tar_digest!(1),
         ];
         let mut fetcher = TestFetcher::new(
             [
@@ -1163,10 +1126,7 @@ mod tests {
 
     #[test]
     fn manifest_depends_on_existing_layer_fetch_manifest_dependency_after_layer() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Manifest)
-        ];
+        let layers = nonempty![tar_digest!(2), manifest_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
@@ -1204,10 +1164,7 @@ mod tests {
 
     #[test]
     fn manifest_depends_on_existing_layer_fetch_manifest_dependency_before_layer() {
-        let layers = nonempty![
-            (digest!(2), ArtifactType::Tar),
-            (digest!(1), ArtifactType::Manifest)
-        ];
+        let layers = nonempty![tar_digest!(2), manifest_digest!(1)];
         let mut fetcher = TestFetcher::new(
             [
                 (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),

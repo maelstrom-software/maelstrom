@@ -1622,8 +1622,7 @@ mod tests {
     use bytesize::ByteSize;
     use indoc::indoc;
     use maelstrom_base::{
-        digest, enum_set, nonempty, ArtifactType, EnumSet, JobTerminationStatus, Utf8Path,
-        WindowSize,
+        digest, enum_set, nonempty, tar_digest, EnumSet, JobTerminationStatus, Utf8Path, WindowSize,
     };
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
     use maelstrom_test::{boxed_u8, utf8_path_buf};
@@ -1774,7 +1773,7 @@ mod tests {
     }
 
     fn test_spec(program: &str) -> maelstrom_base::JobSpec {
-        maelstrom_base::JobSpec::new(program, nonempty![(digest![0], ArtifactType::Tar)])
+        maelstrom_base::JobSpec::new(program, nonempty![tar_digest![0]])
     }
 
     fn bash_spec(script: &str) -> maelstrom_base::JobSpec {
