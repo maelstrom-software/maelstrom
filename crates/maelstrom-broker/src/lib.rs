@@ -4,11 +4,13 @@ mod artifact_fetcher;
 mod artifact_pusher;
 pub mod config;
 mod connection;
+mod github;
 mod http;
 mod scheduler_task;
 
 use anyhow::{Context as _, Result};
 use config::Config;
+use github::GithubCache;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
 use scheduler_task::{SchedulerCache, SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, info, Logger};
@@ -186,7 +188,13 @@ async fn main_inner(config: Config, log: Logger) -> Result<()> {
         "http_addr" => http_listener_addr,
         "pid" => process::id());
 
-    main_inner_inner::<TcpUploadLocalCache>(listener, http_listener, config, log.clone()).await?;
+    if config.github_cache {
+        main_inner_inner::<GithubCache>(listener, http_listener, config, log.clone()).await?;
+    } else {
+        main_inner_inner::<TcpUploadLocalCache>(listener, http_listener, config, log.clone())
+            .await?;
+    }
+
     info!(log, "exiting");
     Ok(())
 }

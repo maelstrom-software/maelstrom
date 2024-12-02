@@ -80,6 +80,10 @@ pub struct Config {
     #[config(value_name = "BYTES", default = "bytesize::ByteSize::gb(1)")]
     pub cache_size: CacheSize,
 
+    /// Cache data is stored in github artifacts instead of the local file-system.
+    #[config(value_name = "bool", flag, hide)]
+    pub github_cache: bool,
+
     /// Minimum log level to output.
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
