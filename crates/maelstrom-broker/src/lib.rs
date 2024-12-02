@@ -10,9 +10,7 @@ mod scheduler_task;
 use anyhow::{Context as _, Result};
 use config::Config;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
-use scheduler_task::{
-    BrokerSchedulerCache, SchedulerCache, SchedulerMessage, SchedulerSender, SchedulerTask,
-};
+use scheduler_task::{SchedulerCache, SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, info, Logger};
 use std::{
     net::{Ipv6Addr, SocketAddrV6},
@@ -75,19 +73,20 @@ impl TempFileFactory
 
 /// The main function for the broker. It will return when a signal is received, or when the broker
 /// or http listener socket returns an error at accept time.
-async fn main_inner_inner<CacheT, TempFileFactoryT>(
+async fn main_inner_inner<BrokerCacheT>(
     listener: TcpListener,
     http_listener: TcpListener,
-    cache: CacheT,
-    temp_file_factory: TempFileFactoryT,
+    config: Config,
     log: Logger,
-) where
-    CacheT: SchedulerCache + Send + 'static,
-    CacheT::ArtifactStream: Send + 'static,
-    TempFileFactoryT: TempFileFactory<TempFile = CacheT::TempFile> + Send + 'static,
-    CacheT::TempFile: Send + Sync + 'static,
-    CacheT::ArtifactStream: tokio::io::AsyncRead + Unpin + Send + Sync,
+) -> Result<()>
+where
+    BrokerCacheT: BrokerCache,
+    <BrokerCacheT::Cache as SchedulerCache>::ArtifactStream: Send + 'static,
+    <BrokerCacheT::Cache as SchedulerCache>::TempFile: Send + Sync + 'static,
+    <BrokerCacheT::Cache as SchedulerCache>::ArtifactStream:
+        tokio::io::AsyncRead + Unpin + Send + Sync,
 {
+    let (cache, temp_file_factory) = BrokerCacheT::new(config, log.clone())?;
     let scheduler_task = SchedulerTask::new(cache);
     let id_vendor = Arc::new(IdVendor {
         id: AtomicU32::new(0),
@@ -122,10 +121,45 @@ async fn main_inner_inner<CacheT, TempFileFactoryT>(
     ));
 
     join_set.join_next().await;
+
+    Ok(())
 }
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
     main_inner(config, log)
+}
+
+trait BrokerCache {
+    type Cache: SchedulerCache + Sized + Send + 'static;
+    type TempFileFactory: TempFileFactory<TempFile = <Self::Cache as SchedulerCache>::TempFile>
+        + Sized
+        + Send
+        + 'static;
+
+    fn new(config: Config, log: Logger) -> Result<(Self::Cache, Self::TempFileFactory)>;
+}
+
+enum TcpUploadLocalCache {}
+
+impl BrokerCache for TcpUploadLocalCache {
+    type Cache = maelstrom_util::cache::Cache<
+        maelstrom_util::cache::fs::std::Fs,
+        scheduler_task::cache::BrokerKey,
+        scheduler_task::cache::BrokerGetStrategy,
+    >;
+
+    type TempFileFactory =
+        maelstrom_util::cache::TempFileFactory<maelstrom_util::cache::fs::std::Fs>;
+
+    fn new(config: Config, log: Logger) -> Result<(Self::Cache, Self::TempFileFactory)> {
+        maelstrom_util::cache::Cache::new(
+            maelstrom_util::cache::fs::std::Fs,
+            config.cache_root,
+            config.cache_size,
+            log.clone(),
+            true,
+        )
+    }
 }
 
 #[tokio::main]
@@ -152,21 +186,7 @@ async fn main_inner(config: Config, log: Logger) -> Result<()> {
         "http_addr" => http_listener_addr,
         "pid" => process::id());
 
-    let (cache, temp_file_factory) = BrokerSchedulerCache::new(
-        maelstrom_util::cache::fs::std::Fs,
-        config.cache_root,
-        config.cache_size,
-        log.clone(),
-        true,
-    )?;
-    main_inner_inner(
-        listener,
-        http_listener,
-        cache,
-        temp_file_factory,
-        log.clone(),
-    )
-    .await;
+    main_inner_inner::<TcpUploadLocalCache>(listener, http_listener, config, log.clone()).await?;
     info!(log, "exiting");
     Ok(())
 }

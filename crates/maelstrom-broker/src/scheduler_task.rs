@@ -1,4 +1,4 @@
-mod cache;
+pub(crate) mod cache;
 mod scheduler;
 
 pub use cache::SchedulerCache;
@@ -125,12 +125,6 @@ where
         }
     }
 }
-
-pub type BrokerSchedulerCache = maelstrom_util::cache::Cache<
-    maelstrom_util::cache::fs::std::Fs,
-    cache::BrokerKey,
-    cache::BrokerGetStrategy,
->;
 
 /// The production scheduler message type.
 pub type SchedulerMessage<TempFileT> = Message<
