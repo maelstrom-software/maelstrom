@@ -27,6 +27,8 @@ struct ConfigStructField {
     var_arg: bool,
     #[darling(default)]
     list: bool,
+    #[darling(default)]
+    hide: bool,
     short: Option<char>,
     alias: Option<String>,
     value_name: Option<String>,
@@ -120,6 +122,7 @@ impl ConfigStructField {
         let alias = self.alias();
         let value_name = self.value_name()?;
         let default = self.default_as_string_option();
+        let hide = self.hide;
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
             let builder = ::maelstrom_util::config::CommandBuilder::value(
@@ -129,6 +132,7 @@ impl ConfigStructField {
                 #alias,
                 #value_name,
                 #default,
+                #hide,
                 #doc,
             )
         })
@@ -138,6 +142,7 @@ impl ConfigStructField {
         let name = self.ident().unraw().to_string();
         let short = self.short();
         let alias = self.alias();
+        let hide = self.hide;
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
             let builder = ::maelstrom_util::config::CommandBuilder::flag_value(
@@ -145,6 +150,7 @@ impl ConfigStructField {
                 #name,
                 #short,
                 #alias,
+                #hide,
                 #doc,
             )
         })
@@ -156,6 +162,7 @@ impl ConfigStructField {
         let alias = self.alias();
         let value_name = self.value_name()?;
         let default = self.default_as_string_option();
+        let hide = self.hide;
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
             let builder = ::maelstrom_util::config::CommandBuilder::value(
@@ -165,6 +172,7 @@ impl ConfigStructField {
                 #alias,
                 #value_name,
                 #default,
+                #hide,
                 #doc,
             )
         })
@@ -187,6 +195,7 @@ impl ConfigStructField {
         let name = self.ident().unraw().to_string();
         let value_name = self.value_name()?;
         let default = self.default_as_string_option();
+        let hide = self.hide;
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
             let builder = ::maelstrom_util::config::CommandBuilder::var_arg(
@@ -194,6 +203,7 @@ impl ConfigStructField {
                 #name,
                 #value_name,
                 #default,
+                #hide,
                 #doc,
             )
         })
@@ -205,6 +215,7 @@ impl ConfigStructField {
         let alias = self.alias();
         let value_name = self.value_name()?;
         let default = self.default_as_string_option();
+        let hide = self.hide;
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
             let builder = ::maelstrom_util::config::CommandBuilder::list(
@@ -214,6 +225,7 @@ impl ConfigStructField {
                 #alias,
                 #value_name,
                 #default,
+                #hide,
                 #doc,
             )
         })

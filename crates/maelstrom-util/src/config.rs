@@ -369,6 +369,7 @@ impl CommandBuilder {
         alias: Option<String>,
         value_name: &'static str,
         default: Option<String>,
+        hide: bool,
         help: &'static str,
         action: ArgAction,
     ) -> Self {
@@ -383,7 +384,8 @@ impl CommandBuilder {
         let mut arg = Arg::new(name.clone())
             .value_name(value_name)
             .action(action)
-            .help(help);
+            .help(help)
+            .hide(hide);
         if is_var_arg {
             arg = arg.last(true);
         } else {
@@ -399,6 +401,7 @@ impl CommandBuilder {
         self
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn value(
         self,
         field: &'static str,
@@ -406,6 +409,7 @@ impl CommandBuilder {
         alias: Option<String>,
         value_name: &'static str,
         default: Option<String>,
+        hide: bool,
         help: &'static str,
     ) -> Self {
         self._value(
@@ -415,6 +419,7 @@ impl CommandBuilder {
             alias,
             value_name,
             default,
+            hide,
             help,
             ArgAction::Set,
         )
@@ -425,6 +430,7 @@ impl CommandBuilder {
         field: &'static str,
         short: Option<char>,
         alias: Option<String>,
+        hide: bool,
         help: &'static str,
     ) -> Self {
         self._value(
@@ -434,6 +440,7 @@ impl CommandBuilder {
             alias,
             "",
             Some("false".to_string()),
+            hide,
             help,
             ArgAction::SetTrue,
         )
@@ -444,6 +451,7 @@ impl CommandBuilder {
         field: &'static str,
         value_name: &'static str,
         default: Option<String>,
+        hide: bool,
         help: &'static str,
     ) -> Self {
         self._value(
@@ -453,11 +461,13 @@ impl CommandBuilder {
             None, /* alias */
             value_name,
             default,
+            hide,
             help,
             ArgAction::Append,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn list(
         self,
         field: &'static str,
@@ -465,6 +475,7 @@ impl CommandBuilder {
         alias: Option<String>,
         value_name: &'static str,
         default: Option<String>,
+        hide: bool,
         help: &'static str,
     ) -> Self {
         self._value(
@@ -474,6 +485,7 @@ impl CommandBuilder {
             alias,
             value_name,
             default,
+            hide,
             help,
             ArgAction::Append,
         )
