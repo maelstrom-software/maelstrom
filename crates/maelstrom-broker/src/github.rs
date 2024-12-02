@@ -47,7 +47,11 @@ impl SchedulerCache for ArtifactsCache {
         todo!()
     }
 
-    fn got_artifact(&mut self, _digest: &Sha256Digest, _file: Self::TempFile) -> Vec<JobId> {
+    fn got_artifact(
+        &mut self,
+        _digest: &Sha256Digest,
+        _file: Option<Self::TempFile>,
+    ) -> Vec<JobId> {
         todo!()
     }
 

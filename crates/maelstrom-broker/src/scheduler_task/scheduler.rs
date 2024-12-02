@@ -652,7 +652,7 @@ where
             );
             return;
         };
-        let jids = self.cache.got_artifact(&digest, file);
+        let jids = self.cache.got_artifact(&digest, Some(file));
 
         let client = self.clients.0.get_mut(&cid).unwrap();
         deps.send_message_to_client(
@@ -824,7 +824,7 @@ mod tests {
         ToMonitor(MonitorId, BrokerToMonitor),
         ToWorkerArtifactFetcher(u32, Option<(PathBuf, u64)>),
         CacheGetArtifact(JobId, Sha256Digest),
-        CacheGotArtifact(Sha256Digest, test::TempFile),
+        CacheGotArtifact(Sha256Digest, Option<test::TempFile>),
         CacheDecrementRefcount(Sha256Digest),
         CacheClientDisconnected(ClientId),
         CacheGetArtifactForWorker(Sha256Digest),
@@ -873,7 +873,11 @@ mod tests {
                 .remove(0)
         }
 
-        fn got_artifact(&mut self, digest: &Sha256Digest, file: Self::TempFile) -> Vec<JobId> {
+        fn got_artifact(
+            &mut self,
+            digest: &Sha256Digest,
+            file: Option<Self::TempFile>,
+        ) -> Vec<JobId> {
             self.borrow_mut()
                 .messages
                 .push(CacheGotArtifact(digest.clone(), file));
@@ -1800,12 +1804,12 @@ mod tests {
 
         GotArtifact(digest![43], "/z/tmp/foo".into()) => {};
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
-            CacheGotArtifact(digest![43], "/z/tmp/foo".into()),
+            CacheGotArtifact(digest![43], Some("/z/tmp/foo".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
         };
         GotArtifact(digest![44], "/z/tmp/bar".into()) => {};
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![44])) => {
-            CacheGotArtifact(digest![44], "/z/tmp/bar".into()),
+            CacheGotArtifact(digest![44], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![44], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))),
         };
@@ -1865,7 +1869,7 @@ mod tests {
 
         GotArtifact(digest![42], "/z/tmp/bar".into()) => {};
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
-            CacheGotArtifact(digest![42], "/z/tmp/bar".into()),
+            CacheGotArtifact(digest![42], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(42)]))),
         };
@@ -1899,7 +1903,7 @@ mod tests {
 
         GotArtifact(digest![42], "/z/tmp/foo".into()) => {};
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
-            CacheGotArtifact(digest![42], "/z/tmp/foo".into()),
+            CacheGotArtifact(digest![42], Some("/z/tmp/foo".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
             CacheReadArtifact(digest![42]),
             ReadManifest(ManifestReadRequest {
@@ -1919,7 +1923,7 @@ mod tests {
 
         GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
-            CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
+            CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
         };
@@ -1954,7 +1958,7 @@ mod tests {
 
         GotArtifact(digest![42], "/z/tmp/foo".into()) => {};
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
-            CacheGotArtifact(digest![42], "/z/tmp/foo".into()),
+            CacheGotArtifact(digest![42], Some("/z/tmp/foo".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
             CacheReadArtifact(digest![42]),
             ReadManifest(ManifestReadRequest {
@@ -1976,7 +1980,7 @@ mod tests {
 
         GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
-            CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
+            CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
         };
@@ -2027,7 +2031,7 @@ mod tests {
 
         GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
-            CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
+            CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
         };
@@ -2078,7 +2082,7 @@ mod tests {
 
         GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
         FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
-            CacheGotArtifact(digest![43], "/z/tmp/bar".into()),
+            CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
         };

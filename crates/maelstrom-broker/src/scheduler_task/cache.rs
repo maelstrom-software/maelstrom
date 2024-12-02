@@ -54,7 +54,7 @@ pub trait SchedulerCache {
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact;
 
     /// Enter something into the cache.
-    fn got_artifact(&mut self, digest: &Sha256Digest, file: Self::TempFile) -> Vec<JobId>;
+    fn got_artifact(&mut self, digest: &Sha256Digest, file: Option<Self::TempFile>) -> Vec<JobId>;
 
     /// Decrement the refcount for the given artifact.
     fn decrement_refcount(&mut self, digest: &Sha256Digest);
@@ -85,7 +85,8 @@ impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKey, BrokerGetStrategy> {
         self.get_artifact(BrokerKey(digest), jid)
     }
 
-    fn got_artifact(&mut self, digest: &Sha256Digest, file: FsT::TempFile) -> Vec<JobId> {
+    fn got_artifact(&mut self, digest: &Sha256Digest, file: Option<FsT::TempFile>) -> Vec<JobId> {
+        let file = file.expect("file provided");
         self.got_artifact_success(BrokerKey::ref_cast(digest), GotArtifact::file(file))
             .map_err(|(err, _)| err)
             .unwrap()
