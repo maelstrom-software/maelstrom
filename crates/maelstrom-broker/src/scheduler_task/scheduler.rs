@@ -806,7 +806,10 @@ mod tests {
     use super::{Message::*, *};
     use enum_map::enum_map;
     use itertools::Itertools;
-    use maelstrom_base::proto::BrokerToWorker::{self, *};
+    use maelstrom_base::{
+        digest,
+        proto::BrokerToWorker::{self, *},
+    };
     use maelstrom_test::*;
     use maelstrom_util::cache::fs::test;
     use maplit::hashmap;

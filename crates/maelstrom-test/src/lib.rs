@@ -35,38 +35,38 @@ macro_rules! spec {
     [1, $type:ident] => {
         maelstrom_base::JobSpec::new(
             "test_1",
-            maelstrom_base::nonempty![(digest!(1), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![(maelstrom_base::digest!(1), maelstrom_base::ArtifactType::$type)]
         )
     };
     [2, $type:ident] => {
         maelstrom_base::JobSpec::new(
             "test_2",
-            maelstrom_base::nonempty![(digest!(2), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![(maelstrom_base::digest!(2), maelstrom_base::ArtifactType::$type)]
         ).arguments(["arg_1"])
     };
     [3, $type:ident] => {
         maelstrom_base::JobSpec::new(
             "test_3",
-            maelstrom_base::nonempty![(digest!(3), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![(maelstrom_base::digest!(3), maelstrom_base::ArtifactType::$type)]
         ).arguments(["arg_1", "arg_2"])
     };
     [4, $type:ident] => {
         maelstrom_base::JobSpec::new(
             "test_4",
-            maelstrom_base::nonempty![(digest!(4), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![(maelstrom_base::digest!(4), maelstrom_base::ArtifactType::$type)]
         ).arguments(["arg_1", "arg_2", "arg_3"])
     };
     [$n:literal, $type:ident] => {
         maelstrom_base::JobSpec::new(
             concat!("test_", stringify!($n)),
-            maelstrom_base::nonempty![(digest!($n), maelstrom_base::ArtifactType::$type)]
+            maelstrom_base::nonempty![(maelstrom_base::digest!($n), maelstrom_base::ArtifactType::$type)]
         ).arguments(["arg_1"])
     };
     [$n:literal, [$(($digest:expr, $type:ident)),*]] => {
         {
             let mut spec = spec![$n, Tar];
             spec.layers = maelstrom_base::nonempty![
-                $((digest!($digest), maelstrom_base::ArtifactType::$type)),*
+                $((maelstrom_base::digest!($digest), maelstrom_base::ArtifactType::$type)),*
             ];
             spec
         }
@@ -126,16 +126,9 @@ macro_rules! outcome {
 }
 
 #[macro_export]
-macro_rules! digest {
-    [$n:expr] => {
-        maelstrom_base::Sha256Digest::from($n as u64)
-    };
-}
-
-#[macro_export]
 macro_rules! digest_hash_set {
     [$($e:expr),*] => {
-        ::std::collections::HashSet::from_iter([$($crate::digest!($e)),*])
+        ::std::collections::HashSet::from_iter([$(maelstrom_base::digest!($e)),*])
     };
 }
 

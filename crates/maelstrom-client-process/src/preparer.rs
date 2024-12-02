@@ -530,7 +530,7 @@ mod tests {
     use maelstrom_base::{job_spec, WindowSize};
     use maelstrom_client::spec;
     use maelstrom_client_base::spec::ImageConfig;
-    use maelstrom_test::{digest, millis, string, tar_layer};
+    use maelstrom_test::{millis, string, tar_layer};
     use std::{cell::RefCell, ffi::OsStr, rc::Rc};
     use TestMessage::*;
 
@@ -741,7 +741,7 @@ mod tests {
 
     macro_rules! tar_digest {
         ($digest:expr) => {
-            (digest!($digest), ArtifactType::Tar)
+            (maelstrom_base::digest!($digest), ArtifactType::Tar)
         };
     }
 

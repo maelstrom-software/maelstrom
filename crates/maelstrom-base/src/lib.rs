@@ -784,12 +784,6 @@ impl From<u64> for Sha256Digest {
     }
 }
 
-impl From<u32> for Sha256Digest {
-    fn from(input: u32) -> Self {
-        Sha256Digest::from(u64::from(input))
-    }
-}
-
 impl FromStr for Sha256Digest {
     type Err = FromHexError;
 
@@ -805,6 +799,13 @@ impl fmt::Display for Sha256Digest {
         hex::encode_to_slice(self.0, &mut bytes).unwrap();
         f.pad(unsafe { str::from_utf8_unchecked(&bytes) })
     }
+}
+
+#[macro_export]
+macro_rules! digest {
+    ($n:expr) => {
+        $crate::Sha256Digest::from(u64::try_from($n).unwrap())
+    };
 }
 
 /// Error indicating that two digests that should have matched didn't.
@@ -869,17 +870,6 @@ mod tests {
         assert_eq!(format!("{}", WorkerId::from(0)), "0");
         assert_eq!(format!("{:03}", WorkerId::from(0)), "000");
         assert_eq!(format!("{:3}", WorkerId::from(43)), " 43");
-    }
-
-    #[test]
-    fn sha256_digest_from_u32() {
-        assert_eq!(
-            Sha256Digest::from(0x12345678u32),
-            Sha256Digest([
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0x12, 0x34, 0x56, 0x78,
-            ])
-        );
     }
 
     #[test]
@@ -1152,10 +1142,7 @@ mod tests {
 
     #[test]
     fn job_spec_must_be_run_locally_network() {
-        let spec = JobSpec::new(
-            "foo",
-            nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
-        );
+        let spec = JobSpec::new("foo", nonempty![(digest!(0), ArtifactType::Tar)]);
         assert!(!spec.must_be_run_locally());
 
         let spec = spec.network(JobNetwork::Loopback);
@@ -1170,10 +1157,7 @@ mod tests {
 
     #[test]
     fn job_spec_must_be_run_locally_mounts() {
-        let spec = JobSpec::new(
-            "foo",
-            nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
-        );
+        let spec = JobSpec::new("foo", nonempty![(digest!(0), ArtifactType::Tar)]);
         assert!(!spec.must_be_run_locally());
 
         let spec = spec.mounts([
@@ -1194,10 +1178,7 @@ mod tests {
 
     #[test]
     fn job_spec_must_be_run_locally_root_overlay() {
-        let spec = JobSpec::new(
-            "foo",
-            nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
-        );
+        let spec = JobSpec::new("foo", nonempty![(digest!(0), ArtifactType::Tar)]);
         assert!(!spec.must_be_run_locally());
 
         let spec = spec.root_overlay(JobRootOverlay::None);
@@ -1215,10 +1196,7 @@ mod tests {
 
     #[test]
     fn job_spec_must_be_run_locally_allocate_tty() {
-        let spec = JobSpec::new(
-            "foo",
-            nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
-        );
+        let spec = JobSpec::new("foo", nonempty![(digest!(0), ArtifactType::Tar)]);
         assert!(!spec.must_be_run_locally());
 
         let spec = spec.allocate_tty(Some(JobTty::new(b"\0abcde", WindowSize::new(20, 80))));

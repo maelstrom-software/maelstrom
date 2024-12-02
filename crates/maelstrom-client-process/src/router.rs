@@ -271,7 +271,7 @@ pub fn start_task(
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use maelstrom_base::JobNetwork;
+    use maelstrom_base::{digest, JobNetwork};
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc, result};
     use BrokerToClient::*;

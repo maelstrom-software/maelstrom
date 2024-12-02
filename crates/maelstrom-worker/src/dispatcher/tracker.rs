@@ -378,8 +378,8 @@ impl LayerTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::nonempty;
-    use maelstrom_test::{digest, path_buf};
+    use maelstrom_base::{digest, nonempty};
+    use maelstrom_test::path_buf;
     use maelstrom_util::ext::BoolExt as _;
     use maplit::hashset;
 

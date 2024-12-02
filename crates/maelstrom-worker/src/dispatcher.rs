@@ -770,7 +770,7 @@ where
 mod tests {
     use super::{Message::*, *};
     use anyhow::anyhow;
-    use maelstrom_base::{self as base, JobEffects, JobOutputResult, JobTerminationStatus};
+    use maelstrom_base::{self as base, digest, JobEffects, JobOutputResult, JobTerminationStatus};
     use maelstrom_test::*;
     use maelstrom_util::cache::fs::test::Fs as TestFs;
     use std::{cell::RefCell, rc::Rc, time::Duration};

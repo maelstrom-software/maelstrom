@@ -1021,6 +1021,7 @@ mod tests {
         Debug, *,
     };
     use crate::fs;
+    use maelstrom_base::digest;
     use maelstrom_test::*;
     use slog::{o, Discard};
     use strum::{EnumString, IntoStaticStr, VariantNames};

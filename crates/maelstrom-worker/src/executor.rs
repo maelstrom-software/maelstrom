@@ -1622,10 +1622,11 @@ mod tests {
     use bytesize::ByteSize;
     use indoc::indoc;
     use maelstrom_base::{
-        enum_set, nonempty, ArtifactType, EnumSet, JobTerminationStatus, Utf8Path, WindowSize,
+        digest, enum_set, nonempty, ArtifactType, EnumSet, JobTerminationStatus, Utf8Path,
+        WindowSize,
     };
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
-    use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
+    use maelstrom_test::{boxed_u8, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::{
         ascii, collections::HashSet, env, fs, path::PathBuf, str, sync::Arc, time::Duration,
