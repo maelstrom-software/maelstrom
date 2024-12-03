@@ -1156,67 +1156,73 @@ mod tests {
 
     #[test]
     fn job_spec_must_be_run_locally_network() {
-        let spec = JobSpec::new("foo", nonempty![tar_digest!(0)]);
+        let spec = job_spec!("foo", [tar_digest!(0)]);
         assert!(!spec.must_be_run_locally());
 
-        let spec = spec.network(JobNetwork::Loopback);
+        let spec = job_spec!("foo", [tar_digest!(0)], network: Loopback);
         assert!(!spec.must_be_run_locally());
 
-        let spec = spec.network(JobNetwork::Local);
+        let spec = job_spec!("foo", [tar_digest!(0)], network: Local);
         assert!(spec.must_be_run_locally());
 
-        let spec = spec.network(JobNetwork::Disabled);
+        let spec = job_spec!("foo", [tar_digest!(0)], network: Disabled);
         assert!(!spec.must_be_run_locally());
     }
 
     #[test]
     fn job_spec_must_be_run_locally_mounts() {
-        let spec = JobSpec::new("foo", nonempty![tar_digest!(0)]);
+        let spec = job_spec!("foo", [tar_digest!(0)]);
         assert!(!spec.must_be_run_locally());
 
-        let spec = spec.mounts([
-            JobMount::Sys {
-                mount_point: Utf8PathBuf::from("/sys"),
-            },
-            JobMount::Bind {
-                mount_point: Utf8PathBuf::from("/bind"),
-                local_path: Utf8PathBuf::from("/a"),
-                read_only: false,
-            },
-        ]);
+        let spec = job_spec! {
+            "foo",
+            [tar_digest!(0)],
+            mounts: [
+                JobMount::Sys {
+                    mount_point: Utf8PathBuf::from("/sys"),
+                },
+                JobMount::Bind {
+                    mount_point: Utf8PathBuf::from("/bind"),
+                    local_path: Utf8PathBuf::from("/a"),
+                    read_only: false,
+                },
+            ],
+        };
         assert!(spec.must_be_run_locally());
-
-        let spec = spec.mounts([]);
-        assert!(!spec.must_be_run_locally());
     }
 
     #[test]
     fn job_spec_must_be_run_locally_root_overlay() {
-        let spec = JobSpec::new("foo", nonempty![tar_digest!(0)]);
+        let spec = job_spec!("foo", [tar_digest!(0)]);
         assert!(!spec.must_be_run_locally());
 
-        let spec = spec.root_overlay(JobRootOverlay::None);
+        let spec = job_spec!("foo", [tar_digest!(0)], root_overlay: JobRootOverlay::None);
         assert!(!spec.must_be_run_locally());
 
-        let spec = spec.root_overlay(JobRootOverlay::Tmp);
+        let spec = job_spec!("foo", [tar_digest!(0)], root_overlay: JobRootOverlay::Tmp);
         assert!(!spec.must_be_run_locally());
 
-        let spec = spec.root_overlay(JobRootOverlay::Local {
-            upper: "upper".into(),
-            work: "work".into(),
-        });
+        let spec = job_spec! {
+            "foo",
+            [tar_digest!(0)],
+            root_overlay: JobRootOverlay::Local {
+                upper: "upper".into(),
+                work: "work".into(),
+            },
+        };
         assert!(spec.must_be_run_locally());
     }
 
     #[test]
     fn job_spec_must_be_run_locally_allocate_tty() {
-        let spec = JobSpec::new("foo", nonempty![tar_digest!(0)]);
+        let spec = job_spec!("foo", [tar_digest!(0)]);
         assert!(!spec.must_be_run_locally());
 
-        let spec = spec.allocate_tty(Some(JobTty::new(b"\0abcde", WindowSize::new(20, 80))));
+        let spec = job_spec! {
+            "foo",
+            [tar_digest!(0)],
+            allocate_tty: JobTty::new(b"\0abcde", WindowSize::new(20, 80)),
+        };
         assert!(spec.must_be_run_locally());
-
-        let spec = spec.allocate_tty(None::<JobTty>);
-        assert!(!spec.must_be_run_locally());
     }
 }
