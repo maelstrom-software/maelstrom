@@ -9,7 +9,7 @@ mod http;
 mod scheduler_task;
 
 use anyhow::{Context as _, Result};
-use cache::{github::GithubCache, local::TcpUploadLocalCache, SchedulerCache};
+use cache::{github::GithubCache, local::TcpUploadLocalCache, BrokerCache, SchedulerCache};
 use config::Config;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
@@ -54,22 +54,6 @@ async fn stats_heartbeat<TempFileT>(sender: SchedulerSender<TempFileT>) {
     let mut interval = tokio::time::interval(BROKER_STATISTICS_INTERVAL);
     while sender.send(SchedulerMessage::StatisticsHeartbeat).is_ok() {
         interval.tick().await;
-    }
-}
-
-trait TempFileFactory: Clone {
-    type TempFile: maelstrom_util::cache::fs::TempFile;
-
-    fn temp_file(&self) -> Result<Self::TempFile>;
-}
-
-impl TempFileFactory
-    for maelstrom_util::cache::TempFileFactory<maelstrom_util::cache::fs::std::Fs>
-{
-    type TempFile = <maelstrom_util::cache::fs::std::Fs as maelstrom_util::cache::fs::Fs>::TempFile;
-
-    fn temp_file(&self) -> Result<Self::TempFile> {
-        self.temp_file()
     }
 }
 
@@ -129,16 +113,6 @@ where
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
     main_inner(config, log)
-}
-
-trait BrokerCache {
-    type Cache: SchedulerCache + Sized + Send + 'static;
-    type TempFileFactory: TempFileFactory<TempFile = <Self::Cache as SchedulerCache>::TempFile>
-        + Sized
-        + Send
-        + 'static;
-
-    fn new(config: Config, log: Logger) -> Result<(Self::Cache, Self::TempFileFactory)>;
 }
 
 #[tokio::main]

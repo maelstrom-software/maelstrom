@@ -2,8 +2,11 @@ pub mod github;
 pub mod local;
 mod remote;
 
+use crate::Config;
+use anyhow::Result;
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::GetArtifact;
+use slog::Logger;
 use std::path::PathBuf;
 
 /// The required interface for the cache that is provided to the [`Scheduler`].
@@ -39,4 +42,20 @@ pub trait SchedulerCache {
     /// the artifact. You must have a non-zero refcount on the artifact before calling this
     /// function and keep it the whole time the stream is being used.
     fn read_artifact(&mut self, digest: &Sha256Digest) -> (Self::ArtifactStream, u64);
+}
+
+pub trait TempFileFactory: Clone {
+    type TempFile: maelstrom_util::cache::fs::TempFile;
+
+    fn temp_file(&self) -> Result<Self::TempFile>;
+}
+
+pub trait BrokerCache {
+    type Cache: SchedulerCache + Sized + Send + 'static;
+    type TempFileFactory: TempFileFactory<TempFile = <Self::Cache as SchedulerCache>::TempFile>
+        + Sized
+        + Send
+        + 'static;
+
+    fn new(config: Config, log: Logger) -> Result<(Self::Cache, Self::TempFileFactory)>;
 }

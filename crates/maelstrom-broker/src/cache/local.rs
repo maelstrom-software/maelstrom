@@ -1,4 +1,7 @@
-use crate::{cache::SchedulerCache, BrokerCache, Config};
+use crate::{
+    cache::{BrokerCache, SchedulerCache, TempFileFactory},
+    Config,
+};
 use anyhow::Result;
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::{fs::Fs, Cache, GetArtifact, GetStrategy, GotArtifact, Key};
@@ -109,5 +112,15 @@ impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKey, BrokerGetStrategy> {
         let bytes_used = self.try_get_size(key).expect("non-zero refcount");
 
         (stream, bytes_used)
+    }
+}
+
+impl TempFileFactory
+    for maelstrom_util::cache::TempFileFactory<maelstrom_util::cache::fs::std::Fs>
+{
+    type TempFile = <maelstrom_util::cache::fs::std::Fs as maelstrom_util::cache::fs::Fs>::TempFile;
+
+    fn temp_file(&self) -> Result<Self::TempFile> {
+        self.temp_file()
     }
 }

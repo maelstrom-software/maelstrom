@@ -1,5 +1,4 @@
-use crate::cache::SchedulerCache;
-use crate::TempFileFactory;
+use crate::cache::{SchedulerCache, TempFileFactory};
 use anyhow::{bail, Result};
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::{fs::TempFile, GetArtifact};

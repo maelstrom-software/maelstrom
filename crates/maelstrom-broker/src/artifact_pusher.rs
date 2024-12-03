@@ -1,6 +1,6 @@
 use crate::{
+    cache::TempFileFactory,
     scheduler_task::{SchedulerMessage, SchedulerSender},
-    TempFileFactory,
 };
 use anyhow::Result;
 use maelstrom_base::proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};

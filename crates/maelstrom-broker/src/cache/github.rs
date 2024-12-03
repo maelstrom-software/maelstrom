@@ -1,4 +1,4 @@
-use crate::{cache::remote, BrokerCache};
+use crate::cache::{remote, BrokerCache};
 use anyhow::Result;
 use maelstrom_base::Sha256Digest;
 use tokio::io::AsyncRead;

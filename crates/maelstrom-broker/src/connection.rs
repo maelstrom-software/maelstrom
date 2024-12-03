@@ -1,7 +1,8 @@
 use crate::{
     artifact_fetcher, artifact_pusher,
+    cache::TempFileFactory,
     scheduler_task::{SchedulerMessage, SchedulerSender},
-    IdVendor, TempFileFactory,
+    IdVendor,
 };
 use anyhow::Result;
 use maelstrom_base::{
