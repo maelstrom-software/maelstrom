@@ -238,8 +238,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             working_directory: test_metadata.container.working_directory,
             user: test_metadata.container.user,
             group: test_metadata.container.group,
-        }
-        .into();
+        };
         let spec = JobSpec {
             container,
             program,

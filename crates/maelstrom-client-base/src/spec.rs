@@ -183,39 +183,11 @@ pub struct ContainerSpec {
     pub group: Option<GroupId>,
 }
 
-#[derive(IntoProtoBuf, TryFromProtoBuf, From, Clone, Debug, PartialEq, Eq)]
-#[proto(
-    proto_buf_type = "proto::ContainerRef",
-    enum_type = "proto::container_ref::Ref"
-)]
-pub enum ContainerRef {
-    Name(String),
-    Inline(ContainerSpec),
-}
-
-impl ContainerRef {
-    pub fn as_inline(&self) -> Option<&ContainerSpec> {
-        if let Self::Inline(c) = self {
-            Some(c)
-        } else {
-            None
-        }
-    }
-
-    pub fn as_inline_mut(&mut self) -> Option<&mut ContainerSpec> {
-        if let Self::Inline(c) = self {
-            Some(c)
-        } else {
-            None
-        }
-    }
-}
-
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq)]
 #[proto(proto_buf_type = "proto::JobSpec")]
 pub struct JobSpec {
     #[proto(option)]
-    pub container: ContainerRef,
+    pub container: ContainerSpec,
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub timeout: Option<Timeout>,
@@ -237,8 +209,7 @@ impl JobSpec {
                 working_directory: Default::default(),
                 user: Default::default(),
                 group: Default::default(),
-            }
-            .into(),
+            },
             program: program.into().into(),
             arguments: Default::default(),
             timeout: Default::default(),
@@ -249,7 +220,7 @@ impl JobSpec {
     }
 
     pub fn image(mut self, image: ImageSpec) -> Self {
-        self.container.as_inline_mut().unwrap().image = Some(image);
+        self.container.image = Some(image);
         self
     }
 
@@ -263,38 +234,37 @@ impl JobSpec {
     }
 
     pub fn environment(mut self, environment: impl IntoEnvironment) -> Self {
-        self.container.as_inline_mut().unwrap().environment = environment.into_environment();
+        self.container.environment = environment.into_environment();
         self
     }
 
     pub fn mounts(mut self, mounts: impl IntoIterator<Item = JobMount>) -> Self {
-        self.container.as_inline_mut().unwrap().mounts = mounts.into_iter().collect();
+        self.container.mounts = mounts.into_iter().collect();
         self
     }
 
     pub fn network(mut self, network: JobNetwork) -> Self {
-        self.container.as_inline_mut().unwrap().network = network;
+        self.container.network = network;
         self
     }
 
     pub fn root_overlay(mut self, root_overlay: JobRootOverlay) -> Self {
-        self.container.as_inline_mut().unwrap().root_overlay = root_overlay;
+        self.container.root_overlay = root_overlay;
         self
     }
 
     pub fn working_directory(mut self, working_directory: Option<impl Into<Utf8PathBuf>>) -> Self {
-        self.container.as_inline_mut().unwrap().working_directory =
-            working_directory.map(Into::into);
+        self.container.working_directory = working_directory.map(Into::into);
         self
     }
 
     pub fn user(mut self, user: Option<impl Into<UserId>>) -> Self {
-        self.container.as_inline_mut().unwrap().user = user.map(Into::into);
+        self.container.user = user.map(Into::into);
         self
     }
 
     pub fn group(mut self, group: Option<impl Into<GroupId>>) -> Self {
-        self.container.as_inline_mut().unwrap().group = group.map(Into::into);
+        self.container.group = group.map(Into::into);
         self
     }
 

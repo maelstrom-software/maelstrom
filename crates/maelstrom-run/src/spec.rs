@@ -125,8 +125,7 @@ impl Job {
             working_directory,
             user: self.user,
             group: self.group,
-        }
-        .into();
+        };
         Ok(JobSpec {
             container,
             program: self.program,

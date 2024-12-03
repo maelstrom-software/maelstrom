@@ -18,7 +18,7 @@ use maelstrom_base::{
     JobWorkerStatus, NonEmpty,
 };
 use maelstrom_client::{
-    spec::{ContainerRef, ContainerSpec, JobSpec, LayerSpec},
+    spec::{ContainerSpec, JobSpec, LayerSpec},
     JobRunningStatus, JobStatus,
 };
 use maelstrom_simex::SimulationExplorer;
@@ -426,8 +426,8 @@ fn test_spec(bin: &str, name: &str) -> JobSpec {
     }
 }
 
-fn default_container() -> ContainerRef {
-    ContainerRef::Inline(ContainerSpec {
+fn default_container() -> ContainerSpec {
+    ContainerSpec {
         image: None,
         layers: vec![LayerSpec::Stubs {
             stubs: vec![
@@ -459,7 +459,7 @@ fn default_container() -> ContainerRef {
         network: JobNetwork::Disabled,
         user: None,
         group: None,
-    })
+    }
 }
 
 macro_rules! test_output_test_inner {
