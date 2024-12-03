@@ -5,15 +5,12 @@ mod artifact_pusher;
 mod cache;
 pub mod config;
 mod connection;
-mod github;
 mod http;
 mod scheduler_task;
 
 use anyhow::{Context as _, Result};
-use cache::local::TcpUploadLocalCache;
-use cache::SchedulerCache;
+use cache::{github::GithubCache, local::TcpUploadLocalCache, SchedulerCache};
 use config::Config;
-use github::GithubCache;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, info, Logger};

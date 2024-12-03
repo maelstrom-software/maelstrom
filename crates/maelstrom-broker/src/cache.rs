@@ -1,3 +1,4 @@
+pub mod github;
 pub mod local;
 
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
