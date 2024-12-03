@@ -2,6 +2,7 @@
 
 mod artifact_fetcher;
 mod artifact_pusher;
+mod cache;
 pub mod config;
 mod connection;
 mod github;
@@ -9,10 +10,11 @@ mod http;
 mod scheduler_task;
 
 use anyhow::{Context as _, Result};
+use cache::SchedulerCache;
 use config::Config;
 use github::GithubCache;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
-use scheduler_task::{SchedulerCache, SchedulerMessage, SchedulerSender, SchedulerTask};
+use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, info, Logger};
 use std::{
     net::{Ipv6Addr, SocketAddrV6},
@@ -146,8 +148,8 @@ enum TcpUploadLocalCache {}
 impl BrokerCache for TcpUploadLocalCache {
     type Cache = maelstrom_util::cache::Cache<
         maelstrom_util::cache::fs::std::Fs,
-        scheduler_task::cache::BrokerKey,
-        scheduler_task::cache::BrokerGetStrategy,
+        cache::BrokerKey,
+        cache::BrokerGetStrategy,
     >;
 
     type TempFileFactory =

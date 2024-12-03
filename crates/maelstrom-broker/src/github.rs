@@ -1,4 +1,4 @@
-use crate::{scheduler_task::SchedulerCache, BrokerCache, TempFileFactory};
+use crate::{cache::SchedulerCache, BrokerCache, TempFileFactory};
 use anyhow::{bail, Result};
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::{fs::TempFile, GetArtifact};

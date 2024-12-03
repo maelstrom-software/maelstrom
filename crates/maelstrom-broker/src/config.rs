@@ -1,7 +1,7 @@
-use crate::scheduler_task::CacheDir;
 use derive_more::{Debug, From};
 use maelstrom_macro::Config;
 use maelstrom_util::{
+    cache::CacheDir,
     config::common::{CacheSize, LogLevel},
     root::RootBuf,
 };

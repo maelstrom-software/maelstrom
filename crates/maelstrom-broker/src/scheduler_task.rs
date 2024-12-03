@@ -1,9 +1,6 @@
-pub(crate) mod cache;
 mod scheduler;
 
-pub use cache::SchedulerCache;
-pub use maelstrom_util::cache::CacheDir;
-
+use crate::cache::SchedulerCache;
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
     proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker},

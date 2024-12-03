@@ -1,7 +1,7 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use crate::scheduler_task::cache::SchedulerCache;
+use crate::cache::SchedulerCache;
 use crate::scheduler_task::ManifestReadRequest;
 use maelstrom_base::{
     proto::{
