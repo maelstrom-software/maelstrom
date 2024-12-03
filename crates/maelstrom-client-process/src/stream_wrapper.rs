@@ -90,6 +90,7 @@ impl<T: Connected> Connected for StreamWrapper<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use maelstrom_util::io::ErrorReader;
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -132,18 +133,6 @@ mod tests {
         assert!(vec.is_empty());
         receiver_task.await.unwrap();
         assert!(fired.load(Ordering::SeqCst));
-    }
-
-    struct ErrorReader;
-
-    impl AsyncRead for ErrorReader {
-        fn poll_read(
-            self: Pin<&mut Self>,
-            _: &mut Context<'_>,
-            _: &mut ReadBuf<'_>,
-        ) -> Poll<io::Result<()>> {
-            Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, "foo")))
-        }
     }
 
     #[tokio::test]

@@ -859,6 +859,27 @@ impl AsyncWrite for AsyncFile {
     }
 }
 
+pub struct ErrorReader;
+
+impl std::io::Read for ErrorReader {
+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+        Err(std::io::Error::new(std::io::ErrorKind::Other, "test error"))
+    }
+}
+
+impl AsyncRead for ErrorReader {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+        _: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Poll::Ready(Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "test error",
+        )))
+    }
+}
+
 pub fn copy_using_splice(
     reader: &mut impl AsRawFd,
     writer: &mut impl AsRawFd,
