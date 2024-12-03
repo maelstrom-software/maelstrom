@@ -450,13 +450,12 @@ where
                     .insert(digest.clone())
                     .assert_is_true();
                 if is_manifest.is_manifest() {
-                    let (manifest_stream, size) = self.cache.read_artifact(&digest);
+                    let manifest_stream = self.cache.read_artifact(&digest);
                     deps.read_manifest(
                         &mut self.manifest_reader_sender,
                         ManifestReadRequest {
                             manifest_stream,
                             digest: digest.clone(),
-                            size,
                             job_id: jid,
                         },
                     );
@@ -670,13 +669,12 @@ where
             let is_manifest = job.missing_artifacts.remove(&digest.clone()).unwrap();
 
             if is_manifest.is_manifest() {
-                let (manifest_stream, size) = self.cache.read_artifact(&digest);
+                let manifest_stream = self.cache.read_artifact(&digest);
                 deps.read_manifest(
                     &mut self.manifest_reader_sender,
                     ManifestReadRequest {
                         manifest_stream,
                         digest: digest.clone(),
-                        size,
                         job_id: jid,
                     },
                 );
@@ -911,11 +909,11 @@ mod tests {
                 .remove(0)
         }
 
-        fn read_artifact(&mut self, digest: &Sha256Digest) -> (TestArtifactStream, u64) {
+        fn read_artifact(&mut self, digest: &Sha256Digest) -> TestArtifactStream {
             self.borrow_mut()
                 .messages
                 .push(CacheReadArtifact(digest.clone()));
-            (TestArtifactStream(digest.clone()), 10)
+            TestArtifactStream(digest.clone())
         }
     }
 
@@ -1908,7 +1906,6 @@ mod tests {
             CacheReadArtifact(digest![42]),
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
-                size: 10,
                 digest: digest![42],
                 job_id: jid![1, 2],
             }),
@@ -1963,7 +1960,6 @@ mod tests {
             CacheReadArtifact(digest![42]),
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
-                size: 10,
                 digest: digest![42],
                 job_id: jid![1, 2],
             }),
@@ -2012,7 +2008,6 @@ mod tests {
             CacheReadArtifact(digest![42]),
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
-                size: 10,
                 digest: digest![42],
                 job_id: jid![1, 2],
             }),
@@ -2063,7 +2058,6 @@ mod tests {
             CacheReadArtifact(digest![42]),
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
-                size: 10,
                 digest: digest![42],
                 job_id: jid![1, 2],
             }),
@@ -2114,7 +2108,6 @@ mod tests {
             CacheReadArtifact(digest![42]),
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
-                size: 10,
                 digest: digest![42],
                 job_id: jid![1, 2],
             }),
@@ -2159,7 +2152,6 @@ mod tests {
             CacheReadArtifact(digest![42]),
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
-                size: 10,
                 digest: digest![42],
                 job_id: jid![1, 2],
             }),

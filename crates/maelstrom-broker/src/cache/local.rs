@@ -100,18 +100,15 @@ impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKey, BrokerGetStrategy> {
             .map(|size| (cache_path, size))
     }
 
-    fn read_artifact(&mut self, digest: &Sha256Digest) -> (Self::ArtifactStream, u64) {
+    fn read_artifact(&mut self, digest: &Sha256Digest) -> Self::ArtifactStream {
         let key = BrokerKey::ref_cast(digest);
         let cache_path = self.cache_path(key).into_path_buf();
-        let stream = LazyRead::new(Box::pin(async move {
+        LazyRead::new(Box::pin(async move {
             let fs = maelstrom_util::async_fs::Fs::new();
             fs.open_file(cache_path)
                 .await
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
-        }));
-        let bytes_used = self.try_get_size(key).expect("non-zero refcount");
-
-        (stream, bytes_used)
+        }))
     }
 }
 

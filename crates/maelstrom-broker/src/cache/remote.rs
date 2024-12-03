@@ -109,7 +109,7 @@ impl<ArtifactReaderT: RemoteArtifactReader> SchedulerCache for RemoteCache<Artif
         None
     }
 
-    fn read_artifact(&mut self, _digest: &Sha256Digest) -> (Self::ArtifactStream, u64) {
+    fn read_artifact(&mut self, _digest: &Sha256Digest) -> Self::ArtifactStream {
         todo!()
     }
 }

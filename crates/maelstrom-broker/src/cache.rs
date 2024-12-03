@@ -38,10 +38,10 @@ pub trait SchedulerCache {
     /// If the refcount is non-zero, it is increased by one.
     fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)>;
 
-    /// Get a stream that reads the contents of an artifact. Returns said stream and the size of
-    /// the artifact. You must have a non-zero refcount on the artifact before calling this
-    /// function and keep it the whole time the stream is being used.
-    fn read_artifact(&mut self, digest: &Sha256Digest) -> (Self::ArtifactStream, u64);
+    /// Get a stream that reads the contents of an artifact. You must have a non-zero refcount on
+    /// the artifact before calling this function and keep it the whole time the stream is being
+    /// used.
+    fn read_artifact(&mut self, digest: &Sha256Digest) -> Self::ArtifactStream;
 }
 
 pub trait TempFileFactory: Clone {

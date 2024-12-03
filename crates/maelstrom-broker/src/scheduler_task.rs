@@ -17,7 +17,6 @@ use tokio::task::JoinSet;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ManifestReadRequest<ArtifactStreamT> {
     manifest_stream: ArtifactStreamT,
-    size: u64,
     digest: Sha256Digest,
     job_id: JobId,
 }
