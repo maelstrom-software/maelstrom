@@ -332,6 +332,88 @@ impl JobSpec {
     }
 }
 
+#[macro_export]
+macro_rules! job_spec {
+    (@expand [$program:expr] [] -> [] [$($container_field:tt)*]) => {
+        $crate::spec::JobSpec {
+            container: $crate::container_spec!{$($container_field)*},
+            program: $program.into(),
+            arguments: Default::default(),
+            timeout: Default::default(),
+            estimated_duration: Default::default(),
+            allocate_tty: Default::default(),
+            priority: Default::default(),
+        }
+    };
+    (@expand [$program:expr] [] -> [$($field:tt)+] [$($container_field:tt)*]) => {
+        $crate::spec::JobSpec {
+            $($field)+,
+            .. $crate::job_spec!(@expand [$program] [] -> [] [$($container_field)*])
+        }
+    };
+
+    (@expand [$program:expr] [image: $image:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? image: $image])
+    };
+    (@expand [$program:expr] [layers: [$($layer:tt)*] $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? layers: [$($layer)*]])
+    };
+    (@expand [$program:expr] [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? root_overlay: $root_overlay])
+    };
+    (@expand [$program:expr] [environment: [$($environment:tt)*] $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? environment: [$($environment)*]])
+    };
+    (@expand [$program:expr] [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? working_directory: $working_directory])
+    };
+    (@expand [$program:expr] [mounts: [$($mount:tt)*] $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? mounts: [$($mount)*]])
+    };
+    (@expand [$program:expr] [network: $network:ident $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? network: $network])
+    };
+    (@expand [$program:expr] [user: $user:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? user: $user])
+    };
+    (@expand [$program:expr] [group: $group:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? group: $group])
+    };
+
+    (@expand [$program:expr] [arguments: [$($arg:expr),*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? arguments: vec![$($arg.into()),*]] [$($container_field)*])
+    };
+    (@expand [$program:expr] [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? timeout: ::maelstrom_base::Timeout::new($timeout)] [$($container_field)*])
+    };
+    (@expand [$program:expr] [estimated_duration: $estimated_duration:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? estimated_duration: Some($estimated_duration)] [$($container_field)*])
+    };
+    (@expand [$program:expr] [allocate_tty: $allocate_tty:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? allocate_tty: Some($allocate_tty)] [$($container_field)*])
+    };
+    (@expand [$program:expr] [priority: $priority:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? priority: $priority] [$($container_field)*])
+    };
+    ($program:expr $(,$($field_in:tt)*)?) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] -> [] [])
+    };
+}
+
 #[derive(
     IntoProtoBuf,
     TryFromProtoBuf,
