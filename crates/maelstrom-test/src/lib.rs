@@ -32,38 +32,43 @@ macro_rules! jid {
 
 #[macro_export]
 macro_rules! spec {
-    [1] => {
+    (1 $($field:tt)*) => {
         maelstrom_base::job_spec! {
             "test_1",
-            [maelstrom_base::tar_digest!(1)],
+            [maelstrom_base::tar_digest!(1)]
+            $($field)*
         }
     };
-    [2] => {
+    (2 $($field:tt)*) => {
         maelstrom_base::job_spec! {
             "test_2",
             [maelstrom_base::tar_digest!(2)],
-            arguments: ["arg_1"],
+            arguments: ["arg_1"]
+            $($field)*
         }
     };
-    [3] => {
+    (3 $($field:tt)*) => {
         maelstrom_base::job_spec! {
             "test_3",
             [maelstrom_base::tar_digest!(3)],
-            arguments: ["arg_1", "arg_2"],
+            arguments: ["arg_1", "arg_2"]
+            $($field)*
         }
     };
-    [4] => {
+    (4 $($field:tt)*) => {
         maelstrom_base::job_spec! {
             "test_4",
             [maelstrom_base::tar_digest!(4)],
-            arguments: ["arg_1", "arg_2", "arg_3"],
+            arguments: ["arg_1", "arg_2", "arg_3"]
+            $($field)*
         }
     };
-    [$n:literal] => {
+    ($n:literal $($field:tt)*) => {
         maelstrom_base::job_spec! {
             concat!("test_", stringify!($n)),
-            maelstrom_base::nonempty![maelstrom_base::tar_digest!($n)],
-            arguments: ["arg_1"],
+            [maelstrom_base::tar_digest!($n)],
+            arguments: ["arg_1"]
+            $($field)*
         }
     };
 }
