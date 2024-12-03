@@ -271,7 +271,7 @@ pub fn start_task(
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use maelstrom_base::{digest, JobNetwork};
+    use maelstrom_base::digest;
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc, result};
     use BrokerToClient::*;
@@ -542,8 +542,8 @@ mod tests {
         RunJob(spec!(0), cjid!(0)) => {
             JobRequestToBroker(cjid!(0), spec!(0)),
         };
-        RunJob(spec!(1).network(JobNetwork::Local), cjid!(1)) => {
-            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1).network(JobNetwork::Local)),
+        RunJob(spec!(1, network: Local), cjid!(1)) => {
+            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, network: Local)),
         };
     }
 
@@ -575,7 +575,7 @@ mod tests {
     fn job_response_from_local_worker_unknown_clustered() {
         let mut fixture = Fixture::new(false, None);
         // Give it a job just so it doesn't crash subracting the job counts.
-        fixture.receive_message(RunJob(spec!(0).network(JobNetwork::Local), cjid!(0)));
+        fixture.receive_message(RunJob(spec!(0, network: Local), cjid!(0)));
         fixture.receive_message(LocalWorker(WorkerToBroker::JobResponse(
             jid!(0, 1),
             Ok(outcome!(0)),
@@ -585,8 +585,8 @@ mod tests {
     script_test! {
         job_response_from_local_worker_known_clustered,
         Fixture::new(false, None),
-        RunJob(spec!(0).network(JobNetwork::Local), cjid!(0)) => {
-            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0).network(JobNetwork::Local)),
+        RunJob(spec!(0, network: Local), cjid!(0)) => {
+            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, network: Local)),
         };
         LocalWorker(WorkerToBroker::JobResponse(jid!(0, 0), Ok(outcome!(0)))) => {
             JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
