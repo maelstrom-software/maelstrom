@@ -1910,7 +1910,7 @@ mod tests {
 
     #[tokio::test]
     async fn environment() {
-        Test::new(bash_spec!("echo -n $FOO - $BAR").environment(["FOO=3", "BAR=4"]))
+        Test::new(bash_spec!("echo -n $FOO - $BAR", environment: ["FOO=3", "BAR=4"]))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"3 - 4")))
             .run()
             .await;
@@ -1946,13 +1946,13 @@ mod tests {
 
     #[tokio::test]
     async fn no_loopback() {
-        Test::new(
-            test_spec!("/bin/cat")
-                .arguments(["/sys/class/net/lo/carrier"])
-                .mounts([JobMount::Sys {
-                    mount_point: utf8_path_buf!("/sys"),
-                }]),
-        )
+        Test::new(test_spec! {
+            "/bin/cat",
+            arguments: ["/sys/class/net/lo/carrier"],
+            mounts: [
+                JobMount::Sys { mount_point: utf8_path_buf!("/sys") },
+            ],
+        })
         .expected_status(JobTerminationStatus::Exited(1))
         .expected_stderr(JobOutputResult::Inline(boxed_u8!(
             b"cat: read error: Invalid argument\n"
@@ -1963,14 +1963,14 @@ mod tests {
 
     #[tokio::test]
     async fn loopback() {
-        Test::new(
-            test_spec!("/bin/cat")
-                .arguments(["/sys/class/net/lo/carrier"])
-                .mounts([JobMount::Sys {
-                    mount_point: utf8_path_buf!("/sys"),
-                }])
-                .network(JobNetwork::Loopback),
-        )
+        Test::new(test_spec! {
+            "/bin/cat",
+            arguments: ["/sys/class/net/lo/carrier"],
+            mounts: [
+                JobMount::Sys { mount_point: utf8_path_buf!("/sys") },
+            ],
+            network: Loopback,
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1\n")))
         .run()
         .await;
@@ -1991,20 +1991,20 @@ mod tests {
             socket.write_all(b"goodbye").await.unwrap();
         });
         let port = port_receiver.await.unwrap();
-        Test::new(
-            python_spec!(&format!(
+        Test::new(python_spec! {
+            &format!(
                 indoc! {r#"
-                    import socket
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.connect(("127.0.0.1", {port}))
-                        s.sendall(b"hello")
-                        s.shutdown(socket.SHUT_WR)
-                        print(s.recv(1024).decode(), end="")
-                "#},
+                        import socket
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.connect(("127.0.0.1", {port}))
+                            s.sendall(b"hello")
+                            s.shutdown(socket.SHUT_WR)
+                            print(s.recv(1024).decode(), end="")
+                    "#},
                 port = port
-            ))
-            .network(JobNetwork::Local),
-        )
+            ),
+            network: Local,
+        })
         .expected_status(JobTerminationStatus::Exited(0))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"goodbye")))
         .run()
@@ -2029,15 +2029,15 @@ mod tests {
 
     #[tokio::test]
     async fn user_and_group_nonzero() {
-        Test::new(
-            python_spec!(indoc! {r#"
-                import os
-                print('uid:', os.getuid())
-                print('gid:', os.getgid())
-            "#})
-            .user(Some(43))
-            .group(Some(100)),
-        )
+        Test::new(python_spec! {
+            indoc! {r#"
+                    import os
+                    print('uid:', os.getuid())
+                    print('gid:', os.getgid())
+                "#},
+            user: 43,
+            group: 100,
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(indoc! {b"
             uid: 43
             gid: 100
@@ -2050,10 +2050,11 @@ mod tests {
     async fn close_range() {
         // Throw the kitchen sink in the spec: we want an example of anything that opens a file
         // descriptor.
-        let spec = test_spec!("/bin/ls")
-            .arguments(["/proc/self/fd"])
-            .network(JobNetwork::Loopback)
-            .mounts([
+        let spec = test_spec! {
+            "/bin/ls",
+            arguments: ["/proc/self/fd"],
+            network: Loopback,
+            mounts: [
                 JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 },
@@ -2065,7 +2066,8 @@ mod tests {
                 JobMount::Devices {
                     devices: enum_set!(JobDevice::Null),
                 },
-            ]);
+            ],
+        };
         let JobCompleted {
             status,
             effects: JobEffects { stdout, stderr, .. },
@@ -2090,7 +2092,7 @@ mod tests {
 
     #[tokio::test]
     async fn one_layer_is_read_only() {
-        Test::new(test_spec!("/bin/touch").arguments(["/foo"]))
+        Test::new(test_spec!("/bin/touch", arguments: ["/foo"]))
             .expected_status(JobTerminationStatus::Exited(1))
             .expected_stderr(JobOutputResult::Inline(boxed_u8!(
                 b"touch: /foo: Read-only file system\n"
@@ -2101,7 +2103,7 @@ mod tests {
 
     #[tokio::test]
     async fn one_layer_with_tmp_root_overlay_is_writable() {
-        Test::new(bash_spec!("echo bar > /foo && cat /foo").root_overlay(JobRootOverlay::Tmp))
+        Test::new(bash_spec!("echo bar > /foo && cat /foo", root_overlay: JobRootOverlay::Tmp))
             .expected_status(JobTerminationStatus::Exited(0))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
             .run()
@@ -2116,7 +2118,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_layers_with_tmp_root_overlay_is_writable() {
-        let spec = bash_spec!("echo bar > /foo && cat /foo").root_overlay(JobRootOverlay::Tmp);
+        let spec = bash_spec!("echo bar > /foo && cat /foo", root_overlay: JobRootOverlay::Tmp);
         Test::new(spec)
             .expected_status(JobTerminationStatus::Exited(0))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
@@ -2124,7 +2126,7 @@ mod tests {
             .await;
 
         // Run another job to ensure that the file doesn't persist.
-        let spec = bash_spec!("test -e /foo").root_overlay(JobRootOverlay::Tmp);
+        let spec = bash_spec!("test -e /foo", root_overlay: JobRootOverlay::Tmp);
         Test::new(spec)
             .expected_status(JobTerminationStatus::Exited(1))
             .run()
@@ -2141,24 +2143,26 @@ mod tests {
         fs.create_dir(&upper_path).await.unwrap();
         fs.create_dir(&work_path).await.unwrap();
 
-        Test::new(
-            bash_spec!("echo bar > /foo && cat /foo").root_overlay(JobRootOverlay::Local {
+        Test::new(bash_spec! {
+            "echo bar > /foo && cat /foo",
+            root_overlay: JobRootOverlay::Local {
                 upper: upper_path.clone().try_into().unwrap(),
                 work: work_path.clone().try_into().unwrap(),
-            }),
-        )
+            },
+        })
         .expected_status(JobTerminationStatus::Exited(0))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
         .run()
         .await;
 
         // Run another job to ensure that the file persisted.
-        Test::new(
-            bash_spec!("test -e /foo").root_overlay(JobRootOverlay::Local {
+        Test::new(bash_spec! {
+            "test -e /foo",
+            root_overlay: JobRootOverlay::Local {
                 upper: upper_path.clone().try_into().unwrap(),
                 work: work_path.clone().try_into().unwrap(),
-            }),
-        )
+            },
+        })
         .expected_status(JobTerminationStatus::Exited(0))
         .run()
         .await;
@@ -2180,11 +2184,14 @@ mod tests {
 
     #[tokio::test]
     async fn mount_dev_full() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/full | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: EnumSet::only(JobDevice::Full),
-            }]),
-        )
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/full | awk '{print $5, $6}'",
+            mounts: [
+                JobMount::Devices {
+                    devices: EnumSet::only(JobDevice::Full),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 7\n")))
         .run()
         .await;
@@ -2200,11 +2207,14 @@ mod tests {
 
     #[tokio::test]
     async fn mount_dev_fuse() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/fuse | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: EnumSet::only(JobDevice::Fuse),
-            }]),
-        )
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/fuse | awk '{print $5, $6}'",
+            mounts: [
+                JobMount::Devices {
+                    devices: EnumSet::only(JobDevice::Fuse),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"10, 229\n")))
         .run()
         .await;
@@ -2220,11 +2230,14 @@ mod tests {
 
     #[tokio::test]
     async fn mount_dev_null() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/null | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: EnumSet::only(JobDevice::Null),
-            }]),
-        )
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/null | awk '{print $5, $6}'",
+            mounts: [
+                JobMount::Devices {
+                    devices: EnumSet::only(JobDevice::Null),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 3\n")))
         .run()
         .await;
@@ -2232,11 +2245,14 @@ mod tests {
 
     #[tokio::test]
     async fn mount_dev_null_write() {
-        Test::new(bash_spec!("echo foo > /dev/null && cat /dev/null").mounts([
-            JobMount::Devices {
-                devices: EnumSet::only(JobDevice::Null),
-            },
-        ]))
+        Test::new(bash_spec! {
+            "echo foo > /dev/null && cat /dev/null",
+            mounts: [
+                JobMount::Devices {
+                    devices: EnumSet::only(JobDevice::Null),
+                },
+            ],
+        })
         .run()
         .await;
     }
@@ -2251,13 +2267,14 @@ mod tests {
 
     #[tokio::test]
     async fn mount_dev_random() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/random | awk '{print $5, $6}'").mounts([
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/random | awk '{print $5, $6}'",
+            mounts: [
                 JobMount::Devices {
                     devices: EnumSet::only(JobDevice::Random),
                 },
-            ]),
-        )
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 8\n")))
         .run()
         .await;
@@ -2273,11 +2290,14 @@ mod tests {
 
     #[tokio::test]
     async fn mount_dev_tty() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/tty | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: EnumSet::only(JobDevice::Tty),
-            }]),
-        )
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/tty | awk '{print $5, $6}'",
+            mounts: [
+                JobMount::Devices {
+                    devices: EnumSet::only(JobDevice::Tty),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 0\n")))
         .run()
         .await;
@@ -2293,13 +2313,14 @@ mod tests {
 
     #[tokio::test]
     async fn mount_dev_urandom() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/urandom | awk '{print $5, $6}'").mounts([
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/urandom | awk '{print $5, $6}'",
+            mounts: [
                 JobMount::Devices {
                     devices: EnumSet::only(JobDevice::Urandom),
                 },
-            ]),
-        )
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 9\n")))
         .run()
         .await;
@@ -2315,11 +2336,14 @@ mod tests {
 
     #[tokio::test]
     async fn mount_dev_zero() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/zero | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: EnumSet::only(JobDevice::Zero),
-            }]),
-        )
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/zero | awk '{print $5, $6}'",
+            mounts: [
+                JobMount::Devices {
+                    devices: EnumSet::only(JobDevice::Zero),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 5\n")))
         .run()
         .await;
@@ -2335,11 +2359,14 @@ mod tests {
 
     #[tokio::test]
     async fn dev_full() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/full | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: enum_set!(JobDevice::Full),
-            }]),
-        )
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/full | awk '{print $5, $6}'",
+            mounts: [
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Full),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 7\n")))
         .run()
         .await;
@@ -2355,11 +2382,14 @@ mod tests {
 
     #[tokio::test]
     async fn dev_null() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/null | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: enum_set!(JobDevice::Null),
-            }]),
-        )
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/null | awk '{print $5, $6}'",
+            mounts: [
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Null),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 3\n")))
         .run()
         .await;
@@ -2367,11 +2397,14 @@ mod tests {
 
     #[tokio::test]
     async fn dev_null_write() {
-        Test::new(bash_spec!("echo foo > /dev/null && cat /dev/null").mounts([
-            JobMount::Devices {
-                devices: enum_set!(JobDevice::Null),
-            },
-        ]))
+        Test::new(bash_spec! {
+            "echo foo > /dev/null && cat /dev/null",
+            mounts: [
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Null),
+                },
+            ],
+        })
         .run()
         .await;
     }
@@ -2386,13 +2419,14 @@ mod tests {
 
     #[tokio::test]
     async fn dev_random() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/random | awk '{print $5, $6}'").mounts([
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/random | awk '{print $5, $6}'",
+            mounts: [
                 JobMount::Devices {
                     devices: enum_set!(JobDevice::Random),
                 },
-            ]),
-        )
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 8\n")))
         .run()
         .await;
@@ -2408,11 +2442,14 @@ mod tests {
 
     #[tokio::test]
     async fn dev_tty() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/tty | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: enum_set!(JobDevice::Tty),
-            }]),
-        )
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/tty | awk '{print $5, $6}'",
+            mounts: [
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Tty),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 0\n")))
         .run()
         .await;
@@ -2428,13 +2465,14 @@ mod tests {
 
     #[tokio::test]
     async fn dev_urandom() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/urandom | awk '{print $5, $6}'").mounts([
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/urandom | awk '{print $5, $6}'",
+            mounts: [
                 JobMount::Devices {
                     devices: enum_set!(JobDevice::Urandom),
                 },
-            ]),
-        )
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 9\n")))
         .run()
         .await;
@@ -2450,11 +2488,14 @@ mod tests {
 
     #[tokio::test]
     async fn dev_zero() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/zero | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: enum_set!(JobDevice::Zero),
-            }]),
-        )
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/zero | awk '{print $5, $6}'",
+            mounts: [
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Zero),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 5\n")))
         .run()
         .await;
@@ -2462,13 +2503,13 @@ mod tests {
 
     #[tokio::test]
     async fn no_tmpfs() {
-        Test::new(
-            test_spec!("/bin/grep")
-                .arguments(["^tmpfs /tmp", "/proc/self/mounts"])
-                .mounts([JobMount::Proc {
-                    mount_point: utf8_path_buf!("/proc"),
-                }]),
-        )
+        Test::new(test_spec! {
+            "/bin/grep",
+            arguments: ["^tmpfs /tmp", "/proc/self/mounts"],
+            mounts: [
+                JobMount::Proc { mount_point: utf8_path_buf!("/proc") },
+            ],
+        })
         .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
@@ -2476,18 +2517,21 @@ mod tests {
 
     #[tokio::test]
     async fn tmpfs() {
-        Test::new(
-            test_spec!("/bin/awk")
-                .arguments([r#"/^none \/tmp/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
-                .mounts([
-                    JobMount::Proc {
-                        mount_point: utf8_path_buf!("/proc"),
-                    },
-                    JobMount::Tmp {
-                        mount_point: utf8_path_buf!("/tmp"),
-                    },
-                ]),
-        )
+        Test::new(test_spec! {
+            "/bin/awk",
+            arguments: [
+                r#"/^none \/tmp/ { print $1, $2, $3 }"#,
+                "/proc/self/mounts"
+            ],
+            mounts: [
+                JobMount::Proc {
+                    mount_point: utf8_path_buf!("/proc"),
+                },
+                JobMount::Tmp {
+                    mount_point: utf8_path_buf!("/tmp"),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /tmp tmpfs\n")))
         .run()
         .await;
@@ -2495,13 +2539,15 @@ mod tests {
 
     #[tokio::test]
     async fn no_sysfs() {
-        Test::new(
-            test_spec!("/bin/grep")
-                .arguments(["^sysfs /sys", "/proc/self/mounts"])
-                .mounts([JobMount::Proc {
+        Test::new(test_spec! {
+            "/bin/grep",
+            arguments: ["^sysfs /sys", "/proc/self/mounts"],
+            mounts: [
+                JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
-                }]),
-        )
+                },
+            ],
+        })
         .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
@@ -2509,18 +2555,21 @@ mod tests {
 
     #[tokio::test]
     async fn sysfs() {
-        Test::new(
-            test_spec!("/bin/awk")
-                .arguments([r#"/^none \/sys/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
-                .mounts([
-                    JobMount::Proc {
-                        mount_point: utf8_path_buf!("/proc"),
-                    },
-                    JobMount::Sys {
-                        mount_point: utf8_path_buf!("/sys"),
-                    },
-                ]),
-        )
+        Test::new(test_spec! {
+            "/bin/awk",
+            arguments: [
+                r#"/^none \/sys/ { print $1, $2, $3 }"#,
+                "/proc/self/mounts",
+            ],
+            mounts: [
+                JobMount::Proc {
+                    mount_point: utf8_path_buf!("/proc"),
+                },
+                JobMount::Sys {
+                    mount_point: utf8_path_buf!("/sys"),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /sys sysfs\n")))
         .run()
         .await;
@@ -2528,20 +2577,22 @@ mod tests {
 
     #[tokio::test]
     async fn no_procfs() {
-        Test::new(test_spec!("/bin/ls").arguments(["/proc"]))
+        Test::new(test_spec!("/bin/ls", arguments: ["/proc"]))
             .run()
             .await
     }
 
     #[tokio::test]
     async fn procfs() {
-        Test::new(
-            test_spec!("/bin/grep")
-                .arguments(["proc", "/proc/self/mounts"])
-                .mounts([JobMount::Proc {
+        Test::new(test_spec! {
+            "/bin/grep",
+            arguments: ["proc", "/proc/self/mounts"],
+            mounts: [
+                JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
-                }]),
-        )
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(
             b"none /proc proc rw,relatime 0 0\n"
         )))
@@ -2551,13 +2602,15 @@ mod tests {
 
     #[tokio::test]
     async fn no_devpts() {
-        Test::new(
-            test_spec!("/bin/grep")
-                .arguments(["^devpts /dev/pty", "/proc/self/mounts"])
-                .mounts([JobMount::Proc {
+        Test::new(test_spec! {
+            "/bin/grep",
+            arguments: ["^devpts /dev/pty", "/proc/self/mounts"],
+            mounts: [
+                JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
-                }]),
-        )
+                },
+            ],
+        })
         .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
@@ -2565,21 +2618,21 @@ mod tests {
 
     #[tokio::test]
     async fn devpts() {
-        Test::new(
-            test_spec!("/bin/awk")
-                .arguments([
-                    r#"/^none \/dev\/pts/ { print $1, $2, $3 }"#,
-                    "/proc/self/mounts",
-                ])
-                .mounts([
-                    JobMount::Proc {
-                        mount_point: utf8_path_buf!("/proc"),
-                    },
-                    JobMount::Devpts {
-                        mount_point: utf8_path_buf!("/dev/pts"),
-                    },
-                ]),
-        )
+        Test::new(test_spec! {
+            "/bin/awk",
+            arguments: [
+                r#"/^none \/dev\/pts/ { print $1, $2, $3 }"#,
+                "/proc/self/mounts",
+            ],
+            mounts: [
+                JobMount::Proc {
+                    mount_point: utf8_path_buf!("/proc"),
+                },
+                JobMount::Devpts {
+                    mount_point: utf8_path_buf!("/dev/pts"),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(
             b"none /dev/pts devpts\n"
         )))
@@ -2589,13 +2642,14 @@ mod tests {
 
     #[tokio::test]
     async fn devpts_ptmx_mode() {
-        Test::new(
-            bash_spec!("/bin/ls -l /dev/pts/ptmx | awk '{ print $1, $5, $6 }'").mounts([
+        Test::new(bash_spec! {
+            "/bin/ls -l /dev/pts/ptmx | awk '{ print $1, $5, $6 }'",
+            mounts: [
                 JobMount::Devpts {
                     mount_point: utf8_path_buf!("/dev/pts"),
                 },
-            ]),
-        )
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"crw-rw-rw- 5, 2\n")))
         .run()
         .await;
@@ -2603,13 +2657,15 @@ mod tests {
 
     #[tokio::test]
     async fn no_mqueue() {
-        Test::new(
-            test_spec!("/bin/grep")
-                .arguments(["^mqueue /dev/mqueue", "/proc/self/mounts"])
-                .mounts([JobMount::Proc {
+        Test::new(test_spec! {
+            "/bin/grep",
+            arguments: ["^mqueue /dev/mqueue", "/proc/self/mounts"],
+            mounts: [
+                JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
-                }]),
-        )
+                },
+            ],
+        })
         .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
@@ -2617,21 +2673,21 @@ mod tests {
 
     #[tokio::test]
     async fn mqueue() {
-        Test::new(
-            test_spec!("/bin/awk")
-                .arguments([
-                    r#"/^none \/dev\/mqueue/ { print $1, $2, $3 }"#,
-                    "/proc/self/mounts",
-                ])
-                .mounts([
-                    JobMount::Proc {
-                        mount_point: utf8_path_buf!("/proc"),
-                    },
-                    JobMount::Mqueue {
-                        mount_point: utf8_path_buf!("/dev/mqueue"),
-                    },
-                ]),
-        )
+        Test::new(test_spec! {
+            "/bin/awk",
+            arguments: [
+                r#"/^none \/dev\/mqueue/ { print $1, $2, $3 }"#,
+                "/proc/self/mounts",
+            ],
+            mounts: [
+                JobMount::Proc {
+                    mount_point: utf8_path_buf!("/proc"),
+                },
+                JobMount::Mqueue {
+                    mount_point: utf8_path_buf!("/dev/mqueue"),
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(
             b"none /dev/mqueue mqueue\n"
         )))
@@ -2642,19 +2698,21 @@ mod tests {
     #[tokio::test]
     async fn bind_mount_writable() {
         let temp_file = NamedTempFile::new().unwrap();
-        Test::new(
-            bash_spec!(&format!(
+        Test::new(bash_spec! {
+            &format!(
                 "echo hello > /mnt/{}",
                 temp_file.path().file_name().unwrap().to_str().unwrap()
-            ))
-            .mounts([JobMount::Bind {
-                mount_point: utf8_path_buf!("/mnt"),
-                local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
-                    .unwrap()
-                    .to_owned(),
-                read_only: false,
-            }]),
-        )
+            ),
+            mounts: [
+                JobMount::Bind {
+                    mount_point: utf8_path_buf!("/mnt"),
+                    local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
+                        .unwrap()
+                        .to_owned(),
+                    read_only: false,
+                },
+            ],
+        })
         .run()
         .await;
         let contents = fs::read_to_string(temp_file).unwrap();
@@ -2666,12 +2724,12 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let fs = async_fs::Fs::new();
         fs.write(temp_file.path(), b"hello\n").await.unwrap();
-        Test::new(
-            bash_spec!(&format!(
+        Test::new(bash_spec! {
+            &format!(
                 "(echo goodbye > /mnt/{}) 2>/dev/null",
                 temp_file.path().file_name().unwrap().to_str().unwrap()
-            ))
-            .mounts([
+            ),
+            mounts: [
                 JobMount::Bind {
                     mount_point: utf8_path_buf!("/mnt"),
                     local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
@@ -2682,8 +2740,8 @@ mod tests {
                 JobMount::Devices {
                     devices: enum_set!(JobDevice::Null),
                 },
-            ]),
-        )
+            ],
+        })
         .expected_status(JobTerminationStatus::Exited(1))
         .run()
         .await;
@@ -2700,18 +2758,19 @@ mod tests {
             Utf8PathBuf::from_path_buf(pathdiff::diff_paths(temp_dir_path, pwd).unwrap()).unwrap();
         let fs = async_fs::Fs::new();
         fs.write(temp_file.path(), b"hello\n").await.unwrap();
-        Test::new(
-            test_spec!("/bin/cat")
-                .arguments([format!(
-                    "/mnt/{}",
-                    temp_file.path().file_name().unwrap().to_str().unwrap()
-                )])
-                .mounts([JobMount::Bind {
+        Test::new(test_spec! {
+            "/bin/cat",
+            arguments: [
+                format!("/mnt/{}", temp_file.path().file_name().unwrap().to_str().unwrap())
+            ],
+            mounts: [
+                JobMount::Bind {
                     mount_point: utf8_path_buf!("/mnt"),
                     local_path: temp_dir_relative_path,
                     read_only: true,
-                }]),
-        )
+                },
+            ],
+        })
         .expected_status(JobTerminationStatus::Exited(0))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"hello\n")))
         .run()
@@ -2720,13 +2779,15 @@ mod tests {
 
     #[tokio::test]
     async fn old_mounts_are_unmounted() {
-        Test::new(
-            test_spec!("/bin/wc")
-                .arguments(["-l", "/proc/self/mounts"])
-                .mounts([JobMount::Proc {
+        Test::new(test_spec! {
+            "/bin/wc",
+            arguments: ["-l", "/proc/self/mounts"],
+            mounts: [
+                JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
-                }]),
-        )
+                },
+            ],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"2 /proc/self/mounts\n")))
         .run()
         .await;
@@ -2742,7 +2803,7 @@ mod tests {
 
     #[tokio::test]
     async fn working_directory_not_root() {
-        Test::new(bash_spec!("pwd").working_directory(Some("/usr/bin")))
+        Test::new(bash_spec!("pwd", working_directory: "/usr/bin"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"/usr/bin\n")))
             .run()
             .await;
@@ -2762,7 +2823,7 @@ mod tests {
 
     #[tokio::test]
     async fn bad_working_directory_is_an_execution_error() {
-        assert_execution_error(test_spec!("/bin/cat").working_directory(Some("/dev/null"))).await;
+        assert_execution_error(test_spec!("/bin/cat", working_directory: "/dev/null")).await;
     }
 
     async fn expect(mut socket: impl AsyncRead + Unpin, expected: &[u8]) {
@@ -2806,11 +2867,11 @@ mod tests {
     #[tokio::test]
     #[allow(non_snake_case)]
     async fn PATH_can_be_used() {
-        Test::new(
-            test_spec!("echo")
-                .arguments(["foo"])
-                .environment(["PATH=/bin"]),
-        )
+        Test::new(test_spec! {
+            "echo",
+            arguments: ["foo"],
+            environment: ["PATH=/bin"],
+        })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"foo\n")))
         .run()
         .await;
@@ -2829,7 +2890,10 @@ mod tests {
         let program_string = program.to_string();
         let job_handle = task::spawn(async move {
             run(
-                test_spec!(&program_string).allocate_tty(Some(JobTty::new(&path, window_size))),
+                test_spec! {
+                    &program_string,
+                    allocate_tty: JobTty::new(&path, window_size),
+                },
                 0.into(),
             )
             .await
