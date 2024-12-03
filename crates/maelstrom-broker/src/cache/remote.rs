@@ -117,6 +117,7 @@ impl<ArtifactReaderT: RemoteArtifactReader> SchedulerCache for RemoteCache<Artif
 #[cfg(test)]
 mod tests {
     use super::*;
+    use maelstrom_base::digest;
     use maelstrom_test::*;
 
     #[derive(Default)]
