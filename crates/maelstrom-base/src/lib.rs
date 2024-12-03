@@ -505,6 +505,87 @@ impl JobSpec {
     }
 }
 
+#[macro_export]
+macro_rules! job_spec {
+    (@expand [$program:expr, [$($layer:expr),+ $(,)?]] [] -> []) => {
+        $crate::JobSpec {
+            program: $program.into(),
+            arguments: Default::default(),
+            environment: Default::default(),
+            layers: $crate::nonempty![$($layer),+],
+            mounts: Default::default(),
+            network: Default::default(),
+            root_overlay: Default::default(),
+            working_directory: Default::default(),
+            user: Default::default(),
+            group: Default::default(),
+            timeout: Default::default(),
+            estimated_duration: Default::default(),
+            allocate_tty: Default::default(),
+            priority: Default::default(),
+        }
+    };
+    (@expand [$($required:tt)+] [] -> [$($fields:tt)+]) => {
+        $crate::JobSpec {
+            $($fields)+,
+            .. $crate::job_spec!(@expand [$($required)+] [] -> [])
+        }
+    };
+    (@expand [$($required:tt)+] [arguments: [$($($argument:expr),+ $(,)?)?] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? arguments: vec![$($($argument.into()),+)?]
+        ])
+    };
+    (@expand [$($required:tt)+] [environment: [$($($var:expr),+ $(,)?)?] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? environment: vec![$($($var.into()),+)?]
+        ])
+    };
+    (@expand [$($required:tt)+] [mounts: [$($mount:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? mounts: vec![$($mount)*]])
+    };
+    (@expand [$($required:tt)+] [network: $network:ident $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? network: $crate::JobNetwork::$network])
+    };
+    (@expand [$($required:tt)+] [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? root_overlay: $root_overlay])
+    };
+    (@expand [$($required:tt)+] [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? working_directory: Some($dir.into())])
+    };
+    (@expand [$($required:tt)+] [user: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? user: Some($crate::UserId::new($user))])
+    };
+    (@expand [$($required:tt)+] [group: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? group: Some($crate::GroupId::new($user))])
+    };
+    (@expand [$($required:tt)+] [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? timeout: $crate::Timeout::new($timeout)])
+    };
+    (@expand [$($required:tt)+] [estimated_duration: $duration:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? estimated_duration: Some($duration)])
+    };
+    (@expand [$($required:tt)+] [allocate_tty: $tty:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? allocate_tty: Some($tty)])
+    };
+    (@expand [$($required:tt)+] [priority: $priority:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? priority: $priority])
+    };
+    ($program:expr, [$($layer:expr),+ $(,)?] $(,$($field_in:tt)*)?) => {
+        $crate::job_spec!(@expand [$program, [$($layer),+]] [$($($field_in)*)?] -> [])
+    };
+}
+
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a
 /// signal.
 #[pocket_definition(export)]
