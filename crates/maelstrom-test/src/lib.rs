@@ -62,13 +62,6 @@ macro_rules! spec {
             maelstrom_base::nonempty![maelstrom_base::tar_digest!($n)]
         ).arguments(["arg_1"])
     };
-    [$n:literal, [$($digest:expr),*]] => {
-        {
-            let mut spec = spec!($n);
-            spec.layers = maelstrom_base::nonempty![$($digest),*];
-            spec
-        }
-    }
 }
 
 #[macro_export]

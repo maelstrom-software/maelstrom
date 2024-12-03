@@ -771,7 +771,8 @@ mod tests {
     use super::{Message::*, *};
     use anyhow::anyhow;
     use maelstrom_base::{
-        self as base, digest, tar_digest, JobEffects, JobOutputResult, JobTerminationStatus,
+        self as base, digest, job_spec, tar_digest, JobEffects, JobOutputResult,
+        JobTerminationStatus,
     };
     use maelstrom_test::*;
     use maelstrom_util::cache::fs::test::Fs as TestFs;
@@ -1070,7 +1071,7 @@ mod tests {
             (bottom_fs_layer!(42), path_buf!("/z/bl/42")),
             (upper_fs_layer!(42, 41), path_buf!("/z/ul/42/41")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1, [tar_digest!(41), tar_digest!(42)]))) => {
+        Broker(EnqueueJob(jid!(1), job_spec!("1", [tar_digest!(41), tar_digest!(42)]))) => {
             CacheGetArtifact(blob!(41), jid!(1)),
             CachePath(blob!(41)),
             CacheGetArtifact(bottom_fs_layer!(41), jid!(1)),
@@ -1081,7 +1082,7 @@ mod tests {
             CachePath(bottom_fs_layer!(42)),
             CacheGetArtifact(upper_fs_layer!(42, 41), jid!(1)),
             CachePath(upper_fs_layer!(42, 41)),
-            StartJob(jid!(1), spec!(1, [tar_digest!(41), tar_digest!(42)]), path_buf!("/z/ul/42/41")),
+            StartJob(jid!(1), job_spec!("1", [tar_digest!(41), tar_digest!(42)]), path_buf!("/z/ul/42/41")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
         Broker(CancelJob(jid!(1))) => {
@@ -1101,7 +1102,7 @@ mod tests {
             (blob!(42), path_buf!("/z/b/42")),
             (bottom_fs_layer!(41), path_buf!("/z/bl/41")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1, [tar_digest!(41), tar_digest!(42), tar_digest!(43)]))) => {
+        Broker(EnqueueJob(jid!(1), job_spec!("1", [tar_digest!(41), tar_digest!(42), tar_digest!(43)]))) => {
             CacheGetArtifact(blob!(41), jid!(1)),
             CachePath(blob!(41)),
             CacheGetArtifact(bottom_fs_layer!(41), jid!(1)),
@@ -1357,7 +1358,7 @@ mod tests {
             (blob!(41), path_buf!("/z/b/41")),
             (bottom_fs_layer!(41), path_buf!("/z/bl/41")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1, [tar_digest!(41), tar_digest!(42)]))) => {
+        Broker(EnqueueJob(jid!(1), job_spec!("1", [tar_digest!(41), tar_digest!(42)]))) => {
             CacheGetArtifact(blob!(41), jid!(1)),
             CachePath(blob!(41)),
             CacheGetArtifact(blob!(42), jid!(1)),
@@ -1390,7 +1391,7 @@ mod tests {
             (bottom_fs_layer!(43), path_buf!("/z/bl/43")),
             (upper_fs_layer!(42, 41), path_buf!("/z/ul/42/41")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1, [tar_digest!(41), tar_digest!(42)]))) => {
+        Broker(EnqueueJob(jid!(1), job_spec!("1", [tar_digest!(41), tar_digest!(42)]))) => {
             CacheGetArtifact(blob!(41), jid!(1)),
             CachePath(blob!(41)),
             CacheGetArtifact(bottom_fs_layer!(41), jid!(1)),
@@ -1401,10 +1402,10 @@ mod tests {
             CachePath(bottom_fs_layer!(42)),
             CacheGetArtifact(upper_fs_layer!(42, 41), jid!(1)),
             CachePath(upper_fs_layer!(42, 41)),
-            StartJob(jid!(1), spec!(1, [tar_digest!(41), tar_digest!(42)]), path_buf!("/z/ul/42/41")),
+            StartJob(jid!(1), job_spec!("1", [tar_digest!(41), tar_digest!(42)]), path_buf!("/z/ul/42/41")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
-        Broker(EnqueueJob(jid!(2), spec!(2, [tar_digest!(43)]))) => {
+        Broker(EnqueueJob(jid!(2), job_spec!("2", [tar_digest!(43)]))) => {
             CacheGetArtifact(blob!(43), jid!(2)),
             CachePath(blob!(43)),
             CacheGetArtifact(bottom_fs_layer!(43), jid!(2)),
@@ -1420,7 +1421,7 @@ mod tests {
             CacheDecrementRefCount(upper_fs_layer!(42, 41)),
             CacheDecrementRefCount(blob!(41)),
             CacheDecrementRefCount(blob!(42)),
-            StartJob(jid!(2), spec!(2, [tar_digest!(43)]), path_buf!("/z/bl/43")),
+            StartJob(jid!(2), job_spec!("2", [tar_digest!(43)]), path_buf!("/z/bl/43")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(2), JobWorkerStatus::Executing)),
         };
     }
@@ -1470,7 +1471,7 @@ mod tests {
             StartJob(jid!(2), spec!(2), path_buf!("/z/bl/2")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(2), JobWorkerStatus::Executing)),
         };
-        Broker(EnqueueJob(jid!(3), spec!(3, [tar_digest!(41), tar_digest!(42), tar_digest!(41)]))) => {
+        Broker(EnqueueJob(jid!(3), job_spec!("3", [tar_digest!(41), tar_digest!(42), tar_digest!(41)]))) => {
             CacheGetArtifact(blob!(41), jid!(3)),
             CachePath(blob!(41)),
             CacheGetArtifact(bottom_fs_layer!(41), jid!(3)),
@@ -1789,7 +1790,7 @@ mod tests {
             (bottom_fs_layer!(42), path_buf!("/z/bl/41")),
             (upper_fs_layer!(42, 41), path_buf!("/z/ul/42/41")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1, [tar_digest!(41), tar_digest!(42)]))) => {
+        Broker(EnqueueJob(jid!(1), job_spec!("1", [tar_digest!(41), tar_digest!(42)]))) => {
             CacheGetArtifact(blob!(41), jid!(1)),
             CachePath(blob!(41)),
             CacheGetArtifact(bottom_fs_layer!(41), jid!(1)),
@@ -1800,7 +1801,7 @@ mod tests {
             CachePath(bottom_fs_layer!(42)),
             CacheGetArtifact(upper_fs_layer!(42, 41), jid!(1)),
             CachePath(upper_fs_layer!(42, 41)),
-            StartJob(jid!(1), spec!(1, [tar_digest!(41), tar_digest!(42)]), path_buf!("/z/ul/42/41")),
+            StartJob(jid!(1), job_spec!("1", [tar_digest!(41), tar_digest!(42)]), path_buf!("/z/ul/42/41")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
         Broker(CancelJob(jid!(1))) => {
@@ -2028,7 +2029,7 @@ mod tests {
             (blob!(41), path_buf!("/a")),
             (blob!(43), path_buf!("/c")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1, [tar_digest!(41), tar_digest!(42), tar_digest!(43), tar_digest!(44)]))) => {
+        Broker(EnqueueJob(jid!(1), job_spec!("1", [tar_digest!(41), tar_digest!(42), tar_digest!(43), tar_digest!(44)]))) => {
             CacheGetArtifact(blob!(41), jid!(1)),
             CacheGetArtifact(blob!(42), jid!(1)),
             CacheGetArtifact(blob!(43), jid!(1)),
@@ -2091,14 +2092,14 @@ mod tests {
             (bottom_fs_layer!(1), path_buf!("/z/bl/1")),
             (upper_fs_layer!(1, 1), path_buf!("/z/ul/1/1")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1, [tar_digest!(1), tar_digest!(1)]))) => {
+        Broker(EnqueueJob(jid!(1), job_spec!("1", [tar_digest!(1), tar_digest!(1)]))) => {
             CacheGetArtifact(blob!(1), jid!(1)),
             CachePath(blob!(1)),
             CacheGetArtifact(bottom_fs_layer!(1), jid!(1)),
             CachePath(bottom_fs_layer!(1)),
             CacheGetArtifact(upper_fs_layer!(1, 1), jid!(1)),
             CachePath(upper_fs_layer!(1, 1)),
-            StartJob(jid!(1), spec!(1, [tar_digest!(1), tar_digest!(1)]), path_buf!("/z/ul/1/1")),
+            StartJob(jid!(1), job_spec!("1", [tar_digest!(1), tar_digest!(1)]), path_buf!("/z/ul/1/1")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
         Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
