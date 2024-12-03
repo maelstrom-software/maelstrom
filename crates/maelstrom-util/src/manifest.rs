@@ -12,9 +12,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
-use tokio::io::{
-    AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _,
-};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 pub async fn decode_async<T: DeserializeOwned>(
     mut stream: impl AsyncRead + Unpin,
@@ -60,35 +58,38 @@ pub fn encode<T: Serialize>(mut stream: impl io::Write, t: &T) -> io::Result<()>
     Ok(())
 }
 
-pub struct ManifestReader<ReadT> {
-    r: ReadT,
-    stream_end: u64,
-}
+pub struct ManifestReader<ReadT>(ReadT);
 
-impl<ReadT: io::Read + io::Seek> ManifestReader<ReadT> {
+impl<ReadT: io::Read> ManifestReader<ReadT> {
     pub fn new(mut r: ReadT) -> io::Result<Self> {
-        let stream_start = r.stream_position()?;
-        r.seek(io::SeekFrom::End(0))?;
-        let stream_end = r.stream_position()?;
-        r.seek(io::SeekFrom::Start(stream_start))?;
-
         let version: ManifestVersion = decode(&mut r)?;
         if version != ManifestVersion::default() {
             return Err(io::Error::new(io::ErrorKind::Other, "bad manifest version"));
         }
 
-        Ok(Self { r, stream_end })
+        Ok(Self(r))
     }
 
     fn next_inner(&mut self) -> io::Result<Option<ManifestEntry>> {
-        if self.r.stream_position()? == self.stream_end {
-            return Ok(None);
+        let mut counter = countio::Counter::new(&mut self.0);
+        match decode(&mut counter) {
+            Ok(entry) => Ok(Some(entry)),
+            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+                if counter.reader_bytes() > 0 {
+                    Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "truncated manifest entry",
+                    ))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(err) => Err(err),
         }
-        Ok(Some(decode(&mut self.r)?))
     }
 }
 
-impl<ReadT: io::Read + io::Seek> Iterator for ManifestReader<ReadT> {
+impl<ReadT: io::Read> Iterator for ManifestReader<ReadT> {
     type Item = io::Result<ManifestEntry>;
 
     fn next(&mut self) -> Option<io::Result<ManifestEntry>> {
@@ -96,22 +97,10 @@ impl<ReadT: io::Read + io::Seek> Iterator for ManifestReader<ReadT> {
     }
 }
 
-pub struct AsyncManifestReader<ReadT>(tokio::io::Take<ReadT>);
-
-impl<ReadT: AsyncRead + AsyncSeek + Unpin> AsyncManifestReader<ReadT> {
-    pub async fn new(mut r: ReadT) -> io::Result<Self> {
-        let stream_start = r.stream_position().await?;
-        r.seek(io::SeekFrom::End(0)).await?;
-        let stream_end = r.stream_position().await?;
-        r.seek(io::SeekFrom::Start(stream_start)).await?;
-
-        Self::new_with_size(r, stream_end).await
-    }
-}
+pub struct AsyncManifestReader<ReadT>(ReadT);
 
 impl<ReadT: AsyncRead + Unpin> AsyncManifestReader<ReadT> {
-    pub async fn new_with_size(r: ReadT, size: u64) -> io::Result<Self> {
-        let mut r = r.take(size);
+    pub async fn new(mut r: ReadT) -> io::Result<Self> {
         let version: ManifestVersion = decode_async(&mut r).await?;
         if version != ManifestVersion::default() {
             return Err(io::Error::new(io::ErrorKind::Other, "bad manifest version"));
@@ -121,10 +110,21 @@ impl<ReadT: AsyncRead + Unpin> AsyncManifestReader<ReadT> {
     }
 
     pub async fn next(&mut self) -> io::Result<Option<ManifestEntry>> {
-        if self.0.limit() == 0 {
-            return Ok(None);
+        let mut counter = countio::Counter::new(&mut self.0);
+        match decode_async(&mut counter).await {
+            Ok(entry) => Ok(Some(entry)),
+            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+                if counter.reader_bytes() > 0 {
+                    Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "truncated manifest entry",
+                    ))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(err) => Err(err),
         }
-        Ok(Some(decode_async(&mut self.0).await?))
     }
 }
 
@@ -277,10 +277,14 @@ impl<'cb, WriteT: AsyncWrite + Unpin> ManifestBuilder<'cb, WriteT> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::ErrorReader;
+    use maelstrom_base::digest;
+    use maelstrom_test::utf8_path_buf;
     use std::future::Future;
     use std::path::PathBuf;
     use std::pin::Pin;
     use tempfile::{tempdir, TempDir};
+    use tokio::io::AsyncReadExt;
 
     struct Fixture {
         fs: Fs,
@@ -328,7 +332,7 @@ mod tests {
         let mut fixture = Fixture::new();
         build(&mut fixture, &mut builder).await;
 
-        let actual_entries: Vec<_> = ManifestReader::new(io::Cursor::new(buffer))
+        let actual_entries: Vec<_> = ManifestReader::new(&buffer[..])
             .unwrap()
             .map(|e| e.unwrap())
             .collect();
@@ -447,5 +451,100 @@ mod tests {
             ManifestEntryData::File(ManifestFileData::Digest(42u64.into())),
         )
         .await;
+    }
+
+    fn test_entries() -> [ManifestEntry; 2] {
+        [
+            ManifestEntry {
+                path: utf8_path_buf!["foo"],
+                metadata: ManifestEntryMetadata {
+                    size: 12,
+                    mode: Mode(0o774),
+                    mtime: UnixTimestamp(12345),
+                },
+                data: ManifestEntryData::File(ManifestFileData::Digest(digest![42])),
+            },
+            ManifestEntry {
+                path: utf8_path_buf!["bar"],
+                metadata: ManifestEntryMetadata {
+                    size: 77,
+                    mode: Mode(0o663),
+                    mtime: UnixTimestamp(12346),
+                },
+                data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
+            },
+        ]
+    }
+
+    #[test]
+    fn manifest_write_read() {
+        let mut buffer = vec![];
+        let mut writer = ManifestWriter::new(&mut buffer).unwrap();
+        let entries = test_entries();
+        writer.write_entries(entries.iter()).unwrap();
+
+        let mut reader = ManifestReader::new(&buffer[..]).unwrap();
+        assert_eq!(reader.next().transpose().unwrap(), Some(entries[0].clone()));
+        assert_eq!(reader.next().transpose().unwrap(), Some(entries[1].clone()));
+        assert_eq!(reader.next().transpose().unwrap(), None);
+    }
+
+    #[test]
+    fn manifest_read_truncated() {
+        let mut buffer = vec![];
+        let mut writer = ManifestWriter::new(&mut buffer).unwrap();
+        let entries = test_entries();
+        writer.write_entries(entries.iter()).unwrap();
+
+        let mut reader = ManifestReader::new(&buffer[..(buffer.len() - 3)]).unwrap();
+        assert_eq!(reader.next().transpose().unwrap(), Some(entries[0].clone()));
+        reader.next().transpose().unwrap_err();
+    }
+
+    #[test]
+    fn manifest_read_forwards_error() {
+        let mut buffer = vec![];
+        let _ = ManifestWriter::new(&mut buffer).unwrap();
+
+        let mut reader = ManifestReader::new(io::Read::chain(&buffer[..], ErrorReader)).unwrap();
+        reader.next().transpose().unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn async_manifest_write_read() {
+        let mut buffer = vec![];
+        let mut writer = AsyncManifestWriter::new(&mut buffer).await.unwrap();
+        let entries = test_entries();
+        writer.write_entries(entries.iter()).await.unwrap();
+
+        let mut reader = AsyncManifestReader::new(&buffer[..]).await.unwrap();
+        assert_eq!(reader.next().await.unwrap(), Some(entries[0].clone()));
+        assert_eq!(reader.next().await.unwrap(), Some(entries[1].clone()));
+        assert_eq!(reader.next().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn async_manifest_read_truncated() {
+        let mut buffer = vec![];
+        let mut writer = AsyncManifestWriter::new(&mut buffer).await.unwrap();
+        let entries = test_entries();
+        writer.write_entries(entries.iter()).await.unwrap();
+
+        let mut reader = AsyncManifestReader::new(&buffer[..(buffer.len() - 3)])
+            .await
+            .unwrap();
+        assert_eq!(reader.next().await.unwrap(), Some(entries[0].clone()));
+        reader.next().await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn async_manifest_read_forwards_error() {
+        let mut buffer = vec![];
+        let _ = AsyncManifestWriter::new(&mut buffer).await.unwrap();
+
+        let mut reader = AsyncManifestReader::new(AsyncReadExt::chain(&buffer[..], ErrorReader))
+            .await
+            .unwrap();
+        reader.next().await.unwrap_err();
     }
 }

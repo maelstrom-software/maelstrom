@@ -79,10 +79,9 @@ struct CacheManifestReader<ArtifactStreamT, TempFileT> {
 async fn read_manifest<ArtifactStreamT: AsyncRead + Unpin, TempFileT>(
     sender: SchedulerSender<TempFileT>,
     stream: ArtifactStreamT,
-    size: u64,
     job_id: JobId,
 ) -> anyhow::Result<()> {
-    let mut reader = AsyncManifestReader::new_with_size(stream, size).await?;
+    let mut reader = AsyncManifestReader::new(stream).await?;
     while let Some(entry) = reader.next().await? {
         if let ManifestEntryData::File(ManifestFileData::Digest(digest)) = entry.data {
             sender.send(Message::GotManifestEntry(digest, job_id)).ok();
@@ -111,8 +110,7 @@ where
         while let Some(req) = self.receiver.recv().await {
             let sender = self.sender.clone();
             self.tasks.spawn(async move {
-                let result =
-                    read_manifest(sender.clone(), req.manifest_stream, req.size, req.job_id).await;
+                let result = read_manifest(sender.clone(), req.manifest_stream, req.job_id).await;
                 sender
                     .send(Message::FinishedReadingManifest(
                         req.digest, req.job_id, result,
