@@ -183,6 +183,59 @@ pub struct ContainerSpec {
     pub group: Option<GroupId>,
 }
 
+#[macro_export]
+macro_rules! container_spec {
+    (@expand [] -> []) => {
+        $crate::spec::ContainerSpec {
+            image: Default::default(),
+            layers: Default::default(),
+            root_overlay: Default::default(),
+            environment: Default::default(),
+            working_directory: Default::default(),
+            mounts: Default::default(),
+            network: Default::default(),
+            user: Default::default(),
+            group: Default::default(),
+        }
+    };
+    (@expand [] -> [$($fields:tt)+]) => {
+        $crate::spec::ContainerSpec {
+            $($fields)+,
+            .. $crate::container_spec!(@expand [] -> [])
+        }
+    };
+    (@expand [image: $image:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? image: Some($image)])
+    };
+    (@expand [layers: [$($layer:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: vec![$($layer)*]])
+    };
+    (@expand [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? root_overlay: $root_overlay])
+    };
+    (@expand [environment: [$($environment:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: vec![$($environment)*]])
+    };
+    (@expand [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? working_directory: Some($dir.into())])
+    };
+    (@expand [mounts: [$($mount:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? mounts: vec![$($mount)*]])
+    };
+    (@expand [network: $network:ident $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? network: ::maelstrom_base::JobNetwork::$network])
+    };
+    (@expand [user: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? user: Some(::maelstrom_base::UserId::new($user))])
+    };
+    (@expand [group: $group:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? group: Some(::maelstrom_base::GroupId::new($group))])
+    };
+    ($($field_in:tt)*) => {
+        $crate::container_spec!(@expand [$($field_in)*] -> [])
+    };
+}
+
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq)]
 #[proto(proto_buf_type = "proto::JobSpec")]
 pub struct JobSpec {

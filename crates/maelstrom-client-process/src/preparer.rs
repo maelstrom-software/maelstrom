@@ -514,7 +514,7 @@ mod tests {
     use super::{Message::*, *};
     use maelstrom_base::{job_spec, tar_digest, WindowSize};
     use maelstrom_client::spec;
-    use maelstrom_client_base::spec::ImageConfig;
+    use maelstrom_client_base::{container_spec, spec::ImageConfig};
     use maelstrom_test::{millis, string, tar_layer};
     use std::{cell::RefCell, ffi::OsStr, rc::Rc};
     use TestMessage::*;
@@ -622,58 +622,6 @@ mod tests {
                 }
             );
         }
-    }
-
-    macro_rules! container_spec {
-        (@expand [] -> []) => {
-            ContainerSpec {
-                image: Default::default(),
-                layers: Default::default(),
-                root_overlay: Default::default(),
-                environment: Default::default(),
-                working_directory: Default::default(),
-                mounts: Default::default(),
-                network: Default::default(),
-                user: Default::default(),
-                group: Default::default(),
-            }
-        };
-        (@expand [] -> [$($fields:tt)+]) => {
-            ContainerSpec {
-                $($fields)+,
-                .. container_spec!(@expand [] -> [])
-            }
-        };
-        (@expand [image: $image:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? image: Some($image)])
-        };
-        (@expand [layers: [$($layer:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: vec![$($layer)*]])
-        };
-        (@expand [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? root_overlay: $root_overlay])
-        };
-        (@expand [environment: [$($environment:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: vec![$($environment)*]])
-        };
-        (@expand [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? working_directory: Some($dir.into())])
-        };
-        (@expand [mounts: [$($mount:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? mounts: vec![$($mount)*]])
-        };
-        (@expand [network: $network:ident $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? network: JobNetwork::$network])
-        };
-        (@expand [user: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? user: Some(UserId::new($user))])
-        };
-        (@expand [group: $group:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? group: Some(GroupId::new($group))])
-        };
-        ($($field_in:tt)*) => {
-            container_spec!(@expand [$($field_in)*] -> [])
-        };
     }
 
     macro_rules! client_job_spec {
