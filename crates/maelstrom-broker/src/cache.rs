@@ -1,5 +1,6 @@
 pub mod github;
 pub mod local;
+mod remote;
 
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::GetArtifact;
