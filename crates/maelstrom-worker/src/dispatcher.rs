@@ -1159,14 +1159,14 @@ mod tests {
             StartJob(jid!(2), spec!(2), path_buf!("/z/bl/2")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(2), JobWorkerStatus::Executing)),
         };
-        Broker(EnqueueJob(jid!(3), spec!(3).estimated_duration(Some(millis!(10))))) => {
+        Broker(EnqueueJob(jid!(3), spec!(3, estimated_duration: millis!(10)))) => {
             CacheGetArtifact(blob!(3), jid!(3)),
             CachePath(blob!(3)),
             CacheGetArtifact(bottom_fs_layer!(3), jid!(3)),
             CachePath(bottom_fs_layer!(3)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(3), JobWorkerStatus::WaitingToExecute)),
         };
-        Broker(EnqueueJob(jid!(4), spec!(4).estimated_duration(Some(millis!(100))))) => {
+        Broker(EnqueueJob(jid!(4), spec!(4, estimated_duration: millis!(100)))) => {
             CacheGetArtifact(blob!(4), jid!(4)),
             CachePath(blob!(4)),
             CacheGetArtifact(bottom_fs_layer!(4), jid!(4)),
@@ -1197,7 +1197,7 @@ mod tests {
         Message::JobCompleted(jid!(2), Ok(completed!(1))) => {
             CacheDecrementRefCount(blob!(2)),
             CacheDecrementRefCount(bottom_fs_layer!(2)),
-            StartJob(jid!(4), spec!(4).estimated_duration(Some(millis!(100))), path_buf!("/z/bl/4")),
+            StartJob(jid!(4), spec!(4, estimated_duration: millis!(100)), path_buf!("/z/bl/4")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(4), JobWorkerStatus::Executing)),
         };
 
@@ -1207,7 +1207,7 @@ mod tests {
         Message::JobCompleted(jid!(5), Ok(completed!(1))) => {
             CacheDecrementRefCount(blob!(5)),
             CacheDecrementRefCount(bottom_fs_layer!(5)),
-            StartJob(jid!(3), spec!(3).estimated_duration(Some(millis!(10))), path_buf!("/z/bl/3")),
+            StartJob(jid!(3), spec!(3, estimated_duration: millis!(10)), path_buf!("/z/bl/3")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(3), JobWorkerStatus::Executing)),
         };
     }
@@ -1261,35 +1261,35 @@ mod tests {
             StartJob(jid!(2), spec!(2), path_buf!("/z/bl/2")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(2), JobWorkerStatus::Executing)),
         };
-        Broker(EnqueueJob(jid!(3), spec!(3).estimated_duration(Some(millis!(30))))) => {
+        Broker(EnqueueJob(jid!(3), spec!(3, estimated_duration: millis!(30)))) => {
             CacheGetArtifact(blob!(3), jid!(3)),
             CachePath(blob!(3)),
             CacheGetArtifact(bottom_fs_layer!(3), jid!(3)),
             CachePath(bottom_fs_layer!(3)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(3), JobWorkerStatus::WaitingToExecute)),
         };
-        Broker(EnqueueJob(jid!(4), spec!(4).estimated_duration(Some(millis!(40))))) => {
+        Broker(EnqueueJob(jid!(4), spec!(4, estimated_duration: millis!(40)))) => {
             CacheGetArtifact(blob!(4), jid!(4)),
             CachePath(blob!(4)),
             CacheGetArtifact(bottom_fs_layer!(4), jid!(4)),
             CachePath(bottom_fs_layer!(4)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(4), JobWorkerStatus::WaitingToExecute)),
         };
-        Broker(EnqueueJob(jid!(5), spec!(5).priority(1).estimated_duration(Some(millis!(10))))) => {
+        Broker(EnqueueJob(jid!(5), spec!(5, priority: 1, estimated_duration: millis!(10)))) => {
             CacheGetArtifact(blob!(5), jid!(5)),
             CachePath(blob!(5)),
             CacheGetArtifact(bottom_fs_layer!(5), jid!(5)),
             CachePath(bottom_fs_layer!(5)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(5), JobWorkerStatus::WaitingToExecute)),
         };
-        Broker(EnqueueJob(jid!(6), spec!(6).priority(1).estimated_duration(Some(millis!(20))))) => {
+        Broker(EnqueueJob(jid!(6), spec!(6, priority: 1, estimated_duration: millis!(20)))) => {
             CacheGetArtifact(blob!(6), jid!(6)),
             CachePath(blob!(6)),
             CacheGetArtifact(bottom_fs_layer!(6), jid!(6)),
             CachePath(bottom_fs_layer!(6)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(6), JobWorkerStatus::WaitingToExecute)),
         };
-        Broker(EnqueueJob(jid!(7), spec!(7).priority(-1).estimated_duration(Some(millis!(100))))) => {
+        Broker(EnqueueJob(jid!(7), spec!(7, priority: -1, estimated_duration: millis!(100)))) => {
             CacheGetArtifact(blob!(7), jid!(7)),
             CachePath(blob!(7)),
             CacheGetArtifact(bottom_fs_layer!(7), jid!(7)),
@@ -1303,7 +1303,7 @@ mod tests {
         Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
             CacheDecrementRefCount(blob!(1)),
             CacheDecrementRefCount(bottom_fs_layer!(1)),
-            StartJob(jid!(6), spec!(6).priority(1).estimated_duration(Some(millis!(20))), path_buf!("/z/bl/6")),
+            StartJob(jid!(6), spec!(6, priority: 1, estimated_duration: millis!(20)), path_buf!("/z/bl/6")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(6), JobWorkerStatus::Executing)),
         };
 
@@ -1313,7 +1313,7 @@ mod tests {
         Message::JobCompleted(jid!(2), Ok(completed!(1))) => {
             CacheDecrementRefCount(blob!(2)),
             CacheDecrementRefCount(bottom_fs_layer!(2)),
-            StartJob(jid!(5), spec!(5).priority(1).estimated_duration(Some(millis!(10))), path_buf!("/z/bl/5")),
+            StartJob(jid!(5), spec!(5, priority: 1, estimated_duration: millis!(10)), path_buf!("/z/bl/5")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(5), JobWorkerStatus::Executing)),
         };
 
@@ -1323,7 +1323,7 @@ mod tests {
         Message::JobCompleted(jid!(6), Ok(completed!(1))) => {
             CacheDecrementRefCount(blob!(6)),
             CacheDecrementRefCount(bottom_fs_layer!(6)),
-            StartJob(jid!(4), spec!(4).estimated_duration(Some(millis!(40))), path_buf!("/z/bl/4")),
+            StartJob(jid!(4), spec!(4, estimated_duration: millis!(40)), path_buf!("/z/bl/4")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(4), JobWorkerStatus::Executing)),
         };
 
@@ -1333,7 +1333,7 @@ mod tests {
         Message::JobCompleted(jid!(5), Ok(completed!(1))) => {
             CacheDecrementRefCount(blob!(5)),
             CacheDecrementRefCount(bottom_fs_layer!(5)),
-            StartJob(jid!(3), spec!(3).estimated_duration(Some(millis!(30))), path_buf!("/z/bl/3")),
+            StartJob(jid!(3), spec!(3, estimated_duration: millis!(30)), path_buf!("/z/bl/3")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(3), JobWorkerStatus::Executing)),
         };
 
@@ -1343,7 +1343,7 @@ mod tests {
         Message::JobCompleted(jid!(4), Ok(completed!(1))) => {
             CacheDecrementRefCount(blob!(4)),
             CacheDecrementRefCount(bottom_fs_layer!(4)),
-            StartJob(jid!(7), spec!(7).priority(-1).estimated_duration(Some(millis!(100))), path_buf!("/z/bl/7")),
+            StartJob(jid!(7), spec!(7, priority: -1, estimated_duration: millis!(100)), path_buf!("/z/bl/7")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(7), JobWorkerStatus::Executing)),
         };
     }
@@ -1552,12 +1552,12 @@ mod tests {
             (bottom_fs_layer!(1), path_buf!("/z/bl/1")),
             (bottom_fs_layer!(2), path_buf!("/z/bl/2")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1).timeout(timeout!(1)))) => {
+        Broker(EnqueueJob(jid!(1), spec!(1, timeout: 1))) => {
             CacheGetArtifact(blob!(1), jid!(1)),
             CachePath(blob!(1)),
             CacheGetArtifact(bottom_fs_layer!(1), jid!(1)),
             CachePath(bottom_fs_layer!(1)),
-            StartJob(jid!(1), spec!(1).timeout(timeout!(1)), path_buf!("/z/bl/1")),
+            StartJob(jid!(1), spec!(1, timeout: 1), path_buf!("/z/bl/1")),
             StartTimer(jid!(1), Duration::from_secs(1)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
@@ -1654,13 +1654,13 @@ mod tests {
             ],
         );
 
-        fixture.receive_message(Broker(EnqueueJob(jid!(1), spec!(1).timeout(timeout!(1)))));
+        fixture.receive_message(Broker(EnqueueJob(jid!(1), spec!(1, timeout: 1))));
         fixture.expect_messages_in_any_order(vec![
             CacheGetArtifact(blob!(1), jid!(1)),
             CachePath(blob!(1)),
             CacheGetArtifact(bottom_fs_layer!(1), jid!(1)),
             CachePath(bottom_fs_layer!(1)),
-            StartJob(jid!(1), spec!(1).timeout(timeout!(1)), path_buf!("/z/bl/1")),
+            StartJob(jid!(1), spec!(1, timeout: 1), path_buf!("/z/bl/1")),
             StartTimer(jid!(1), Duration::from_secs(1)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(
                 jid!(1),
@@ -1748,7 +1748,7 @@ mod tests {
             CachePath(bottom_fs_layer!(2)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(2), JobWorkerStatus::WaitingToExecute)),
         };
-        Broker(EnqueueJob(jid!(3), spec!(3).estimated_duration(Some(millis!(10))))) => {
+        Broker(EnqueueJob(jid!(3), spec!(3, estimated_duration: millis!(10)))) => {
             CacheGetArtifact(blob!(3), jid!(3)),
             CachePath(blob!(3)),
             CacheGetArtifact(bottom_fs_layer!(3), jid!(3)),
@@ -1770,7 +1770,7 @@ mod tests {
             CacheDecrementRefCount(blob!(2)),
             CacheDecrementRefCount(bottom_fs_layer!(2)),
             JobHandleDropped(jid!(2)),
-            StartJob(jid!(3), spec!(3).estimated_duration(Some(millis!(10))), path_buf!("/z/bl/3")),
+            StartJob(jid!(3), spec!(3, estimated_duration: millis!(10)), path_buf!("/z/bl/3")),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(3), JobWorkerStatus::Executing)),
         };
     }
@@ -1832,12 +1832,12 @@ mod tests {
             (blob!(1), path_buf!("/z/b/1")),
             (bottom_fs_layer!(1), path_buf!("/z/bl/1")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1).timeout(timeout!(33)))) => {
+        Broker(EnqueueJob(jid!(1), spec!(1, timeout: 33))) => {
             CacheGetArtifact(blob!(1), jid!(1)),
             CachePath(blob!(1)),
             CacheGetArtifact(bottom_fs_layer!(1), jid!(1)),
             CachePath(bottom_fs_layer!(1)),
-            StartJob(jid!(1), spec!(1).timeout(timeout!(33)), path_buf!("/z/bl/1")),
+            StartJob(jid!(1), spec!(1, timeout: 33), path_buf!("/z/bl/1")),
             StartTimer(jid!(1), Duration::from_secs(33)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
@@ -1859,12 +1859,12 @@ mod tests {
             (blob!(1), path_buf!("/z/b/1")),
             (bottom_fs_layer!(1), path_buf!("/z/bl/1")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1).timeout(timeout!(33)))) => {
+        Broker(EnqueueJob(jid!(1), spec!(1, timeout: 33))) => {
             CacheGetArtifact(blob!(1), jid!(1)),
             CachePath(blob!(1)),
             CacheGetArtifact(bottom_fs_layer!(1), jid!(1)),
             CachePath(bottom_fs_layer!(1)),
-            StartJob(jid!(1), spec!(1).timeout(timeout!(33)), path_buf!("/z/bl/1")),
+            StartJob(jid!(1), spec!(1, timeout: 33), path_buf!("/z/bl/1")),
             StartTimer(jid!(1), Duration::from_secs(33)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
@@ -1887,12 +1887,12 @@ mod tests {
             (bottom_fs_layer!(1), path_buf!("/z/bl/1")),
             (bottom_fs_layer!(2), path_buf!("/z/bl/2")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1).timeout(timeout!(1)))) => {
+        Broker(EnqueueJob(jid!(1), spec!(1, timeout: 1))) => {
             CacheGetArtifact(blob!(1), jid!(1)),
             CachePath(blob!(1)),
             CacheGetArtifact(bottom_fs_layer!(1), jid!(1)),
             CachePath(bottom_fs_layer!(1)),
-            StartJob(jid!(1), spec!(1).timeout(timeout!(1)), path_buf!("/z/bl/1")),
+            StartJob(jid!(1), spec!(1, timeout: 1), path_buf!("/z/bl/1")),
             StartTimer(jid!(1), Duration::from_secs(1)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
@@ -1940,12 +1940,12 @@ mod tests {
             (bottom_fs_layer!(1), path_buf!("/z/bl/1")),
             (bottom_fs_layer!(2), path_buf!("/z/bl/2")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1).timeout(timeout!(1)))) => {
+        Broker(EnqueueJob(jid!(1), spec!(1, timeout: 1))) => {
             CacheGetArtifact(blob!(1), jid!(1)),
             CachePath(blob!(1)),
             CacheGetArtifact(bottom_fs_layer!(1), jid!(1)),
             CachePath(bottom_fs_layer!(1)),
-            StartJob(jid!(1), spec!(1).timeout(timeout!(1)), path_buf!("/z/bl/1")),
+            StartJob(jid!(1), spec!(1, timeout: 1), path_buf!("/z/bl/1")),
             StartTimer(jid!(1), Duration::from_secs(1)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
@@ -1981,12 +1981,12 @@ mod tests {
             (bottom_fs_layer!(1), path_buf!("/z/bl/1")),
             (bottom_fs_layer!(2), path_buf!("/z/bl/2")),
         ]),
-        Broker(EnqueueJob(jid!(1), spec!(1).timeout(timeout!(1)))) => {
+        Broker(EnqueueJob(jid!(1), spec!(1, timeout: 1))) => {
             CacheGetArtifact(blob!(1), jid!(1)),
             CachePath(blob!(1)),
             CacheGetArtifact(bottom_fs_layer!(1), jid!(1)),
             CachePath(bottom_fs_layer!(1)),
-            StartJob(jid!(1), spec!(1).timeout(timeout!(1)), path_buf!("/z/bl/1")),
+            StartJob(jid!(1), spec!(1, timeout: 1), path_buf!("/z/bl/1")),
             StartTimer(jid!(1), Duration::from_secs(1)),
             SendMessageToBroker(WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing)),
         };
