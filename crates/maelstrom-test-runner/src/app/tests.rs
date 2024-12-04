@@ -428,7 +428,7 @@ fn test_spec(bin: &str, name: &str) -> JobSpec {
 
 fn default_container() -> ContainerSpec {
     ContainerSpec {
-        image: None,
+        parent: None,
         layers: vec![LayerSpec::Stubs {
             stubs: vec![
                 "/{proc,sys,tmp}/".into(),

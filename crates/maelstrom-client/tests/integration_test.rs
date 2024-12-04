@@ -132,7 +132,7 @@ impl ClientFixture {
         network: JobNetwork,
     ) -> anyhow::Error {
         let spec = ContainerSpec {
-            image: None,
+            parent: None,
             layers,
             root_overlay: Default::default(),
             environment: vec![],

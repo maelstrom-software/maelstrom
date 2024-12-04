@@ -9,16 +9,16 @@ use maelstrom_base::{
     Timeout, Utf8PathBuf,
 };
 use maelstrom_client::{
-    spec::{LayerSpec, PrefixOptions},
+    spec::{ContainerParent, LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
-    ClientBgProcess, ContainerImageDepotDir, ImageSpec, JobSpec, ProjectDir, StateDir,
+    ClientBgProcess, ContainerImageDepotDir, JobSpec, ProjectDir, StateDir,
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
     metadata::TestMetadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
+    BuildDir, CollectTests, ImageSpec, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
     TestArtifact, TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait,
     WaitStatus,
 };
@@ -259,7 +259,12 @@ impl PytestTestCollector<'_> {
                             .ok_or_else(|| anyhow!("non-UTF8 path"))?
                     ),
                 ])
-                .image(image_spec)
+                .parent(ContainerParent::Image {
+                    name: image_spec.name,
+                    use_layers: image_spec.use_layers,
+                    use_environment: image_spec.use_environment,
+                    use_working_directory: image_spec.use_working_directory,
+                })
                 .network(JobNetwork::Local)
                 .root_overlay(JobRootOverlay::Local {
                     upper: upper.clone().try_into()?,
@@ -397,8 +402,23 @@ impl TestArtifact for PytestTestArtifact {
     }
 
     fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec> {
-        match &metadata.container.image {
-            Some(image) => self.test_layers.get(image).into_iter().cloned().collect(),
+        match metadata.container.parent {
+            Some(ContainerParent::Image {
+                ref name,
+                use_layers,
+                use_environment,
+                use_working_directory,
+            }) => self
+                .test_layers
+                .get(&ImageSpec {
+                    name: name.into(),
+                    use_layers,
+                    use_environment,
+                    use_working_directory,
+                })
+                .into_iter()
+                .cloned()
+                .collect(),
             _ => vec![],
         }
     }

@@ -5,8 +5,8 @@ use maelstrom_base::{
     NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
-    ContainerSpec, ConvertedImage, EnvironmentSpec, ImageSpec, ImageUse, JobSpec as ClientJobSpec,
-    LayerSpec,
+    ContainerParent, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageUse,
+    JobSpec as ClientJobSpec, LayerSpec,
 };
 use maelstrom_util::ext::OptionExt as _;
 use std::{
@@ -160,15 +160,9 @@ impl<DepsT: Deps> Preparer<DepsT> {
         };
 
         let (pending_image, get_image) = {
-            match container.image {
-                Some(ImageSpec {
-                    name: _,
-                    use_layers: false,
-                    use_environment: false,
-                    use_working_directory: false,
-                })
-                | None => (None, None),
-                Some(ImageSpec {
+            match container.parent {
+                None => (None, None),
+                Some(ContainerParent::Image {
                     name,
                     use_layers: layers,
                     use_environment: environment,
@@ -184,7 +178,11 @@ impl<DepsT: Deps> Preparer<DepsT> {
                     if working_directory {
                         image_use.insert(ImageUse::WorkingDirectory);
                     }
-                    (Some(image_use), Some(name))
+                    if image_use.is_empty() {
+                        (None, None)
+                    } else {
+                        (Some(image_use), Some(name))
+                    }
                 }
             }
         };
@@ -514,7 +512,9 @@ mod tests {
     use super::{Message::*, *};
     use maelstrom_base::{job_spec, tar_digest, WindowSize};
     use maelstrom_client::spec;
-    use maelstrom_client_base::{container_spec, job_spec as client_job_spec, spec::ImageConfig};
+    use maelstrom_client_base::{
+        container_spec, image_container_parent, job_spec as client_job_spec, spec::ImageConfig,
+    };
     use maelstrom_test::{millis, string, tar_layer};
     use std::{cell::RefCell, ffi::OsStr, rc::Rc};
     use TestMessage::*;
@@ -645,35 +645,6 @@ mod tests {
             JobMount::Tmp {
                 mount_point: $mount_point.into(),
             }
-        };
-    }
-
-    macro_rules! image_spec {
-        (@expand [$name:expr] [] -> []) => {
-            ImageSpec {
-                name: $name.into(),
-                use_layers: false,
-                use_environment: false,
-                use_working_directory: false,
-            }
-        };
-        (@expand [$name:expr] [] -> [$($field_out:tt)+]) => {
-            ImageSpec {
-                $($field_out)+,
-                .. image_spec!(@expand [$name] [] -> [])
-            }
-        };
-        (@expand [$name:expr] [layers $(,$($field_in:ident)*)?] -> [$($($field_out:tt)+)?]) => {
-            image_spec!(@expand [$name] [$($($field_in)*)?] -> [$($($field_out)+,)? use_layers: true])
-        };
-        (@expand [$name:expr] [environment $(,$($field_in:ident)*)?] -> [$($($field_out:tt)+)?]) => {
-            image_spec!(@expand [$name] [$($($field_in)*)?] -> [$($($field_out)+,)? use_environment: true])
-        };
-        (@expand [$name:expr] [working_directory $(,$($field_in:ident)*)?] -> [$($($field_out:tt)+)?]) => {
-            image_spec!(@expand [$name] [$($($field_in)*)?] -> [$($($field_out)+,)? use_working_directory: true])
-        };
-        ($name:expr $(, $($use:ident),+ $(,)?)?) => {
-            image_spec!(@expand [$name] [$($($use),+)?] -> [])
         };
     }
 
@@ -956,7 +927,7 @@ mod tests {
             1,
             client_job_spec! {
                 "one",
-                image: image_spec!("image1", layers),
+                parent: image_container_parent!("image1", layers),
                 layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
             },
         ) => {
@@ -981,7 +952,7 @@ mod tests {
             2,
             client_job_spec! {
                 "two",
-                image: image_spec!("image2", layers),
+                parent: image_container_parent!("image2", layers),
                 layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
             },
         ) => {
@@ -991,7 +962,7 @@ mod tests {
             3,
             client_job_spec! {
                 "three",
-                image: image_spec!("image1", layers),
+                parent: image_container_parent!("image1", layers),
                 layers: [ tar_layer!("foo.tar"), tar_layer!("baz.tar") ],
             },
         ) => {
@@ -1015,7 +986,7 @@ mod tests {
             4,
             client_job_spec! {
                 "four",
-                image: image_spec!("image1", layers),
+                parent: image_container_parent!("image1", layers),
                 layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
             },
         ) => {
@@ -1032,7 +1003,7 @@ mod tests {
             1,
             client_job_spec! {
                 "one",
-                image: image_spec!("image1"),
+                parent: image_container_parent!("image1"),
                 layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
             },
         ) => {
@@ -1052,7 +1023,7 @@ mod tests {
             1,
             client_job_spec! {
                 "one",
-                image: image_spec!("image", layers),
+                parent: image_container_parent!("image", layers),
             },
         ) => {
             GetImage(string!("image")),
@@ -1061,7 +1032,7 @@ mod tests {
             2,
             client_job_spec! {
                 "two",
-                image: image_spec!("image", working_directory),
+                parent: image_container_parent!("image", working_directory),
                 layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
             },
         ) => {
@@ -1089,7 +1060,7 @@ mod tests {
             4,
             client_job_spec! {
                 "four",
-                image: image_spec!("image", layers),
+                parent: image_container_parent!("image", layers),
                 layers: [tar_layer!("baz.tar")],
             },
         ) => {
@@ -1160,7 +1131,7 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            image: image_spec!("image", environment),
+            parent: image_container_parent!("image", environment),
             layers: [tar_layer!("foo.tar")],
         }) => {
             GetImage(string!("image")),
@@ -1177,7 +1148,7 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            image: image_spec!("image", environment),
+            parent: image_container_parent!("image", environment),
             layers: [tar_layer!("foo.tar")],
         }) => {
             GetImage(string!("image")),
@@ -1198,7 +1169,7 @@ mod tests {
 
         PrepareJob(2, client_job_spec! {
             "two",
-            image: image_spec!("image", environment),
+            parent: image_container_parent!("image", environment),
             layers: [tar_layer!("foo.tar")],
             environment: [
                 environment_spec!{false, "OLD_FOO" => "old_$prev{FOO}", "BAZ" => "$prev{BAR}"},
@@ -1218,7 +1189,7 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            image: image_spec!("image", environment),
+            parent: image_container_parent!("image", environment),
             layers: [tar_layer!("foo.tar")],
             environment: [environment_spec!{true, "BAZ" => "baz" }],
         }) => {
@@ -1280,7 +1251,7 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            image: image_spec!("image", working_directory),
+            parent: image_container_parent!("image", working_directory),
             layers: [tar_layer!("foo.tar")],
         }) => {
             GetImage(string!("image")),
@@ -1306,7 +1277,7 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            image: image_spec!("image", working_directory),
+            parent: image_container_parent!("image", working_directory),
             layers: [tar_layer!("foo.tar")],
             working_directory: "/root2",
         }) => {
@@ -1329,7 +1300,7 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            image: image_spec!("image", working_directory),
+            parent: image_container_parent!("image", working_directory),
             layers: [tar_layer!("foo.tar")],
         }) => {
             GetImage(string!("image")),
@@ -1348,7 +1319,7 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            image: image_spec!("image", layers),
+            parent: image_container_parent!("image", layers),
         }) => {
             GetImage(string!("image")),
         };

@@ -225,7 +225,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
         let (program, arguments) = artifact.build_command(case_name, case_metadata);
         let container = ContainerSpec {
-            image: test_metadata.container.image,
+            parent: test_metadata.container.parent,
             environment: test_metadata.container.environment,
             layers,
             mounts: test_metadata.container.mounts,

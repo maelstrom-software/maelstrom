@@ -48,12 +48,44 @@ where
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-#[proto(proto_buf_type = "proto::ImageSpec")]
-pub struct ImageSpec {
-    pub name: String,
-    pub use_layers: bool,
-    pub use_environment: bool,
-    pub use_working_directory: bool,
+#[proto(
+    proto_buf_type = "proto::ContainerParent",
+    enum_type = "proto::container_parent::Parent"
+)]
+pub enum ContainerParent {
+    #[proto(proto_buf_type = proto::ImageContainerParent)]
+    Image {
+        name: String,
+        use_layers: bool,
+        use_environment: bool,
+        use_working_directory: bool,
+    },
+    //    #[proto(proto_buf_type = proto::ContainerContainerParent)]
+    //    Container { name: String },
+}
+
+#[macro_export]
+macro_rules! image_container_parent {
+    (@expand [] -> [$name:expr, $layers:literal, $environment:literal, $working_directory:literal]) => {
+        $crate::spec::ContainerParent::Image {
+            name: $name.into(),
+            use_layers: $layers,
+            use_environment: $environment,
+            use_working_directory: $working_directory,
+        }
+    };
+    (@expand [layers $(,$($field_in:ident)*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
+        $crate::image_container_parent!(@expand [$($($field_in)*)?] -> [$name, true, $environment, $working_directory])
+    };
+    (@expand [environment $(,$($field_in:ident)*)?] -> [$name:expr, $layers:literal, $old_environment:literal, $working_directory:literal]) => {
+        $crate::image_container_parent!(@expand [$($($field_in)*)?] -> [$name, $layers, true, $working_directory])
+    };
+    (@expand [working_directory $(,$($field_in:ident)*)?] -> [$name:expr, $layers:literal, $environment:literal, $old_working_directory:literal]) => {
+        $crate::image_container_parent!(@expand [$($($field_in)*)?] -> [$name, $layers, $environment, true])
+    };
+    ($name:expr $(, $($use:ident),+ $(,)?)?) => {
+        $crate::image_container_parent!(@expand [$($($use),+)?] -> [$name, false, false, false])
+    };
 }
 
 #[derive(
@@ -81,6 +113,12 @@ pub trait IntoEnvironment {
 impl IntoEnvironment for Vec<EnvironmentSpec> {
     fn into_environment(self) -> Self {
         self
+    }
+}
+
+impl<const N: usize> IntoEnvironment for [EnvironmentSpec; N] {
+    fn into_environment(self) -> Vec<EnvironmentSpec> {
+        self.into_iter().collect()
     }
 }
 
@@ -171,7 +209,7 @@ pub fn environment_eval(
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[proto(proto_buf_type = "proto::ContainerSpec")]
 pub struct ContainerSpec {
-    pub image: Option<ImageSpec>,
+    pub parent: Option<ContainerParent>,
     pub layers: Vec<LayerSpec>,
     #[proto(default)]
     pub root_overlay: JobRootOverlay,
@@ -187,7 +225,7 @@ pub struct ContainerSpec {
 macro_rules! container_spec {
     (@expand [] -> []) => {
         $crate::spec::ContainerSpec {
-            image: Default::default(),
+            parent: Default::default(),
             layers: Default::default(),
             root_overlay: Default::default(),
             environment: Default::default(),
@@ -204,8 +242,8 @@ macro_rules! container_spec {
             .. $crate::container_spec!(@expand [] -> [])
         }
     };
-    (@expand [image: $image:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? image: Some($image)])
+    (@expand [parent: $parent:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? parent: Some($parent)])
     };
     (@expand [layers: [$($layer:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: vec![$($layer)*]])
@@ -213,8 +251,8 @@ macro_rules! container_spec {
     (@expand [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? root_overlay: $root_overlay])
     };
-    (@expand [environment: [$($environment:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: vec![$($environment)*]])
+    (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: $crate::spec::IntoEnvironment::into_environment($environment)])
     };
     (@expand [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? working_directory: Some($dir.into())])
@@ -254,7 +292,7 @@ impl JobSpec {
         JobSpec {
             container: ContainerSpec {
                 layers: layers.into(),
-                image: Default::default(),
+                parent: Default::default(),
                 environment: Default::default(),
                 mounts: Default::default(),
                 network: Default::default(),
@@ -272,8 +310,8 @@ impl JobSpec {
         }
     }
 
-    pub fn image(mut self, image: ImageSpec) -> Self {
-        self.container.image = Some(image);
+    pub fn parent(mut self, parent: ContainerParent) -> Self {
+        self.container.parent = Some(parent);
         self
     }
 
@@ -352,9 +390,9 @@ macro_rules! job_spec {
         }
     };
 
-    (@expand [$program:expr] [image: $image:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+    (@expand [$program:expr] [parent: $parent:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? image: $image])
+            [$($field_out)*] [$($($container_field)+,)? parent: $parent])
     };
     (@expand [$program:expr] [layers: [$($layer:tt)*] $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
@@ -364,9 +402,9 @@ macro_rules! job_spec {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($field_out)*] [$($($container_field)+,)? root_overlay: $root_overlay])
     };
-    (@expand [$program:expr] [environment: [$($environment:tt)*] $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+    (@expand [$program:expr] [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? environment: [$($environment)*]])
+            [$($field_out)*] [$($($container_field)+,)? environment: $environment])
     };
     (@expand [$program:expr] [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->

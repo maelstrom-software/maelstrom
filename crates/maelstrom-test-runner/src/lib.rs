@@ -27,6 +27,14 @@ use std::{
 };
 use ui::{Ui, UiSender, UiSlogDrain};
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct ImageSpec {
+    pub name: String,
+    pub use_layers: bool,
+    pub use_environment: bool,
+    pub use_working_directory: bool,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NotRunEstimate {
     About(u64),

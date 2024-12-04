@@ -147,12 +147,16 @@ message EnvironmentSpec {
     bool extend = 2;
 }
 
-message ImageSpec {
+message ImageContainerParent {
     string name = 1;
     bool use_layers = 2;
     bool use_environment = 3;
     bool use_working_directory = 4;
 }
+
+//message ContainerContainerParent {
+//    string name = 1;
+//}
 
 message WindowSize {
     uint32 rows = 1;
@@ -164,8 +168,15 @@ message JobTty {
     WindowSize window_size = 2;
 }
 
+message ContainerParent {
+    oneof parent {
+        ImageContainerParent image = 1;
+//        ContainerContainerParent container = 2;
+    }
+}
+
 message ContainerSpec {
-    optional ImageSpec image = 1;
+    optional ContainerParent parent = 1;
     repeated LayerSpec layers = 2;
     optional JobRootOverlay root_overlay = 3;
     repeated EnvironmentSpec environment = 4;

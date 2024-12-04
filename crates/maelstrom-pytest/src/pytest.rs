@@ -2,8 +2,8 @@ use crate::{
     BuildDir, PytestCaseMetadata, PytestConfigValues, PytestPackageId, PytestTestArtifact,
 };
 use anyhow::{anyhow, bail, Result};
-use maelstrom_client::{spec::LayerSpec, ImageSpec, ProjectDir};
-use maelstrom_test_runner::WaitStatus;
+use maelstrom_client::{spec::LayerSpec, ProjectDir};
+use maelstrom_test_runner::{ImageSpec, WaitStatus};
 use maelstrom_util::{process::ExitCode, root::Root};
 use serde::Deserialize;
 use std::collections::HashMap;

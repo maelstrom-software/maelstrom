@@ -1,7 +1,7 @@
-use crate::{metadata::TestMetadata, ui};
+use crate::{metadata::TestMetadata, ui, ImageSpec};
 use anyhow::Result;
 use maelstrom_base::Utf8PathBuf;
-use maelstrom_client::{spec::LayerSpec, ImageSpec};
+use maelstrom_client::spec::LayerSpec;
 use maelstrom_util::{process::ExitCode, template::TemplateVars};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
