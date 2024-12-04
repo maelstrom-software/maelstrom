@@ -1,3 +1,8 @@
+pub use azure_core::{
+    tokio::fs::{FileStream, FileStreamBuilder},
+    Body,
+};
+
 use anyhow::{anyhow, bail, Result};
 use azure_storage_blobs::prelude::BlobClient;
 use futures::{stream::TryStreamExt as _, StreamExt as _};
@@ -197,13 +202,15 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub async fn upload(&self, name: &str, content: &[u8]) -> Result<()> {
+    pub async fn upload(&self, name: &str, content: impl Into<Body>) -> Result<()> {
         let blob_client = self.start_upload(name).await?;
+        let body: Body = content.into();
+        let size = body.len();
         blob_client
-            .put_block_blob(content.to_owned())
+            .put_block_blob(body)
             .content_type("application/octet-stream")
             .await?;
-        self.finish_upload(name, content.len()).await?;
+        self.finish_upload(name, size).await?;
         Ok(())
     }
 
@@ -278,7 +285,7 @@ mod tests {
         };
         println!("test found GitHub credentials");
 
-        client.upload("test_data", &TEST_DATA).await.unwrap();
+        client.upload("test_data", TEST_DATA).await.unwrap();
 
         let listing = client.list().await.unwrap();
         println!("got artifact listing {listing:?}");

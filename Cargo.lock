@@ -681,6 +681,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "time",
+ "tokio",
  "tracing",
  "url 2.5.2",
  "uuid",
@@ -3549,6 +3550,7 @@ name = "maelstrom-github"
 version = "0.13.0-dev"
 dependencies = [
  "anyhow",
+ "azure_core",
  "azure_storage_blobs",
  "base64 0.22.1",
  "futures",
