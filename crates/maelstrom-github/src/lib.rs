@@ -149,7 +149,6 @@ pub struct DatabaseId(#[serde_as(as = "DisplayFromStr")] i64);
 
 #[serde_as]
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct Artifact {
     #[serde(flatten, with = "BackendIdsSnakeCase")]
     pub backend_ids: BackendIds,
