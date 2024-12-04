@@ -259,9 +259,7 @@ impl GitHubClient {
         Ok(())
     }
 
-    /// List all the given artifacts accessible to the current workflow run which match the given
-    /// name filter. If no filter is provided, they are all returned.
-    pub async fn list(
+    async fn list_internal(
         &self,
         name_filter: Option<String>,
         id_filter: Option<DatabaseId>,
@@ -280,6 +278,35 @@ impl GitHubClient {
             )
             .await?;
         Ok(resp.artifacts)
+    }
+
+    /// List all the given artifacts accessible to the current workflow run.
+    pub async fn list(&self) -> Result<Vec<Artifact>> {
+        self.list_internal(None, None).await
+    }
+
+    /// Get the artifact represented by the given name if it exists.
+    pub async fn get(&self, name: &str) -> Result<Option<Artifact>> {
+        let mut artifacts = self.list_internal(Some(name.into()), None).await?;
+        if artifacts.is_empty() {
+            return Ok(None);
+        }
+        if artifacts.len() > 1 {
+            bail!("invalid filtered list response");
+        }
+        Ok(Some(artifacts.remove(0)))
+    }
+
+    /// Get the artifact represented by the given id if it exists.
+    pub async fn get_by_id(&self, id: DatabaseId) -> Result<Option<Artifact>> {
+        let mut artifacts = self.list_internal(None, Some(id)).await?;
+        if artifacts.is_empty() {
+            return Ok(None);
+        }
+        if artifacts.len() > 1 {
+            bail!("invalid filtered list response");
+        }
+        Ok(Some(artifacts.remove(0)))
     }
 
     /// Start a download of an artifact identified by the given name. The returned [`BlobClient`]
@@ -380,16 +407,20 @@ mod tests {
 
         client.upload("test_data", TEST_DATA).await.unwrap();
 
-        let listing = client.list(None, None).await.unwrap();
+        let listing = client.list().await.unwrap();
         println!("got artifact listing {listing:?}");
         assert!(listing.iter().find(|a| a.name == "test_data").is_some());
 
-        let name_listing = client.list(Some("test_data".into()), None).await.unwrap();
-        assert_eq!(name_listing.len(), 1, "{name_listing:?}");
-        let artifact = &name_listing[0];
+        let artifact = client.get("test_data").await.unwrap().unwrap();
 
-        let id_listing = client.list(None, Some(artifact.database_id)).await.unwrap();
-        assert_eq!(&name_listing, &id_listing);
+        let artifact2 = client
+            .get_by_id(artifact.database_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&artifact, &artifact2);
+
+        assert_eq!(client.get("this_does_not_exist").await.unwrap(), None);
 
         let backend_ids = &artifact.backend_ids;
         let mut download_stream = client
@@ -403,15 +434,5 @@ mod tests {
             .unwrap();
 
         assert_eq!(downloaded, TEST_DATA);
-
-        // discover how filtering works
-        client.upload("test_foo", TEST_DATA).await.unwrap();
-        for f in ["test_", "foo", "data", "^foo", "^test_"] {
-            let listing = client.list(Some(f.into()), None).await.unwrap();
-            println!(
-                "list with filter {f:?}: {:?}",
-                Vec::from_iter(listing.into_iter().map(|a| a.name))
-            );
-        }
     }
 }
