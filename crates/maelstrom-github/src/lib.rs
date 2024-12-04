@@ -1,3 +1,15 @@
+//! This crate contains code that can communicate with GitHub's artifact API.
+//!
+//! This API works by doing HTTP requests to GitHub to manage the artifacts, but the actual data is
+//! stored in Azure, and the API returns signed-URLs to upload or download the data.
+//!
+//! The GitHub API is using the TWIRP RPC framework <https://github.com/twitchtv/twirp>.
+//!
+//! It seems that it uses protobuf definitions to define the body of requests. I'm not sure where
+//! to find these protobuf definitions, but we do have access to typescript that seems to be
+//! generated from them, which can be found here:
+//! <https://github.com/actions/toolkit/blob/main/packages/artifact/src/generated/results/api/v1/artifact.ts>
+
 pub use azure_core::{
     tokio::fs::{FileStream, FileStreamBuilder},
     Body,
@@ -178,6 +190,11 @@ impl GitHubClient {
         })
     }
 
+    /// Start an upload of an artifact. It returns a [`BlobClient`] which should be used to upload
+    /// your data. Once all the data has been written, [`Self::finish_upload`] must be called to
+    /// finalize the upload.
+    ///
+    /// The given name needs to be something unique, an error should be returned on collision.
     pub async fn start_upload(&self, name: &str) -> Result<BlobClient> {
         let req = CreateArtifactRequest {
             backend_ids: self.client.backend_ids.clone(),
@@ -197,6 +214,10 @@ impl GitHubClient {
         Ok(BlobClient::from_sas_url(&upload_url)?)
     }
 
+    /// Meant to be called on an upload which was started via [`Self::start_upload`] which has had
+    /// all its data uploaded with the returned [`BlobClient`]. Once it returns success, the
+    /// artifact should be immediately available to be downloaded. If called on an artifact not in
+    /// this state, an error should be returned.
     pub async fn finish_upload(&self, name: &str, content_length: usize) -> Result<()> {
         let req = FinalizeArtifactRequest {
             backend_ids: self.client.backend_ids.clone(),
@@ -213,6 +234,9 @@ impl GitHubClient {
         Ok(())
     }
 
+    /// Upload the given content as an artifact. Once it returns success, the artifact should be
+    /// immediately available for download. The given content can be an in-memory buffer or a
+    /// [`FileStream`] created using [`FileStreamBuilder`].
     pub async fn upload(&self, name: &str, content: impl Into<Body>) -> Result<()> {
         let blob_client = self.start_upload(name).await?;
         let body: Body = content.into();
@@ -225,6 +249,7 @@ impl GitHubClient {
         Ok(())
     }
 
+    /// List all the given artifacts accessible to the current workflow run.
     pub async fn list(&self) -> Result<Vec<Artifact>> {
         let req = ListArtifactsRequest {
             backend_ids: self.client.backend_ids.clone(),
@@ -240,6 +265,11 @@ impl GitHubClient {
         Ok(resp.artifacts)
     }
 
+    /// Start a download of an artifact identified by the given name. The returned [`BlobClient`]
+    /// should be used to download all or part of the data.
+    ///
+    /// The `backend_ids` must be the ones for the artifact obtained from [`Self::list`]. An
+    /// individual uploader should end up with the same `backend_ids` for all artifacts it uploads.
     pub async fn start_download(&self, backend_ids: BackendIds, name: &str) -> Result<BlobClient> {
         let req = GetSignedArtifactUrlRequest {
             backend_ids,
@@ -257,6 +287,11 @@ impl GitHubClient {
         Ok(BlobClient::from_sas_url(&url)?)
     }
 
+    /// Return a stream that downloads all the contents of the artifacts represented by the given
+    /// name.
+    ///
+    /// The `backend_ids` must be the ones for the artifact obtained from [`Self::list`]. An
+    /// individual uploader should end up with the same `backend_ids` for all artifacts it uploads.
     pub async fn download(
         &self,
         backend_ids: BackendIds,
