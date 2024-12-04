@@ -136,10 +136,19 @@ struct FinalizeArtifactRequest {
 struct ListArtifactsRequest {
     #[serde(flatten)]
     backend_ids: BackendIds,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name_filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id_filter: Option<DatabaseId>,
 }
 
 #[serde_as]
-#[derive(Debug, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct DatabaseId(#[serde_as(as = "DisplayFromStr")] i64);
+
+#[serde_as]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Artifact {
     #[serde(flatten, with = "BackendIdsSnakeCase")]
@@ -147,8 +156,7 @@ pub struct Artifact {
     pub name: String,
     #[serde_as(as = "DisplayFromStr")]
     pub size: i64,
-    #[serde_as(as = "DisplayFromStr")]
-    pub database_id: i64,
+    pub database_id: DatabaseId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,10 +260,17 @@ impl GitHubClient {
         Ok(())
     }
 
-    /// List all the given artifacts accessible to the current workflow run.
-    pub async fn list(&self) -> Result<Vec<Artifact>> {
+    /// List all the given artifacts accessible to the current workflow run which match the given
+    /// name filter. If no filter is provided, they are all returned.
+    pub async fn list(
+        &self,
+        name_filter: Option<String>,
+        id_filter: Option<DatabaseId>,
+    ) -> Result<Vec<Artifact>> {
         let req = ListArtifactsRequest {
             backend_ids: self.client.backend_ids.clone(),
+            name_filter,
+            id_filter,
         };
         let resp: ListArtifactsResponse = self
             .client
@@ -357,7 +372,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn upload_download() {
+    async fn real_github_integration_test() {
         let Some(client) = client_factory() else {
             println!("skipping due to missing GitHub credentials");
             return;
@@ -366,10 +381,16 @@ mod tests {
 
         client.upload("test_data", TEST_DATA).await.unwrap();
 
-        let listing = client.list().await.unwrap();
+        let listing = client.list(None, None).await.unwrap();
         println!("got artifact listing {listing:?}");
+        assert!(listing.iter().find(|a| a.name == "test_data").is_some());
 
-        let artifact = listing.iter().find(|a| a.name == "test_data").unwrap();
+        let name_listing = client.list(Some("test_data".into()), None).await.unwrap();
+        assert_eq!(name_listing.len(), 1, "{name_listing:?}");
+        let artifact = &name_listing[0];
+
+        let id_listing = client.list(None, Some(artifact.database_id)).await.unwrap();
+        assert_eq!(&name_listing, &id_listing);
 
         let backend_ids = &artifact.backend_ids;
         let mut download_stream = client
