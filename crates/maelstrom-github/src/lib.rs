@@ -1,6 +1,9 @@
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use azure_storage_blobs::prelude::BlobClient;
+use futures::{stream::TryStreamExt as _, StreamExt as _};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use tokio::io::AsyncRead;
+use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,10 +239,22 @@ impl GitHubClient {
         Ok(BlobClient::from_sas_url(&url)?)
     }
 
-    pub async fn download(&self, backend_ids: BackendIds, name: &str) -> Result<Vec<u8>> {
+    pub async fn download(
+        &self,
+        backend_ids: BackendIds,
+        name: &str,
+    ) -> Result<impl AsyncRead + Unpin> {
         let blob_client = self.start_download(backend_ids, name).await?;
-        let content = blob_client.get_content().await?;
-        Ok(content)
+        let mut page_stream = blob_client.get().chunk_size(u64::MAX).into_stream();
+        let single_page = page_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("missing response"))??;
+        Ok(single_page
+            .data
+            .map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+            .into_async_read()
+            .compat())
     }
 }
 
@@ -271,8 +286,13 @@ mod tests {
         let artifact = listing.iter().find(|a| a.name == "test_data").unwrap();
 
         let backend_ids = &artifact.backend_ids;
-        let downloaded = client
+        let mut download_stream = client
             .download(backend_ids.clone(), "test_data")
+            .await
+            .unwrap();
+
+        let mut downloaded = vec![];
+        tokio::io::copy(&mut download_stream, &mut downloaded)
             .await
             .unwrap();
 

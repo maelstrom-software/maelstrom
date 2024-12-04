@@ -3551,10 +3551,12 @@ dependencies = [
  "anyhow",
  "azure_storage_blobs",
  "base64 0.22.1",
+ "futures",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "url 2.5.2",
 ]
 
