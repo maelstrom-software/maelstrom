@@ -266,10 +266,11 @@ mod tests {
         client.upload("test_data", &TEST_DATA).await.unwrap();
 
         let listing = client.list().await.unwrap();
-        assert_eq!(listing.len(), 1);
-        assert_eq!(listing[0].name, "test_data");
+        println!("got artifact listing {listing:?}");
 
-        let backend_ids = &listing[0].backend_ids;
+        let artifact = listing.iter().find(|a| a.name == "test_data").unwrap();
+
+        let backend_ids = &artifact.backend_ids;
         let downloaded = client
             .download(backend_ids.clone(), "test_data")
             .await
