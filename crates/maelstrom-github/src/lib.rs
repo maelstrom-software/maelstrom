@@ -8,38 +8,49 @@ use azure_storage_blobs::prelude::BlobClient;
 use futures::{stream::TryStreamExt as _, StreamExt as _};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
+use std::str::FromStr;
 use tokio::io::AsyncRead;
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 use url::Url;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendIds {
     pub workflow_run_backend_id: String,
     pub workflow_job_run_backend_id: String,
 }
 
-fn decode_backend_ids(token: &str) -> BackendIds {
-    use base64::Engine as _;
+impl FromStr for BackendIds {
+    type Err = anyhow::Error;
 
-    let mut token_parts = token.split(".").skip(1);
-    let b64_part = token_parts.next().unwrap();
-    let decoded = base64::engine::general_purpose::STANDARD_NO_PAD
-        .decode(b64_part)
-        .unwrap();
-    let v = serde_json::from_slice::<serde_json::Value>(&decoded).unwrap();
+    fn from_str(token: &str) -> Result<BackendIds> {
+        use base64::Engine as _;
 
-    let scp = v.get("scp").unwrap().as_str().unwrap();
+        let mut token_parts = token.split(".").skip(1);
+        let b64_part = token_parts
+            .next()
+            .ok_or_else(|| anyhow!("missing period"))?;
+        let decoded = base64::engine::general_purpose::STANDARD_NO_PAD
+            .decode(b64_part)
+            .map_err(|e| anyhow!("base64 invalid: {e}"))?;
+        let v = serde_json::from_slice::<serde_json::Value>(&decoded)?;
 
-    let scope_parts = scp
-        .split(" ")
-        .map(|p| p.split(":").collect::<Vec<_>>())
-        .find(|p| p[0] == "Actions.Results")
-        .unwrap();
+        let scp = v
+            .get("scp")
+            .ok_or_else(|| anyhow!("missing 'scp' field"))?
+            .as_str()
+            .ok_or_else(|| anyhow!("'scp' field not a string"))?;
 
-    BackendIds {
-        workflow_run_backend_id: scope_parts[1].into(),
-        workflow_job_run_backend_id: scope_parts[2].into(),
+        let scope_parts = scp
+            .split(" ")
+            .map(|p| p.split(":").collect::<Vec<_>>())
+            .find(|p| p[0] == "Actions.Results")
+            .ok_or_else(|| anyhow!("'Actions.Results' missing from 'scp' field"))?;
+
+        Ok(Self {
+            workflow_run_backend_id: scope_parts[1].into(),
+            workflow_job_run_backend_id: scope_parts[2].into(),
+        })
     }
 }
 
@@ -51,17 +62,13 @@ struct TwirpClient {
 }
 
 impl TwirpClient {
-    fn new(token: &str, base_url: Url) -> Self {
-        let client = reqwest::Client::new();
-
-        let backend_ids = decode_backend_ids(token);
-
-        Self {
-            client,
+    fn new(token: &str, base_url: Url) -> Result<Self> {
+        Ok(Self {
+            client: reqwest::Client::new(),
             token: token.into(),
             base_url,
-            backend_ids,
-        }
+            backend_ids: token.parse()?,
+        })
     }
 
     async fn request<BodyT: Serialize, RespT: DeserializeOwned>(
@@ -165,10 +172,10 @@ pub struct GitHubClient {
 }
 
 impl GitHubClient {
-    pub fn new(token: &str, base_url: Url) -> Self {
-        Self {
-            client: TwirpClient::new(token, base_url),
-        }
+    pub fn new(token: &str, base_url: Url) -> Result<Self> {
+        Ok(Self {
+            client: TwirpClient::new(token, base_url)?,
+        })
     }
 
     pub async fn start_upload(&self, name: &str) -> Result<BlobClient> {
@@ -273,12 +280,42 @@ impl GitHubClient {
 mod tests {
     use super::*;
 
+    const TEST_TOKEN: &str = include_str!("test_token.b64");
+
+    #[test]
+    fn backend_ids_from_str_canned_example() {
+        let ids = BackendIds::from_str(TEST_TOKEN).unwrap();
+        assert_eq!(
+            ids,
+            BackendIds {
+                workflow_run_backend_id: "a4c8893f-39a2-4108-b278-a7d0fb589276".into(),
+                workflow_job_run_backend_id: "5264e576-3c6f-51f6-f055-fab409685f20".into()
+            }
+        );
+    }
+
+    #[test]
+    fn backend_ids_errors() {
+        fn test_error(s: &str, expected_error: &str) {
+            let actual_error = BackendIds::from_str(s).unwrap_err().to_string();
+            assert!(actual_error.contains(expected_error), "{actual_error}");
+        }
+        test_error("foobar", "missing period");
+        test_error("foo.bar", "base64 invalid");
+        test_error("foo.e30=", "base64 invalid: Invalid padding");
+        test_error("foo.eyJzY3AiOjEyfQ", "'scp' field not a string");
+        test_error(
+            "foo.eyJzY3AiOiJmb28ifQ",
+            "'Actions.Results' missing from 'scp' field",
+        );
+    }
+
     const TEST_DATA: &[u8] = include_bytes!("lib.rs");
 
     fn client_factory() -> Option<GitHubClient> {
         let token = std::env::var("ACTIONS_RUNTIME_TOKEN").ok()?;
         let base_url = Url::parse(&std::env::var("ACTIONS_RESULTS_URL").ok()?).unwrap();
-        Some(GitHubClient::new(&token, base_url))
+        Some(GitHubClient::new(&token, base_url).unwrap())
     }
 
     #[tokio::test]
