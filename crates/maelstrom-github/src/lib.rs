@@ -7,6 +7,7 @@ use anyhow::{anyhow, bail, Result};
 use azure_storage_blobs::prelude::BlobClient;
 use futures::{stream::TryStreamExt as _, StreamExt as _};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 use tokio::io::AsyncRead;
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 use url::Url;
@@ -118,11 +119,14 @@ struct ListArtifactsRequest {
     backend_ids: BackendIds,
 }
 
+#[serde_as]
 #[derive(Debug, Deserialize)]
 pub struct Artifact {
     #[serde(flatten, with = "BackendIdsSnakeCase")]
     pub backend_ids: BackendIds,
     pub name: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub size: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
