@@ -403,5 +403,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(downloaded, TEST_DATA);
+
+        // discover how filtering works
+        client.upload("test_foo", TEST_DATA).await.unwrap();
+        for f in ["test_", "foo", "data", "^foo", "^test_"] {
+            let listing = client.list(Some(f.into()), None).await.unwrap();
+            println!(
+                "list with filter {f:?}: {:?}",
+                Vec::from_iter(listing.into_iter().map(|a| a.name))
+            );
+        }
     }
 }
