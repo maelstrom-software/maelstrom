@@ -1,11 +1,12 @@
 pub mod task;
 
 use maelstrom_base::{
-    ArtifactType, GroupId, JobMount, JobNetwork, JobRootOverlay, JobSpec, JobTty, NonEmpty,
-    Sha256Digest, Timeout, UserId, Utf8PathBuf,
+    ArtifactType, EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay, JobSpec, JobTty,
+    NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
-    ContainerSpec, ConvertedImage, EnvironmentSpec, ImageSpec, JobSpec as ClientJobSpec, LayerSpec,
+    ContainerSpec, ConvertedImage, EnvironmentSpec, ImageSpec, ImageUse, JobSpec as ClientJobSpec,
+    LayerSpec,
 };
 use maelstrom_util::ext::OptionExt as _;
 use std::{
@@ -172,14 +173,19 @@ impl<DepsT: Deps> Preparer<DepsT> {
                     use_layers: layers,
                     use_environment: environment,
                     use_working_directory: working_directory,
-                }) => (
-                    Some(ImageUse {
-                        layers,
-                        environment,
-                        working_directory,
-                    }),
-                    Some(name),
-                ),
+                }) => {
+                    let mut image_use = EnumSet::new();
+                    if layers {
+                        image_use.insert(ImageUse::Layers);
+                    }
+                    if environment {
+                        image_use.insert(ImageUse::Environment);
+                    }
+                    if working_directory {
+                        image_use.insert(ImageUse::WorkingDirectory);
+                    }
+                    (Some(image_use), Some(name))
+                }
             }
         };
 
@@ -284,7 +290,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
         let job = job_entry.get_mut();
         let image_use = job.pending_image.take().unwrap();
 
-        if image_use.layers {
+        if image_use.contains(ImageUse::Layers) {
             job.image_layers = Self::evaluate_layers(
                 &self.deps,
                 &mut self.layer_builds,
@@ -295,11 +301,11 @@ impl<DepsT: Deps> Preparer<DepsT> {
             )?;
         }
 
-        if image_use.environment {
+        if image_use.contains(ImageUse::Environment) {
             job.initial_environment = image.environment().map_err(DepsT::error_from_string)?;
         }
 
-        if image_use.working_directory {
+        if image_use.contains(ImageUse::WorkingDirectory) {
             if job.working_directory.is_some() {
                 return Err(DepsT::error_from_string(
                     "can't provide both `working_directory` and `image.use_working_directory`"
@@ -432,7 +438,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
 
 struct Job<DepsT: Deps> {
     handle: DepsT::PrepareJobHandle,
-    pending_image: Option<ImageUse>,
+    pending_image: Option<EnumSet<ImageUse>>,
     image_layers: Vec<Option<(Sha256Digest, ArtifactType)>>,
     layers: Vec<Option<(Sha256Digest, ArtifactType)>>,
     root_overlay: JobRootOverlay,
@@ -449,12 +455,6 @@ struct Job<DepsT: Deps> {
     estimated_duration: Option<Duration>,
     allocate_tty: Option<JobTty>,
     priority: i8,
-}
-
-struct ImageUse {
-    layers: bool,
-    environment: bool,
-    working_directory: bool,
 }
 
 impl<DepsT: Deps> Job<DepsT> {
