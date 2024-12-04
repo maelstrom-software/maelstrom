@@ -140,12 +140,15 @@ struct ListArtifactsRequest {
 
 #[serde_as]
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Artifact {
     #[serde(flatten, with = "BackendIdsSnakeCase")]
     pub backend_ids: BackendIds,
     pub name: String,
     #[serde_as(as = "DisplayFromStr")]
     pub size: i64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub database_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
