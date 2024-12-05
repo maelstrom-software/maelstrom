@@ -22,6 +22,7 @@ futures.workspace = true
 lru.workspace = true
 maelstrom-base.workspace = true
 maelstrom-fuse.workspace = true
+maelstrom-github.workspace = true
 maelstrom-layer-fs.workspace = true
 maelstrom-linux = { workspace = true, features = ["std", "tokio"] }
 maelstrom-macro.workspace = true
@@ -37,6 +38,7 @@ std-semaphore.workspace = true
 strum.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+url.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]

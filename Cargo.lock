@@ -3872,6 +3872,7 @@ dependencies = [
  "lru",
  "maelstrom-base",
  "maelstrom-fuse",
+ "maelstrom-github",
  "maelstrom-layer-fs",
  "maelstrom-linux",
  "maelstrom-macro",
@@ -3890,6 +3891,7 @@ dependencies = [
  "strum",
  "tempfile",
  "tokio",
+ "url 2.5.2",
  "xdg",
 ]
 
