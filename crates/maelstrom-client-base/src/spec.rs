@@ -245,8 +245,8 @@ macro_rules! container_spec {
     (@expand [parent: $parent:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? parent: Some($parent)])
     };
-    (@expand [layers: [$($layer:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: vec![$($layer)*]])
+    (@expand [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: $layers.into()])
     };
     (@expand [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? root_overlay: $root_overlay])
@@ -257,11 +257,11 @@ macro_rules! container_spec {
     (@expand [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? working_directory: Some($dir.into())])
     };
-    (@expand [mounts: [$($mount:tt)*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? mounts: vec![$($mount)*]])
+    (@expand [mounts: $mounts:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? mounts: $mounts.into()])
     };
-    (@expand [network: $network:ident $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? network: ::maelstrom_base::JobNetwork::$network])
+    (@expand [network: $network:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? network: $network])
     };
     (@expand [user: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? user: Some(::maelstrom_base::UserId::new($user))])
@@ -369,9 +369,9 @@ macro_rules! job_spec {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($field_out)*] [$($($container_field)+,)? parent: $parent])
     };
-    (@expand [$program:expr] [layers: [$($layer:tt)*] $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+    (@expand [$program:expr] [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? layers: [$($layer)*]])
+            [$($field_out)*] [$($($container_field)+,)? layers: $layers])
     };
     (@expand [$program:expr] [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
@@ -385,11 +385,11 @@ macro_rules! job_spec {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($field_out)*] [$($($container_field)+,)? working_directory: $working_directory])
     };
-    (@expand [$program:expr] [mounts: [$($mount:tt)*] $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+    (@expand [$program:expr] [mounts: $mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? mounts: [$($mount)*]])
+            [$($field_out)*] [$($($container_field)+,)? mounts: $mounts])
     };
-    (@expand [$program:expr] [network: $network:ident $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+    (@expand [$program:expr] [network: $network:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($field_out)*] [$($($container_field)+,)? network: $network])
     };

@@ -430,7 +430,7 @@ mod tests {
             Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
                 .into_job_spec()
                 .unwrap(),
-            job_spec!("program", layers: [tar_layer!("1")], network: Disabled),
+            job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Disabled),
         );
     }
 
@@ -443,7 +443,7 @@ mod tests {
             }
             .into_job_spec()
             .unwrap(),
-            job_spec!("program", layers: [tar_layer!("1")], network: Disabled),
+            job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Disabled),
         );
     }
 
@@ -456,7 +456,7 @@ mod tests {
             }
             .into_job_spec()
             .unwrap(),
-            job_spec!("program", layers: [tar_layer!("1")], network: Loopback),
+            job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Loopback),
         );
     }
 
@@ -469,7 +469,7 @@ mod tests {
             }
             .into_job_spec()
             .unwrap(),
-            job_spec!("program", layers: [tar_layer!("1")], network: Local),
+            job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Local),
         );
     }
 
@@ -979,7 +979,7 @@ mod tests {
             .unwrap()
             .into_job_spec()
             .unwrap(),
-            job_spec!("/bin/sh", layers: [tar_layer!("1")], network: Loopback),
+            job_spec!("/bin/sh", layers: [tar_layer!("1")], network: JobNetwork::Loopback),
         )
     }
 

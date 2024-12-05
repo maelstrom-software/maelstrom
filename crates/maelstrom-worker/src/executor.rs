@@ -1969,7 +1969,7 @@ mod tests {
             mounts: [
                 JobMount::Sys { mount_point: utf8_path_buf!("/sys") },
             ],
-            network: Loopback,
+            network: JobNetwork::Loopback,
         })
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1\n")))
         .run()
@@ -2003,7 +2003,7 @@ mod tests {
                     "#},
                 port = port
             ),
-            network: Local,
+            network: JobNetwork::Local,
         })
         .expected_status(JobTerminationStatus::Exited(0))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"goodbye")))
@@ -2053,7 +2053,7 @@ mod tests {
         let spec = test_spec! {
             "/bin/ls",
             arguments: ["/proc/self/fd"],
-            network: Loopback,
+            network: JobNetwork::Loopback,
             mounts: [
                 JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),

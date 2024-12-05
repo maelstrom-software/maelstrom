@@ -469,9 +469,9 @@ macro_rules! job_spec {
         $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
             [$($($field_out)+,)? mounts: vec![$($mount)*]])
     };
-    (@expand [$($required:tt)+] [network: $network:ident $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+    (@expand [$($required:tt)+] [network: $network:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
-            [$($($field_out)+,)? network: $crate::JobNetwork::$network])
+            [$($($field_out)+,)? network: $network])
     };
     (@expand [$($required:tt)+] [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
@@ -1069,13 +1069,13 @@ mod tests {
         let spec = job_spec!("foo", [tar_digest!(0)]);
         assert!(!spec.must_be_run_locally());
 
-        let spec = job_spec!("foo", [tar_digest!(0)], network: Loopback);
+        let spec = job_spec!("foo", [tar_digest!(0)], network: JobNetwork::Loopback);
         assert!(!spec.must_be_run_locally());
 
-        let spec = job_spec!("foo", [tar_digest!(0)], network: Local);
+        let spec = job_spec!("foo", [tar_digest!(0)], network: JobNetwork::Local);
         assert!(spec.must_be_run_locally());
 
-        let spec = job_spec!("foo", [tar_digest!(0)], network: Disabled);
+        let spec = job_spec!("foo", [tar_digest!(0)], network: JobNetwork::Disabled);
         assert!(!spec.must_be_run_locally());
     }
 

@@ -716,7 +716,7 @@ mod tests {
             2,
             client_job_spec! {
                 "foo",
-                network: Local,
+                network: JobNetwork::Local,
                 mounts: [ sys_mount!("/mnt") ],
             },
         ) => {
@@ -1086,7 +1086,7 @@ mod tests {
                 proc_mount!("/proc"),
                 tmp_mount!("/tmp"),
             ],
-            network: Local,
+            network: JobNetwork::Local,
             user: 100,
             group: 101,
             arguments: ["arg1", "arg2"],
@@ -1113,7 +1113,7 @@ mod tests {
                     proc_mount!("/proc"),
                     tmp_mount!("/tmp"),
                 ],
-                network: Local,
+                network: JobNetwork::Local,
                 root_overlay: JobRootOverlay::Tmp,
                 working_directory: "/root",
                 user: 100,
@@ -1388,11 +1388,11 @@ mod tests {
 
     script_test! {
         add_container_duplicate,
-        AddContainer(0, string!("foo"), container_spec!{ network: Loopback }) => {
+        AddContainer(0, string!("foo"), container_spec!{ network: JobNetwork::Loopback }) => {
             ContainerAdded(0, Ok(None)),
         };
-        AddContainer(1, string!("foo"), container_spec!{ network: Local }) => {
-            ContainerAdded(1, Ok(Some(container_spec!{ network: Loopback }))),
+        AddContainer(1, string!("foo"), container_spec!{ network: JobNetwork::Local }) => {
+            ContainerAdded(1, Ok(Some(container_spec!{ network: JobNetwork::Loopback }))),
         };
     }
 
@@ -1402,7 +1402,7 @@ mod tests {
             0,
             string!("foo"),
             container_spec! {
-                network: Local,
+                network: JobNetwork::Local,
                 mounts: [ sys_mount!("/mnt") ],
             }
         ) => {
