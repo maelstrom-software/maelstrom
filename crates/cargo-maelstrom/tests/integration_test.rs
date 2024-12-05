@@ -5,7 +5,7 @@ use cargo_maelstrom::{
     Logger,
 };
 use indicatif::InMemoryTerm;
-use maelstrom_client::ClientBgProcess;
+use maelstrom_client::{ArtifactUploadStrategy, ClientBgProcess};
 use maelstrom_test_runner::ui;
 use maelstrom_util::{
     config::common::{CacheSize, InlineLimit, LogLevel, Slots},
@@ -52,6 +52,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             ui: ui::UiKind::Simple,
             repeat: Default::default(),
             stop_after: None,
+            artifact_upload_strategy: ArtifactUploadStrategy::TcpUpload,
         },
         cargo_feature_selection_options: FeatureSelectionOptions::default(),
         cargo_compilation_options: CompilationOptions::default(),

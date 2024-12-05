@@ -646,7 +646,7 @@ pub fn main_with_stderr_and_project_dir(
         config.parent.inline_limit,
         config.parent.slots,
         config.parent.accept_invalid_remote_container_tls_certs,
-        ArtifactUploadStrategy::TcpUpload,
+        config.parent.artifact_upload_strategy,
         log.clone(),
     )?;
     let deps = DefaultMainAppDeps::new(project_dir, build_dir, &cache_dir, &client)?;

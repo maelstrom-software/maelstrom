@@ -1,5 +1,5 @@
 use indicatif::InMemoryTerm;
-use maelstrom_client::{ClientBgProcess, ProjectDir};
+use maelstrom_client::{ArtifactUploadStrategy, ClientBgProcess, ProjectDir};
 use maelstrom_go_test::{cli::ExtraCommandLineOptions, Config, Logger};
 use maelstrom_test_runner::ui;
 use maelstrom_util::{
@@ -38,6 +38,7 @@ fn do_maelstrom_go_test_test(
             ui: ui::UiKind::Simple,
             repeat: Default::default(),
             stop_after: None,
+            artifact_upload_strategy: ArtifactUploadStrategy::TcpUpload,
         },
         go_test_options: Default::default(),
     };

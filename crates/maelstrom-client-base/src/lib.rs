@@ -12,6 +12,7 @@ extern crate self as maelstrom_client;
 
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
+use clap::ValueEnum;
 use derive_more::{Debug, From, Into};
 use maelstrom_base::{
     stats::JobState, ClientJobId, JobBrokerStatus, JobOutcomeResult, JobWorkerStatus,
@@ -23,6 +24,7 @@ use maelstrom_util::{
     root::RootBuf,
 };
 use serde::Deserialize;
+use strum::EnumString;
 
 /// The project directory is used for two things. First, any relative paths in layer specifications
 /// are resolved based on this path. Second, it's where the client process looks for the
@@ -82,6 +84,16 @@ impl AcceptInvalidRemoteContainerTlsCerts {
     pub fn into_inner(self) -> bool {
         self.0
     }
+}
+
+#[derive(Copy, Clone, Debug, EnumString, ValueEnum, IntoProtoBuf, TryFromProtoBuf, Deserialize)]
+#[proto(proto_buf_type = "proto::ArtifactUploadStrategy")]
+#[clap(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+pub enum ArtifactUploadStrategy {
+    TcpUpload = 0,
+    GitHub = 1,
 }
 
 #[derive(Clone, IntoProtoBuf, TryFromProtoBuf)]
@@ -204,13 +216,6 @@ pub enum JobStatus {
 // | | |  __/ (_| | |_| |  __/\__ \ |_ / /| | |  __/\__ \ |_) | (_) | | | \__ \  __/
 // |_|  \___|\__, |\__,_|\___||___/\__/_/ |_|  \___||___/ .__/ \___/|_| |_|___/\___|
 //              |_|                                     |_|
-
-#[derive(Copy, Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
-#[proto(proto_buf_type = "proto::ArtifactUploadStrategy")]
-pub enum ArtifactUploadStrategy {
-    TcpUpload = 0,
-    GitHub = 1,
-}
 
 #[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::StartRequest")]

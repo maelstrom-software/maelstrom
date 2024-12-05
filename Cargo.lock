@@ -3434,6 +3434,7 @@ name = "maelstrom-client-base"
 version = "0.13.0-dev"
 dependencies = [
  "anyhow",
+ "clap",
  "derive_more",
  "enum-map",
  "enumset",
@@ -3448,6 +3449,7 @@ dependencies = [
  "protoc-bin-vendored",
  "serde",
  "slog",
+ "strum",
  "toml",
  "tonic",
  "tonic-build",

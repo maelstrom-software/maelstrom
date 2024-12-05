@@ -608,7 +608,7 @@ pub fn main(
             config.parent.inline_limit,
             config.parent.slots,
             config.parent.accept_invalid_remote_container_tls_certs,
-            ArtifactUploadStrategy::TcpUpload,
+            config.parent.artifact_upload_strategy,
             packages,
             log.clone(),
         )?;

@@ -120,6 +120,14 @@ pub struct Config {
     /// Accept invalid TLS certificates when downloading container images.
     #[config(flag)]
     pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+
+    /// Controls how we upload artifacts when communicating with a remote broker.
+    #[config(
+        value_name = "ARTIFACT_UPLOAD_STRATEGY",
+        default = r#""tcp-upload""#,
+        hide
+    )]
+    pub artifact_upload_strategy: ArtifactUploadStrategy,
 }
 
 #[derive(Args)]
@@ -760,7 +768,7 @@ fn main_with_logger(
         config.inline_limit,
         config.slots,
         config.accept_invalid_remote_container_tls_certs,
-        ArtifactUploadStrategy::TcpUpload,
+        config.artifact_upload_strategy,
         log,
     )?;
     let mut job_specs = spec::job_spec_iter_from_reader(reader);

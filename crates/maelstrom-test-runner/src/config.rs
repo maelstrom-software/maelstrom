@@ -1,7 +1,9 @@
 use crate::ui::UiKind;
 use clap::{command, Args};
 use derive_more::From;
-use maelstrom_client::{AcceptInvalidRemoteContainerTlsCerts, ContainerImageDepotDir};
+use maelstrom_client::{
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, ContainerImageDepotDir,
+};
 use maelstrom_macro::Config;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
@@ -109,6 +111,14 @@ pub struct Config {
         next_help_heading = "Test Runner Config Options"
     )]
     pub broker: Option<BrokerAddr>,
+
+    /// Controls how we upload artifacts when communicating with a remote broker.
+    #[config(
+        value_name = "ARTIFACT_UPLOAD_STRATEGY",
+        default = r#""tcp-upload""#,
+        hide
+    )]
+    pub artifact_upload_strategy: ArtifactUploadStrategy,
 
     /// Minimum log level to output.
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]

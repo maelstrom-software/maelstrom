@@ -13,6 +13,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+clap.workspace = true
 derive_more.workspace = true
 enum-map.workspace = true
 enumset.workspace = true
@@ -23,6 +24,7 @@ maelstrom-util.workspace = true
 prost.workspace = true
 serde.workspace = true
 slog.workspace = true
+strum.workspace = true
 tonic.workspace = true
 tuple.workspace = true
 
