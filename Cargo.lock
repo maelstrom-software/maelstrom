@@ -3472,6 +3472,7 @@ dependencies = [
  "maelstrom-base",
  "maelstrom-client-base",
  "maelstrom-container",
+ "maelstrom-github",
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker",

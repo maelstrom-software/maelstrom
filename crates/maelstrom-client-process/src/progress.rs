@@ -1,11 +1,16 @@
 use maelstrom_client_base::RemoteProgress;
+use maelstrom_github::{AzureResult, SeekableStream};
 use maelstrom_util::ext::OptionExt as _;
-use std::collections::HashMap;
-use std::pin::{pin, Pin};
-use std::sync::OnceLock;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
+use std::{
+    collections::HashMap,
+    future::Future,
+    pin::{pin, Pin},
+    sync::OnceLock,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    task::{ready, Poll},
 };
 use tokio::io::{self, AsyncRead};
 
@@ -36,7 +41,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RunningProgress {
     name: String,
     progress: Arc<AtomicU64>,
@@ -46,6 +51,10 @@ pub struct RunningProgress {
 impl RunningProgress {
     pub fn update(&self, amount_to_add: u64) {
         self.progress.fetch_add(amount_to_add, Ordering::AcqRel);
+    }
+
+    pub fn reset(&self) {
+        self.progress.store(0, Ordering::Release);
     }
 }
 
@@ -114,6 +123,7 @@ impl ProgressTracker {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct UploadProgressReader<ReadT> {
     prog: RunningProgress,
     read: ReadT,
@@ -130,12 +140,46 @@ impl<ReadT: AsyncRead + Unpin> AsyncRead for UploadProgressReader<ReadT> {
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         dst: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<io::Result<()>> {
+    ) -> Poll<io::Result<()>> {
         let start_len = dst.filled().len();
         let me = self.get_mut();
         let result = AsyncRead::poll_read(pin!(&mut me.read), cx, dst);
         let amount_read = dst.filled().len() - start_len;
         me.prog.update(amount_read as u64);
         result
+    }
+}
+
+impl<ReadT: futures::io::AsyncRead + Unpin> futures::io::AsyncRead for UploadProgressReader<ReadT> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        dst: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        let me = self.get_mut();
+        let size = ready!(futures::io::AsyncRead::poll_read(
+            pin!(&mut me.read),
+            cx,
+            dst
+        ))?;
+        me.prog.update(size as u64);
+        Poll::Ready(Ok(size))
+    }
+}
+
+impl<ReadT: SeekableStream + Clone> SeekableStream for UploadProgressReader<ReadT> {
+    fn reset<'life0, 'async_trait>(
+        &'life0 mut self,
+    ) -> Pin<Box<dyn Future<Output = AzureResult<()>> + Send + 'async_trait>>
+    where
+        Self: 'async_trait,
+        'life0: 'async_trait,
+    {
+        self.prog.reset();
+        self.read.reset()
+    }
+
+    fn len(&self) -> usize {
+        self.read.len()
     }
 }

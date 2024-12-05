@@ -1,4 +1,4 @@
-use crate::artifact_pusher::{start_task_inner, Receiver};
+use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver};
 use crate::progress::{ProgressTracker, UploadProgressReader};
 use anyhow::{anyhow, Context as _, Result};
 use maelstrom_base::{
@@ -13,13 +13,6 @@ use tokio::{
     net::TcpStream,
     task::JoinSet,
 };
-
-fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
-    let digest_string = digest.to_string();
-    let short_digest = &digest_string[digest_string.len() - 7..];
-    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    format!("{short_digest} {file_name}")
-}
 
 pub async fn push_one_artifact(
     stream: Option<TcpStream>,

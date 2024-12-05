@@ -11,8 +11,9 @@
 //! <https://github.com/actions/toolkit/blob/main/packages/artifact/src/generated/results/api/v1/artifact.ts>
 
 pub use azure_core::{
+    error::Result as AzureResult,
     tokio::fs::{FileStream, FileStreamBuilder},
-    Body,
+    Body, SeekableStream,
 };
 
 use anyhow::{anyhow, bail, Result};

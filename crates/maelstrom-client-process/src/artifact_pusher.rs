@@ -1,10 +1,15 @@
+mod github;
 mod tcp_upload;
 
 use anyhow::Result;
 use maelstrom_base::Sha256Digest;
 use maelstrom_util::r#async::Pool;
 use std::future::Future;
-use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
+use std::{
+    num::NonZeroU32,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinSet;
 
@@ -75,4 +80,11 @@ fn start_task_inner<PoolItemT, RetFutT, PushOneArtifactFn>(
         }
         Ok(())
     });
+}
+
+fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
+    let digest_string = digest.to_string();
+    let short_digest = &digest_string[digest_string.len() - 7..];
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    format!("{short_digest} {file_name}")
 }
