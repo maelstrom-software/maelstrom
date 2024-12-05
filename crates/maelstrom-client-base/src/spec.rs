@@ -48,8 +48,8 @@ where
 }
 
 #[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
-#[proto(proto_buf_type = "proto::ImageSpec")]
-pub struct ImageSpec {
+#[proto(proto_buf_type = "proto::ImageRef")]
+pub struct ImageRef {
     pub name: String,
     pub r#use: EnumSet<ImageUse>,
 }
@@ -67,7 +67,7 @@ pub struct ContainerRef {
     enum_type = "proto::container_parent::Parent"
 )]
 pub enum ContainerParent {
-    Image(ImageSpec),
+    Image(ImageRef),
     Container(ContainerRef),
 }
 
@@ -75,7 +75,7 @@ pub enum ContainerParent {
 macro_rules! image_container_parent {
     (@expand [] -> [$name:expr, $layers:literal, $environment:literal, $working_directory:literal]) => {
         $crate::spec::ContainerParent::Image(
-            $crate::spec::ImageSpec {
+            $crate::spec::ImageRef {
                 name: $name.into(),
                 r#use: {
                     let mut r#use = EnumSet::new();

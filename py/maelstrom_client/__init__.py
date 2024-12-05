@@ -8,7 +8,7 @@ from .items_pb2 import (
     Duration,
     EnvironmentSpec,
     GlobLayer,
-    ImageSpec,
+    ImageRef,
     ImageUse,
     JobDevice,
     JobMount,

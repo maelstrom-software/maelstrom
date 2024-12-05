@@ -10,7 +10,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     job_spec,
-    spec::{ImageSpec, LayerSpec, PrefixOptions},
+    spec::{ImageRef, LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ContainerParent, ProjectDir, StateDir,
 };
@@ -169,13 +169,13 @@ struct PytestTestCollector<'client> {
     build_dir: RootBuf<BuildDir>,
     cache_dir: RootBuf<CacheDir>,
     client: &'client Client,
-    test_layers: Mutex<HashMap<ImageSpec, LayerSpec>>,
+    test_layers: Mutex<HashMap<ImageRef, LayerSpec>>,
 }
 
 impl PytestTestCollector<'_> {
     fn get_pip_packages(
         &self,
-        image_spec: ImageSpec,
+        image_spec: ImageRef,
         ref_: &DockerReference,
         ui: &UiSender,
     ) -> Result<Utf8PathBuf> {
@@ -308,7 +308,7 @@ impl PytestTestCollector<'_> {
         Ok(upper.try_into()?)
     }
 
-    fn build_test_layer(&self, image: ImageSpec, ui: &UiSender) -> Result<Option<LayerSpec>> {
+    fn build_test_layer(&self, image: ImageRef, ui: &UiSender) -> Result<Option<LayerSpec>> {
         let image_name: ImageName = image.name.parse()?;
         let ImageName::Docker(ref_) = image_name else {
             return Ok(None);
@@ -336,7 +336,7 @@ pub(crate) struct PytestTestArtifact {
     ignored_tests: Vec<String>,
     package: PytestPackageId,
     pytest_options: PytestConfigValues,
-    test_layers: HashMap<ImageSpec, LayerSpec>,
+    test_layers: HashMap<ImageRef, LayerSpec>,
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
@@ -468,7 +468,7 @@ impl CollectTests for PytestTestCollector<'_> {
         Ok((handle, stream))
     }
 
-    fn build_test_layers(&self, images: Vec<ImageSpec>, ui: &UiSender) -> Result<()> {
+    fn build_test_layers(&self, images: Vec<ImageRef>, ui: &UiSender) -> Result<()> {
         let mut test_layers = self.test_layers.lock().unwrap();
         for image in images {
             if let Entry::Vacant(e) = test_layers.entry(image.clone()) {

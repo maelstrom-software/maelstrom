@@ -3,7 +3,7 @@
 import os
 import sys
 
-from maelstrom_client import Client, ImageSpec, ContainerSpec, ContainerRef, JobSpec, ImageUse, ContainerParent
+from maelstrom_client import Client, ImageRef, ContainerSpec, ContainerRef, JobSpec, ImageUse, ContainerParent
 
 def main():
     prog=sys.argv[1]
@@ -11,7 +11,7 @@ def main():
 
     client = Client(slots=4)
 
-    image = ImageSpec(name="docker://alpine", use=[ImageUse.IMAGE_USE_LAYERS])
+    image = ImageRef(name="docker://alpine", use=[ImageUse.IMAGE_USE_LAYERS])
     container = ContainerSpec(working_directory="/", parent=ContainerParent(image=image))
     spec = JobSpec(
         container=container,

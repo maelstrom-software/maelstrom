@@ -153,7 +153,7 @@ enum ImageUse {
     IMAGE_USE_WORKING_DIRECTORY = 2;
 }
 
-message ImageSpec {
+message ImageRef {
     string name = 1;
     repeated ImageUse use = 2;
 }
@@ -186,7 +186,7 @@ message JobTty {
 
 message ContainerParent {
     oneof parent {
-        ImageSpec image = 1;
+        ImageRef image = 1;
         ContainerRef container = 2;
     }
 }

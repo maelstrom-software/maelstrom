@@ -4,7 +4,7 @@ use maelstrom_base::{
     UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
-    incompatible, ContainerParent, ContainerSpec, EnvironmentSpec, Image, ImageSpec, ImageUse,
+    incompatible, ContainerParent, ContainerSpec, EnvironmentSpec, Image, ImageRef, ImageUse,
     IntoEnvironment, JobSpec, LayerSpec, PossiblyImage,
 };
 use serde::de::Error as _;
@@ -108,7 +108,7 @@ impl Job {
             }
         };
         let parent = self.image.map(|image| {
-            ContainerParent::Image(ImageSpec {
+            ContainerParent::Image(ImageRef {
                 name: image,
                 r#use: image_use,
             })

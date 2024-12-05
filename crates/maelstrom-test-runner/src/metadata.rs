@@ -7,7 +7,7 @@ use container::TestContainer;
 use directive::TestDirective;
 use maelstrom_base::{EnumSet, GroupId, JobMount, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::{
-    spec::{ContainerParent, EnvironmentSpec, ImageSpec, ImageUse, LayerSpec, PossiblyImage},
+    spec::{ContainerParent, EnvironmentSpec, ImageRef, ImageUse, LayerSpec, PossiblyImage},
     ProjectDir,
 };
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
@@ -110,7 +110,7 @@ impl TestMetadataContainer {
 
         if container.image.is_some() {
             self.parent = container.image.as_ref().map(|image| {
-                ContainerParent::Image(ImageSpec {
+                ContainerParent::Image(ImageRef {
                     name: image.into(),
                     r#use: image_use,
                 })
@@ -206,11 +206,11 @@ where
             .try_fold(TestMetadata::default(), |m, d| m.try_fold(d))
     }
 
-    pub fn get_all_images(&self) -> Vec<ImageSpec> {
+    pub fn get_all_images(&self) -> Vec<ImageRef> {
         self.directives
             .iter()
             .filter_map(|directive| {
-                directive.container.image.as_ref().map(|name| ImageSpec {
+                directive.container.image.as_ref().map(|name| ImageRef {
                     name: name.into(),
                     r#use: {
                         let mut image_use = EnumSet::new();

@@ -3,7 +3,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use maelstrom_client::{
-    spec::{ImageSpec, LayerSpec},
+    spec::{ImageRef, LayerSpec},
     ProjectDir,
 };
 use maelstrom_test_runner::WaitStatus;
@@ -123,7 +123,7 @@ pub fn pytest_collect_tests(
     pytest_options: &PytestConfigValues,
     project_dir: &Root<ProjectDir>,
     build_dir: &Root<BuildDir>,
-    test_layers: HashMap<ImageSpec, LayerSpec>,
+    test_layers: HashMap<ImageRef, LayerSpec>,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     compile_python(project_dir.as_ref())?;
 
