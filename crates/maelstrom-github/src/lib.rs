@@ -382,6 +382,7 @@ mod tests {
         test_error("foobar", "missing period");
         test_error("foo.bar", "base64 invalid");
         test_error("foo.e30=", "base64 invalid: Invalid padding");
+        test_error("foo.e30", "missing 'scp' field");
         test_error("foo.eyJzY3AiOjEyfQ", "'scp' field not a string");
         test_error(
             "foo.eyJzY3AiOiJmb28ifQ",
