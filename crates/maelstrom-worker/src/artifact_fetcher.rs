@@ -1,4 +1,6 @@
 mod github;
 mod tcp;
 
-pub use tcp::ArtifactFetcher;
+#[expect(unused_imports)]
+pub use github::GitHubArtifactFetcher;
+pub use tcp::TcpArtifactFetcher;

@@ -18,7 +18,7 @@ use maelstrom_util::{
 use slog::{debug, o, warn, Logger};
 use std::{net::TcpStream, num::NonZeroU32, sync::Arc, thread};
 
-pub struct ArtifactFetcher {
+pub struct TcpArtifactFetcher {
     broker_addr: BrokerAddr,
     dispatcher_sender: DispatcherSender,
     log: Logger,
@@ -26,7 +26,7 @@ pub struct ArtifactFetcher {
     temp_file_factory: TempFileFactory,
 }
 
-impl ArtifactFetcher {
+impl TcpArtifactFetcher {
     pub fn new(
         max_simultaneous_fetches: NonZeroU32,
         dispatcher_sender: DispatcherSender,
@@ -34,7 +34,7 @@ impl ArtifactFetcher {
         log: Logger,
         temp_file_factory: TempFileFactory,
     ) -> Self {
-        ArtifactFetcher {
+        Self {
             broker_addr,
             dispatcher_sender,
             log,
@@ -44,7 +44,7 @@ impl ArtifactFetcher {
     }
 }
 
-impl dispatcher::ArtifactFetcher for ArtifactFetcher {
+impl dispatcher::ArtifactFetcher for TcpArtifactFetcher {
     fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
         let log = self.log.new(o!(
             "digest" => digest.to_string(),

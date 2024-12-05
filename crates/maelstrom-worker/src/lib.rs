@@ -12,7 +12,7 @@ mod manifest_digest_cache;
 mod types;
 
 use anyhow::{anyhow, bail, Context as _, Error, Result};
-use artifact_fetcher::ArtifactFetcher;
+use artifact_fetcher::TcpArtifactFetcher;
 use config::Config;
 use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
@@ -175,12 +175,13 @@ fn start_dispatcher_task(
 ) -> Result<JoinHandle<Error>> {
     let log_clone = log.clone();
     let dispatcher_sender_clone = dispatcher_sender.clone();
+    let max_simultaneous_fetches = u32::try_from(MAX_ARTIFACT_FETCHES)
+        .unwrap()
+        .try_into()
+        .unwrap();
     let artifact_fetcher_factory = move |temp_file_factory| {
-        ArtifactFetcher::new(
-            u32::try_from(MAX_ARTIFACT_FETCHES)
-                .unwrap()
-                .try_into()
-                .unwrap(),
+        TcpArtifactFetcher::new(
+            max_simultaneous_fetches,
             dispatcher_sender_clone,
             config.broker,
             log_clone,
