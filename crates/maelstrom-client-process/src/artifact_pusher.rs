@@ -1,5 +1,5 @@
 mod github;
-mod tcp_upload;
+mod tcp;
 
 use crate::progress::ProgressTracker;
 use anyhow::Result;
@@ -100,7 +100,7 @@ pub fn start_task(
 ) -> Result<()> {
     match artifact_upload_strategy {
         ArtifactUploadStrategy::TcpUpload => {
-            tcp_upload::start_task(join_set, receiver, broker_addr, upload_tracker, log);
+            tcp::start_task(join_set, receiver, broker_addr, upload_tracker, log);
             Ok(())
         }
         ArtifactUploadStrategy::GitHub => github::start_task(join_set, receiver, upload_tracker),
