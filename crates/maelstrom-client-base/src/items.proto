@@ -3,8 +3,8 @@ syntax = "proto3";
 package maelstrom_client_base.items;
 
 enum ArtifactTransferStrategy {
-    TcpUpload = 0;
-    GitHub = 1;
+    ARTIFACT_TRANSFER_STRATEGY_TCP_UPLOAD = 0;
+    ARTIFACT_TRANSFER_STRATEGY_GIT_HUB = 1;
 }
 
 message StartRequest {
