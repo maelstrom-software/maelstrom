@@ -1,7 +1,7 @@
-use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver};
+use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver, SuccessCb};
 use crate::progress::{ProgressTracker, UploadProgressReader};
 use anyhow::Result;
-use maelstrom_base::Sha256Digest;
+use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
 use maelstrom_github::{FileStreamBuilder, GitHubClient, SeekableStream};
 use maelstrom_util::async_fs::Fs;
 use std::{path::PathBuf, sync::Arc};
@@ -12,7 +12,7 @@ pub async fn push_one_artifact(
     upload_tracker: ProgressTracker,
     path: PathBuf,
     digest: Sha256Digest,
-    success_callback: Box<dyn FnOnce() + Send + Sync>,
+    success_callback: SuccessCb,
 ) -> Result<()> {
     let fs = Fs::new();
     let file = fs.open_file(&path).await?;
@@ -26,7 +26,7 @@ pub async fn push_one_artifact(
     let stream = Box::new(UploadProgressReader::new(prog, file_stream)) as Box<dyn SeekableStream>;
     github_client.upload(&artifact_name, stream).await?;
 
-    success_callback();
+    success_callback(ArtifactUploadLocation::Remote);
 
     Ok(())
 }

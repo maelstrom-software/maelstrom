@@ -1,8 +1,8 @@
-use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver};
+use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver, SuccessCb};
 use crate::progress::{ProgressTracker, UploadProgressReader};
 use anyhow::{anyhow, Context as _, Result};
 use maelstrom_base::{
-    proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},
+    proto::{ArtifactPusherToBroker, ArtifactUploadLocation, BrokerToArtifactPusher, Hello},
     Sha256Digest,
 };
 use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net, net::AsRawFdExt as _};
@@ -20,7 +20,7 @@ pub async fn push_one_artifact(
     broker_addr: BrokerAddr,
     path: PathBuf,
     digest: Sha256Digest,
-    success_callback: Box<dyn FnOnce() + Send + Sync>,
+    success_callback: SuccessCb,
     log: Logger,
 ) -> Result<(TcpStream, ())> {
     push_one_artifact_inner(
@@ -42,7 +42,7 @@ async fn push_one_artifact_inner(
     broker_addr: BrokerAddr,
     path: &Path,
     digest: Sha256Digest,
-    success_callback: Box<dyn FnOnce() + Send + Sync>,
+    success_callback: SuccessCb,
     log: Logger,
 ) -> Result<(TcpStream, ())> {
     let mut stream = match stream {
@@ -75,7 +75,7 @@ async fn push_one_artifact_inner(
 
     resp.map_err(|e| anyhow!("Error from broker: {e}"))?;
 
-    success_callback();
+    success_callback(ArtifactUploadLocation::TcpUpload);
 
     Ok((stream, ()))
 }

@@ -2,7 +2,7 @@ mod github;
 mod tcp_upload;
 
 use anyhow::Result;
-use maelstrom_base::Sha256Digest;
+use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
 use maelstrom_util::r#async::Pool;
 use std::future::Future;
 use std::{
@@ -15,7 +15,7 @@ use tokio::task::JoinSet;
 
 pub use tcp_upload::start_task;
 
-type SuccessCb = Box<dyn FnOnce() + Send + Sync>;
+type SuccessCb = Box<dyn FnOnce(ArtifactUploadLocation) + Send + Sync>;
 
 pub struct Message {
     pub path: PathBuf,
