@@ -3732,7 +3732,6 @@ name = "maelstrom-test-runner"
 version = "0.13.0-dev"
 dependencies = [
  "anyhow",
- "assert_matches",
  "byteorder",
  "clap",
  "colored",

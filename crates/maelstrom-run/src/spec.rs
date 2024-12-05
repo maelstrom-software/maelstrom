@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use maelstrom_base::{
-    GroupId, JobMountForTomlAndJson, JobNetwork, JobRootOverlay, NonEmpty, Timeout, UserId,
-    Utf8PathBuf,
+    EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, JobRootOverlay, NonEmpty, Timeout,
+    UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
     incompatible, ContainerParent, ContainerSpec, EnvironmentSpec, Image, ImageUse,
@@ -78,14 +78,12 @@ impl Job {
 
     fn into_job_spec(self) -> Result<JobSpec> {
         let environment = self.environment.unwrap_or_default();
-        let mut use_layers = false;
-        let mut use_environment = false;
-        let mut use_working_directory = false;
+        let mut image_use = EnumSet::new();
         if self.use_image_environment {
             if self.image.is_none() {
                 bail!("no image provided");
             }
-            use_environment = true;
+            image_use.insert(ImageUse::Environment);
         }
         let mut layers = match self.layers {
             PossiblyImage::Explicit(layers) => layers.into(),
@@ -93,7 +91,7 @@ impl Job {
                 if self.image.is_none() {
                     bail!("no image provided");
                 }
-                use_layers = true;
+                image_use.insert(ImageUse::Layers);
                 vec![]
             }
         };
@@ -105,15 +103,13 @@ impl Job {
                 if self.image.is_none() {
                     bail!("no image provided");
                 }
-                use_working_directory = true;
+                image_use.insert(ImageUse::WorkingDirectory);
                 None
             }
         };
         let parent = self.image.map(|image| ContainerParent::Image {
             name: image,
-            use_layers,
-            use_environment,
-            use_working_directory,
+            r#use: image_use,
         });
         let container = ContainerSpec {
             parent,

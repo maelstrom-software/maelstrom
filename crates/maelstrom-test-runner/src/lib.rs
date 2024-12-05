@@ -14,8 +14,8 @@ pub use deps::*;
 
 use anyhow::Result;
 use clap::{Args, Command};
-use maelstrom_base::Utf8PathBuf;
-use maelstrom_client::ClientBgProcess;
+use maelstrom_base::{EnumSet, Utf8PathBuf};
+use maelstrom_client::{spec::ImageUse, ClientBgProcess};
 use maelstrom_util::{config::common::LogLevel, config::Config, process::ExitCode};
 use slog::Drain as _;
 use std::{
@@ -30,9 +30,7 @@ use ui::{Ui, UiSender, UiSlogDrain};
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ImageSpec {
     pub name: String,
-    pub use_layers: bool,
-    pub use_environment: bool,
-    pub use_working_directory: bool,
+    pub r#use: EnumSet<ImageUse>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

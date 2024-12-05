@@ -56,9 +56,7 @@ pub enum ContainerParent {
     #[proto(proto_buf_type = proto::ImageContainerParent)]
     Image {
         name: String,
-        use_layers: bool,
-        use_environment: bool,
-        use_working_directory: bool,
+        r#use: EnumSet<ImageUse>,
     },
     //    #[proto(proto_buf_type = proto::ContainerContainerParent)]
     //    Container { name: String },
@@ -69,9 +67,19 @@ macro_rules! image_container_parent {
     (@expand [] -> [$name:expr, $layers:literal, $environment:literal, $working_directory:literal]) => {
         $crate::spec::ContainerParent::Image {
             name: $name.into(),
-            use_layers: $layers,
-            use_environment: $environment,
-            use_working_directory: $working_directory,
+            r#use: {
+                let mut r#use = EnumSet::new();
+                if $layers {
+                    r#use.insert(ImageUse::Layers);
+                }
+                if $environment {
+                    r#use.insert(ImageUse::Environment);
+                }
+                if $working_directory {
+                    r#use.insert(ImageUse::WorkingDirectory);
+                }
+                r#use
+            },
         }
     };
     (@expand [layers $(,$($field_in:ident)*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
@@ -460,9 +468,10 @@ impl LayerSpec {
 /// `use = ["layers", "environment"]` in TOML, or the equivalent in JSON.
 ///
 /// See [`Image`].
-#[derive(Debug, Deserialize, EnumSetType, Serialize)]
+#[derive(Debug, Deserialize, EnumSetType, IntoProtoBuf, Serialize, TryFromProtoBuf)]
 #[serde(rename_all = "snake_case")]
 #[enumset(serialize_repr = "list")]
+#[proto(proto_buf_type = "proto::ImageUse")]
 pub enum ImageUse {
     Layers,
     Environment,

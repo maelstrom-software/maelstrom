@@ -147,11 +147,15 @@ message EnvironmentSpec {
     bool extend = 2;
 }
 
+enum ImageUse {
+    Layers = 0;
+    Environment = 1;
+    WorkingDirectory = 2;
+}
+
 message ImageContainerParent {
     string name = 1;
-    bool use_layers = 2;
-    bool use_environment = 3;
-    bool use_working_directory = 4;
+    repeated ImageUse use = 2;
 }
 
 //message ContainerContainerParent {

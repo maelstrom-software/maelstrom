@@ -49,7 +49,6 @@ vt100.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]
-assert_matches.workspace = true
 colored-diff.workspace = true
 enum-map.workspace = true
 indoc.workspace = true

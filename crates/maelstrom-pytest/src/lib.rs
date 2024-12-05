@@ -263,9 +263,7 @@ impl PytestTestCollector<'_> {
             ],
             parent: ContainerParent::Image {
                 name: image_spec.name,
-                use_layers: image_spec.use_layers,
-                use_environment: image_spec.use_environment,
-                use_working_directory: image_spec.use_working_directory,
+                r#use: image_spec.r#use,
             },
             network: JobNetwork::Local,
             root_overlay: JobRootOverlay::Local {
@@ -407,18 +405,11 @@ impl TestArtifact for PytestTestArtifact {
 
     fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec> {
         match metadata.container.parent {
-            Some(ContainerParent::Image {
-                ref name,
-                use_layers,
-                use_environment,
-                use_working_directory,
-            }) => self
+            Some(ContainerParent::Image { ref name, r#use }) => self
                 .test_layers
                 .get(&ImageSpec {
                     name: name.into(),
-                    use_layers,
-                    use_environment,
-                    use_working_directory,
+                    r#use,
                 })
                 .into_iter()
                 .cloned()

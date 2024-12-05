@@ -162,26 +162,11 @@ impl<DepsT: Deps> Preparer<DepsT> {
         let (pending_image, get_image) = {
             match container.parent {
                 None => (None, None),
-                Some(ContainerParent::Image {
-                    name,
-                    use_layers: layers,
-                    use_environment: environment,
-                    use_working_directory: working_directory,
-                }) => {
-                    let mut image_use = EnumSet::new();
-                    if layers {
-                        image_use.insert(ImageUse::Layers);
-                    }
-                    if environment {
-                        image_use.insert(ImageUse::Environment);
-                    }
-                    if working_directory {
-                        image_use.insert(ImageUse::WorkingDirectory);
-                    }
-                    if image_use.is_empty() {
+                Some(ContainerParent::Image { name, r#use }) => {
+                    if r#use.is_empty() {
                         (None, None)
                     } else {
-                        (Some(image_use), Some(name))
+                        (Some(r#use), Some(name))
                     }
                 }
             }

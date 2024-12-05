@@ -5,9 +5,9 @@ use crate::{ImageSpec, TestFilter};
 use anyhow::{bail, Context as _, Result};
 use container::TestContainer;
 use directive::TestDirective;
-use maelstrom_base::{GroupId, JobMount, JobNetwork, Timeout, UserId, Utf8PathBuf};
+use maelstrom_base::{EnumSet, GroupId, JobMount, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::{
-    spec::{ContainerParent, EnvironmentSpec, LayerSpec, PossiblyImage},
+    spec::{ContainerParent, EnvironmentSpec, ImageUse, LayerSpec, PossiblyImage},
     ProjectDir,
 };
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
@@ -42,9 +42,7 @@ pub struct TestMetadataContainer {
 
 impl TestMetadataContainer {
     fn try_fold(mut self, container: &TestContainer) -> Result<Self> {
-        let mut use_layers = false;
-        let mut use_environment = false;
-        let mut use_working_directory = false;
+        let mut image_use = EnumSet::new();
 
         self.network = container.network.unwrap_or(self.network);
         self.enable_writable_file_system = container
@@ -61,7 +59,7 @@ impl TestMetadataContainer {
                 if container.image.is_none() {
                     bail!("no image provided");
                 }
-                use_layers = true;
+                image_use.insert(ImageUse::Layers);
                 self.layers = vec![];
             }
             None => {}
@@ -85,7 +83,7 @@ impl TestMetadataContainer {
                 if container.image.is_none() {
                     bail!("no image provided");
                 }
-                use_environment = true;
+                image_use.insert(ImageUse::Environment);
             }
             None => {}
         }
@@ -104,7 +102,7 @@ impl TestMetadataContainer {
                 if container.image.is_none() {
                     bail!("no image provided");
                 }
-                use_working_directory = true;
+                image_use.insert(ImageUse::WorkingDirectory);
                 self.working_directory = None;
             }
             None => {}
@@ -116,9 +114,7 @@ impl TestMetadataContainer {
                 .as_ref()
                 .map(|image| ContainerParent::Image {
                     name: image.into(),
-                    use_layers,
-                    use_environment,
-                    use_working_directory,
+                    r#use: image_use,
                 });
         }
 
@@ -217,15 +213,22 @@ where
             .filter_map(|directive| {
                 directive.container.image.as_ref().map(|name| ImageSpec {
                     name: name.into(),
-                    use_environment: matches!(
-                        &directive.container.environment,
-                        Some(PossiblyImage::Image)
-                    ),
-                    use_layers: matches!(&directive.container.layers, Some(PossiblyImage::Image)),
-                    use_working_directory: matches!(
-                        &directive.container.working_directory,
-                        Some(PossiblyImage::Image)
-                    ),
+                    r#use: {
+                        let mut image_use = EnumSet::new();
+                        if matches!(&directive.container.layers, Some(PossiblyImage::Image)) {
+                            image_use.insert(ImageUse::Layers);
+                        }
+                        if matches!(&directive.container.environment, Some(PossiblyImage::Image)) {
+                            image_use.insert(ImageUse::Environment);
+                        }
+                        if matches!(
+                            &directive.container.working_directory,
+                            Some(PossiblyImage::Image)
+                        ) {
+                            image_use.insert(ImageUse::WorkingDirectory);
+                        }
+                        image_use
+                    },
                 })
             })
             .collect()
@@ -270,7 +273,6 @@ mod tests {
     use super::*;
     use crate::{NoCaseMetadata, SimpleFilter};
     use anyhow::Error;
-    use assert_matches::assert_matches;
     use maelstrom_base::{enum_set, JobDevice};
     use maelstrom_client::image_container_parent;
     use maelstrom_test::{tar_layer, utf8_path_buf};
@@ -1046,7 +1048,7 @@ mod tests {
             .environment,
             vec![dir1_env.clone(), dir3_env.clone()]
         );
-        assert_matches!(
+        assert_eq!(
             all.get_metadata_for_test(
                 &"package1".into(),
                 &"package1".into(),
@@ -1056,10 +1058,7 @@ mod tests {
             .container
             .parent
             .unwrap(),
-            ContainerParent::Image {
-                use_environment: true,
-                ..
-            }
+            image_container_parent!("image1", environment),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -1072,7 +1071,7 @@ mod tests {
             .environment,
             vec![dir1_env.clone()]
         );
-        assert_matches!(
+        assert_eq!(
             all.get_metadata_for_test(
                 &"package1".into(),
                 &"package1".into(),
@@ -1082,10 +1081,7 @@ mod tests {
             .container
             .parent
             .unwrap(),
-            ContainerParent::Image {
-                use_environment: true,
-                ..
-            }
+            image_container_parent!("image1", environment),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -1182,7 +1178,7 @@ mod tests {
                 dir3_added_env.clone()
             ]
         );
-        assert_matches!(
+        assert_eq!(
             all.get_metadata_for_test(
                 &"package1".into(),
                 &"package1".into(),
@@ -1192,10 +1188,7 @@ mod tests {
             .container
             .parent
             .unwrap(),
-            ContainerParent::Image {
-                use_environment: true,
-                ..
-            }
+            image_container_parent!("image1", environment),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -1214,7 +1207,7 @@ mod tests {
                 dir4_added_env.clone()
             ]
         );
-        assert_matches!(
+        assert_eq!(
             all.get_metadata_for_test(
                 &"package1".into(),
                 &"package1".into(),
@@ -1224,10 +1217,7 @@ mod tests {
             .container
             .parent
             .unwrap(),
-            ContainerParent::Image {
-                use_environment: true,
-                ..
-            }
+            image_container_parent!("image1", environment),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -1244,7 +1234,7 @@ mod tests {
                 dir2_added_env.clone(),
             ]
         );
-        assert_matches!(
+        assert_eq!(
             all.get_metadata_for_test(
                 &"package1".into(),
                 &"package1".into(),
@@ -1254,10 +1244,7 @@ mod tests {
             .container
             .parent
             .unwrap(),
-            ContainerParent::Image {
-                use_environment: true,
-                ..
-            }
+            image_container_parent!("image1", environment),
         );
         assert_eq!(
             all.get_metadata_for_test(
