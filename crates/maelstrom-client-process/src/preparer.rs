@@ -495,10 +495,11 @@ impl<DepsT: Deps> Job<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use maelstrom_base::{job_spec, tar_digest, WindowSize};
+    use maelstrom_base::{job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, WindowSize};
     use maelstrom_client::spec;
     use maelstrom_client_base::{
-        container_spec, image_container_parent, job_spec as client_job_spec, spec::ImageConfig,
+        container_spec, environment_spec, image_container_parent, job_spec as client_job_spec,
+        spec::ImageConfig,
     };
     use maelstrom_test::{millis, string, tar_layer};
     use std::{cell::RefCell, ffi::OsStr, rc::Rc};
@@ -609,30 +610,6 @@ mod tests {
         }
     }
 
-    macro_rules! sys_mount {
-        ($mount_point:expr) => {
-            JobMount::Sys {
-                mount_point: $mount_point.into(),
-            }
-        };
-    }
-
-    macro_rules! proc_mount {
-        ($mount_point:expr) => {
-            JobMount::Proc {
-                mount_point: $mount_point.into(),
-            }
-        };
-    }
-
-    macro_rules! tmp_mount {
-        ($mount_point:expr) => {
-            JobMount::Tmp {
-                mount_point: $mount_point.into(),
-            }
-        };
-    }
-
     macro_rules! converted_image {
         (@expand [$name:expr] [] -> []) => {
             ConvertedImage::new($name.into(), ImageConfig::default())
@@ -661,15 +638,6 @@ mod tests {
         ($name:expr $(,$($field_in:tt)*)?) => {
             converted_image!(@expand [$name] [$($($field_in)*)?] -> [])
         };
-    }
-
-    macro_rules! environment_spec {
-        ($extend:expr $(, $($($key:expr => $value:expr),+ $(,)?)?)?) => {
-            EnvironmentSpec {
-                extend: $extend.into(),
-                vars: BTreeMap::from([$($($(($key.into(), $value.into())),+)?)?]),
-            }
-        }
     }
 
     macro_rules! script_test {

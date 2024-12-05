@@ -125,6 +125,16 @@ pub struct EnvironmentSpec {
     pub extend: bool,
 }
 
+#[macro_export]
+macro_rules! environment_spec {
+    ($extend:expr $(, $($($key:expr => $value:expr),+ $(,)?)?)?) => {
+        $crate::spec::EnvironmentSpec {
+            extend: $extend.into(),
+            vars: ::std::collections::BTreeMap::from([$($($(($key.into(), $value.into())),+)?)?]),
+        }
+    }
+}
+
 pub trait IntoEnvironment {
     fn into_environment(self) -> Vec<EnvironmentSpec>;
 }

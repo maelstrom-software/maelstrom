@@ -227,6 +227,33 @@ pub enum JobMount {
     },
 }
 
+#[macro_export]
+macro_rules! sys_mount {
+    ($mount_point:expr) => {
+        $crate::JobMount::Sys {
+            mount_point: $mount_point.into(),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! proc_mount {
+    ($mount_point:expr) => {
+        $crate::JobMount::Proc {
+            mount_point: $mount_point.into(),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! tmp_mount {
+    ($mount_point:expr) => {
+        $crate::JobMount::Tmp {
+            mount_point: $mount_point.into(),
+        }
+    };
+}
+
 impl From<JobMountForTomlAndJson> for JobMount {
     fn from(job_mount: JobMountForTomlAndJson) -> JobMount {
         match job_mount {

@@ -1,5 +1,6 @@
 mod artifact_pusher;
 mod client;
+mod collapsed_job_spec;
 mod digest_repo;
 mod log;
 mod preparer;
