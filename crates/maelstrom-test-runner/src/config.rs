@@ -2,7 +2,7 @@ use crate::ui::UiKind;
 use clap::{command, Args};
 use derive_more::From;
 use maelstrom_client::{
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, ContainerImageDepotDir,
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, ContainerImageDepotDir,
 };
 use maelstrom_macro::Config;
 use maelstrom_util::{
@@ -114,11 +114,11 @@ pub struct Config {
 
     /// Controls how we upload artifacts when communicating with a remote broker.
     #[config(
-        value_name = "ARTIFACT_UPLOAD_STRATEGY",
+        value_name = "ARTIFACT_TRANSFER_STRATEGY",
         default = r#""tcp-upload""#,
         hide
     )]
-    pub artifact_upload_strategy: ArtifactUploadStrategy,
+    pub artifact_transfer_strategy: ArtifactTransferStrategy,
 
     /// Minimum log level to output.
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]

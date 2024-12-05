@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use indicatif::InMemoryTerm;
-use maelstrom_client::{ArtifactUploadStrategy, ClientBgProcess, ProjectDir};
+use maelstrom_client::{ArtifactTransferStrategy, ClientBgProcess, ProjectDir};
 use maelstrom_container::local_registry;
 use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, Logger};
 use maelstrom_test_runner::ui;
@@ -109,7 +109,7 @@ fn do_maelstrom_pytest_test(
             ui: ui::UiKind::Simple,
             repeat: Default::default(),
             stop_after: None,
-            artifact_upload_strategy: ArtifactUploadStrategy::TcpUpload,
+            artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
         },
         pytest_options: Default::default(),
     };

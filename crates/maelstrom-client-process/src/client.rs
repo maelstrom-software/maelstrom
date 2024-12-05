@@ -13,7 +13,7 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{self, ContainerSpec},
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, IntrospectResponse,
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, CacheDir, IntrospectResponse,
     JobStatus, ProjectDir, StateDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{self as container, ContainerImageDepot, ContainerImageDepotDir};
@@ -140,7 +140,7 @@ impl Client {
         inline_limit: InlineLimit,
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-        artifact_upload_strategy: ArtifactUploadStrategy,
+        artifact_transfer_strategy: ArtifactTransferStrategy,
     ) -> Result<()> {
         async fn try_to_start(
             log: Logger,
@@ -153,7 +153,7 @@ impl Client {
             inline_limit: InlineLimit,
             slots: Slots,
             accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-            artifact_upload_strategy: ArtifactUploadStrategy,
+            artifact_transfer_strategy: ArtifactTransferStrategy,
         ) -> Result<(ClientState, JoinSet<Result<()>>, JoinHandle<Error>)> {
             let fs = async_fs::Fs::new();
 
@@ -256,7 +256,7 @@ impl Client {
 
                 // Spawn a task for the artifact_pusher.
                 artifact_pusher::start_task(
-                    artifact_upload_strategy,
+                    artifact_transfer_strategy,
                     &mut join_set,
                     artifact_pusher_receiver,
                     broker_addr,
@@ -369,7 +369,7 @@ impl Client {
             inline_limit,
             slots,
             accept_invalid_remote_container_tls_certs,
-            artifact_upload_strategy,
+            artifact_transfer_strategy,
         )
         .await;
         match result {

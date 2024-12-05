@@ -4,7 +4,7 @@ mod tcp;
 use crate::progress::ProgressTracker;
 use anyhow::Result;
 use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
-use maelstrom_client_base::ArtifactUploadStrategy;
+use maelstrom_client_base::ArtifactTransferStrategy;
 use maelstrom_util::{config::common::BrokerAddr, r#async::Pool};
 use slog::Logger;
 use std::future::Future;
@@ -91,18 +91,18 @@ fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
 }
 
 pub fn start_task(
-    artifact_upload_strategy: ArtifactUploadStrategy,
+    artifact_transfer_strategy: ArtifactTransferStrategy,
     join_set: &mut JoinSet<Result<()>>,
     receiver: Receiver,
     broker_addr: BrokerAddr,
     upload_tracker: ProgressTracker,
     log: Logger,
 ) -> Result<()> {
-    match artifact_upload_strategy {
-        ArtifactUploadStrategy::TcpUpload => {
+    match artifact_transfer_strategy {
+        ArtifactTransferStrategy::TcpUpload => {
             tcp::start_task(join_set, receiver, broker_addr, upload_tracker, log);
             Ok(())
         }
-        ArtifactUploadStrategy::GitHub => github::start_task(join_set, receiver, upload_tracker),
+        ArtifactTransferStrategy::GitHub => github::start_task(join_set, receiver, upload_tracker),
     }
 }

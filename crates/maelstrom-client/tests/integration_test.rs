@@ -6,7 +6,7 @@ use maelstrom_base::{
 use maelstrom_client::{
     container_spec, job_spec,
     spec::{LayerSpec, PrefixOptions, SymlinkSpec},
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, CacheDir, Client,
     ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
@@ -64,7 +64,7 @@ impl ClientFixture {
             "1mb".parse().unwrap(), /* inline_limit */
             2u16.try_into().unwrap(),
             AcceptInvalidRemoteContainerTlsCerts::from(true),
-            ArtifactUploadStrategy::TcpUpload,
+            ArtifactTransferStrategy::TcpUpload,
             log.clone(),
         )
         .unwrap();

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package maelstrom_client_base.items;
 
-enum ArtifactUploadStrategy {
+enum ArtifactTransferStrategy {
     TcpUpload = 0;
     GitHub = 1;
 }
@@ -17,7 +17,7 @@ message StartRequest {
     uint32 slots = 7;
     bytes container_image_depot_dir = 8;
     bool accept_invalid_remote_container_tls_certs = 9;
-    ArtifactUploadStrategy artifact_upload_strategy = 10;
+    ArtifactTransferStrategy artifact_transfer_strategy = 10;
 }
 
 message TarLayer {

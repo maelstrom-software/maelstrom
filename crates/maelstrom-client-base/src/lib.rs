@@ -87,11 +87,11 @@ impl AcceptInvalidRemoteContainerTlsCerts {
 }
 
 #[derive(Copy, Clone, Debug, EnumString, ValueEnum, IntoProtoBuf, TryFromProtoBuf, Deserialize)]
-#[proto(proto_buf_type = "proto::ArtifactUploadStrategy")]
+#[proto(proto_buf_type = "proto::ArtifactTransferStrategy")]
 #[clap(rename_all = "kebab-case")]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-pub enum ArtifactUploadStrategy {
+pub enum ArtifactTransferStrategy {
     TcpUpload = 0,
     GitHub = 1,
 }
@@ -229,7 +229,7 @@ pub struct StartRequest {
     pub inline_limit: InlineLimit,
     pub slots: Slots,
     pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-    pub artifact_upload_strategy: ArtifactUploadStrategy,
+    pub artifact_transfer_strategy: ArtifactTransferStrategy,
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf)]

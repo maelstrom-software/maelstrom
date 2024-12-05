@@ -5,7 +5,7 @@ use maelstrom_base::{
     JobOutputResult, JobTerminationStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, CacheDir, Client,
     ClientBgProcess, ContainerImageDepotDir, JobSpec, JobStatus, ProjectDir, StateDir,
 };
 use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow};
@@ -123,11 +123,11 @@ pub struct Config {
 
     /// Controls how we upload artifacts when communicating with a remote broker.
     #[config(
-        value_name = "ARTIFACT_UPLOAD_STRATEGY",
+        value_name = "ARTIFACT_TRANSFER_STRATEGY",
         default = r#""tcp-upload""#,
         hide
     )]
-    pub artifact_upload_strategy: ArtifactUploadStrategy,
+    pub artifact_transfer_strategy: ArtifactTransferStrategy,
 }
 
 #[derive(Args)]
@@ -768,7 +768,7 @@ fn main_with_logger(
         config.inline_limit,
         config.slots,
         config.accept_invalid_remote_container_tls_certs,
-        config.artifact_upload_strategy,
+        config.artifact_transfer_strategy,
         log,
     )?;
     let mut job_specs = spec::job_spec_iter_from_reader(reader);
