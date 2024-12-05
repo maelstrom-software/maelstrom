@@ -1,11 +1,11 @@
 use anyhow::{bail, Result};
 use indicatif::InMemoryTerm;
-use maelstrom_client::{ArtifactTransferStrategy, ClientBgProcess, ProjectDir};
+use maelstrom_client::{ClientBgProcess, ProjectDir};
 use maelstrom_container::local_registry;
 use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, Logger};
 use maelstrom_test_runner::ui;
 use maelstrom_util::{
-    config::common::{CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},

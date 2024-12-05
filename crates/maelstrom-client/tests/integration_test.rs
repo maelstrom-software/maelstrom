@@ -6,10 +6,13 @@ use maelstrom_base::{
 use maelstrom_client::{
     container_spec, job_spec,
     spec::{LayerSpec, PrefixOptions, SymlinkSpec},
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, CacheDir, Client,
-    ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, ProjectDir, StateDir,
 };
-use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
+use maelstrom_util::{
+    config::common::ArtifactTransferStrategy, elf::read_shared_libraries, fs::Fs, log::test_logger,
+    root::Root,
+};
 use regex::Regex;
 use std::panic::Location;
 use std::path::PathBuf;

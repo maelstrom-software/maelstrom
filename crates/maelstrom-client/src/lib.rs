@@ -1,8 +1,8 @@
 pub use maelstrom_client_base::{
     container_spec, image_container_parent, job_spec, spec,
     spec::{ContainerParent, ContainerSpec, JobSpec},
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, CacheDir, IntrospectResponse,
-    JobRunningStatus, JobStatus, ProjectDir, RemoteProgress, RpcLogMessage, StateDir, MANIFEST_DIR,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobRunningStatus,
+    JobStatus, ProjectDir, RemoteProgress, RpcLogMessage, StateDir, MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
@@ -15,7 +15,9 @@ use maelstrom_client_base::{
 };
 use maelstrom_linux::{self as linux, Pid};
 use maelstrom_util::{
-    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{
+        ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots,
+    },
     root::Root,
 };
 use std::{

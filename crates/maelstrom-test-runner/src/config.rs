@@ -1,12 +1,12 @@
 use crate::ui::UiKind;
 use clap::{command, Args};
 use derive_more::From;
-use maelstrom_client::{
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, ContainerImageDepotDir,
-};
+use maelstrom_client::{AcceptInvalidRemoteContainerTlsCerts, ContainerImageDepotDir};
 use maelstrom_macro::Config;
 use maelstrom_util::{
-    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{
+        ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots,
+    },
     root::RootBuf,
 };
 use serde::Deserialize;

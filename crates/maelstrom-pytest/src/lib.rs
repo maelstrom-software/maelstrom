@@ -11,8 +11,8 @@ use maelstrom_base::{
 use maelstrom_client::{
     job_spec,
     spec::{ImageSpec, LayerSpec, PrefixOptions},
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, CacheDir, Client,
-    ClientBgProcess, ContainerImageDepotDir, ContainerParent, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, ContainerParent, ProjectDir, StateDir,
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
@@ -24,7 +24,7 @@ use maelstrom_test_runner::{
     WaitStatus,
 };
 use maelstrom_util::{
-    config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
+    config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},

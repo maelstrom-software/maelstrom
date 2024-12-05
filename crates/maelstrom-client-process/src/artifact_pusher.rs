@@ -4,8 +4,10 @@ mod tcp;
 use crate::progress::ProgressTracker;
 use anyhow::Result;
 use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
-use maelstrom_client_base::ArtifactTransferStrategy;
-use maelstrom_util::{config::common::BrokerAddr, r#async::Pool};
+use maelstrom_util::{
+    config::common::{ArtifactTransferStrategy, BrokerAddr},
+    r#async::Pool,
+};
 use slog::Logger;
 use std::future::Future;
 use std::{

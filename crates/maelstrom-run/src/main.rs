@@ -5,8 +5,8 @@ use maelstrom_base::{
     JobOutputResult, JobTerminationStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, CacheDir, Client,
-    ClientBgProcess, ContainerImageDepotDir, JobSpec, JobStatus, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, JobSpec, JobStatus, ProjectDir, StateDir,
 };
 use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow};
 use maelstrom_macro::Config;
@@ -15,7 +15,9 @@ use maelstrom_run::{
     spec,
 };
 use maelstrom_util::{
-    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{
+        ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots,
+    },
     fs::Fs,
     log,
     process::{ExitCode, ExitCodeAccumulator},

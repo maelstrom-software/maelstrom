@@ -5,10 +5,10 @@ use cargo_maelstrom::{
     Logger,
 };
 use indicatif::InMemoryTerm;
-use maelstrom_client::{ArtifactTransferStrategy, ClientBgProcess};
+use maelstrom_client::ClientBgProcess;
 use maelstrom_test_runner::ui;
 use maelstrom_util::{
-    config::common::{CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     root::RootBuf,
 };

@@ -13,13 +13,13 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{self, ContainerSpec},
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactTransferStrategy, CacheDir, IntrospectResponse,
-    JobStatus, ProjectDir, StateDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
+    StateDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{self as container, ContainerImageDepot, ContainerImageDepotDir};
 use maelstrom_util::{
     async_fs,
-    config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
+    config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
     net::{self, AsRawFdExt as _},
     root::RootBuf,
     signal,

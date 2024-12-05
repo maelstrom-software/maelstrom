@@ -18,8 +18,9 @@ use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
 };
 use maelstrom_util::{
-    broker_addr_pocket_definition, cache_size_pocket_definition,
-    config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
+    artifact_transfer_strategy_pocket_definition, broker_addr_pocket_definition,
+    cache_size_pocket_definition,
+    config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
     inline_limit_pocket_definition, slots_pocket_definition,
 };
 use std::collections::{BTreeMap, HashMap};
@@ -679,6 +680,15 @@ remote_derive!(
     Slots,
     (IntoProtoBuf, TryFromProtoBuf),
     proto(proto_buf_type = u32, try_from_into),
+);
+
+remote_derive!(
+    ArtifactTransferStrategy,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(
+        proto_buf_type = "proto::ArtifactTransferStrategy",
+        try_from_into
+    ),
 );
 
 impl<'a, T> IntoProtoBuf for &'a maelstrom_util::root::Root<T> {

@@ -261,6 +261,16 @@ pub enum SlotsFromStrError {
 
 impl error::Error for SlotsFromStrError {}
 
+#[pocket_definition(export)]
+#[derive(Copy, Clone, Debug, EnumString, ValueEnum, Deserialize)]
+#[clap(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+pub enum ArtifactTransferStrategy {
+    TcpUpload = 0,
+    GitHub = 1,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Debug, *};
