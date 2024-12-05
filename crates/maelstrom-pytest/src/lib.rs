@@ -10,16 +10,16 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     job_spec,
-    spec::{ContainerParent, LayerSpec, PrefixOptions},
+    spec::{ImageSpec, LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
-    ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
+    ClientBgProcess, ContainerImageDepotDir, ContainerParent, ProjectDir, StateDir,
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
     metadata::TestMetadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, ImageSpec, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
+    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
     TestArtifact, TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait,
     WaitStatus,
 };
@@ -261,10 +261,7 @@ impl PytestTestCollector<'_> {
                         .ok_or_else(|| anyhow!("non-UTF8 path"))?
                 ),
             ],
-            parent: ContainerParent::Image {
-                name: image_spec.name,
-                r#use: image_spec.r#use,
-            },
+            parent: ContainerParent::Image(image_spec),
             network: JobNetwork::Local,
             root_overlay: JobRootOverlay::Local {
                 upper: upper.clone().try_into()?,
@@ -404,13 +401,10 @@ impl TestArtifact for PytestTestArtifact {
     }
 
     fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec> {
-        match metadata.container.parent {
-            Some(ContainerParent::Image { ref name, r#use }) => self
+        match &metadata.container.parent {
+            Some(ContainerParent::Image(image_spec)) => self
                 .test_layers
-                .get(&ImageSpec {
-                    name: name.into(),
-                    r#use,
-                })
+                .get(image_spec)
                 .into_iter()
                 .cloned()
                 .collect(),

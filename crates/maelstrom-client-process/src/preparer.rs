@@ -5,7 +5,7 @@ use maelstrom_base::{
     NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
-    ContainerParent, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageUse,
+    ContainerParent, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageSpec, ImageUse,
     JobSpec as ClientJobSpec, LayerSpec,
 };
 use maelstrom_util::ext::OptionExt as _;
@@ -162,7 +162,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
         let (pending_image, get_image) = {
             match container.parent {
                 None => (None, None),
-                Some(ContainerParent::Image { name, r#use }) => {
+                Some(ContainerParent::Image(ImageSpec { name, r#use })) => {
                     if r#use.is_empty() {
                         (None, None)
                     } else {

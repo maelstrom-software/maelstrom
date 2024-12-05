@@ -47,17 +47,20 @@ where
     }
 }
 
-#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
+#[proto(proto_buf_type = "proto::ImageSpec")]
+pub struct ImageSpec {
+    pub name: String,
+    pub r#use: EnumSet<ImageUse>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
 #[proto(
     proto_buf_type = "proto::ContainerParent",
     enum_type = "proto::container_parent::Parent"
 )]
 pub enum ContainerParent {
-    #[proto(proto_buf_type = proto::ImageContainerParent)]
-    Image {
-        name: String,
-        r#use: EnumSet<ImageUse>,
-    },
+    Image(ImageSpec),
     //    #[proto(proto_buf_type = proto::ContainerContainerParent)]
     //    Container { name: String },
 }
@@ -65,22 +68,24 @@ pub enum ContainerParent {
 #[macro_export]
 macro_rules! image_container_parent {
     (@expand [] -> [$name:expr, $layers:literal, $environment:literal, $working_directory:literal]) => {
-        $crate::spec::ContainerParent::Image {
-            name: $name.into(),
-            r#use: {
-                let mut r#use = EnumSet::new();
-                if $layers {
-                    r#use.insert(ImageUse::Layers);
-                }
-                if $environment {
-                    r#use.insert(ImageUse::Environment);
-                }
-                if $working_directory {
-                    r#use.insert(ImageUse::WorkingDirectory);
-                }
-                r#use
-            },
-        }
+        $crate::spec::ContainerParent::Image(
+            $crate::spec::ImageSpec {
+                name: $name.into(),
+                r#use: {
+                    let mut r#use = EnumSet::new();
+                    if $layers {
+                        r#use.insert(ImageUse::Layers);
+                    }
+                    if $environment {
+                        r#use.insert(ImageUse::Environment);
+                    }
+                    if $working_directory {
+                        r#use.insert(ImageUse::WorkingDirectory);
+                    }
+                    r#use
+                },
+            }
+        )
     };
     (@expand [layers $(,$($field_in:ident)*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
         $crate::image_container_parent!(@expand [$($($field_in)*)?] -> [$name, true, $environment, $working_directory])

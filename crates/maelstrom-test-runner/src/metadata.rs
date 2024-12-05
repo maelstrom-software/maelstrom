@@ -1,13 +1,13 @@
 mod container;
 mod directive;
 
-use crate::{ImageSpec, TestFilter};
+use crate::TestFilter;
 use anyhow::{bail, Context as _, Result};
 use container::TestContainer;
 use directive::TestDirective;
 use maelstrom_base::{EnumSet, GroupId, JobMount, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::{
-    spec::{ContainerParent, EnvironmentSpec, ImageUse, LayerSpec, PossiblyImage},
+    spec::{ContainerParent, EnvironmentSpec, ImageSpec, ImageUse, LayerSpec, PossiblyImage},
     ProjectDir,
 };
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
@@ -109,13 +109,12 @@ impl TestMetadataContainer {
         }
 
         if container.image.is_some() {
-            self.parent = container
-                .image
-                .as_ref()
-                .map(|image| ContainerParent::Image {
+            self.parent = container.image.as_ref().map(|image| {
+                ContainerParent::Image(ImageSpec {
                     name: image.into(),
                     r#use: image_use,
-                });
+                })
+            });
         }
 
         Ok(self)
