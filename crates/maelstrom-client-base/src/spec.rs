@@ -206,7 +206,7 @@ pub fn environment_eval(
         .collect())
 }
 
-#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 #[proto(proto_buf_type = "proto::ContainerSpec")]
 pub struct ContainerSpec {
     pub parent: Option<ContainerParent>,
@@ -224,17 +224,7 @@ pub struct ContainerSpec {
 #[macro_export]
 macro_rules! container_spec {
     (@expand [] -> []) => {
-        $crate::spec::ContainerSpec {
-            parent: Default::default(),
-            layers: Default::default(),
-            root_overlay: Default::default(),
-            environment: Default::default(),
-            working_directory: Default::default(),
-            mounts: Default::default(),
-            network: Default::default(),
-            user: Default::default(),
-            group: Default::default(),
-        }
+        $crate::spec::ContainerSpec::default()
     };
     (@expand [] -> [$($fields:tt)+]) => {
         $crate::spec::ContainerSpec {
