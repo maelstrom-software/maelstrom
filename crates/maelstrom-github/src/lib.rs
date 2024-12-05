@@ -340,7 +340,7 @@ impl GitHubClient {
         &self,
         backend_ids: BackendIds,
         name: &str,
-    ) -> Result<impl AsyncRead + Unpin> {
+    ) -> Result<impl AsyncRead + Unpin + Send + Sync + 'static> {
         let blob_client = self.start_download(backend_ids, name).await?;
         let mut page_stream = blob_client.get().chunk_size(u64::MAX).into_stream();
         let single_page = page_stream
