@@ -365,43 +365,6 @@ macro_rules! job_spec {
         }
     };
 
-    (@expand [$program:expr] [parent: $parent:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? parent: $parent])
-    };
-    (@expand [$program:expr] [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? layers: $layers])
-    };
-    (@expand [$program:expr] [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? root_overlay: $root_overlay])
-    };
-    (@expand [$program:expr] [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? environment: $environment])
-    };
-    (@expand [$program:expr] [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? working_directory: $working_directory])
-    };
-    (@expand [$program:expr] [mounts: $mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? mounts: $mounts])
-    };
-    (@expand [$program:expr] [network: $network:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? network: $network])
-    };
-    (@expand [$program:expr] [user: $user:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? user: $user])
-    };
-    (@expand [$program:expr] [group: $group:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($field_out)*] [$($($container_field)+,)? group: $group])
-    };
-
     (@expand [$program:expr] [arguments: [$($arg:expr),*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($($field_out)+,)? arguments: vec![$($arg.into()),*]] [$($container_field)*])
@@ -422,6 +385,12 @@ macro_rules! job_spec {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($($field_out)+,)? priority: $priority] [$($container_field)*])
     };
+
+    (@expand [$program:expr] [$container_field_name:ident: $container_field_value:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($field_out)*] [$($($container_field)+,)? $container_field_name: $container_field_value])
+    };
+
     ($program:expr $(,$($field_in:tt)*)?) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] -> [] [])
     };
