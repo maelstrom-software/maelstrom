@@ -9,9 +9,10 @@ use maelstrom_base::{
     Timeout, Utf8PathBuf,
 };
 use maelstrom_client::{
+    job_spec,
     spec::{ContainerParent, LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
-    ClientBgProcess, ContainerImageDepotDir, JobSpec, ProjectDir, StateDir,
+    ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
@@ -244,36 +245,39 @@ impl PytestTestCollector<'_> {
                 },
             },
         ];
-        let (_, outcome) = self.client.run_job(
-            JobSpec::new("/bin/sh", layers)
-                .arguments([
-                    "-c".to_owned(),
-                    format!(
-                        "
+        let (_, outcome) = self.client.run_job(job_spec! {
+            "/bin/sh",
+            layers: layers,
+            arguments: [
+                "-c".to_owned(),
+                format!(
+                    "
                         set -ex
                         pip install --requirement {}
                         python -m compileall /usr/lib/python* /usr/local/lib/python*
                         ",
-                        source_req_path
-                            .to_str()
-                            .ok_or_else(|| anyhow!("non-UTF8 path"))?
-                    ),
-                ])
-                .parent(ContainerParent::Image {
-                    name: image_spec.name,
-                    use_layers: image_spec.use_layers,
-                    use_environment: image_spec.use_environment,
-                    use_working_directory: image_spec.use_working_directory,
-                })
-                .network(JobNetwork::Local)
-                .root_overlay(JobRootOverlay::Local {
-                    upper: upper.clone().try_into()?,
-                    work: work.clone().try_into()?,
-                })
-                .mounts([JobMount::Devices {
+                    source_req_path
+                        .to_str()
+                        .ok_or_else(|| anyhow!("non-UTF8 path"))?
+                ),
+            ],
+            parent: ContainerParent::Image {
+                name: image_spec.name,
+                use_layers: image_spec.use_layers,
+                use_environment: image_spec.use_environment,
+                use_working_directory: image_spec.use_working_directory,
+            },
+            network: JobNetwork::Local,
+            root_overlay: JobRootOverlay::Local {
+                upper: upper.clone().try_into()?,
+                work: work.clone().try_into()?,
+            },
+            mounts: [
+                JobMount::Devices {
                     devices: enum_set![JobDevice::Null],
-                }]),
-        )?;
+                },
+            ],
+        })?;
         let outcome = outcome.map_err(|err| anyhow!("error installing pip packages: {err:?}"))?;
         match outcome {
             JobOutcome::Completed(completed) => {

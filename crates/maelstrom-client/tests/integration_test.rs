@@ -4,9 +4,9 @@ use maelstrom_base::{
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
-    ClientBgProcess, ContainerImageDepotDir, ContainerSpec, JobSpec, LayerSpec, PrefixOptions,
-    ProjectDir, StateDir, SymlinkSpec,
+    job_spec, AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
+    ClientBgProcess, ContainerImageDepotDir, ContainerSpec, LayerSpec, PrefixOptions, ProjectDir,
+    StateDir, SymlinkSpec,
 };
 use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
 use regex::Regex;
@@ -102,12 +102,15 @@ impl ClientFixture {
     fn run_job(&self, added_layers: Vec<LayerSpec>) -> String {
         let mut layers = self.layers.clone();
         layers.extend(added_layers);
-        let spec = JobSpec::new(self.self_path.clone(), layers)
-            .arguments(["--exact", "single_test", "--nocapture"])
-            .environment([
+        let spec = job_spec! {
+            self.self_path.clone(),
+            layers: layers,
+            arguments: ["--exact", "single_test", "--nocapture"],
+            environment: [
                 ("INSIDE_JOB", "yes"),
                 ("TEST_LINE", &self.test_line.to_string()),
-            ]);
+            ],
+        };
         let (_, outcome) = self.client.run_job(spec).unwrap();
         let output = assert_matches!(
             outcome,
@@ -153,14 +156,17 @@ impl ClientFixture {
     ) -> anyhow::Error {
         let mut layers = self.layers.clone();
         layers.extend(added_layers);
-        let spec = JobSpec::new(self.self_path.clone(), layers)
-            .mounts(mounts)
-            .network(network)
-            .arguments(["--exact", "single_test", "--nocapture"])
-            .environment([
+        let spec = job_spec! {
+            self.self_path.clone(),
+            layers: layers,
+            mounts: mounts,
+            network: network,
+            arguments: ["--exact", "single_test", "--nocapture"],
+            environment: [
                 ("INSIDE_JOB", "yes"),
                 ("TEST_LINE", &self.test_line.to_string()),
-            ]);
+            ],
+        };
         self.client.run_job(spec).unwrap_err()
     }
 }

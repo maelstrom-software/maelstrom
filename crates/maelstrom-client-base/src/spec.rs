@@ -287,64 +287,6 @@ pub struct JobSpec {
     pub priority: i8,
 }
 
-impl JobSpec {
-    pub fn new(program: impl Into<String>, layers: impl Into<Vec<LayerSpec>>) -> Self {
-        JobSpec {
-            container: ContainerSpec {
-                layers: layers.into(),
-                parent: Default::default(),
-                environment: Default::default(),
-                mounts: Default::default(),
-                network: Default::default(),
-                root_overlay: Default::default(),
-                working_directory: Default::default(),
-                user: Default::default(),
-                group: Default::default(),
-            },
-            program: program.into().into(),
-            arguments: Default::default(),
-            timeout: Default::default(),
-            estimated_duration: Default::default(),
-            allocate_tty: Default::default(),
-            priority: Default::default(),
-        }
-    }
-
-    pub fn parent(mut self, parent: ContainerParent) -> Self {
-        self.container.parent = Some(parent);
-        self
-    }
-
-    pub fn arguments<I, T>(mut self, arguments: I) -> Self
-    where
-        I: IntoIterator<Item = T>,
-        T: Into<String>,
-    {
-        self.arguments = arguments.into_iter().map(Into::into).collect();
-        self
-    }
-
-    pub fn environment(mut self, environment: impl IntoEnvironment) -> Self {
-        self.container.environment = environment.into_environment();
-        self
-    }
-
-    pub fn mounts(mut self, mounts: impl IntoIterator<Item = JobMount>) -> Self {
-        self.container.mounts = mounts.into_iter().collect();
-        self
-    }
-
-    pub fn network(mut self, network: JobNetwork) -> Self {
-        self.container.network = network;
-        self
-    }
-
-    pub fn root_overlay(mut self, root_overlay: JobRootOverlay) -> Self {
-        self.container.root_overlay = root_overlay;
-        self
-    }
-}
-
 #[macro_export]
 macro_rules! job_spec {
     (@expand [$program:expr] [] -> [] [$($container_field:tt)*]) => {
@@ -365,9 +307,9 @@ macro_rules! job_spec {
         }
     };
 
-    (@expand [$program:expr] [arguments: [$($arg:expr),*] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+    (@expand [$program:expr] [arguments: $arguments:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($($field_out)+,)? arguments: vec![$($arg.into()),*]] [$($container_field)*])
+            [$($($field_out)+,)? arguments: $arguments.into_iter().map(Into::into).collect()] [$($container_field)*])
     };
     (@expand [$program:expr] [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
