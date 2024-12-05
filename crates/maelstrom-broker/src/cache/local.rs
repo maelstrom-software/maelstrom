@@ -1,5 +1,5 @@
 use crate::{
-    cache::{BrokerCache, SchedulerCache, TempFileFactory},
+    cache::{BrokerCache, LazyRead, SchedulerCache, TempFileFactory},
     Config,
 };
 use anyhow::Result;
@@ -7,10 +7,8 @@ use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::{fs::Fs, Cache, GetArtifact, GetStrategy, GotArtifact, Key};
 use ref_cast::RefCast;
 use slog::Logger;
-use std::future::Future;
 use std::io;
 use std::path::PathBuf;
-use std::pin::Pin;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, RefCast)]
 #[repr(transparent)]
@@ -65,11 +63,6 @@ impl BrokerCache for TcpUploadLocalCache {
         )
     }
 }
-
-type LazyRead<FileT> = maelstrom_util::io::LazyRead<
-    Pin<Box<dyn Future<Output = io::Result<FileT>> + Send + Sync>>,
-    FileT,
->;
 
 impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKey, BrokerGetStrategy> {
     type TempFile = FsT::TempFile;

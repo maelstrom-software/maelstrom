@@ -3380,6 +3380,7 @@ dependencies = [
  "hyper-tungstenite",
  "itertools 0.13.0",
  "maelstrom-base",
+ "maelstrom-github",
  "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
@@ -3392,6 +3393,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
+ "url 2.5.2",
  "xdg",
 ]
 

@@ -48,6 +48,15 @@ pub struct RemoteCache<ArtifactReaderT> {
     artifact_reader: ArtifactReaderT,
 }
 
+impl<ArtifactReaderT> RemoteCache<ArtifactReaderT> {
+    pub fn new(artifact_reader: ArtifactReaderT) -> Self {
+        Self {
+            entries: Default::default(),
+            artifact_reader,
+        }
+    }
+}
+
 impl<ArtifactReaderT: RemoteArtifactReader> SchedulerCache for RemoteCache<ArtifactReaderT> {
     type TempFile = PanicTempFile;
     type ArtifactStream = ArtifactReaderT::ArtifactStream;

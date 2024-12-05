@@ -89,7 +89,7 @@ async fn read_manifest<ArtifactStreamT: AsyncRead + Unpin, TempFileT>(
     Ok(())
 }
 
-impl<ArtifactStreamT: AsyncRead + Unpin + Send + Sync + 'static, TempFileT>
+impl<ArtifactStreamT: AsyncRead + Unpin + Send + 'static, TempFileT>
     CacheManifestReader<ArtifactStreamT, TempFileT>
 where
     TempFileT: Send + 'static,
@@ -140,7 +140,7 @@ pub struct SchedulerTask<CacheT: SchedulerCache> {
 
 impl<CacheT: SchedulerCache> SchedulerTask<CacheT>
 where
-    CacheT::ArtifactStream: tokio::io::AsyncRead + Unpin + Send + Sync + 'static,
+    CacheT::ArtifactStream: tokio::io::AsyncRead + Unpin + Send + 'static,
     CacheT::TempFile: Send + Sync + 'static,
 {
     pub fn new(cache: CacheT) -> Self {

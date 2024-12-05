@@ -67,10 +67,9 @@ async fn main_inner_inner<BrokerCacheT>(
 ) -> Result<()>
 where
     BrokerCacheT: BrokerCache,
-    <BrokerCacheT::Cache as SchedulerCache>::ArtifactStream: Send + 'static,
     <BrokerCacheT::Cache as SchedulerCache>::TempFile: Send + Sync + 'static,
     <BrokerCacheT::Cache as SchedulerCache>::ArtifactStream:
-        tokio::io::AsyncRead + Unpin + Send + Sync,
+        tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     let (cache, temp_file_factory) = BrokerCacheT::new(config, log.clone())?;
     let scheduler_task = SchedulerTask::new(cache);
