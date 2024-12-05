@@ -36,16 +36,17 @@ pub fn start_task(
     dispatcher_sender: Sender,
     log: &Logger,
 ) -> Result<JoinHandle<Error>> {
-    crate::start_dispatcher_task_common(
-        move |_| artifact_fetcher,
+    let args = crate::DispatcherArgs {
         broker_sender,
-        config.cache_size,
-        config.cache_root,
+        cache_size: config.cache_size,
+        cache_root: config.cache_root,
         dispatcher_receiver,
         dispatcher_sender,
-        config.inline_limit,
-        log,
-        false,
-        config.slots,
-    )
+        inline_limit: config.inline_limit,
+        log: log.clone(),
+        log_initial_cache_message_at_info: true,
+        slots: config.slots,
+    };
+
+    crate::start_dispatcher_task_common(move |_| artifact_fetcher, args)
 }

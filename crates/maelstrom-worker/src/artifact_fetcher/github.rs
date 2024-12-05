@@ -27,26 +27,28 @@ fn env_or_error(key: &str) -> Result<String> {
     std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
 }
 
+pub fn github_client_factory() -> Result<Arc<GitHubClient>> {
+    // XXX remi: I would prefer if we didn't read these from environment variables.
+    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
+    let base_url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+    Ok(Arc::new(GitHubClient::new(&token, base_url)?))
+}
+
 impl GitHubArtifactFetcher {
-    #[expect(dead_code)]
     pub fn new(
         max_simultaneous_fetches: NonZeroU32,
+        github_client: Arc<GitHubClient>,
         dispatcher_sender: DispatcherSender,
         log: Logger,
         temp_file_factory: TempFileFactory,
-    ) -> Result<Self> {
-        // XXX remi: I would prefer if we didn't read these from environment variables.
-        let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-        let base_url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-        let github_client = Arc::new(GitHubClient::new(&token, base_url)?);
-
-        Ok(Self {
+    ) -> Self {
+        Self {
             github_client,
             dispatcher_sender,
             log,
             pool: Arc::new(Pool::new(max_simultaneous_fetches)),
             temp_file_factory,
-        })
+        }
     }
 }
 

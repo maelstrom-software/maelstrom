@@ -12,7 +12,7 @@ mod manifest_digest_cache;
 mod types;
 
 use anyhow::{anyhow, bail, Context as _, Error, Result};
-use artifact_fetcher::TcpArtifactFetcher;
+use artifact_fetcher::{github_client_factory, GitHubArtifactFetcher, TcpArtifactFetcher};
 use config::Config;
 use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
@@ -22,7 +22,7 @@ use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux};
 use maelstrom_util::{
     cache::{self, fs::std::Fs as StdFs, TempFileFactory},
-    config::common::{CacheSize, InlineLimit, Slots},
+    config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, Slots},
     net::{self, AsRawFdExt as _},
     root::RootBuf,
     signal,
@@ -179,30 +179,59 @@ fn start_dispatcher_task(
         .unwrap()
         .try_into()
         .unwrap();
-    let artifact_fetcher_factory = move |temp_file_factory| {
-        TcpArtifactFetcher::new(
-            max_simultaneous_fetches,
-            dispatcher_sender_clone,
-            config.broker,
-            log_clone,
-            temp_file_factory,
-        )
-    };
-
     let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
 
-    start_dispatcher_task_common(
-        artifact_fetcher_factory,
+    let args = DispatcherArgs {
         broker_sender,
-        config.cache_size,
-        config.cache_root,
+        cache_size: config.cache_size,
+        cache_root: config.cache_root,
         dispatcher_receiver,
         dispatcher_sender,
-        config.inline_limit,
-        log,
-        true,
-        config.slots,
-    )
+        inline_limit: config.inline_limit,
+        log: log.clone(),
+        log_initial_cache_message_at_info: true,
+        slots: config.slots,
+    };
+
+    match config.artifact_transfer_strategy {
+        ArtifactTransferStrategy::TcpUpload => {
+            let artifact_fetcher_factory = move |temp_file_factory| {
+                TcpArtifactFetcher::new(
+                    max_simultaneous_fetches,
+                    dispatcher_sender_clone,
+                    config.broker,
+                    log_clone,
+                    temp_file_factory,
+                )
+            };
+            start_dispatcher_task_common(artifact_fetcher_factory, args)
+        }
+        ArtifactTransferStrategy::GitHub => {
+            let github_client = github_client_factory()?;
+            let artifact_fetcher_factory = move |temp_file_factory| {
+                GitHubArtifactFetcher::new(
+                    max_simultaneous_fetches,
+                    github_client,
+                    dispatcher_sender_clone,
+                    log_clone,
+                    temp_file_factory,
+                )
+            };
+            start_dispatcher_task_common(artifact_fetcher_factory, args)
+        }
+    }
+}
+
+struct DispatcherArgs<BrokerSenderT> {
+    broker_sender: BrokerSenderT,
+    cache_size: CacheSize,
+    cache_root: RootBuf<config::CacheDir>,
+    dispatcher_receiver: DispatcherReceiver,
+    dispatcher_sender: DispatcherSender,
+    inline_limit: InlineLimit,
+    log: Logger,
+    log_initial_cache_message_at_info: bool,
+    slots: Slots,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -212,32 +241,24 @@ fn start_dispatcher_task_common<
     BrokerSenderT: dispatcher::BrokerSender + Send + 'static,
 >(
     artifact_fetcher_factory: ArtifactFetcherFactoryT,
-    broker_sender: BrokerSenderT,
-    cache_size: CacheSize,
-    cache_root: RootBuf<config::CacheDir>,
-    mut dispatcher_receiver: DispatcherReceiver,
-    dispatcher_sender: DispatcherSender,
-    inline_limit: InlineLimit,
-    log: &Logger,
-    log_initial_cache_message_at_info: bool,
-    slots: Slots,
+    args: DispatcherArgs<BrokerSenderT>,
 ) -> Result<JoinHandle<Error>> {
     let (cache, temp_file_factory) = Cache::new(
         StdFs,
-        cache_root.join::<cache::CacheDir>("artifacts"),
-        cache_size,
-        log.clone(),
-        log_initial_cache_message_at_info,
+        args.cache_root.join::<cache::CacheDir>("artifacts"),
+        args.cache_size,
+        args.log.clone(),
+        args.log_initial_cache_message_at_info,
     )?;
 
     let artifact_fetcher = artifact_fetcher_factory(temp_file_factory.clone());
 
     let dispatcher_adapter = DispatcherAdapter::new(
-        dispatcher_sender,
-        inline_limit,
-        log.clone(),
-        cache_root.join::<MountDir>("mount"),
-        cache_root.join::<TmpfsDir>("upper"),
+        args.dispatcher_sender,
+        args.inline_limit,
+        args.log.clone(),
+        args.cache_root.join::<MountDir>("mount"),
+        args.cache_root.join::<TmpfsDir>("upper"),
         cache.root().join::<BlobDir>("sha256/blob"),
         temp_file_factory,
     )?;
@@ -245,11 +266,12 @@ fn start_dispatcher_task_common<
     let mut dispatcher = Dispatcher::new(
         dispatcher_adapter,
         artifact_fetcher,
-        broker_sender,
+        args.broker_sender,
         cache,
-        slots,
+        args.slots,
     );
 
+    let mut dispatcher_receiver = args.dispatcher_receiver;
     let dispatcher_main = async move {
         loop {
             let msg = dispatcher_receiver
