@@ -2,7 +2,7 @@ use crate::{
     cache::{BrokerCache, LazyRead, SchedulerCache, TempFileFactory},
     Config,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::{fs::Fs, Cache, GetArtifact, GetStrategy, GotArtifact, Key};
 use ref_cast::RefCast;
@@ -72,11 +72,18 @@ impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKey, BrokerGetStrategy> {
         self.get_artifact(BrokerKey(digest), jid)
     }
 
-    fn got_artifact(&mut self, digest: &Sha256Digest, file: Option<FsT::TempFile>) -> Vec<JobId> {
-        let file = file.expect("file provided");
-        self.got_artifact_success(BrokerKey::ref_cast(digest), GotArtifact::file(file))
+    fn got_artifact(
+        &mut self,
+        digest: &Sha256Digest,
+        file: Option<FsT::TempFile>,
+    ) -> Result<Vec<JobId>> {
+        let Some(file) = file else {
+            bail!("transferred artifact not found");
+        };
+        Ok(self
+            .got_artifact_success(BrokerKey::ref_cast(digest), GotArtifact::file(file))
             .map_err(|(err, _)| err)
-            .unwrap()
+            .unwrap())
     }
 
     fn decrement_refcount(&mut self, digest: &Sha256Digest) {

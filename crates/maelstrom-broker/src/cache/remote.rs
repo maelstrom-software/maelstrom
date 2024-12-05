@@ -87,18 +87,25 @@ impl<ArtifactReaderT: RemoteArtifactReader> SchedulerCache for RemoteCache<Artif
         }
     }
 
-    fn got_artifact(&mut self, digest: &Sha256Digest, file: Option<Self::TempFile>) -> Vec<JobId> {
-        assert!(file.is_none(), "expecting remote file");
+    fn got_artifact(
+        &mut self,
+        digest: &Sha256Digest,
+        file: Option<Self::TempFile>,
+    ) -> Result<Vec<JobId>> {
+        if file.is_some() {
+            bail!("cache received uploaded file, but is remote");
+        }
+
         let Some(entry) = self.entries.get_mut(digest) else {
-            return vec![];
+            return Ok(vec![]);
         };
         let Entry::Getting { jobs, .. } = entry else {
-            return vec![];
+            return Ok(vec![]);
         };
 
         let jobs = mem::take(jobs);
         *entry = Entry::InCache;
-        jobs
+        Ok(jobs)
     }
 
     fn decrement_refcount(&mut self, _digest: &Sha256Digest) {
@@ -178,7 +185,7 @@ mod tests {
         let mut cache = ArtifactsCache::default();
 
         cache.get_artifact(jid![1, 1], digest![42]);
-        cache.got_artifact(&digest![42], None);
+        cache.got_artifact(&digest![42], None).unwrap();
 
         assert_eq!(
             cache.get_artifact(jid![1, 2], digest![42]),
@@ -201,7 +208,7 @@ mod tests {
         cache.get_artifact(jid![2, 2], digest![42]);
 
         assert_eq!(
-            cache.got_artifact(&digest![42], None),
+            cache.got_artifact(&digest![42], None).unwrap(),
             vec![jid![1, 1], jid![1, 2], jid![2, 1], jid![2, 2]]
         );
     }
@@ -218,8 +225,25 @@ mod tests {
         cache.client_disconnected(cid![1]);
 
         assert_eq!(
-            cache.got_artifact(&digest![42], None),
+            cache.got_artifact(&digest![42], None).unwrap(),
             vec![jid![2, 1], jid![2, 2]]
+        );
+    }
+
+    #[test]
+    fn got_artifact_with_file() {
+        let mut cache = ArtifactsCache::default();
+
+        cache.get_artifact(jid![1, 1], digest![42]);
+        cache.get_artifact(jid![1, 2], digest![43]);
+
+        let err = cache
+            .got_artifact(&digest![42], Some(PanicTempFile))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cache received uploaded file, but is remote"),
+            "{err}"
         );
     }
 }

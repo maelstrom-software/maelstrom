@@ -1,7 +1,9 @@
 use crate::artifact_pusher;
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
+    proto::{
+        ArtifactUploadLocation, BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker,
+    },
     ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::{JobRunningStatus, JobStatus};
@@ -208,7 +210,10 @@ impl Deps for Adapter {
         let broker_sender = self.broker_sender.clone();
         let cb_digest = digest.clone();
         let success_callback = Box::new(move || {
-            let _ = broker_sender.send(ClientToBroker::ArtifactTransferred(cb_digest));
+            let _ = broker_sender.send(ClientToBroker::ArtifactTransferred(
+                cb_digest,
+                ArtifactUploadLocation::TcpUpload,
+            ));
         });
         let _ = self.artifact_pusher_sender.send(artifact_pusher::Message {
             digest,

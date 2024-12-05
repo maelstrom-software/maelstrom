@@ -5,8 +5,8 @@ use crate::cache::SchedulerCache;
 use crate::scheduler_task::ManifestReadRequest;
 use maelstrom_base::{
     proto::{
-        BrokerToClient, BrokerToMonitor, BrokerToWorker, ClientToBroker, MonitorToBroker,
-        WorkerToBroker,
+        ArtifactUploadLocation, BrokerToClient, BrokerToMonitor, BrokerToWorker, ClientToBroker,
+        MonitorToBroker, WorkerToBroker,
     },
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
@@ -167,8 +167,8 @@ where
             Message::FromClient(cid, ClientToBroker::JobRequest(cjid, spec)) => {
                 self.receive_client_job_request(deps, cid, cjid, spec)
             }
-            Message::FromClient(cid, ClientToBroker::ArtifactTransferred(digest)) => {
-                self.receive_artifact_transfered(deps, cid, digest)
+            Message::FromClient(cid, ClientToBroker::ArtifactTransferred(digest, location)) => {
+                self.receive_artifact_transfered(deps, cid, digest, location)
             }
             Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
@@ -634,30 +634,41 @@ where
         self.tcp_upload_landing_pad.insert(digest, file);
     }
 
+    fn send_artifact_transferred_response(
+        &mut self,
+        deps: &mut DepsT,
+        cid: ClientId,
+        digest: Sha256Digest,
+        res: Result<(), String>,
+    ) {
+        let client = self.clients.0.get_mut(&cid).unwrap();
+        deps.send_message_to_client(
+            &mut client.sender,
+            BrokerToClient::ArtifactTransferredResponse(digest, res),
+        );
+    }
+
     fn receive_artifact_transfered(
         &mut self,
         deps: &mut DepsT,
         cid: ClientId,
         digest: Sha256Digest,
+        location: ArtifactUploadLocation,
     ) {
-        let Some(file) = self.tcp_upload_landing_pad.remove(&digest) else {
-            let client = self.clients.0.get_mut(&cid).unwrap();
-            deps.send_message_to_client(
-                &mut client.sender,
-                BrokerToClient::ArtifactTransferredResponse(
-                    digest,
-                    Err("transferred artifact not found".into()),
-                ),
-            );
-            return;
-        };
-        let jids = self.cache.got_artifact(&digest, Some(file));
+        let file = (location == ArtifactUploadLocation::TcpUpload)
+            .then(|| self.tcp_upload_landing_pad.remove(&digest))
+            .flatten();
 
-        let client = self.clients.0.get_mut(&cid).unwrap();
-        deps.send_message_to_client(
-            &mut client.sender,
-            BrokerToClient::ArtifactTransferredResponse(digest.clone(), Ok(())),
-        );
+        let jids = match self.cache.got_artifact(&digest, file) {
+            Ok(jids) => {
+                self.send_artifact_transferred_response(deps, cid, digest.clone(), Ok(()));
+                jids
+            }
+            Err(err) => {
+                self.send_artifact_transferred_response(deps, cid, digest, Err(err.to_string()));
+                return;
+            }
+        };
 
         let mut just_enqueued = HashSet::default();
         for jid in jids {
@@ -802,6 +813,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
+    use anyhow::{anyhow, Result};
     use enum_map::enum_map;
     use itertools::Itertools;
     use maelstrom_base::job_spec;
@@ -842,7 +854,7 @@ mod tests {
     struct TestState {
         messages: Vec<TestMessage>,
         get_artifact_returns: HashMap<(JobId, Sha256Digest), Vec<GetArtifact>>,
-        got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<JobId>>>,
+        got_artifact_returns: HashMap<Sha256Digest, Vec<Result<Vec<JobId>>>>,
         #[allow(clippy::type_complexity)]
         get_artifact_for_worker_returns: HashMap<Sha256Digest, Vec<Option<(PathBuf, u64)>>>,
     }
@@ -875,7 +887,7 @@ mod tests {
             &mut self,
             digest: &Sha256Digest,
             file: Option<Self::TempFile>,
-        ) -> Vec<JobId> {
+        ) -> Result<Vec<JobId>> {
             self.borrow_mut()
                 .messages
                 .push(CacheGotArtifact(digest.clone(), file));
@@ -989,7 +1001,7 @@ mod tests {
         #[allow(clippy::type_complexity)]
         fn new<const L: usize, const M: usize, const N: usize>(
             get_artifact_returns: [((JobId, Sha256Digest), Vec<GetArtifact>); L],
-            got_artifact_returns: [(Sha256Digest, Vec<Vec<JobId>>); M],
+            got_artifact_returns: [(Sha256Digest, Vec<Result<Vec<JobId>>>); M],
             get_artifact_for_worker_returns: [(Sha256Digest, Vec<Option<(PathBuf, u64)>>); N],
         ) -> Self {
             let result = Self::default();
@@ -1782,8 +1794,8 @@ mod tests {
                 ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
                 ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
             ], [
-                (digest![43], vec![vec![jid![1, 2]]]),
-                (digest![44], vec![vec![jid![1, 2]]]),
+                (digest![43], vec![Ok(vec![jid![1, 2]])]),
+                (digest![44], vec![Ok(vec![jid![1, 2]])]),
             ], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -1801,12 +1813,16 @@ mod tests {
         };
 
         GotArtifact(digest![43], "/z/tmp/foo".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![43], ArtifactUploadLocation::TcpUpload)
+        ) => {
             CacheGotArtifact(digest![43], Some("/z/tmp/foo".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
         };
         GotArtifact(digest![44], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![44])) => {
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![44], ArtifactUploadLocation::TcpUpload)
+        ) => {
             CacheGotArtifact(digest![44], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![44], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))),
@@ -1818,6 +1834,100 @@ mod tests {
             CacheDecrementRefcount(digest![42]),
             CacheDecrementRefcount(digest![43]),
             CacheDecrementRefcount(digest![44]),
+        }
+    }
+
+    script_test! {
+        request_with_layers_3_remote_cache,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
+                ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
+            ], [
+                (digest![43], vec![Ok(vec![jid![1, 2]])]),
+                (digest![44], vec![Ok(vec![jid![1, 2]])]),
+            ], [])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(
+            cid![1],
+            ClientToBroker::JobRequest(cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))
+        ) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            CacheGetArtifact(jid![1, 2], digest![43]),
+            CacheGetArtifact(jid![1, 2], digest![44]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
+        };
+
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![43], ArtifactUploadLocation::Remote)
+        ) => {
+            CacheGotArtifact(digest![43], None),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
+        };
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![44], ArtifactUploadLocation::Remote)
+        ) => {
+            CacheGotArtifact(digest![44], None),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![44], Ok(()))),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+            CacheDecrementRefcount(digest![43]),
+            CacheDecrementRefcount(digest![44]),
+        }
+    }
+
+    script_test! {
+        request_with_layers_3_cache_errors,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
+                ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
+            ], [
+                (digest![43], vec![Err(anyhow!("test error"))]),
+                (digest![44], vec![Err(anyhow!("test error"))]),
+            ], [])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(
+            cid![1],
+            ClientToBroker::JobRequest(cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))
+        ) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            CacheGetArtifact(jid![1, 2], digest![43]),
+            CacheGetArtifact(jid![1, 2], digest![44]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
+            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
+        };
+
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![43], ArtifactUploadLocation::Remote)
+        ) => {
+            CacheGotArtifact(digest![43], None),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Err("test error".into()))),
+        };
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![44], ArtifactUploadLocation::Remote)
+        ) => {
+            CacheGotArtifact(digest![44], None),
+            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![44], Err("test error".into()))),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
         }
     }
 
@@ -1851,7 +1961,7 @@ mod tests {
             Fixture::new([
                 ((jid![1, 2], digest![42]), vec![GetArtifact::Get]),
             ], [
-                (digest![42], vec![vec![jid![1, 2]]]),
+                (digest![42], vec![Ok(vec![jid![1, 2]])]),
             ], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -1866,7 +1976,9 @@ mod tests {
         };
 
         GotArtifact(digest![42], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![42], ArtifactUploadLocation::TcpUpload)
+        ) => {
             CacheGotArtifact(digest![42], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(42)]))),
@@ -1886,8 +1998,8 @@ mod tests {
                 ((jid![1, 2], digest![42]), vec![GetArtifact::Get]),
                 ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
             ], [
-                (digest![42], vec![vec![jid![1, 2]]]),
-                (digest![43], vec![vec![jid![1, 2]]]),
+                (digest![42], vec![Ok(vec![jid![1, 2]])]),
+                (digest![43], vec![Ok(vec![jid![1, 2]])]),
             ], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -1900,7 +2012,9 @@ mod tests {
         };
 
         GotArtifact(digest![42], "/z/tmp/foo".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![42], ArtifactUploadLocation::TcpUpload)
+        ) => {
             CacheGotArtifact(digest![42], Some("/z/tmp/foo".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
             CacheReadArtifact(digest![42]),
@@ -1919,7 +2033,9 @@ mod tests {
         FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
 
         GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![43], ArtifactUploadLocation::TcpUpload)
+        ) => {
             CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
@@ -1940,8 +2056,8 @@ mod tests {
                 ((jid![1, 2], digest![42]), vec![GetArtifact::Get]),
                 ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
             ], [
-                (digest![42], vec![vec![jid![1, 2]]]),
-                (digest![43], vec![vec![jid![1, 2]]]),
+                (digest![42], vec![Ok(vec![jid![1, 2]])]),
+                (digest![43], vec![Ok(vec![jid![1, 2]])]),
             ], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -1954,7 +2070,9 @@ mod tests {
         };
 
         GotArtifact(digest![42], "/z/tmp/foo".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![42])) => {
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![42], ArtifactUploadLocation::TcpUpload)
+        ) => {
             CacheGotArtifact(digest![42], Some("/z/tmp/foo".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
             CacheReadArtifact(digest![42]),
@@ -1975,7 +2093,9 @@ mod tests {
         FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
 
         GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![43], ArtifactUploadLocation::TcpUpload)
+        ) => {
             CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
@@ -1996,8 +2116,8 @@ mod tests {
                 ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
                 ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
             ], [
-                (digest![42], vec![vec![jid![1, 2]]]),
-                (digest![43], vec![vec![jid![1, 2]]]),
+                (digest![42], vec![Ok(vec![jid![1, 2]])]),
+                (digest![43], vec![Ok(vec![jid![1, 2]])]),
             ], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -2025,7 +2145,9 @@ mod tests {
         FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
 
         GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![43], ArtifactUploadLocation::TcpUpload)
+        ) => {
             CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
@@ -2046,8 +2168,8 @@ mod tests {
                 ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
                 ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
             ], [
-                (digest![42], vec![vec![jid![1, 2]]]),
-                (digest![43], vec![vec![jid![1, 2]]]),
+                (digest![42], vec![Ok(vec![jid![1, 2]])]),
+                (digest![43], vec![Ok(vec![jid![1, 2]])]),
             ], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -2075,7 +2197,9 @@ mod tests {
         FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
 
         GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(digest![43])) => {
+        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
+            digest![43], ArtifactUploadLocation::TcpUpload)
+        ) => {
             CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
             ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
@@ -2096,8 +2220,8 @@ mod tests {
                 ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
                 ((jid![1, 2], digest![43]), vec![GetArtifact::Success]),
             ], [
-                (digest![42], vec![vec![jid![1, 2]]]),
-                (digest![43], vec![vec![jid![1, 2]]]),
+                (digest![42], vec![Ok(vec![jid![1, 2]])]),
+                (digest![43], vec![Ok(vec![jid![1, 2]])]),
             ], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -2140,8 +2264,8 @@ mod tests {
                 ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
                 ((jid![1, 2], digest![43]), vec![GetArtifact::Success]),
             ], [
-                (digest![42], vec![vec![jid![1, 2]]]),
-                (digest![43], vec![vec![jid![1, 2]]]),
+                (digest![42], vec![Ok(vec![jid![1, 2]])]),
+                (digest![43], vec![Ok(vec![jid![1, 2]])]),
             ], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};

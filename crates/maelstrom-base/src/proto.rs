@@ -46,13 +46,19 @@ pub enum BrokerToClient {
     ArtifactTransferredResponse(Sha256Digest, Result<(), String>),
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ArtifactUploadLocation {
+    TcpUpload,
+    Remote,
+}
+
 /// Message sent from a client to the broker. After sending the initial [`Hello`], a client will
 /// send a stream of these messages.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ClientToBroker {
     JobRequest(ClientJobId, JobSpec),
-    ArtifactTransferred(Sha256Digest),
+    ArtifactTransferred(Sha256Digest, ArtifactUploadLocation),
 }
 
 /// Message sent from the broker to a monitor. The broker won't send a message until it has

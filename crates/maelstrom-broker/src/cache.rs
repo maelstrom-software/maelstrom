@@ -29,7 +29,11 @@ pub trait SchedulerCache {
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact;
 
     /// Enter something into the cache.
-    fn got_artifact(&mut self, digest: &Sha256Digest, file: Option<Self::TempFile>) -> Vec<JobId>;
+    fn got_artifact(
+        &mut self,
+        digest: &Sha256Digest,
+        file: Option<Self::TempFile>,
+    ) -> Result<Vec<JobId>>;
 
     /// Decrement the refcount for the given artifact.
     fn decrement_refcount(&mut self, digest: &Sha256Digest);
