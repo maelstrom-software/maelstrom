@@ -4,9 +4,10 @@ use maelstrom_base::{
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    job_spec, AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
-    ClientBgProcess, ContainerImageDepotDir, ContainerSpec, LayerSpec, PrefixOptions, ProjectDir,
-    StateDir, SymlinkSpec,
+    container_spec, job_spec,
+    spec::{LayerSpec, PrefixOptions, SymlinkSpec},
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
+    ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
 use regex::Regex;
@@ -134,16 +135,10 @@ impl ClientFixture {
         mounts: Vec<JobMount>,
         network: JobNetwork,
     ) -> anyhow::Error {
-        let spec = ContainerSpec {
-            parent: None,
-            layers,
-            root_overlay: Default::default(),
-            environment: vec![],
-            working_directory: None,
-            mounts,
-            network,
-            user: None,
-            group: None,
+        let spec = container_spec! {
+            layers: layers,
+            mounts: mounts,
+            network: network,
         };
         self.client.add_container(name, spec).unwrap_err()
     }

@@ -14,10 +14,10 @@ use anyhow::anyhow;
 use itertools::Itertools as _;
 use maelstrom_base::{
     nonempty, ClientJobId, JobBrokerStatus, JobCompleted, JobDevice, JobEffects, JobError,
-    JobMount, JobNetwork, JobOutcome, JobOutputResult, JobRootOverlay, JobTerminationStatus,
-    JobWorkerStatus, NonEmpty,
+    JobMount, JobOutcome, JobOutputResult, JobTerminationStatus, JobWorkerStatus, NonEmpty,
 };
 use maelstrom_client::{
+    container_spec,
     spec::{ContainerSpec, JobSpec, LayerSpec},
     JobRunningStatus, JobStatus,
 };
@@ -427,18 +427,16 @@ fn test_spec(bin: &str, name: &str) -> JobSpec {
 }
 
 fn default_container() -> ContainerSpec {
-    ContainerSpec {
-        parent: None,
-        layers: vec![LayerSpec::Stubs {
-            stubs: vec![
-                "/{proc,sys,tmp}/".into(),
-                "/dev/{full,null,random,urandom,zero}".into(),
-            ],
-        }],
-        root_overlay: JobRootOverlay::None,
-        environment: vec![],
-        working_directory: None,
-        mounts: vec![
+    container_spec! {
+        layers: [
+            LayerSpec::Stubs {
+                stubs: vec![
+                    "/{proc,sys,tmp}/".into(),
+                    "/dev/{full,null,random,urandom,zero}".into(),
+                ],
+            },
+        ],
+        mounts: [
             JobMount::Tmp {
                 mount_point: "/tmp".into(),
             },
@@ -456,9 +454,6 @@ fn default_container() -> ContainerSpec {
                     | JobDevice::Zero,
             },
         ],
-        network: JobNetwork::Disabled,
-        user: None,
-        group: None,
     }
 }
 

@@ -1,6 +1,6 @@
 pub use maelstrom_client_base::{
-    image_container_parent, job_spec,
-    spec::{self, ContainerSpec, JobSpec, LayerSpec, PrefixOptions, SymlinkSpec},
+    container_spec, image_container_parent, job_spec, spec,
+    spec::{ContainerParent, ContainerSpec, JobSpec},
     AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, IntrospectResponse,
     JobRunningStatus, JobStatus, ProjectDir, RemoteProgress, RpcLogMessage, StateDir, MANIFEST_DIR,
 };
