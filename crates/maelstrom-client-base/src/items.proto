@@ -148,9 +148,9 @@ message EnvironmentSpec {
 }
 
 enum ImageUse {
-    Layers = 0;
-    Environment = 1;
-    WorkingDirectory = 2;
+    ImageUseLayers = 0;
+    ImageUseEnvironment = 1;
+    ImageUseWorkingDirectory = 2;
 }
 
 message ImageSpec {
@@ -158,9 +158,21 @@ message ImageSpec {
     repeated ImageUse use = 2;
 }
 
-//message ContainerContainerParent {
-//    string name = 1;
-//}
+enum ContainerUse {
+    ContainerUseLayers = 0;
+    ContainerUseRootOverlay = 1;
+    ContainerUseEnvironment = 2;
+    ContainerUseWorkingDirectory = 3;
+    ContainerUseMounts = 4;
+    ContainerUseNetwork = 5;
+    ContainerUseUser = 6;
+    ContainerUseGroup = 7;
+}
+
+message ContainerRef {
+    string name = 1;
+    repeated ContainerUse use = 2;
+}
 
 message WindowSize {
     uint32 rows = 1;
@@ -175,7 +187,7 @@ message JobTty {
 message ContainerParent {
     oneof parent {
         ImageSpec image = 1;
-//        ContainerContainerParent container = 2;
+        ContainerRef container = 2;
     }
 }
 

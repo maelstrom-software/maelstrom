@@ -161,7 +161,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
 
         let (pending_image, get_image) = {
             match container.parent {
-                None => (None, None),
+                None | Some(ContainerParent::Container(_)) => (None, None),
                 Some(ContainerParent::Image(ImageSpec { name, r#use })) => {
                     if r#use.is_empty() {
                         (None, None)

@@ -55,14 +55,20 @@ pub struct ImageSpec {
 }
 
 #[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
+#[proto(proto_buf_type = "proto::ContainerRef")]
+pub struct ContainerRef {
+    pub name: String,
+    pub r#use: EnumSet<ContainerUse>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
 #[proto(
     proto_buf_type = "proto::ContainerParent",
     enum_type = "proto::container_parent::Parent"
 )]
 pub enum ContainerParent {
     Image(ImageSpec),
-    //    #[proto(proto_buf_type = proto::ContainerContainerParent)]
-    //    Container { name: String },
+    Container(ContainerRef),
 }
 
 #[macro_export]
@@ -481,6 +487,21 @@ pub enum ImageUse {
     Layers,
     Environment,
     WorkingDirectory,
+}
+
+#[derive(Debug, Deserialize, EnumSetType, IntoProtoBuf, Serialize, TryFromProtoBuf)]
+#[serde(rename_all = "snake_case")]
+#[enumset(serialize_repr = "list")]
+#[proto(proto_buf_type = "proto::ContainerUse")]
+pub enum ContainerUse {
+    Layers,
+    RootOverlay,
+    Environment,
+    WorkingDirectory,
+    Mounts,
+    Network,
+    User,
+    Group,
 }
 
 /// A struct used for deserializing "image" statements in JSON, TOML, or other similar formats.
