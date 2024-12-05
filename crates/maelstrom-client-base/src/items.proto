@@ -124,9 +124,9 @@ message TmpMount {
 }
 
 enum JobNetwork {
-    Disabled = 0;
-    Loopback = 1;
-    Local = 2;
+    JOB_NETWORK_DISABLED = 0;
+    JOB_NETWORK_LOOPBACK = 1;
+    JOB_NETWORK_LOCAL = 2;
 }
 
 message JobRootOverlay {
@@ -148,9 +148,9 @@ message EnvironmentSpec {
 }
 
 enum ImageUse {
-    ImageUseLayers = 0;
-    ImageUseEnvironment = 1;
-    ImageUseWorkingDirectory = 2;
+    IMAGE_USE_LAYERS = 0;
+    IMAGE_USE_ENVIRONMENT = 1;
+    IMAGE_USE_WORKING_DIRECTORY = 2;
 }
 
 message ImageSpec {
@@ -159,14 +159,14 @@ message ImageSpec {
 }
 
 enum ContainerUse {
-    ContainerUseLayers = 0;
-    ContainerUseRootOverlay = 1;
-    ContainerUseEnvironment = 2;
-    ContainerUseWorkingDirectory = 3;
-    ContainerUseMounts = 4;
-    ContainerUseNetwork = 5;
-    ContainerUseUser = 6;
-    ContainerUseGroup = 7;
+    CONTAINER_USE_LAYERS = 0;
+    CONTAINER_USE_ROOT_OVERLAY = 1;
+    CONTAINER_USE_ENVIRONMENT = 2;
+    CONTAINER_USE_WORKING_DIRECTORY = 3;
+    CONTAINER_USE_MOUNTS = 4;
+    CONTAINER_USE_NETWORK = 5;
+    CONTAINER_USE_USER = 6;
+    CONTAINER_USE_GROUP = 7;
 }
 
 message ContainerRef {
@@ -340,7 +340,7 @@ message LogKeyValue {
 }
 
 message LogMessage {
-    string message = 1;
+    string message_ = 1;
     LogLevel level = 2;
     string tag = 3;
     repeated LogKeyValue key_values = 4;
