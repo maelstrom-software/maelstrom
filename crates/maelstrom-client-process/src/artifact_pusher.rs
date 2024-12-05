@@ -1,9 +1,12 @@
 mod github;
 mod tcp_upload;
 
+use crate::progress::ProgressTracker;
 use anyhow::Result;
 use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
-use maelstrom_util::r#async::Pool;
+use maelstrom_client_base::ArtifactUploadStrategy;
+use maelstrom_util::{config::common::BrokerAddr, r#async::Pool};
+use slog::Logger;
 use std::future::Future;
 use std::{
     num::NonZeroU32,
@@ -12,8 +15,6 @@ use std::{
 };
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinSet;
-
-pub use tcp_upload::start_task;
 
 type SuccessCb = Box<dyn FnOnce(ArtifactUploadLocation) + Send + Sync>;
 
@@ -87,4 +88,21 @@ fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
     let short_digest = &digest_string[digest_string.len() - 7..];
     let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     format!("{short_digest} {file_name}")
+}
+
+pub fn start_task(
+    artifact_upload_strategy: ArtifactUploadStrategy,
+    join_set: &mut JoinSet<Result<()>>,
+    receiver: Receiver,
+    broker_addr: BrokerAddr,
+    upload_tracker: ProgressTracker,
+    log: Logger,
+) -> Result<()> {
+    match artifact_upload_strategy {
+        ArtifactUploadStrategy::TcpUpload => {
+            tcp_upload::start_task(join_set, receiver, broker_addr, upload_tracker, log);
+            Ok(())
+        }
+        ArtifactUploadStrategy::GitHub => github::start_task(join_set, receiver, upload_tracker),
+    }
 }

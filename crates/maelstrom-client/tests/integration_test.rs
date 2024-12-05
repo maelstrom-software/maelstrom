@@ -4,10 +4,10 @@ use maelstrom_base::{
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, ContainerSpec, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
+    ClientBgProcess, ContainerImageDepotDir, ContainerSpec, JobSpec, LayerSpec, PrefixOptions,
+    ProjectDir, StateDir, SymlinkSpec,
 };
-use maelstrom_client_base::spec::{JobSpec, LayerSpec, PrefixOptions, SymlinkSpec};
 use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
 use regex::Regex;
 use std::panic::Location;
@@ -63,6 +63,7 @@ impl ClientFixture {
             "1mb".parse().unwrap(), /* inline_limit */
             2u16.try_into().unwrap(),
             AcceptInvalidRemoteContainerTlsCerts::from(true),
+            ArtifactUploadStrategy::TcpUpload,
             log.clone(),
         )
         .unwrap();

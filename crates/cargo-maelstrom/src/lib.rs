@@ -9,8 +9,8 @@ use cargo_metadata::Target as CargoTarget;
 use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     spec::{LayerSpec, PrefixOptions},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
+    ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
     metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
@@ -57,6 +57,7 @@ impl DefaultMainAppDeps {
         inline_limit: InlineLimit,
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+        artifact_upload_strategy: ArtifactUploadStrategy,
         packages: Vec<CargoPackage>,
         log: slog::Logger,
     ) -> Result<Self> {
@@ -86,6 +87,7 @@ impl DefaultMainAppDeps {
             inline_limit,
             slots,
             accept_invalid_remote_container_tls_certs,
+            artifact_upload_strategy,
             log.clone(),
         )?;
         Ok(Self {
@@ -606,6 +608,7 @@ pub fn main(
             config.parent.inline_limit,
             config.parent.slots,
             config.parent.accept_invalid_remote_container_tls_certs,
+            ArtifactUploadStrategy::TcpUpload,
             packages,
             log.clone(),
         )?;

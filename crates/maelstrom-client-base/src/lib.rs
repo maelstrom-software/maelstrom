@@ -205,6 +205,13 @@ pub enum JobStatus {
 // |_|  \___|\__, |\__,_|\___||___/\__/_/ |_|  \___||___/ .__/ \___/|_| |_|___/\___|
 //              |_|                                     |_|
 
+#[derive(Copy, Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
+#[proto(proto_buf_type = "proto::ArtifactUploadStrategy")]
+pub enum ArtifactUploadStrategy {
+    TcpUpload = 0,
+    GitHub = 1,
+}
+
 #[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::StartRequest")]
 pub struct StartRequest {
@@ -217,6 +224,7 @@ pub struct StartRequest {
     pub inline_limit: InlineLimit,
     pub slots: Slots,
     pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+    pub artifact_upload_strategy: ArtifactUploadStrategy,
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf)]

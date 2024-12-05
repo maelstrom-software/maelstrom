@@ -1,8 +1,8 @@
 pub use maelstrom_client_base::{
     spec,
-    spec::{ContainerSpec, ImageSpec, JobSpec},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobRunningStatus,
-    JobStatus, ProjectDir, RemoteProgress, RpcLogMessage, StateDir, MANIFEST_DIR,
+    spec::{ContainerSpec, ImageSpec, JobSpec, LayerSpec, PrefixOptions, SymlinkSpec},
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, IntrospectResponse,
+    JobRunningStatus, JobStatus, ProjectDir, RemoteProgress, RpcLogMessage, StateDir, MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
@@ -221,6 +221,7 @@ impl Client {
         inline_limit: InlineLimit,
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+        artifact_upload_strategy: ArtifactUploadStrategy,
         log: slog::Logger,
     ) -> Result<Self> {
         let (send, recv) = tokio_mpsc::unbounded_channel();
@@ -238,6 +239,7 @@ impl Client {
             inline_limit,
             slots,
             accept_invalid_remote_container_tls_certs,
+            artifact_upload_strategy,
         };
         let s = Self {
             requester: Some(send),

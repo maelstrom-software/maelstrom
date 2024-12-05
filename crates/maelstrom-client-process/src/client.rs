@@ -13,8 +13,8 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{self, ContainerSpec},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
-    StateDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, IntrospectResponse,
+    JobStatus, ProjectDir, StateDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{self as container, ContainerImageDepot, ContainerImageDepotDir};
 use maelstrom_util::{
@@ -140,6 +140,7 @@ impl Client {
         inline_limit: InlineLimit,
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+        artifact_upload_strategy: ArtifactUploadStrategy,
     ) -> Result<()> {
         async fn try_to_start(
             log: Logger,
@@ -152,6 +153,7 @@ impl Client {
             inline_limit: InlineLimit,
             slots: Slots,
             accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+            artifact_upload_strategy: ArtifactUploadStrategy,
         ) -> Result<(ClientState, JoinSet<Result<()>>, JoinHandle<Error>)> {
             let fs = async_fs::Fs::new();
 
@@ -254,12 +256,13 @@ impl Client {
 
                 // Spawn a task for the artifact_pusher.
                 artifact_pusher::start_task(
+                    artifact_upload_strategy,
                     &mut join_set,
                     artifact_pusher_receiver,
                     broker_addr,
                     artifact_upload_tracker.clone(),
                     log.clone(),
-                );
+                )?;
             } else {
                 // We don't have a broker_addr, which means we're in standalone mode.
                 standalone = true;
@@ -366,6 +369,7 @@ impl Client {
             inline_limit,
             slots,
             accept_invalid_remote_container_tls_certs,
+            artifact_upload_strategy,
         )
         .await;
         match result {

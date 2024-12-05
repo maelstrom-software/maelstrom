@@ -5,8 +5,8 @@ use maelstrom_base::{
     JobOutputResult, JobTerminationStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, JobSpec, JobStatus, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, ArtifactUploadStrategy, CacheDir, Client,
+    ClientBgProcess, ContainerImageDepotDir, JobSpec, JobStatus, ProjectDir, StateDir,
 };
 use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow};
 use maelstrom_macro::Config;
@@ -760,6 +760,7 @@ fn main_with_logger(
         config.inline_limit,
         config.slots,
         config.accept_invalid_remote_container_tls_certs,
+        ArtifactUploadStrategy::TcpUpload,
         log,
     )?;
     let mut job_specs = spec::job_spec_iter_from_reader(reader);

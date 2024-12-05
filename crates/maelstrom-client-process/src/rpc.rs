@@ -103,6 +103,7 @@ impl ClientProcess for ArcHandler {
                     request.inline_limit,
                     request.slots,
                     request.accept_invalid_remote_container_tls_certs,
+                    request.artifact_upload_strategy,
                 )
                 .await
                 .map(IntoProtoBuf::into_proto_buf)

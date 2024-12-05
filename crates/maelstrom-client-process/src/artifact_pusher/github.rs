@@ -1,11 +1,12 @@
 use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver, SuccessCb};
 use crate::progress::{ProgressTracker, UploadProgressReader};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
 use maelstrom_github::{FileStreamBuilder, GitHubClient, SeekableStream};
 use maelstrom_util::async_fs::Fs;
 use std::{path::PathBuf, sync::Arc};
 use tokio::task::JoinSet;
+use url::Url;
 
 pub async fn push_one_artifact(
     github_client: Arc<GitHubClient>,
@@ -31,13 +32,20 @@ pub async fn push_one_artifact(
     Ok(())
 }
 
-#[expect(dead_code)]
+fn env_or_error(key: &str) -> Result<String> {
+    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
+}
+
 pub fn start_task(
     join_set: &mut JoinSet<Result<()>>,
     receiver: Receiver,
-    github_client: Arc<GitHubClient>,
     upload_tracker: ProgressTracker,
-) {
+) -> Result<()> {
+    // XXX remi: I would prefer if we didn't read these from environment variables.
+    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
+    let base_url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+    let github_client = Arc::new(GitHubClient::new(&token, base_url)?);
+
     start_task_inner(
         join_set,
         receiver,
@@ -56,5 +64,6 @@ pub fn start_task(
                 .map(|()| ((), ()))
             }
         },
-    )
+    );
+    Ok(())
 }
