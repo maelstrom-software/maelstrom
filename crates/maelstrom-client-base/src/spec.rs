@@ -343,31 +343,6 @@ impl JobSpec {
         self.container.root_overlay = root_overlay;
         self
     }
-
-    pub fn working_directory(mut self, working_directory: Option<impl Into<Utf8PathBuf>>) -> Self {
-        self.container.working_directory = working_directory.map(Into::into);
-        self
-    }
-
-    pub fn user(mut self, user: Option<impl Into<UserId>>) -> Self {
-        self.container.user = user.map(Into::into);
-        self
-    }
-
-    pub fn group(mut self, group: Option<impl Into<GroupId>>) -> Self {
-        self.container.group = group.map(Into::into);
-        self
-    }
-
-    pub fn timeout(mut self, timeout: Option<impl Into<Timeout>>) -> Self {
-        self.timeout = timeout.map(Into::into);
-        self
-    }
-
-    pub fn priority(mut self, priority: i8) -> Self {
-        self.priority = priority;
-        self
-    }
 }
 
 #[macro_export]
