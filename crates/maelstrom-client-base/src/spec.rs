@@ -54,6 +54,40 @@ pub struct ImageRef {
     pub r#use: EnumSet<ImageUse>,
 }
 
+#[macro_export]
+macro_rules! image_ref {
+    (@expand [] -> [$name:expr, $layers:literal, $environment:literal, $working_directory:literal]) => {
+        $crate::spec::ImageRef {
+            name: $name.into(),
+            r#use: {
+                let mut r#use = ::maelstrom_base::EnumSet::new();
+                if $layers {
+                    r#use.insert($crate::spec::ImageUse::Layers);
+                }
+                if $environment {
+                    r#use.insert($crate::spec::ImageUse::Environment);
+                }
+                if $working_directory {
+                    r#use.insert($crate::spec::ImageUse::WorkingDirectory);
+                }
+                r#use
+            },
+        }
+    };
+    (@expand [layers $(,$($field_in:ident),*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
+        $crate::image_ref!(@expand [$($($field_in),*)?] -> [$name, true, $environment, $working_directory])
+    };
+    (@expand [environment $(,$($field_in:ident),*)?] -> [$name:expr, $layers:literal, $old_environment:literal, $working_directory:literal]) => {
+        $crate::image_ref!(@expand [$($($field_in),*)?] -> [$name, $layers, true, $working_directory])
+    };
+    (@expand [working_directory $(,$($field_in:ident),*)?] -> [$name:expr, $layers:literal, $environment:literal, $old_working_directory:literal]) => {
+        $crate::image_ref!(@expand [$($($field_in),*)?] -> [$name, $layers, $environment, true])
+    };
+    ($name:expr $(, $($use:ident),+ $(,)?)?) => {
+        $crate::image_ref!(@expand [$($($use),+)?] -> [$name, false, false, false])
+    };
+}
+
 #[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::ContainerRef")]
 pub struct ContainerRef {
@@ -73,37 +107,8 @@ pub enum ContainerParent {
 
 #[macro_export]
 macro_rules! image_container_parent {
-    (@expand [] -> [$name:expr, $layers:literal, $environment:literal, $working_directory:literal]) => {
-        $crate::spec::ContainerParent::Image(
-            $crate::spec::ImageRef {
-                name: $name.into(),
-                r#use: {
-                    let mut r#use = ::maelstrom_base::EnumSet::new();
-                    if $layers {
-                        r#use.insert($crate::spec::ImageUse::Layers);
-                    }
-                    if $environment {
-                        r#use.insert($crate::spec::ImageUse::Environment);
-                    }
-                    if $working_directory {
-                        r#use.insert($crate::spec::ImageUse::WorkingDirectory);
-                    }
-                    r#use
-                },
-            }
-        )
-    };
-    (@expand [layers $(,$($field_in:ident),*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
-        $crate::image_container_parent!(@expand [$($($field_in),*)?] -> [$name, true, $environment, $working_directory])
-    };
-    (@expand [environment $(,$($field_in:ident),*)?] -> [$name:expr, $layers:literal, $old_environment:literal, $working_directory:literal]) => {
-        $crate::image_container_parent!(@expand [$($($field_in),*)?] -> [$name, $layers, true, $working_directory])
-    };
-    (@expand [working_directory $(,$($field_in:ident),*)?] -> [$name:expr, $layers:literal, $environment:literal, $old_working_directory:literal]) => {
-        $crate::image_container_parent!(@expand [$($($field_in),*)?] -> [$name, $layers, $environment, true])
-    };
-    ($name:expr $(, $($use:ident),+ $(,)?)?) => {
-        $crate::image_container_parent!(@expand [$($($use),+)?] -> [$name, false, false, false])
+    ($($arg:tt)*) => {
+        $crate::spec::ContainerParent::Image($crate::image_ref!($($arg)*))
     };
 }
 
