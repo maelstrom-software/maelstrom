@@ -41,7 +41,7 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RunningProgress {
     name: String,
     progress: Arc<AtomicU64>,
@@ -125,13 +125,16 @@ impl ProgressTracker {
 
 #[derive(Clone, Debug)]
 pub struct UploadProgressReader<ReadT> {
-    prog: RunningProgress,
+    prog: Arc<RunningProgress>,
     read: ReadT,
 }
 
 impl<ReadT> UploadProgressReader<ReadT> {
     pub fn new(prog: RunningProgress, read: ReadT) -> Self {
-        Self { prog, read }
+        Self {
+            prog: Arc::new(prog),
+            read,
+        }
     }
 }
 
