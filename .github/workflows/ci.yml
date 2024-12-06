@@ -66,7 +66,7 @@ jobs:
     - name: Expose GitHub Action Runtime
       uses: crazy-max/ghaction-github-runtime@v3
     - name: Test
-      run: ./scripts/run-tests-on-maelstrom.sh "${{ env.ACTIONS_RUNTIME_TOKEN }}" "${{ env.ACTIONS_RESULTS>URL }}"
+      run: ./scripts/run-tests-on-maelstrom.sh "${{ env.ACTIONS_RUNTIME_TOKEN }}" "${{ env.ACTIONS_RESULTS_URL }}"
 
   github_api_tests:
     name: Run GitHub API tests
