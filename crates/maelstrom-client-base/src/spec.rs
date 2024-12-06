@@ -245,12 +245,11 @@ pub fn environment_eval(
 pub struct ContainerSpec {
     pub parent: Option<ContainerParent>,
     pub layers: Vec<LayerSpec>,
-    #[proto(default)]
-    pub root_overlay: JobRootOverlay,
+    pub root_overlay: Option<JobRootOverlay>,
     pub environment: Vec<EnvironmentSpec>,
     pub working_directory: Option<Utf8PathBuf>,
     pub mounts: Vec<JobMount>,
-    pub network: JobNetwork,
+    pub network: Option<JobNetwork>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
 }
@@ -273,7 +272,7 @@ macro_rules! container_spec {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: $layers.into()])
     };
     (@expand [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? root_overlay: $root_overlay])
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? root_overlay: Some($root_overlay)])
     };
     (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: $crate::spec::IntoEnvironment::into_environment($environment)])
@@ -285,7 +284,7 @@ macro_rules! container_spec {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? mounts: $mounts.into()])
     };
     (@expand [network: $network:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? network: $network])
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? network: Some($network)])
     };
     (@expand [user: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? user: Some(::maelstrom_base::UserId::new($user))])

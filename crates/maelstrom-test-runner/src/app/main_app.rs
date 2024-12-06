@@ -230,11 +230,16 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             layers,
             mounts: test_metadata.container.mounts,
             network: test_metadata.container.network,
-            root_overlay: if test_metadata.container.enable_writable_file_system {
-                JobRootOverlay::Tmp
-            } else {
-                JobRootOverlay::None
-            },
+            root_overlay: test_metadata
+                .container
+                .enable_writable_file_system
+                .map(|enable| {
+                    if enable {
+                        JobRootOverlay::Tmp
+                    } else {
+                        JobRootOverlay::None
+                    }
+                }),
             working_directory: test_metadata.container.working_directory,
             user: test_metadata.container.user,
             group: test_metadata.container.group,

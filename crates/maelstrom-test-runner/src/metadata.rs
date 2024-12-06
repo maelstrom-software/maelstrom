@@ -30,8 +30,8 @@ pub struct AllMetadata<TestFilterT> {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TestMetadataContainer {
     pub parent: Option<ContainerParent>,
-    pub network: JobNetwork,
-    pub enable_writable_file_system: bool,
+    pub network: Option<JobNetwork>,
+    pub enable_writable_file_system: Option<bool>,
     pub working_directory: Option<Utf8PathBuf>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
@@ -44,10 +44,10 @@ impl TestMetadataContainer {
     fn try_fold(mut self, container: &TestContainer) -> Result<Self> {
         let mut image_use = EnumSet::new();
 
-        self.network = container.network.unwrap_or(self.network);
+        self.network = container.network.or(self.network);
         self.enable_writable_file_system = container
             .enable_writable_file_system
-            .unwrap_or(self.enable_writable_file_system);
+            .or(self.enable_writable_file_system);
         self.user = container.user.or(self.user);
         self.group = container.group.or(self.group);
 
@@ -491,7 +491,7 @@ mod tests {
             .unwrap()
             .container
             .network,
-            JobNetwork::Loopback,
+            Some(JobNetwork::Loopback),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -502,7 +502,7 @@ mod tests {
             .unwrap()
             .container
             .network,
-            JobNetwork::Local,
+            Some(JobNetwork::Local),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -513,7 +513,7 @@ mod tests {
             .unwrap()
             .container
             .network,
-            JobNetwork::Disabled,
+            Some(JobNetwork::Disabled),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -524,7 +524,7 @@ mod tests {
             .unwrap()
             .container
             .network,
-            JobNetwork::Disabled,
+            None,
         );
     }
 
@@ -542,17 +542,18 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(
-            !all.get_metadata_for_test(
+        assert_eq!(
+            all.get_metadata_for_test(
                 &"package1".into(),
                 &"package1".into(),
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
             .container
-            .enable_writable_file_system
+            .enable_writable_file_system,
+            Some(false),
         );
-        assert!(
+        assert_eq!(
             all.get_metadata_for_test(
                 &"package1".into(),
                 &"package1".into(),
@@ -560,17 +561,19 @@ mod tests {
             )
             .unwrap()
             .container
-            .enable_writable_file_system
+            .enable_writable_file_system,
+            Some(true),
         );
-        assert!(
-            !all.get_metadata_for_test(
+        assert_eq!(
+            all.get_metadata_for_test(
                 &"package2".into(),
                 &"package2".into(),
                 ("test1", &NoCaseMetadata)
             )
             .unwrap()
             .container
-            .enable_writable_file_system
+            .enable_writable_file_system,
+            None,
         );
     }
 

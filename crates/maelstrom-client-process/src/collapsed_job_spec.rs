@@ -4,7 +4,7 @@ use maelstrom_base::{
     GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
-    ContainerSpec, EnvironmentSpec, ImageRef, JobSpec as ClientJobSpec, LayerSpec,
+    ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, JobSpec, LayerSpec,
 };
 use std::time::Duration;
 
@@ -12,11 +12,11 @@ use std::time::Duration;
 pub struct CollapsedJobSpec {
     pub image: Option<ImageRef>,
     pub layers: Vec<LayerSpec>,
-    pub root_overlay: JobRootOverlay,
+    pub root_overlay: Option<JobRootOverlay>,
     pub environment: Vec<EnvironmentSpec>,
     pub working_directory: Option<Utf8PathBuf>,
     pub mounts: Vec<JobMount>,
-    pub network: JobNetwork,
+    pub network: Option<JobNetwork>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
     pub program: Utf8PathBuf,
@@ -119,13 +119,13 @@ macro_rules! collapsed_job_spec {
 
 impl CollapsedJobSpec {
     pub fn new(
-        job_spec: ClientJobSpec,
+        job_spec: JobSpec,
         _container_resolver: impl Fn(&str) -> Option<&ContainerSpec>,
     ) -> Result<Self, String> {
-        let ClientJobSpec {
+        let JobSpec {
             container:
                 ContainerSpec {
-                    parent: _,
+                    parent,
                     layers,
                     root_overlay,
                     environment,
@@ -142,8 +142,23 @@ impl CollapsedJobSpec {
             allocate_tty,
             priority,
         } = job_spec;
+        let mut image = match parent {
+            None => None,
+            Some(ContainerParent::Container(_)) => None,
+            Some(ContainerParent::Image(image_ref)) => Some(image_ref),
+        };
+        if let Some(image_ref) = &mut image {
+            if working_directory.is_some() {
+                image_ref.r#use.remove(ImageUse::WorkingDirectory);
+            }
+        }
+        if let Some(image_ref) = &image {
+            if image_ref.r#use.is_empty() {
+                image = None;
+            }
+        }
         Ok(CollapsedJobSpec {
-            image: None,
+            image,
             layers,
             root_overlay,
             environment,
@@ -166,7 +181,7 @@ impl CollapsedJobSpec {
 mod tests {
     use super::*;
     use maelstrom_base::{proc_mount, tmp_mount, WindowSize};
-    use maelstrom_client_base::{environment_spec, job_spec, image_container_parent};
+    use maelstrom_client_base::{environment_spec, image_container_parent, image_ref, job_spec};
     use maelstrom_test::{millis, tar_layer};
 
     #[test]
@@ -416,7 +431,61 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    parent: image_container_parent!("image1", layers, layers, layers),
+                    parent: image_container_parent!("image1", layers, environment, working_directory),
+                },
+                |_| None,
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                image: image_ref!("image1", layers, environment, working_directory),
+            }),
+        )
+    }
+
+    #[test]
+    fn image_parent_with_working_directory() {
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: image_container_parent!("image1", layers, environment, working_directory),
+                    working_directory: "/root",
+                },
+                |_| None,
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                image: image_ref!("image1", layers, environment),
+                working_directory: "/root",
+            }),
+        )
+    }
+
+    #[test]
+    fn image_parent_with_working_directory_only() {
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: image_container_parent!("image1", working_directory),
+                    working_directory: "/root",
+                },
+                |_| None,
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                working_directory: "/root",
+            }),
+        )
+    }
+
+    #[test]
+    fn image_parent_with_no_fields() {
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: image_container_parent!("image1"),
                 },
                 |_| None,
             ),

@@ -123,12 +123,14 @@ impl Job {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            network: self.network.unwrap_or_default(),
-            root_overlay: if self.enable_writable_file_system.unwrap_or_default() {
-                JobRootOverlay::Tmp
-            } else {
-                JobRootOverlay::None
-            },
+            network: self.network,
+            root_overlay: self.enable_writable_file_system.map(|writable| {
+                if writable {
+                    JobRootOverlay::Tmp
+                } else {
+                    JobRootOverlay::None
+                }
+            }),
             working_directory,
             user: self.user,
             group: self.group,
@@ -428,7 +430,7 @@ mod tests {
             Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
                 .into_job_spec()
                 .unwrap(),
-            job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Disabled),
+            job_spec!("program", layers: [tar_layer!("1")]),
         );
     }
 

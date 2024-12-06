@@ -198,7 +198,7 @@ message ContainerSpec {
     repeated EnvironmentSpec environment = 4;
     optional string working_directory = 5;
     repeated JobMount mounts = 6;
-    JobNetwork network = 7;
+    optional JobNetwork network = 7;
     optional uint32 user = 8;
     optional uint32 group = 9;
 }

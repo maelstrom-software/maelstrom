@@ -177,12 +177,12 @@ impl<DepsT: Deps> Preparer<DepsT> {
             pending_image,
             image_layers: vec![],
             layers,
-            root_overlay: container.root_overlay,
+            root_overlay: container.root_overlay.unwrap_or_default(),
             initial_environment: Default::default(),
             environment: container.environment,
             working_directory: container.working_directory,
             mounts: container.mounts,
-            network: container.network,
+            network: container.network.unwrap_or_default(),
             user: container.user,
             group: container.group,
             program: spec.program,
@@ -402,7 +402,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
     }
 
     fn check_for_local_network_and_sys_mount(spec: &ContainerSpec) -> Result<(), DepsT::Error> {
-        if spec.network == JobNetwork::Local
+        if spec.network == Some(JobNetwork::Local)
             && spec
                 .mounts
                 .iter()
