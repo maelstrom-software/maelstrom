@@ -78,29 +78,29 @@ macro_rules! image_container_parent {
             $crate::spec::ImageRef {
                 name: $name.into(),
                 r#use: {
-                    let mut r#use = EnumSet::new();
+                    let mut r#use = ::maelstrom_base::EnumSet::new();
                     if $layers {
-                        r#use.insert(ImageUse::Layers);
+                        r#use.insert($crate::spec::ImageUse::Layers);
                     }
                     if $environment {
-                        r#use.insert(ImageUse::Environment);
+                        r#use.insert($crate::spec::ImageUse::Environment);
                     }
                     if $working_directory {
-                        r#use.insert(ImageUse::WorkingDirectory);
+                        r#use.insert($crate::spec::ImageUse::WorkingDirectory);
                     }
                     r#use
                 },
             }
         )
     };
-    (@expand [layers $(,$($field_in:ident)*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
-        $crate::image_container_parent!(@expand [$($($field_in)*)?] -> [$name, true, $environment, $working_directory])
+    (@expand [layers $(,$($field_in:ident),*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
+        $crate::image_container_parent!(@expand [$($($field_in),*)?] -> [$name, true, $environment, $working_directory])
     };
-    (@expand [environment $(,$($field_in:ident)*)?] -> [$name:expr, $layers:literal, $old_environment:literal, $working_directory:literal]) => {
-        $crate::image_container_parent!(@expand [$($($field_in)*)?] -> [$name, $layers, true, $working_directory])
+    (@expand [environment $(,$($field_in:ident),*)?] -> [$name:expr, $layers:literal, $old_environment:literal, $working_directory:literal]) => {
+        $crate::image_container_parent!(@expand [$($($field_in),*)?] -> [$name, $layers, true, $working_directory])
     };
-    (@expand [working_directory $(,$($field_in:ident)*)?] -> [$name:expr, $layers:literal, $environment:literal, $old_working_directory:literal]) => {
-        $crate::image_container_parent!(@expand [$($($field_in)*)?] -> [$name, $layers, $environment, true])
+    (@expand [working_directory $(,$($field_in:ident),*)?] -> [$name:expr, $layers:literal, $environment:literal, $old_working_directory:literal]) => {
+        $crate::image_container_parent!(@expand [$($($field_in),*)?] -> [$name, $layers, $environment, true])
     };
     ($name:expr $(, $($use:ident),+ $(,)?)?) => {
         $crate::image_container_parent!(@expand [$($($use),+)?] -> [$name, false, false, false])

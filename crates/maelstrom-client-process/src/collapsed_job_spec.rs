@@ -166,7 +166,7 @@ impl CollapsedJobSpec {
 mod tests {
     use super::*;
     use maelstrom_base::{proc_mount, tmp_mount, WindowSize};
-    use maelstrom_client_base::{environment_spec, job_spec};
+    use maelstrom_client_base::{environment_spec, job_spec, image_container_parent};
     use maelstrom_test::{millis, tar_layer};
 
     #[test]
@@ -408,5 +408,21 @@ mod tests {
                 priority: 42,
             })
         );
+    }
+
+    #[test]
+    fn image_parent() {
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: image_container_parent!("image1", layers, layers, layers),
+                },
+                |_| None,
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+            }),
+        )
     }
 }
