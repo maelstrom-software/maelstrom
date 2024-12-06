@@ -2,7 +2,7 @@ use derive_more::{Debug, From};
 use maelstrom_macro::Config;
 use maelstrom_util::{
     cache::CacheDir,
-    config::common::{CacheSize, LogLevel},
+    config::common::{ArtifactTransferStrategy, CacheSize, LogLevel},
     root::RootBuf,
 };
 use serde::Deserialize;
@@ -80,9 +80,13 @@ pub struct Config {
     #[config(value_name = "BYTES", default = "bytesize::ByteSize::gb(1)")]
     pub cache_size: CacheSize,
 
-    /// Cache data is stored in github artifacts instead of the local file-system.
-    #[config(value_name = "bool", flag, hide)]
-    pub github_cache: bool,
+    /// Controls how we deal with artifacts when communicating with clients and workers.
+    #[config(
+        value_name = "ARTIFACT_TRANSFER_STRATEGY",
+        default = r#""tcp-upload""#,
+        hide
+    )]
+    pub artifact_transfer_strategy: ArtifactTransferStrategy,
 
     /// Minimum log level to output.
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]

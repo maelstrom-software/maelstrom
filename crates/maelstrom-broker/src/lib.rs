@@ -12,6 +12,7 @@ use anyhow::{Context as _, Result};
 use cache::{github::GithubCache, local::TcpUploadLocalCache, BrokerCache, SchedulerCache};
 use config::Config;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
+use maelstrom_util::config::common::ArtifactTransferStrategy;
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, info, Logger};
 use std::{
@@ -138,11 +139,14 @@ async fn main_inner(config: Config, log: Logger) -> Result<()> {
         "http_addr" => http_listener_addr,
         "pid" => process::id());
 
-    if config.github_cache {
-        main_inner_inner::<GithubCache>(listener, http_listener, config, log.clone()).await?;
-    } else {
-        main_inner_inner::<TcpUploadLocalCache>(listener, http_listener, config, log.clone())
-            .await?;
+    match config.artifact_transfer_strategy {
+        ArtifactTransferStrategy::GitHub => {
+            main_inner_inner::<GithubCache>(listener, http_listener, config, log.clone()).await?;
+        }
+        ArtifactTransferStrategy::TcpUpload => {
+            main_inner_inner::<TcpUploadLocalCache>(listener, http_listener, config, log.clone())
+                .await?;
+        }
     }
 
     info!(log, "exiting");
