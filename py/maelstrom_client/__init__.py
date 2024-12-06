@@ -2,12 +2,14 @@ from .client import Client, RunJobStream, LayerType
 
 from .items_pb2 import (
     BindMount,
+    ContainerParent,
     ContainerRef,
     ContainerSpec,
     Duration,
     EnvironmentSpec,
     GlobLayer,
     ImageSpec,
+    ImageUse,
     JobDevice,
     JobMount,
     JobNetwork,
