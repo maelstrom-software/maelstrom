@@ -29,7 +29,6 @@ impl TempFileFactory for ErroringTempFileFactory {
 pub trait RemoteArtifactReader {
     type ArtifactStream;
 
-    #[expect(dead_code)]
     fn read(&self, digest: &Sha256Digest) -> Self::ArtifactStream;
 }
 
@@ -44,7 +43,6 @@ enum Entry {
 #[derive(Default)]
 pub struct RemoteCache<ArtifactReaderT> {
     entries: HashMap<Sha256Digest, Entry>,
-    #[expect(dead_code)]
     artifact_reader: ArtifactReaderT,
 }
 
@@ -125,8 +123,8 @@ impl<ArtifactReaderT: RemoteArtifactReader> SchedulerCache for RemoteCache<Artif
         None
     }
 
-    fn read_artifact(&mut self, _digest: &Sha256Digest) -> Self::ArtifactStream {
-        todo!()
+    fn read_artifact(&mut self, digest: &Sha256Digest) -> Self::ArtifactStream {
+        self.artifact_reader.read(digest)
     }
 }
 
