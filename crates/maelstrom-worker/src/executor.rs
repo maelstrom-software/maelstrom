@@ -80,9 +80,10 @@ impl JobSpec {
             working_directory,
             user,
             group,
+            timeout: _,
             estimated_duration: _,
             allocate_tty,
-            ..
+            priority: _,
         } = spec;
         JobSpec {
             program,
