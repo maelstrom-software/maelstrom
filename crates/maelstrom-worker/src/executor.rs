@@ -61,9 +61,9 @@ pub struct JobSpec {
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
     pub root_overlay: JobRootOverlay,
-    pub working_directory: Option<Utf8PathBuf>,
-    pub user: Option<UserId>,
-    pub group: Option<GroupId>,
+    pub working_directory: Utf8PathBuf,
+    pub user: UserId,
+    pub group: GroupId,
     pub allocate_tty: Option<JobTty>,
 }
 
@@ -91,9 +91,9 @@ impl JobSpec {
             mounts,
             network,
             root_overlay,
-            working_directory,
-            user,
-            group,
+            working_directory: working_directory.unwrap_or_else(|| "/".into()),
+            user: user.unwrap_or_else(|| 0.into()),
+            group: group.unwrap_or_else(|| 0.into()),
             allocate_tty,
         }
     }
@@ -563,13 +563,7 @@ impl<ClockT: Clock> Executor<'_, ClockT> {
 
         // This first set of syscalls sets up the uid mapping.
         let mut uid_map_contents = BumpString::with_capacity_in(24, bump);
-        writeln!(
-            uid_map_contents,
-            "{} {} 1",
-            spec.user.unwrap_or(0.into()),
-            self.user,
-        )
-        .map_err(syserr)?;
+        writeln!(uid_map_contents, "{} {} 1", spec.user, self.user,).map_err(syserr)?;
         builder.push(
             Syscall::Open {
                 path: c"/proc/self/uid_map",
@@ -604,13 +598,7 @@ impl<ClockT: Clock> Executor<'_, ClockT> {
 
         // Finally, we set up the gid mapping.
         let mut gid_map_contents = BumpString::with_capacity_in(24, bump);
-        writeln!(
-            gid_map_contents,
-            "{} {} 1",
-            spec.group.unwrap_or(0.into()),
-            self.group,
-        )
-        .map_err(syserr)?;
+        writeln!(gid_map_contents, "{} {} 1", spec.group, self.group,).map_err(syserr)?;
         builder.push(
             Syscall::Open {
                 path: c"/proc/self/gid_map",
@@ -659,8 +647,8 @@ impl<ClockT: Clock> Executor<'_, ClockT> {
                 target: new_root_path,
                 flags: MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
                 root_mode: self.root_mode,
-                uid: Uid::from_u32(spec.user.unwrap_or(UserId::new(0)).into()),
-                gid: Gid::from_u32(spec.group.unwrap_or(GroupId::new(0)).into()),
+                uid: Uid::from_u32(spec.user.into()),
+                gid: Gid::from_u32(spec.group.into()),
                 fuse_fd: fd,
             },
             &|err| syserr(anyhow!("fuse mount: {err}")),
@@ -1158,9 +1146,9 @@ impl<ClockT: Clock> Executor<'_, ClockT> {
         builder: &mut ScriptBuilder<'bump>,
     ) -> JobResult<(), Error> {
         // Change to the working directory, if it's not "/".
-        if let Some(working_directory) = &spec.working_directory {
+        if spec.working_directory != "/" {
             let working_directory =
-                bump_c_str_from_bytes(bump, working_directory.as_os_str().as_bytes())
+                bump_c_str_from_bytes(bump, spec.working_directory.as_os_str().as_bytes())
                     .map_err(syserr)?;
             builder.push(
                 Syscall::Chdir {
