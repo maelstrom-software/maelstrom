@@ -435,9 +435,9 @@ pub struct JobSpec {
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
     pub root_overlay: JobRootOverlay,
-    pub working_directory: Option<Utf8PathBuf>,
-    pub user: Option<UserId>,
-    pub group: Option<GroupId>,
+    pub working_directory: Utf8PathBuf,
+    pub user: UserId,
+    pub group: GroupId,
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
     pub allocate_tty: Option<JobTty>,
@@ -467,9 +467,9 @@ macro_rules! job_spec {
             mounts: Default::default(),
             network: Default::default(),
             root_overlay: Default::default(),
-            working_directory: Default::default(),
-            user: Default::default(),
-            group: Default::default(),
+            working_directory: "/".into(),
+            user: 0.into(),
+            group: 0.into(),
             timeout: Default::default(),
             estimated_duration: Default::default(),
             allocate_tty: Default::default(),
@@ -504,17 +504,17 @@ macro_rules! job_spec {
         $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
             [$($($field_out)+,)? root_overlay: $root_overlay])
     };
-    (@expand [$($required:tt)+] [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+    (@expand [$($required:tt)+] [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
-            [$($($field_out)+,)? working_directory: Some($dir.into())])
+            [$($($field_out)+,)? working_directory: $working_directory.into()])
     };
     (@expand [$($required:tt)+] [user: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
-            [$($($field_out)+,)? user: Some($crate::UserId::new($user))])
+            [$($($field_out)+,)? user: $user.into()])
     };
-    (@expand [$($required:tt)+] [group: $user:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+    (@expand [$($required:tt)+] [group: $group:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->
-            [$($($field_out)+,)? group: Some($crate::GroupId::new($user))])
+            [$($($field_out)+,)? group: $group.into()])
     };
     (@expand [$($required:tt)+] [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::job_spec!(@expand [$($required)+] [$($($field_in)*)?] ->

@@ -91,9 +91,9 @@ impl JobSpec {
             mounts,
             network,
             root_overlay,
-            working_directory: working_directory.unwrap_or_else(|| "/".into()),
-            user: user.unwrap_or_else(|| 0.into()),
-            group: group.unwrap_or_else(|| 0.into()),
+            working_directory,
+            user,
+            group,
             allocate_tty,
         }
     }
