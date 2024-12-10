@@ -4,14 +4,13 @@ use maelstrom_base::{
     EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
-    ContainerParent, ContainerSpec, ContainerUse, EnvironmentSpec, ImageRef, ImageUse, JobSpec,
-    LayerSpec,
+    ContainerParent, ContainerSpec, ContainerUse, ConvertedImage, EnvironmentSpec, ImageRef,
+    ImageUse, JobSpec, LayerSpec,
 };
-use std::time::Duration;
+use std::{collections::BTreeMap, mem, time::Duration};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct CollapsedJobSpec {
-    pub image: Option<ImageRef>,
     pub layers: Vec<LayerSpec>,
     pub root_overlay: Option<JobRootOverlay>,
     pub environment: Vec<EnvironmentSpec>,
@@ -20,6 +19,8 @@ pub struct CollapsedJobSpec {
     pub network: Option<JobNetwork>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
+    pub image: Option<ImageRef>,
+    pub initial_environment: BTreeMap<String, String>,
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub timeout: Option<Timeout>,
@@ -32,7 +33,6 @@ pub struct CollapsedJobSpec {
 macro_rules! collapsed_job_spec {
     (@expand [$program:expr] [] -> []) => {
         $crate::collapsed_job_spec::CollapsedJobSpec {
-            image: Default::default(),
             layers: Default::default(),
             root_overlay: Default::default(),
             environment: Default::default(),
@@ -41,6 +41,8 @@ macro_rules! collapsed_job_spec {
             network: Default::default(),
             user: Default::default(),
             group: Default::default(),
+            image: Default::default(),
+            initial_environment: Default::default(),
             program: $program.into(),
             arguments: Default::default(),
             timeout: Default::default(),
@@ -59,6 +61,10 @@ macro_rules! collapsed_job_spec {
     (@expand [$program:expr] [image: $image:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($($field_out)+,)? image: Some($image.into())])
+    };
+    (@expand [$program:expr] [initial_environment: $initial_environment:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? initial_environment: $initial_environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect()])
     };
     (@expand [$program:expr] [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
@@ -216,7 +222,6 @@ impl CollapsedJobSpec {
             }
         }
         Ok(CollapsedJobSpec {
-            image,
             layers,
             root_overlay,
             environment,
@@ -225,6 +230,8 @@ impl CollapsedJobSpec {
             network,
             user,
             group,
+            image,
+            initial_environment: Default::default(),
             program,
             arguments,
             timeout,
@@ -233,6 +240,22 @@ impl CollapsedJobSpec {
             priority,
         })
     }
+
+    pub fn integrate_image(&mut self, image: ConvertedImage) -> Result<(), String> {
+        let image_use = self.image.take().unwrap().r#use;
+        if image_use.contains(ImageUse::Layers) {
+            let top = mem::replace(&mut self.layers, image.layers()?);
+            self.layers.extend(top);
+        }
+        if image_use.contains(ImageUse::Environment) {
+            self.initial_environment = image.environment()?;
+        }
+        if image_use.contains(ImageUse::WorkingDirectory) {
+            assert!(self.working_directory.is_none());
+            self.working_directory = image.working_directory();
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -240,8 +263,8 @@ mod tests {
     use super::*;
     use maelstrom_base::{proc_mount, tmp_mount, WindowSize};
     use maelstrom_client_base::{
-        container_container_parent, container_spec, environment_spec, image_container_parent,
-        image_ref, job_spec,
+        container_container_parent, container_spec, converted_image, environment_spec,
+        image_container_parent, image_ref, job_spec,
     };
     use maelstrom_test::{millis, tar_layer};
     use std::collections::HashMap;
@@ -1564,5 +1587,84 @@ mod tests {
             ),
             Ok(collapsed_job_spec!("prog")),
         )
+    }
+
+    #[test]
+    fn integrate_image_layers() {
+        let mut job_spec = collapsed_job_spec! {
+            "prog",
+            image: image_ref!("image", layers),
+        };
+        job_spec
+            .integrate_image(converted_image! {"image", layers: ["foo.tar", "bar.tar"]})
+            .unwrap();
+        assert_eq!(
+            job_spec,
+            collapsed_job_spec! {
+                "prog",
+                layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
+            }
+        );
+    }
+
+    #[test]
+    fn integrate_image_environment() {
+        let mut job_spec = collapsed_job_spec! {
+            "prog",
+            image: image_ref!("image", environment),
+        };
+        job_spec
+            .integrate_image(converted_image! {"image", environment: ["FOO=foo", "BAR=bar"]})
+            .unwrap();
+        assert_eq!(
+            job_spec,
+            collapsed_job_spec! {
+                "prog",
+                initial_environment: [("BAR", "bar"), ("FOO", "foo")],
+            }
+        );
+    }
+
+    #[test]
+    fn integrate_image_environment_bad_environment() {
+        let mut job_spec = collapsed_job_spec! {
+            "prog",
+            image: image_ref!("image", environment),
+        };
+        assert_eq!(
+            job_spec
+                .integrate_image(converted_image! {"image", environment: ["FOO"]})
+                .unwrap_err(),
+            "image image has an invalid environment variable FOO");
+    }
+
+    #[test]
+    fn integrate_image_working_directory_some() {
+        let mut job_spec = collapsed_job_spec! {
+            "prog",
+            image: image_ref!("image", working_directory),
+        };
+        job_spec
+            .integrate_image(converted_image! {"image", working_directory: "/root"})
+            .unwrap();
+        assert_eq!(
+            job_spec,
+            collapsed_job_spec! {
+                "prog",
+                working_directory: "/root",
+            }
+        );
+    }
+
+    #[test]
+    fn integrate_image_working_directory_none() {
+        let mut job_spec = collapsed_job_spec! {
+            "prog",
+            image: image_ref!("image", layers),
+        };
+        job_spec
+            .integrate_image(converted_image! {"image"})
+            .unwrap();
+        assert_eq!(job_spec, collapsed_job_spec! {"prog"});
     }
 }

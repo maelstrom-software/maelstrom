@@ -868,6 +868,37 @@ pub struct ConvertedImage {
     working_directory: Option<Utf8PathBuf>,
 }
 
+#[macro_export]
+macro_rules! converted_image {
+    (@expand [$name:expr] [] -> []) => {
+        $crate::spec::ConvertedImage::new($name.into(), $crate::spec::ImageConfig::default())
+    };
+    (@expand [$name:expr] [] -> [$($field_out:tt)+]) => {
+        $crate::spec::ConvertedImage::new($name.into(), $crate::spec::ImageConfig {
+            $($field_out)+,
+            .. $crate::spec::ImageConfig::default()
+        })
+    };
+    (@expand [$name:expr] [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::converted_image!(@expand [$name] [$($($field_in)*)?] -> [
+            $($($field_out)+,)? layers: $layers.into_iter().map(Into::into).collect()
+        ])
+    };
+    (@expand [$name:expr] [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::converted_image!(@expand [$name] [$($($field_in)*)?] -> [
+            $($($field_out)+,)? environment: Some($environment.into_iter().map(Into::into).collect())
+        ])
+    };
+    (@expand [$name:expr] [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::converted_image!(@expand [$name] [$($($field_in)*)?] -> [
+            $($($field_out)+,)? working_directory: Some($working_directory.into())
+        ])
+    };
+    ($name:expr $(,$($field_in:tt)*)?) => {
+        $crate::converted_image!(@expand [$name] [$($($field_in)*)?] -> [])
+    };
+}
+
 impl ConvertedImage {
     /// Create a new [`ConvertedImage`].
     pub fn new(name: &str, config: ImageConfig) -> Self {
@@ -923,10 +954,8 @@ impl ConvertedImage {
 
     /// Return the working directory for the image. If the image doesn't have a working directory,
     /// this will return an error.
-    pub fn working_directory(&self) -> Result<Utf8PathBuf, String> {
-        self.working_directory
-            .clone()
-            .ok_or_else(|| format!("image {} has no working directory to use", self.name()))
+    pub fn working_directory(&self) -> Option<Utf8PathBuf> {
+        self.working_directory.clone()
     }
 }
 
@@ -1012,10 +1041,7 @@ mod tests {
             io.environment().unwrap_err(),
             "image empty has no environment to use",
         );
-        assert_eq!(
-            io.working_directory().unwrap_err(),
-            "image empty has no working directory to use",
-        );
+        assert_eq!(io.working_directory(), None,);
     }
 
     #[test]

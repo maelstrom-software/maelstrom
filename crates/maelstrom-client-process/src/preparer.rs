@@ -295,11 +295,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
                         .into(),
                 ));
             }
-            job.working_directory = Some(
-                image
-                    .working_directory()
-                    .map_err(DepsT::error_from_string)?,
-            );
+            job.working_directory = image.working_directory();
         }
 
         if job.is_ready() {
@@ -498,8 +494,8 @@ mod tests {
     use maelstrom_base::{job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, WindowSize};
     use maelstrom_client::spec;
     use maelstrom_client_base::{
-        container_spec, environment_spec, image_container_parent, job_spec as client_job_spec,
-        spec::ImageConfig,
+        container_spec, converted_image, environment_spec, image_container_parent,
+        job_spec as client_job_spec,
     };
     use maelstrom_test::{millis, string, tar_layer};
     use std::{cell::RefCell, ffi::OsStr, rc::Rc};
@@ -608,36 +604,6 @@ mod tests {
                 }
             );
         }
-    }
-
-    macro_rules! converted_image {
-        (@expand [$name:expr] [] -> []) => {
-            ConvertedImage::new($name.into(), ImageConfig::default())
-        };
-        (@expand [$name:expr] [] -> [$($field_out:tt)+]) => {
-            ConvertedImage::new($name.into(), ImageConfig {
-                $($field_out)+,
-                .. ImageConfig::default()
-            })
-        };
-        (@expand [$name:expr] [layers: [$($($layer:expr),+ $(,)?)?] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            converted_image!(@expand [$name] [$($($field_in)*)?] -> [
-                $($($field_out)+,)? layers: vec![$($($layer.into()),+)?]
-            ])
-        };
-        (@expand [$name:expr] [environment: [$($($var:expr),+ $(,)?)?] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            converted_image!(@expand [$name] [$($($field_in)*)?] -> [
-                $($($field_out)+,)? environment: Some(vec![$($($var.into()),+)?])
-            ])
-        };
-        (@expand [$name:expr] [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-            converted_image!(@expand [$name] [$($($field_in)*)?] -> [
-                $($($field_out)+,)? working_directory: Some($working_directory.into())
-            ])
-        };
-        ($name:expr $(,$($field_in:tt)*)?) => {
-            converted_image!(@expand [$name] [$($($field_in)*)?] -> [])
-        };
     }
 
     macro_rules! script_test {
@@ -1263,7 +1229,7 @@ mod tests {
         GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
 
         GotImage(string!("image"), Ok(converted_image!{"image"})) => {
-            JobPrepared(1, Err(string!("image image has no working directory to use"))),
+            JobPrepared(1, Ok(job_spec!{"one", [tar_digest!(1)]})),
         };
     }
 
