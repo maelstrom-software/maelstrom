@@ -780,6 +780,16 @@ pub enum ImageUse {
     WorkingDirectory,
 }
 
+impl ImageUse {
+    pub fn to_container_use(self) -> ContainerUse {
+        match self {
+            Self::Layers => ContainerUse::Layers,
+            Self::Environment => ContainerUse::Environment,
+            Self::WorkingDirectory => ContainerUse::WorkingDirectory,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, EnumSetType, IntoProtoBuf, Serialize, TryFromProtoBuf)]
 #[serde(rename_all = "snake_case")]
 #[enumset(serialize_repr = "list")]

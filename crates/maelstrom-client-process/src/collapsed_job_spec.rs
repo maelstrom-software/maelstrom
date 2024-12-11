@@ -155,14 +155,10 @@ impl CollapsedJobSpec {
             match parent {
                 ContainerParent::Image(mut image_ref) => {
                     // Remove fields that have been previously masked out by more direct ancestors.
-                    if !use_mask.contains(ContainerUse::Layers) {
-                        image_ref.r#use.remove(ImageUse::Layers);
-                    }
-                    if !use_mask.contains(ContainerUse::Environment) {
-                        image_ref.r#use.remove(ImageUse::Environment);
-                    }
-                    if !use_mask.contains(ContainerUse::WorkingDirectory) {
-                        image_ref.r#use.remove(ImageUse::WorkingDirectory);
+                    for image_use in EnumSet::<ImageUse>::all() {
+                        if !use_mask.contains(image_use.to_container_use()) {
+                            image_ref.r#use.remove(image_use);
+                        }
                     }
 
                     // If the working directory has been set by a more direct ancestor, don't
@@ -184,39 +180,41 @@ impl CollapsedJobSpec {
                     let parent = container_resolver(&container_ref.name).ok_or_else(|| {
                         format!("couldn't find parent container {:?}", &container_ref.name)
                     })?;
-
                     use_mask = use_mask.intersection(container_ref.r#use);
-                    if use_mask.contains(ContainerUse::Layers) {
-                        layers = parent.layers.iter().cloned().chain(layers).collect();
+                    for container_use in use_mask {
+                        match container_use {
+                            ContainerUse::Layers => {
+                                layers = parent.layers.iter().cloned().chain(layers).collect();
+                            }
+                            ContainerUse::RootOverlay => {
+                                root_overlay = root_overlay.or_else(|| parent.root_overlay.clone());
+                            }
+                            ContainerUse::Environment => {
+                                environment = parent
+                                    .environment
+                                    .iter()
+                                    .cloned()
+                                    .chain(environment)
+                                    .collect();
+                            }
+                            ContainerUse::WorkingDirectory => {
+                                working_directory =
+                                    working_directory.or_else(|| parent.working_directory.clone());
+                            }
+                            ContainerUse::Mounts => {
+                                mounts = parent.mounts.iter().cloned().chain(mounts).collect();
+                            }
+                            ContainerUse::Network => {
+                                network = network.or(parent.network);
+                            }
+                            ContainerUse::User => {
+                                user = user.or(parent.user);
+                            }
+                            ContainerUse::Group => {
+                                group = group.or(parent.group);
+                            }
+                        }
                     }
-                    if use_mask.contains(ContainerUse::RootOverlay) {
-                        root_overlay = root_overlay.or_else(|| parent.root_overlay.clone());
-                    }
-                    if use_mask.contains(ContainerUse::Environment) {
-                        environment = parent
-                            .environment
-                            .iter()
-                            .cloned()
-                            .chain(environment)
-                            .collect();
-                    }
-                    if use_mask.contains(ContainerUse::WorkingDirectory) {
-                        working_directory =
-                            working_directory.or_else(|| parent.working_directory.clone());
-                    }
-                    if use_mask.contains(ContainerUse::Mounts) {
-                        mounts = parent.mounts.iter().cloned().chain(mounts).collect();
-                    }
-                    if use_mask.contains(ContainerUse::Network) {
-                        network = network.or(parent.network);
-                    }
-                    if use_mask.contains(ContainerUse::User) {
-                        user = user.or(parent.user);
-                    }
-                    if use_mask.contains(ContainerUse::Group) {
-                        group = group.or(parent.group);
-                    }
-
                     next_parent = parent.parent.clone();
                 }
             }
