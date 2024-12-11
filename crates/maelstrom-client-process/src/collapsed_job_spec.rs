@@ -7,7 +7,7 @@ use maelstrom_client_base::spec::{
     ContainerParent, ContainerSpec, ContainerUse, ConvertedImage, EnvironmentSpec, ImageRef,
     ImageUse, JobSpec, LayerSpec,
 };
-use std::{collections::BTreeMap, mem, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct CollapsedJobSpec {
@@ -21,6 +21,7 @@ pub struct CollapsedJobSpec {
     pub group: Option<GroupId>,
     pub image: Option<ImageRef>,
     pub initial_environment: BTreeMap<String, String>,
+    pub image_layers: Vec<LayerSpec>,
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub timeout: Option<Timeout>,
@@ -43,6 +44,7 @@ macro_rules! collapsed_job_spec {
             group: Default::default(),
             image: Default::default(),
             initial_environment: Default::default(),
+            image_layers: Default::default(),
             program: $program.into(),
             arguments: Default::default(),
             timeout: Default::default(),
@@ -65,6 +67,10 @@ macro_rules! collapsed_job_spec {
     (@expand [$program:expr] [initial_environment: $initial_environment:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($($field_out)+,)? initial_environment: $initial_environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect()])
+    };
+    (@expand [$program:expr] [image_layers: $image_layers:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? image_layers: $image_layers.into_iter().map(Into::into).collect()])
     };
     (@expand [$program:expr] [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
@@ -230,6 +236,7 @@ impl CollapsedJobSpec {
             group,
             image,
             initial_environment: Default::default(),
+            image_layers: Default::default(),
             program,
             arguments,
             timeout,
@@ -242,10 +249,11 @@ impl CollapsedJobSpec {
     pub fn integrate_image(&mut self, image: ConvertedImage) -> Result<(), String> {
         let image_use = self.image.take().unwrap().r#use;
         if image_use.contains(ImageUse::Layers) {
-            let top = mem::replace(&mut self.layers, image.layers()?);
-            self.layers.extend(top);
+            assert!(self.image_layers.is_empty());
+            self.image_layers = image.layers()?;
         }
         if image_use.contains(ImageUse::Environment) {
+            assert!(self.initial_environment.is_empty());
             self.initial_environment = image.environment()?;
         }
         if image_use.contains(ImageUse::WorkingDirectory) {
@@ -253,6 +261,26 @@ impl CollapsedJobSpec {
             self.working_directory = image.working_directory();
         }
         Ok(())
+    }
+
+    pub fn check(&mut self) -> Result<(), String> {
+        assert!(self.image.is_none());
+        if self.network == Some(JobNetwork::Local)
+            && self
+                .mounts
+                .iter()
+                .any(|m| matches!(m, JobMount::Sys { .. }))
+        {
+            Err("A \"sys\" mount is not compatible with local networking. \
+                Check the documentation for the \"network\" field of \"JobSpec\"."
+                .into())
+        } else if self.layers.is_empty() && self.image_layers.is_empty() {
+            Err("At least one layer must be specified, or an image must be \
+                used that has at least one layer."
+                .into())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -1600,7 +1628,7 @@ mod tests {
             job_spec,
             collapsed_job_spec! {
                 "prog",
-                layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
+                image_layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
             }
         );
     }

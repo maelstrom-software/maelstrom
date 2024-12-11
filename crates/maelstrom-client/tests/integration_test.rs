@@ -4,7 +4,7 @@ use maelstrom_base::{
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    container_spec, job_spec,
+    job_spec,
     spec::{LayerSpec, PrefixOptions, SymlinkSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
@@ -129,21 +129,6 @@ impl ClientFixture {
             Regex::new("(?s)^\nrunning 1 test\n(.*)test .* \\.\\.\\. ok\n\n.*$").unwrap();
         let captured = output_re.captures(output).unwrap().get(1).unwrap();
         captured.as_str().to_owned()
-    }
-
-    fn add_container_expecting_error(
-        &self,
-        name: String,
-        layers: Vec<LayerSpec>,
-        mounts: Vec<JobMount>,
-        network: JobNetwork,
-    ) -> anyhow::Error {
-        let spec = container_spec! {
-            layers: layers,
-            mounts: mounts,
-            network: network,
-        };
-        self.client.add_container(name, spec).unwrap_err()
     }
 
     fn run_job_expecting_error(
@@ -350,7 +335,7 @@ fn symlinks_test(fix: &ClientFixture) {
 }
 
 fn sys_local_network_error_test(fix: &ClientFixture) {
-    let error1 = fix.run_job_expecting_error(
+    let error = fix.run_job_expecting_error(
         vec![LayerSpec::Stubs {
             stubs: vec!["/sys/".into()],
         }],
@@ -359,22 +344,10 @@ fn sys_local_network_error_test(fix: &ClientFixture) {
         }],
         JobNetwork::Local,
     );
-    let error2 = fix.add_container_expecting_error(
-        "my_container".into(),
-        vec![LayerSpec::Stubs {
-            stubs: vec!["/sys/".into()],
-        }],
-        vec![JobMount::Sys {
-            mount_point: "/sys".into(),
-        }],
-        JobNetwork::Local,
-    );
-    for error in [error1, error2] {
-        assert!(error.to_string().contains(
-            "A \"sys\" mount is not compatible with local networking. \
+    assert!(error.to_string().contains(
+        "A \"sys\" mount is not compatible with local networking. \
             Check the documentation for the \"network\" field of \"JobSpec\"."
-        ));
-    }
+    ));
 }
 
 fn panic_test_job() {

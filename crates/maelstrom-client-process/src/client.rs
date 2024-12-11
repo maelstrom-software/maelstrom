@@ -465,7 +465,7 @@ impl Client {
             .preparer_sender
             .send(preparer::Message::AddContainer(sender, name, container))?;
 
-        if let Some(existing) = receiver.await?.map_err(Error::msg)? {
+        if let Some(existing) = receiver.await? {
             debug!(state.log, "add_container replacing existing"; "existing" => ?existing);
         }
 

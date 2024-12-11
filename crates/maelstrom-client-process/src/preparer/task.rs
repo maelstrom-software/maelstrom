@@ -60,7 +60,7 @@ pub struct Adapter {
 
 impl Deps for Adapter {
     type PrepareJobHandle = oneshot::Sender<Result<JobSpec, Self::Error>>;
-    type AddContainerHandle = oneshot::Sender<Result<Option<ContainerSpec>, Self::Error>>;
+    type AddContainerHandle = oneshot::Sender<Option<ContainerSpec>>;
     type Error = String;
 
     fn error_from_string(err: String) -> Self::Error {
@@ -79,12 +79,8 @@ impl Deps for Adapter {
         let _ = handle.send(result);
     }
 
-    fn container_added(
-        &self,
-        handle: Self::AddContainerHandle,
-        result: Result<Option<ContainerSpec>, Self::Error>,
-    ) {
-        let _ = handle.send(result);
+    fn container_added(&self, handle: Self::AddContainerHandle, old: Option<ContainerSpec>) {
+        let _ = handle.send(old);
     }
 
     fn get_image(&self, name: String) {

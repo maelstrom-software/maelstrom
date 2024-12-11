@@ -30,11 +30,7 @@ pub trait Deps {
         specs: Vec<EnvironmentSpec>,
     ) -> Result<Vec<String>, Self::Error>;
     fn job_prepared(&self, handle: Self::PrepareJobHandle, result: Result<JobSpec, Self::Error>);
-    fn container_added(
-        &self,
-        handle: Self::AddContainerHandle,
-        old: Result<Option<ContainerSpec>, Self::Error>,
-    );
+    fn container_added(&self, handle: Self::AddContainerHandle, old: Option<ContainerSpec>);
     fn get_image(&self, name: String);
     fn build_layer(&self, spec: LayerSpec);
 }
@@ -136,11 +132,6 @@ impl<DepsT: Deps> Preparer<DepsT> {
     fn receive_prepare_job(&mut self, handle: DepsT::PrepareJobHandle, spec: ClientJobSpec) {
         let container = spec.container;
 
-        if let Err(err) = Self::check_for_local_network_and_sys_mount(&container) {
-            self.deps.job_prepared(handle, Err(err));
-            return;
-        }
-
         let ijid = self.next_ijid;
         self.next_ijid = self.next_ijid.checked_add(1).unwrap();
 
@@ -225,12 +216,8 @@ impl<DepsT: Deps> Preparer<DepsT> {
         name: String,
         spec: ContainerSpec,
     ) {
-        let result = if let Err(err) = Self::check_for_local_network_and_sys_mount(&spec) {
-            Err(err)
-        } else {
-            Ok(self.containers.insert(name, spec))
-        };
-        self.deps.container_added(handle, result);
+        self.deps
+            .container_added(handle, self.containers.insert(name, spec));
     }
 
     fn receive_got_image(&mut self, name: &str, result: Result<ConvertedImage, DepsT::Error>) {
@@ -396,23 +383,6 @@ impl<DepsT: Deps> Preparer<DepsT> {
             deps.job_prepared(spec.handle, Err(err));
         }
     }
-
-    fn check_for_local_network_and_sys_mount(spec: &ContainerSpec) -> Result<(), DepsT::Error> {
-        if spec.network == Some(JobNetwork::Local)
-            && spec
-                .mounts
-                .iter()
-                .any(|m| matches!(m, JobMount::Sys { .. }))
-        {
-            Err(DepsT::error_from_string(
-                "A \"sys\" mount is not compatible with local networking. \
-                Check the documentation for the \"network\" field of \"JobSpec\"."
-                    .into(),
-            ))
-        } else {
-            Ok(())
-        }
-    }
 }
 
 struct Job<DepsT: Deps> {
@@ -444,7 +414,18 @@ impl<DepsT: Deps> Job<DepsT> {
         assert!(self.is_ready());
         (
             self.handle,
-            if self.image_layers.is_empty() && self.layers.is_empty() {
+            if self.network == JobNetwork::Local
+                && self
+                    .mounts
+                    .iter()
+                    .any(|m| matches!(m, JobMount::Sys { .. }))
+            {
+                Err(DepsT::error_from_string(
+                    "A \"sys\" mount is not compatible with local networking. \
+                    Check the documentation for the \"network\" field of \"JobSpec\"."
+                        .into(),
+                ))
+            } else if self.image_layers.is_empty() && self.layers.is_empty() {
                 Err(DepsT::error_from_string(
                     "job specification has no layers".into(),
                 ))
@@ -504,7 +485,7 @@ mod tests {
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
     enum TestMessage {
         JobPrepared(u32, Result<JobSpec, String>),
-        ContainerAdded(u32, Result<Option<ContainerSpec>, String>),
+        ContainerAdded(u32, Option<ContainerSpec>),
         GetImage(String),
         BuildLayer(LayerSpec),
     }
@@ -540,14 +521,10 @@ mod tests {
                 .push(TestMessage::JobPrepared(handle, result));
         }
 
-        fn container_added(
-            &self,
-            handle: Self::AddContainerHandle,
-            result: Result<Option<ContainerSpec>, Self::Error>,
-        ) {
+        fn container_added(&self, handle: Self::AddContainerHandle, old: Option<ContainerSpec>) {
             self.borrow_mut()
                 .messages
-                .push(TestMessage::ContainerAdded(handle, result));
+                .push(TestMessage::ContainerAdded(handle, old));
         }
 
         fn get_image(&self, name: String) {
@@ -1311,30 +1288,10 @@ mod tests {
     script_test! {
         add_container_duplicate,
         AddContainer(0, string!("foo"), container_spec!{ network: JobNetwork::Loopback }) => {
-            ContainerAdded(0, Ok(None)),
+            ContainerAdded(0, None),
         };
         AddContainer(1, string!("foo"), container_spec!{ network: JobNetwork::Local }) => {
-            ContainerAdded(1, Ok(Some(container_spec!{ network: JobNetwork::Loopback }))),
-        };
-    }
-
-    script_test! {
-        add_container_with_local_network_and_sys_mount,
-        AddContainer(
-            0,
-            string!("foo"),
-            container_spec! {
-                network: JobNetwork::Local,
-                mounts: [ sys_mount!("/mnt") ],
-            }
-        ) => {
-            ContainerAdded(
-                0,
-                Err(string!(
-                    "A \"sys\" mount is not compatible with local networking. \
-                    Check the documentation for the \"network\" field of \"JobSpec\"."
-                ))
-            ),
+            ContainerAdded(1, Some(container_spec!{ network: JobNetwork::Loopback })),
         };
     }
 }
