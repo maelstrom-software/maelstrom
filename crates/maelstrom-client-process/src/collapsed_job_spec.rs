@@ -1,5 +1,6 @@
 use maelstrom_base::{
-    EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Timeout, UserId, Utf8PathBuf,
+    ArtifactType, EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay, JobSpec as BaseJobSpec,
+    JobTty, NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
     ContainerParent, ContainerSpec, ContainerUse, ConvertedImage, EnvironmentSpec, ImageRef,
@@ -279,7 +280,7 @@ impl CollapsedJobSpec {
         Ok(())
     }
 
-    pub fn check(&self) -> Result<(), String> {
+    fn check(&self) -> Result<(), String> {
         assert!(self.image.is_none());
         if self.network == Some(JobNetwork::Local)
             && self
@@ -297,6 +298,51 @@ impl CollapsedJobSpec {
         } else {
             Ok(())
         }
+    }
+
+    pub fn into_job_spec(
+        self,
+        layers: impl Iterator<Item = (Sha256Digest, ArtifactType)>,
+        environment: Vec<String>,
+    ) -> Result<BaseJobSpec, String> {
+        self.check()?;
+        let layers = NonEmpty::collect(layers).unwrap();
+        assert_eq!(layers.len(), self.image_layers.len() + self.layers.len());
+        let Self {
+            layers: _,
+            root_overlay,
+            environment: _,
+            working_directory,
+            mounts,
+            network,
+            user,
+            group,
+            image: _,
+            initial_environment: _,
+            image_layers: _,
+            program,
+            arguments,
+            timeout,
+            estimated_duration,
+            allocate_tty,
+            priority,
+        } = self;
+        Ok(BaseJobSpec {
+            program,
+            arguments,
+            environment,
+            layers,
+            mounts,
+            network: network.unwrap_or_default(),
+            root_overlay: root_overlay.unwrap_or_default(),
+            working_directory: working_directory.unwrap_or_else(|| "/".into()),
+            user: user.unwrap_or(0.into()),
+            group: group.unwrap_or(0.into()),
+            timeout,
+            estimated_duration,
+            allocate_tty,
+            priority,
+        })
     }
 }
 

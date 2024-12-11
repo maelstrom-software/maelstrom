@@ -1,7 +1,7 @@
 pub mod task;
 
 use crate::collapsed_job_spec::CollapsedJobSpec;
-use maelstrom_base::{ArtifactType, JobNetwork, JobRootOverlay, JobSpec, NonEmpty, Sha256Digest};
+use maelstrom_base::{ArtifactType, JobSpec, Sha256Digest};
 use maelstrom_client_base::spec::{
     ContainerSpec, ConvertedImage, EnvironmentSpec, ImageRef, JobSpec as ClientJobSpec, LayerSpec,
 };
@@ -365,61 +365,29 @@ impl<DepsT: Deps> Job<DepsT> {
         assert!(self.is_ready());
         let Job {
             handle,
-            job_spec,
+            mut job_spec,
             image_layers,
             layers,
         } = self;
-        (
-            handle,
-            if let Err(err) = job_spec.check() {
-                Err(DepsT::error_from_string(err))
-            } else {
-                let CollapsedJobSpec {
-                    layers: _,
-                    root_overlay,
-                    environment,
-                    working_directory,
-                    mounts,
-                    network,
-                    user,
-                    group,
-                    image: _,
-                    initial_environment,
-                    image_layers: _,
-                    program,
-                    arguments,
-                    timeout,
-                    estimated_duration,
-                    allocate_tty,
-                    priority,
-                } = job_spec;
-                deps.evaluate_environment(initial_environment, environment)
-                    .map(|environment| JobSpec {
-                        program,
-                        arguments,
+        (handle, {
+            deps.evaluate_environment(
+                mem::take(&mut job_spec.initial_environment),
+                mem::take(&mut job_spec.environment),
+            )
+            .and_then(|environment| {
+                job_spec
+                    .into_job_spec(
+                        image_layers.into_iter().chain(layers).map(|layer| {
+                            let Some((digest, artifact_type)) = layer else {
+                                panic!("shouldn't be called while awaiting any layers");
+                            };
+                            (digest, artifact_type)
+                        }),
                         environment,
-                        layers: NonEmpty::collect(image_layers.into_iter().chain(layers).map(
-                            |layer| {
-                                let Some((digest, artifact_type)) = layer else {
-                                    panic!("shouldn't be called while awaiting any layers");
-                                };
-                                (digest, artifact_type)
-                            },
-                        ))
-                        .unwrap(),
-                        mounts,
-                        network: network.unwrap_or(JobNetwork::Disabled),
-                        root_overlay: root_overlay.unwrap_or(JobRootOverlay::None),
-                        working_directory: working_directory.unwrap_or_else(|| "/".into()),
-                        user: user.unwrap_or(0.into()),
-                        group: group.unwrap_or(0.into()),
-                        timeout,
-                        estimated_duration,
-                        allocate_tty,
-                        priority,
-                    })
-            },
-        )
+                    )
+                    .map_err(DepsT::error_from_string)
+            })
+        })
     }
 
     fn is_ready(&self) -> bool {
@@ -433,7 +401,7 @@ impl<DepsT: Deps> Job<DepsT> {
 mod tests {
     use super::{Message::*, *};
     use maelstrom_base::{
-        job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, JobTty, WindowSize,
+        job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, JobTty, WindowSize, JobNetwork, JobRootOverlay,
     };
     use maelstrom_client::spec;
     use maelstrom_client_base::{
