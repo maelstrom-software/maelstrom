@@ -7,6 +7,24 @@ use maelstrom_client_base::spec::{
 };
 use std::{collections::BTreeMap, time::Duration};
 
+/**
+ * A [`CollapsedJobSpec`] is a bridge between a [`maelstrom_client_base::spec::JobSpec`] and a
+ * [`maelstrom_base::JobSpec`]. The former has an embedded
+ * [`maelstrom_client_base::spec::ContainerSpec`], which has a `parent` field, which can reference
+ * another named [`maelstrom_client_base::spec::ContainerSpec`], an image, or nothing. Moreover,
+ * the `parent` field allows for selecting only certain parts of the referenced named container or
+ * image.
+ *
+ * Taken together, [`maelstrom_client_base::spec::JobSpec`] can be viewed as a linked list of
+ * containers, with an optional image at the beginning of the list, and where the last element of
+ * the list has some extra fields. This struct represents what happens when that linked list is
+ * collapsed into a single struct. In that regard, it much more closely resembles
+ * [`maelstrom_base::JobSpec`] than it does [`maelstrom_client_base::spec::JobSpec`].
+ *
+ * However, it is different in the sense that tracks if an image needs to be fetched, and if so,
+ * what aspects of that image need to be integrated into the job spec. It also keeps tracks some
+ * fields separately to make the job of the [`crate::preparer::Preparer`] easier.
+ */
 #[derive(Debug, Eq, PartialEq)]
 pub struct CollapsedJobSpec {
     pub layers: Vec<LayerSpec>,
