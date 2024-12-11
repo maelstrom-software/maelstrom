@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use maelstrom_base::{
     EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Timeout, UserId, Utf8PathBuf,
 };
