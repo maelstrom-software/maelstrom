@@ -1058,7 +1058,10 @@ mod tests {
         };
         GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
         GotImage(string!("image"), Ok(converted_image!("image", layers: ["image1/1.tar"]))) => {
-            JobPrepared(1, Err(string!("image image has no environment to use"))),
+            JobPrepared(1, Ok(job_spec! {
+                "one",
+                [tar_digest!(1)],
+            })),
         };
     }
 

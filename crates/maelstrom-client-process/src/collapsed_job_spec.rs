@@ -1626,6 +1626,18 @@ mod tests {
     }
 
     #[test]
+    fn integrate_image_environment_no_environment() {
+        let mut job_spec = collapsed_job_spec! {
+            "prog",
+            image: image_ref!("image", environment),
+        };
+        job_spec
+            .integrate_image(converted_image! {"image", working_directory: "/root" })
+            .unwrap();
+        assert_eq!(job_spec, collapsed_job_spec! {"prog"});
+    }
+
+    #[test]
     fn integrate_image_environment_bad_environment() {
         let mut job_spec = collapsed_job_spec! {
             "prog",
@@ -1635,7 +1647,8 @@ mod tests {
             job_spec
                 .integrate_image(converted_image! {"image", environment: ["FOO"]})
                 .unwrap_err(),
-            "image image has an invalid environment variable FOO");
+            "image image has an invalid environment variable FOO"
+        );
     }
 
     #[test]

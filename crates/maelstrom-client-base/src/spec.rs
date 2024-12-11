@@ -935,18 +935,17 @@ impl ConvertedImage {
     pub fn environment(&self) -> Result<BTreeMap<String, String>, String> {
         Ok(BTreeMap::from_iter(
             self.environment
-                .as_ref()
-                .ok_or_else(|| format!("image {} has no environment to use", self.name()))?
                 .iter()
+                .flatten()
                 .map(|var| {
                     var.split_once('=')
-                        .map(|pair| pair.map(str::to_string))
                         .ok_or_else(|| {
                             format!(
                                 "image {} has an invalid environment variable {var}",
                                 self.name(),
                             )
                         })
+                        .map(|pair| pair.map(str::to_string))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         ))
@@ -1037,11 +1036,8 @@ mod tests {
     #[test]
     fn image_option_no_environment_and_no_working_directory() {
         let io = ConvertedImage::new("empty", images("empty"));
-        assert_eq!(
-            io.environment().unwrap_err(),
-            "image empty has no environment to use",
-        );
-        assert_eq!(io.working_directory(), None,);
+        assert_eq!(io.environment().unwrap(), BTreeMap::default());
+        assert_eq!(io.working_directory(), None);
     }
 
     #[test]
