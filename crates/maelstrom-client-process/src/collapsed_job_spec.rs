@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 
 use maelstrom_base::{
-    GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Timeout, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
-    ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, JobSpec, LayerSpec,
+    ContainerParent, ContainerSpec, ContainerUse, EnvironmentSpec, ImageRef, ImageUse, JobSpec,
+    LayerSpec,
 };
 use std::time::Duration;
 
@@ -118,22 +119,22 @@ macro_rules! collapsed_job_spec {
 }
 
 impl CollapsedJobSpec {
-    pub fn new(
-        job_spec: JobSpec,
-        _container_resolver: impl Fn(&str) -> Option<&ContainerSpec>,
-    ) -> Result<Self, String> {
+    pub fn new<'a, F>(job_spec: JobSpec, container_resolver: &'a F) -> Result<Self, String>
+    where
+        F: for<'b> Fn(&'b str) -> Option<&'a ContainerSpec>,
+    {
         let JobSpec {
             container:
                 ContainerSpec {
-                    parent,
-                    layers,
-                    root_overlay,
-                    environment,
-                    working_directory,
-                    mounts,
-                    network,
-                    user,
-                    group,
+                    parent: mut next_parent,
+                    mut layers,
+                    mut root_overlay,
+                    mut environment,
+                    mut working_directory,
+                    mut mounts,
+                    mut network,
+                    mut user,
+                    mut group,
                 },
             program,
             arguments,
@@ -142,19 +143,76 @@ impl CollapsedJobSpec {
             allocate_tty,
             priority,
         } = job_spec;
-        let mut image = match parent {
-            None => None,
-            Some(ContainerParent::Container(_)) => None,
-            Some(ContainerParent::Image(image_ref)) => Some(image_ref),
-        };
-        if let Some(image_ref) = &mut image {
-            if working_directory.is_some() {
-                image_ref.r#use.remove(ImageUse::WorkingDirectory);
-            }
-        }
-        if let Some(image_ref) = &image {
-            if image_ref.r#use.is_empty() {
-                image = None;
+        let mut use_mask = EnumSet::all();
+        let mut image = None;
+        while let Some(parent) = next_parent {
+            match parent {
+                ContainerParent::Image(mut image_ref) => {
+                    // Remove fields that have been previously masked out by more direct ancestors.
+                    if !use_mask.contains(ContainerUse::Layers) {
+                        image_ref.r#use.remove(ImageUse::Layers);
+                    }
+                    if !use_mask.contains(ContainerUse::Environment) {
+                        image_ref.r#use.remove(ImageUse::Environment);
+                    }
+                    if !use_mask.contains(ContainerUse::WorkingDirectory) {
+                        image_ref.r#use.remove(ImageUse::WorkingDirectory);
+                    }
+
+                    // If the working directory has been set by a more direct ancestor, don't
+                    // include it from the image.
+                    if working_directory.is_some() {
+                        image_ref.r#use.remove(ImageUse::WorkingDirectory);
+                    }
+
+                    // If we're not going to use any fields from the image, don't bother getting
+                    // it.
+                    if !image_ref.r#use.is_empty() {
+                        image = Some(image_ref);
+                    }
+
+                    break;
+                }
+
+                ContainerParent::Container(container_ref) => {
+                    let parent = container_resolver(&container_ref.name).ok_or_else(|| {
+                        format!("couldn't find parent container {:?}", &container_ref.name)
+                    })?;
+
+                    use_mask = use_mask.intersection(container_ref.r#use);
+                    if use_mask.contains(ContainerUse::Layers) {
+                        layers = parent.layers.iter().cloned().chain(layers).collect();
+                    }
+                    if use_mask.contains(ContainerUse::RootOverlay) {
+                        root_overlay = root_overlay.or_else(|| parent.root_overlay.clone());
+                    }
+                    if use_mask.contains(ContainerUse::Environment) {
+                        environment = parent
+                            .environment
+                            .iter()
+                            .cloned()
+                            .chain(environment)
+                            .collect();
+                    }
+                    if use_mask.contains(ContainerUse::WorkingDirectory) {
+                        working_directory =
+                            working_directory.or_else(|| parent.working_directory.clone());
+                    }
+                    if use_mask.contains(ContainerUse::Mounts) {
+                        mounts = parent.mounts.iter().cloned().chain(mounts).collect();
+                    }
+                    if use_mask.contains(ContainerUse::Network) {
+                        network = network.or(parent.network);
+                    }
+                    if use_mask.contains(ContainerUse::User) {
+                        user = user.or(parent.user);
+                    }
+                    if use_mask.contains(ContainerUse::Group) {
+                        group = group.or(parent.group);
+                    }
+
+                    next_parent = parent.parent.clone();
+                }
             }
         }
         Ok(CollapsedJobSpec {
@@ -181,162 +239,1177 @@ impl CollapsedJobSpec {
 mod tests {
     use super::*;
     use maelstrom_base::{proc_mount, tmp_mount, WindowSize};
-    use maelstrom_client_base::{environment_spec, image_container_parent, image_ref, job_spec};
+    use maelstrom_client_base::{
+        container_container_parent, container_spec, environment_spec, image_container_parent,
+        image_ref, job_spec,
+    };
     use maelstrom_test::{millis, tar_layer};
+    use std::collections::HashMap;
 
     #[test]
     fn program() {
+        let containers = HashMap::from([
+            (
+                "p1",
+                container_spec! {parent: image_container_parent!("image", all)},
+            ),
+            (
+                "p2",
+                container_spec! {parent: container_container_parent!("p1", all)},
+            ),
+            (
+                "p3",
+                container_spec! {parent: container_container_parent!("p2", all)},
+            ),
+            ("p4", container_spec! {}),
+        ]);
         assert_eq!(
-            CollapsedJobSpec::new(job_spec!("prog"), |_| None,),
-            Ok(collapsed_job_spec!("prog")),
+            CollapsedJobSpec::new(job_spec! {"prog"}, &|c| containers.get(c)),
+            Ok(collapsed_job_spec! {"prog"}),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {"prog", parent: container_container_parent!("p1", all)},
+                &|c| containers.get(c),
+            ),
+            Ok(collapsed_job_spec! {"prog", image: image_ref!("image", all)}),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {"prog", parent: container_container_parent!("p3", all)},
+                &|c| containers.get(c),
+            ),
+            Ok(collapsed_job_spec! {"prog", image: image_ref!("image", all)}),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {"prog", parent: container_container_parent!("p4", all)},
+                &|c| containers.get(c),
+            ),
+            Ok(collapsed_job_spec! {"prog"}),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {"prog", parent: image_container_parent!("image", all)},
+                &|c| containers.get(c),
+            ),
+            Ok(collapsed_job_spec! {"prog", image: image_ref!("image", all)}),
         );
     }
 
     #[test]
     fn layers() {
+        let containers = HashMap::from([
+            (
+                "p1",
+                container_spec! {
+                    parent: image_container_parent!("image", all),
+                    layers: [tar_layer!("p1.tar")],
+                },
+            ),
+            (
+                "p2",
+                container_spec! {
+                    parent: container_container_parent!("p1", all),
+                    layers: [tar_layer!("p2.tar")],
+                },
+            ),
+            (
+                "p3",
+                container_spec! {
+                    parent: container_container_parent!("p2", environment),
+                    layers: [tar_layer!("p3.tar")],
+                },
+            ),
+            (
+                "p4",
+                container_spec! {
+                    layers: [tar_layer!("p4.tar")],
+                },
+            ),
+        ]);
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
                     layers: [tar_layer!("foo.tar")],
                 },
-                |_| None,
+                &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 layers: [tar_layer!("foo.tar")],
-            })
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    layers: [tar_layer!("foo.tar")],
+                    parent: image_container_parent!("image", layers),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                layers: [tar_layer!("foo.tar")],
+                image: image_ref!("image", layers),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    layers: [tar_layer!("foo.tar")],
+                    parent: image_container_parent!("image"),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                layers: [tar_layer!("foo.tar")],
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    layers: [tar_layer!("foo.tar")],
+                    parent: container_container_parent!("p1", layers),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                layers: [tar_layer!("p1.tar"), tar_layer!("foo.tar")],
+                image: image_ref!("image", layers),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    layers: [tar_layer!("foo.tar")],
+                    parent: container_container_parent!("p1"),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                layers: [tar_layer!("foo.tar")],
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    layers: [tar_layer!("foo.tar")],
+                    parent: container_container_parent!("p2", layers),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                layers: [tar_layer!("p1.tar"), tar_layer!("p2.tar"), tar_layer!("foo.tar")],
+                image: image_ref!("image", layers),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    layers: [tar_layer!("foo.tar")],
+                    parent: container_container_parent!("p3", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                layers: [tar_layer!("p3.tar"), tar_layer!("foo.tar")],
+                image: image_ref!("image", environment),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    layers: [tar_layer!("foo.tar")],
+                    parent: container_container_parent!("p4", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                layers: [tar_layer!("p4.tar"), tar_layer!("foo.tar")],
+            }),
         );
     }
 
     #[test]
     fn root_overlay() {
+        let containers = HashMap::from([
+            (
+                "p1",
+                container_spec! {
+                    parent: image_container_parent!("image", all),
+                    root_overlay: JobRootOverlay::Tmp,
+                },
+            ),
+            (
+                "p2",
+                container_spec! {
+                    parent: container_container_parent!("p1", all),
+                },
+            ),
+            (
+                "p3",
+                container_spec! {
+                    parent: container_container_parent!("p2", all),
+                    root_overlay: JobRootOverlay::None,
+                },
+            ),
+            (
+                "p4",
+                container_spec! {
+                    parent: container_container_parent!("p2", environment),
+                },
+            ),
+        ]);
+        assert_eq!(
+            CollapsedJobSpec::new(job_spec! {"prog"}, &|c| containers.get(c)),
+            Ok(collapsed_job_spec! {"prog"}),
+        );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    root_overlay: JobRootOverlay::Tmp,
+                    root_overlay: JobRootOverlay::Local {
+                        upper: "upper".into(),
+                        work: "work".into(),
+                    },
                 },
-                |_| None,
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                root_overlay: JobRootOverlay::Local {
+                    upper: "upper".into(),
+                    work: "work".into(),
+                },
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    root_overlay: JobRootOverlay::Local {
+                        upper: "upper".into(),
+                        work: "work".into(),
+                    },
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                root_overlay: JobRootOverlay::Local {
+                    upper: "upper".into(),
+                    work: "work".into(),
+                },
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    root_overlay: JobRootOverlay::Local {
+                        upper: "upper".into(),
+                        work: "work".into(),
+                    },
+                    parent: image_container_parent!("image", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                root_overlay: JobRootOverlay::Local {
+                    upper: "upper".into(),
+                    work: "work".into(),
+                },
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 root_overlay: JobRootOverlay::Tmp,
-            })
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p2", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                root_overlay: JobRootOverlay::Tmp,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p3", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                root_overlay: JobRootOverlay::None,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p4", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                image: image_ref!("image", environment),
+            }),
         );
     }
 
     #[test]
     fn environment() {
+        let containers = HashMap::from([
+            (
+                "p1",
+                container_spec! {
+                    parent: image_container_parent!("image", all),
+                    environment: [environment_spec!{true, "FOO" => "foo1"}],
+                },
+            ),
+            (
+                "p2",
+                container_spec! {
+                    parent: container_container_parent!("p1", all),
+                    environment: [environment_spec!{true, "FOO" => "foo2"}],
+                },
+            ),
+            (
+                "p3",
+                container_spec! {
+                    parent: container_container_parent!("p2", layers),
+                    environment: [environment_spec!{true, "FOO" => "foo3"}],
+                },
+            ),
+            (
+                "p4",
+                container_spec! {
+                    environment: [environment_spec!{true, "FOO" => "foo4"}],
+                },
+            ),
+        ]);
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    environment: [
-                        environment_spec!{false, "FOO" => "foo", "BAR" => "bar"},
-                        environment_spec!{true, "FOO" => "frob", "BAZ" => "baz"},
-                    ],
+                    environment: [environment_spec!{true, "FOO" => "foo"}],
                 },
-                |_| None,
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                environment: [environment_spec!{true, "FOO" => "foo"}],
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    parent: image_container_parent!("image", environment),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                environment: [environment_spec!{true, "FOO" => "foo"}],
+                image: image_ref!("image", environment),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    parent: image_container_parent!("image", layers),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                environment: [environment_spec!{true, "FOO" => "foo"}],
+                image: image_ref!("image", layers),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    parent: container_container_parent!("p1", environment),
+                },
+                &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 environment: [
-                    environment_spec!{false, "FOO" => "foo", "BAR" => "bar"},
-                    environment_spec!{true, "FOO" => "frob", "BAZ" => "baz"},
+                    environment_spec!{true, "FOO" => "foo1"},
+                    environment_spec!{true, "FOO" => "foo"},
                 ],
-            })
+                image: image_ref!("image", environment),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    parent: container_container_parent!("p2", environment),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                environment: [
+                    environment_spec!{true, "FOO" => "foo1"},
+                    environment_spec!{true, "FOO" => "foo2"},
+                    environment_spec!{true, "FOO" => "foo"},
+                ],
+                image: image_ref!("image", environment),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    parent: container_container_parent!("p3", environment),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                environment: [
+                    environment_spec!{true, "FOO" => "foo3"},
+                    environment_spec!{true, "FOO" => "foo"},
+                ],
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    parent: container_container_parent!("p4", environment),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                environment: [
+                    environment_spec!{true, "FOO" => "foo4"},
+                    environment_spec!{true, "FOO" => "foo"},
+                ],
+            }),
         );
     }
 
     #[test]
     fn working_directory() {
+        let containers = HashMap::from([
+            (
+                "p1",
+                container_spec! {
+                    parent: image_container_parent!("image", all),
+                    working_directory: "/root1",
+                },
+            ),
+            (
+                "p2",
+                container_spec! {
+                    parent: container_container_parent!("p1", all),
+                },
+            ),
+            (
+                "p3",
+                container_spec! {
+                    parent: container_container_parent!("p2", all),
+                    working_directory: "/root3",
+                },
+            ),
+            (
+                "p4",
+                container_spec! {
+                    parent: container_container_parent!("p2", layers),
+                },
+            ),
+        ]);
+        assert_eq!(
+            CollapsedJobSpec::new(job_spec! {"prog"}, &|c| containers.get(c)),
+            Ok(collapsed_job_spec! {"prog"}),
+        );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
                     working_directory: "/root",
                 },
-                |_| None,
+                &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 working_directory: "/root",
-            })
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    working_directory: "/root",
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                working_directory: "/root",
+                image: image_ref!("image", layers, environment),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    working_directory: "/root",
+                    parent: image_container_parent!("image", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                working_directory: "/root",
+                image: image_ref!("image", layers, environment),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                working_directory: "/root1",
+                image: image_ref!("image", layers, environment),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p2", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                working_directory: "/root1",
+                image: image_ref!("image", layers, environment),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p3", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                working_directory: "/root3",
+                image: image_ref!("image", layers, environment),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p4", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                image: image_ref!("image", layers),
+            }),
         );
     }
 
     #[test]
     fn mounts() {
+        let containers = HashMap::from([
+            (
+                "p1",
+                container_spec! {
+                    parent: image_container_parent!("image", all),
+                    mounts: [proc_mount!("/proc1")],
+                },
+            ),
+            (
+                "p2",
+                container_spec! {
+                    parent: container_container_parent!("p1", all),
+                    mounts: [tmp_mount!("/tmp2")],
+                },
+            ),
+            (
+                "p3",
+                container_spec! {
+                    parent: container_container_parent!("p2", layers),
+                    mounts: [proc_mount!("/proc3")],
+                },
+            ),
+            (
+                "p4",
+                container_spec! {
+                    mounts: [tmp_mount!("/tmp4")],
+                },
+            ),
+        ]);
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    mounts: [
-                        proc_mount!("/proc"),
-                        tmp_mount!("/tmp"),
-                    ],
+                    mounts: [proc_mount!("/proc")],
                 },
-                |_| None,
+                &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                mounts: [
-                    proc_mount!("/proc"),
-                    tmp_mount!("/tmp"),
-                ],
-            })
+                mounts: [proc_mount!("/proc")],
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    mounts: [proc_mount!("/proc")],
+                    parent: image_container_parent!("image", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                mounts: [proc_mount!("/proc")],
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    mounts: [proc_mount!("/proc")],
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                mounts: [proc_mount!("/proc1"), proc_mount!("/proc")],
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    mounts: [proc_mount!("/proc")],
+                    parent: container_container_parent!("p1", mounts),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                mounts: [proc_mount!("/proc1"), proc_mount!("/proc")],
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    mounts: [proc_mount!("/proc")],
+                    parent: container_container_parent!("p2", mounts),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                mounts: [proc_mount!("/proc1"), tmp_mount!("/tmp2"), proc_mount!("/proc")],
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    mounts: [proc_mount!("/proc")],
+                    parent: container_container_parent!("p3", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                mounts: [proc_mount!("/proc3"), proc_mount!("/proc")],
+                image: image_ref!("image", layers),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    mounts: [proc_mount!("/proc")],
+                    parent: container_container_parent!("p4", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                mounts: [tmp_mount!("/tmp4"), proc_mount!("/proc")],
+            }),
         );
     }
 
     #[test]
     fn network() {
+        let containers = HashMap::from([
+            (
+                "p1",
+                container_spec! {
+                    parent: image_container_parent!("image", all),
+                    network: JobNetwork::Loopback,
+                },
+            ),
+            (
+                "p2",
+                container_spec! {
+                    parent: container_container_parent!("p1", all),
+                },
+            ),
+            (
+                "p3",
+                container_spec! {
+                    parent: container_container_parent!("p2", all),
+                    network: JobNetwork::Disabled,
+                },
+            ),
+            (
+                "p4",
+                container_spec! {
+                    parent: container_container_parent!("p2", environment),
+                },
+            ),
+        ]);
+        assert_eq!(
+            CollapsedJobSpec::new(job_spec! {"prog"}, &|c| containers.get(c)),
+            Ok(collapsed_job_spec! {"prog"}),
+        );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
                     network: JobNetwork::Local,
                 },
-                |_| None,
+                &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 network: JobNetwork::Local,
-            })
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    network: JobNetwork::Local,
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                network: JobNetwork::Local,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    network: JobNetwork::Local,
+                    parent: image_container_parent!("image", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                network: JobNetwork::Local,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                network: JobNetwork::Loopback,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p2", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                network: JobNetwork::Loopback,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p3", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                network: JobNetwork::Disabled,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p4", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                image: image_ref!("image", environment),
+            }),
         );
     }
 
     #[test]
     fn user() {
+        let containers = HashMap::from([
+            (
+                "p1",
+                container_spec! {
+                    parent: image_container_parent!("image", all),
+                    user: 101,
+                },
+            ),
+            (
+                "p2",
+                container_spec! {
+                    parent: container_container_parent!("p1", all),
+                },
+            ),
+            (
+                "p3",
+                container_spec! {
+                    parent: container_container_parent!("p2", all),
+                    user: 103,
+                },
+            ),
+            (
+                "p4",
+                container_spec! {
+                    parent: container_container_parent!("p2", environment),
+                },
+            ),
+        ]);
+        assert_eq!(
+            CollapsedJobSpec::new(job_spec! {"prog"}, &|c| containers.get(c)),
+            Ok(collapsed_job_spec! {"prog"}),
+        );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
                     user: 100,
                 },
-                |_| None,
+                &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 user: 100,
-            })
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    user: 100,
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                user: 100,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    user: 100,
+                    parent: image_container_parent!("image", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                user: 100,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                user: 101,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p2", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                user: 101,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p3", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                user: 103,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p4", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                image: image_ref!("image", environment),
+            }),
         );
     }
 
     #[test]
     fn group() {
+        let containers = HashMap::from([
+            (
+                "p1",
+                container_spec! {
+                    parent: image_container_parent!("image", all),
+                    group: 101,
+                },
+            ),
+            (
+                "p2",
+                container_spec! {
+                    parent: container_container_parent!("p1", all),
+                },
+            ),
+            (
+                "p3",
+                container_spec! {
+                    parent: container_container_parent!("p2", all),
+                    group: 103,
+                },
+            ),
+            (
+                "p4",
+                container_spec! {
+                    parent: container_container_parent!("p2", environment),
+                },
+            ),
+        ]);
+        assert_eq!(
+            CollapsedJobSpec::new(job_spec! {"prog"}, &|c| containers.get(c)),
+            Ok(collapsed_job_spec! {"prog"}),
+        );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    group: 101,
+                    group: 100,
                 },
-                |_| None,
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                group: 100,
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    group: 100,
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                group: 100,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    group: 100,
+                    parent: image_container_parent!("image", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                group: 100,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p1", all),
+                },
+                &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 group: 101,
-            })
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p2", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                group: 101,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p3", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                group: 103,
+                image: image_ref!("image", all),
+            }),
+        );
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p4", all),
+                },
+                &|c| containers.get(c)
+            ),
+            Ok(collapsed_job_spec! {
+                "prog",
+                image: image_ref!("image", environment),
+            }),
         );
     }
 
@@ -348,12 +1421,12 @@ mod tests {
                     "prog",
                     arguments: ["arg1", "arg2"],
                 },
-                |_| None,
+                &|_| None,
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 arguments: ["arg1", "arg2"],
-            })
+            }),
         );
     }
 
@@ -365,12 +1438,12 @@ mod tests {
                     "prog",
                     timeout: 10,
                 },
-                |_| None,
+                &|_| None,
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 timeout: 10,
-            })
+            }),
         );
     }
 
@@ -382,12 +1455,12 @@ mod tests {
                     "prog",
                     estimated_duration: millis!(100),
                 },
-                |_| None,
+                &|_| None,
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 estimated_duration: millis!(100),
-            })
+            }),
         );
     }
 
@@ -399,12 +1472,12 @@ mod tests {
                     "prog",
                     allocate_tty: JobTty::new(b"123456", WindowSize::new(50, 100)),
                 },
-                |_| None,
+                &|_| None,
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 allocate_tty: JobTty::new(b"123456", WindowSize::new(50, 100)),
-            })
+            }),
         );
     }
 
@@ -416,12 +1489,12 @@ mod tests {
                     "prog",
                     priority: 42,
                 },
-                |_| None,
+                &|_| None,
             ),
             Ok(collapsed_job_spec! {
                 "prog",
                 priority: 42,
-            })
+            }),
         );
     }
 
@@ -433,7 +1506,7 @@ mod tests {
                     "prog",
                     parent: image_container_parent!("image1", layers, environment, working_directory),
                 },
-                |_| None,
+                &|_| None,
             ),
             Ok(collapsed_job_spec! {
                 "prog",
@@ -451,7 +1524,7 @@ mod tests {
                     parent: image_container_parent!("image1", layers, environment, working_directory),
                     working_directory: "/root",
                 },
-                |_| None,
+                &|_| None,
             ),
             Ok(collapsed_job_spec! {
                 "prog",
@@ -470,7 +1543,7 @@ mod tests {
                     parent: image_container_parent!("image1", working_directory),
                     working_directory: "/root",
                 },
-                |_| None,
+                &|_| None,
             ),
             Ok(collapsed_job_spec! {
                 "prog",
@@ -487,11 +1560,9 @@ mod tests {
                     "prog",
                     parent: image_container_parent!("image1"),
                 },
-                |_| None,
+                &|_| None,
             ),
-            Ok(collapsed_job_spec! {
-                "prog",
-            }),
+            Ok(collapsed_job_spec!("prog")),
         )
     }
 }

@@ -74,6 +74,9 @@ macro_rules! image_ref {
             },
         }
     };
+    (@expand [all $(,$($field_in:ident),*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
+        $crate::image_ref!(@expand [] -> [$name, true, true, true])
+    };
     (@expand [layers $(,$($field_in:ident),*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
         $crate::image_ref!(@expand [$($($field_in),*)?] -> [$name, true, $environment, $working_directory])
     };
@@ -95,6 +98,273 @@ pub struct ContainerRef {
     pub r#use: EnumSet<ContainerUse>,
 }
 
+#[macro_export]
+macro_rules! container_ref {
+    (@expand [] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::spec::ContainerRef {
+            name: $name.into(),
+            r#use: {
+                let mut r#use = ::maelstrom_base::EnumSet::new();
+                if $layers {
+                    r#use.insert($crate::spec::ContainerUse::Layers);
+                }
+                if $root_overlay {
+                    r#use.insert($crate::spec::ContainerUse::RootOverlay);
+                }
+                if $environment {
+                    r#use.insert($crate::spec::ContainerUse::Environment);
+                }
+                if $working_directory {
+                    r#use.insert($crate::spec::ContainerUse::WorkingDirectory);
+                }
+                if $mounts {
+                    r#use.insert($crate::spec::ContainerUse::Mounts);
+                }
+                if $network {
+                    r#use.insert($crate::spec::ContainerUse::Network);
+                }
+                if $user {
+                    r#use.insert($crate::spec::ContainerUse::User);
+                }
+                if $group {
+                    r#use.insert($crate::spec::ContainerUse::Group);
+                }
+                r#use
+            },
+        }
+    };
+    (@expand [all $(,$($field_in:ident),*)?] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::container_ref!(@expand [] -> [
+            name: $name,
+            layers: true,
+            root_overlay: true,
+            environment: true,
+            working_directory: true,
+            mounts: true,
+            network: true,
+            user: true,
+            group: true,
+        ])
+    };
+    (@expand [layers $(,$($field_in:ident),*)?] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
+            name: $name,
+            layers: true,
+            root_overlay: $root_overlay,
+            environment: $environment,
+            working_directory: $working_directory,
+            mounts: $mounts,
+            network: $network,
+            user: $user,
+            group: $group,
+        ])
+    };
+    (@expand [root_overlay $(,$($field_in:ident),*)?] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
+            name: $name,
+            layers: $layers,
+            root_overlay: true,
+            environment: $environment,
+            working_directory: $working_directory,
+            mounts: $mounts,
+            network: $network,
+            user: $user,
+            group: $group,
+        ])
+    };
+    (@expand [environment $(,$($field_in:ident),*)?] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
+            name: $name,
+            layers: $layers,
+            root_overlay: $root_overlay,
+            environment: true,
+            working_directory: $working_directory,
+            mounts: $mounts,
+            network: $network,
+            user: $user,
+            group: $group,
+        ])
+    };
+    (@expand [working_directory $(,$($field_in:ident),*)?] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
+            name: $name,
+            layers: $layers,
+            root_overlay: $root_overlay,
+            environment: $environment,
+            working_directory: true,
+            mounts: $mounts,
+            network: $network,
+            user: $user,
+            group: $group,
+        ])
+    };
+    (@expand [mounts $(,$($field_in:ident),*)?] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
+            name: $name,
+            layers: $layers,
+            root_overlay: $root_overlay,
+            environment: $environment,
+            working_directory: $working_directory,
+            mounts: true,
+            network: $network,
+            user: $user,
+            group: $group,
+        ])
+    };
+    (@expand [network $(,$($field_in:ident),*)?] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
+            name: $name,
+            layers: $layers,
+            root_overlay: $root_overlay,
+            environment: $environment,
+            working_directory: $working_directory,
+            mounts: $mounts,
+            network: true,
+            user: $user,
+            group: $group,
+        ])
+    };
+    (@expand [user $(,$($field_in:ident),*)?] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
+            name: $name,
+            layers: $layers,
+            root_overlay: $root_overlay,
+            environment: $environment,
+            working_directory: $working_directory,
+            mounts: $mounts,
+            network: $network,
+            user: true,
+            group: $group,
+        ])
+    };
+    (@expand [group $(,$($field_in:ident),*)?] -> [
+         name: $name:expr,
+         layers: $layers:literal,
+         root_overlay: $root_overlay:literal,
+         environment: $environment:literal,
+         working_directory: $working_directory:literal,
+         mounts: $mounts:literal,
+         network: $network:literal,
+         user: $user:literal,
+         group: $group:literal,
+    ]) => {
+        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
+            name: $name,
+            layers: $layers,
+            root_overlay: $root_overlay,
+            environment: $environment,
+            working_directory: $working_directory,
+            mounts: $mounts,
+            network: $network,
+            user: $user,
+            group: true,
+        ])
+    };
+    ($name:expr $(, $($use:ident),+ $(,)?)?) => {
+        $crate::container_ref!(@expand [$($($use),+)?] -> [
+            name: $name,
+            layers: false,
+            root_overlay: false,
+            environment: false,
+            working_directory: false,
+            mounts: false,
+            network: false,
+            user: false,
+            group: false,
+        ])
+    };
+}
+
 #[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
 #[proto(
     proto_buf_type = "proto::ContainerParent",
@@ -109,6 +379,13 @@ pub enum ContainerParent {
 macro_rules! image_container_parent {
     ($($arg:tt)*) => {
         $crate::spec::ContainerParent::Image($crate::image_ref!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! container_container_parent {
+    ($($arg:tt)*) => {
+        $crate::spec::ContainerParent::Container($crate::container_ref!($($arg)*))
     };
 }
 
