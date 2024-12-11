@@ -8,24 +8,22 @@ use maelstrom_client_base::spec::{
 };
 use std::{collections::BTreeMap, time::Duration};
 
-/**
- * A [`CollapsedJobSpec`] is a bridge between a [`maelstrom_client_base::spec::JobSpec`] and a
- * [`maelstrom_base::JobSpec`]. The former has an embedded
- * [`maelstrom_client_base::spec::ContainerSpec`], which has a `parent` field, which can reference
- * another named [`maelstrom_client_base::spec::ContainerSpec`], an image, or nothing. Moreover,
- * the `parent` field allows for selecting only certain parts of the referenced named container or
- * image.
- *
- * Taken together, [`maelstrom_client_base::spec::JobSpec`] can be viewed as a linked list of
- * containers, with an optional image at the beginning of the list, and where the last element of
- * the list has some extra fields. This struct represents what happens when that linked list is
- * collapsed into a single struct. In that regard, it much more closely resembles
- * [`maelstrom_base::JobSpec`] than it does [`maelstrom_client_base::spec::JobSpec`].
- *
- * However, it is different in the sense that tracks if an image needs to be fetched, and if so,
- * what aspects of that image need to be integrated into the job spec. It also keeps tracks some
- * fields separately to make the job of the [`crate::preparer::Preparer`] easier.
- */
+/// A [`CollapsedJobSpec`] is a bridge between a [`maelstrom_client_base::spec::JobSpec`] and a
+/// [`maelstrom_base::JobSpec`]. The former has an embedded
+/// [`maelstrom_client_base::spec::ContainerSpec`], which has a `parent` field, which can reference
+/// another named [`maelstrom_client_base::spec::ContainerSpec`], an image, or nothing. Moreover,
+/// the `parent` field allows for selecting only certain parts of the referenced named container or
+/// image.
+///
+/// Taken together, [`maelstrom_client_base::spec::JobSpec`] can be viewed as a linked list of
+/// containers, with an optional image at the beginning of the list, and where the last element of
+/// the list has some extra fields. This struct represents what happens when that linked list is
+/// collapsed into a single struct. In that regard, it much more closely resembles
+/// [`maelstrom_base::JobSpec`] than it does [`maelstrom_client_base::spec::JobSpec`].
+///
+/// However, it is different in the sense that tracks if an image needs to be fetched, and if so,
+/// what aspects of that image need to be integrated into the job spec. It also keeps tracks some
+/// fields separately to make the job of the [`crate::preparer::Preparer`] easier.
 #[derive(Debug, Eq, PartialEq)]
 pub struct CollapsedJobSpec {
     pub layers: Vec<LayerSpec>,
@@ -48,6 +46,29 @@ pub struct CollapsedJobSpec {
 }
 
 #[macro_export]
+/// Easily create a [`CollapsedJobSpec`].
+///
+/// The macro must be passed at least one argument. The first argument will be set to the
+/// `program` field. For example:
+///
+/// ```
+/// assert_eq!(collapsed_job_spec! { "cat" }.program, "dog");
+/// assert_eq!(collapsed_job_spec! { "cat", user: 1 }.program, "cat");
+/// ```
+///
+/// Extra fields can be specified using the field name followed by the value. If the field type is
+/// `Option`, then the value will automatically be wrapped in `Some`. Also, `Into::into` will be
+/// called on scalar values, and collection values will be run through an `IntoIterator` and a map
+/// of `Into::into`. Some examples:
+///
+/// ```
+/// assert_eq!(
+///     collapsed_job_spec! { "cat", layers: [tar_layer!("foo.tar")] }.layers,
+///     vec![tar_layer!("foo.tar")]);
+/// assert_eq!(collapsed_job_spec! { "cat", user: 3 }.user, User::new(3));
+/// ```
+///
+#[cfg(test)]
 macro_rules! collapsed_job_spec {
     (@expand [$program:expr] [] -> []) => {
         $crate::collapsed_job_spec::CollapsedJobSpec {
@@ -76,7 +97,6 @@ macro_rules! collapsed_job_spec {
             .. collapsed_job_spec!(@expand [$program] [] -> [])
         }
     };
-
     (@expand [$program:expr] [image: $image:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($($field_out)+,)? image: Some($image.into())])
@@ -141,13 +161,23 @@ macro_rules! collapsed_job_spec {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($($field_out)+,)? priority: $priority.into()])
     };
-
     ($program:expr $(,$($field_in:tt)*)?) => {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] -> [])
     };
 }
 
 impl CollapsedJobSpec {
+    /// Build a [`CollapsedJobSpec`] from a [`maelstrom_client_base::spec::JobSpec`].
+    ///
+    /// If the provided spec has a parent field that refers to a named container, that container
+    /// will be looked up using the provided `container_resolver`. This will continue recursively
+    /// until either: a) an ancestor container has no parent, b) an ancestor container's parent is
+    /// an image, c) a named ancestor can't be found, or d) an ancestor cycle is found. In the
+    /// latter two cases, an error will be returned.
+    ///
+    /// If the most distant ancestor is an image, then the `image` field will be `Some` and will
+    /// contain the name of the image and what aspects of it should be imported. When the image is
+    /// fetched, [`Self::integrate_image`] should be called to complete construction.
     pub fn new<'a, F>(job_spec: JobSpec, container_resolver: &'a F) -> Result<Self, String>
     where
         F: for<'b> Fn(&'b str) -> Option<&'a ContainerSpec>,
@@ -263,6 +293,14 @@ impl CollapsedJobSpec {
         })
     }
 
+    /// Integrate the fields of an image into [`Self`].
+    ///
+    /// This function only makes sense when the `self.image` field is `Some`. The required fields
+    /// from the image will be integrated into `image_layers`, `initial_environment`, and
+    /// `working_directory` as specified. It is an error for any of those fields to be set to
+    /// non-default values beforehand.
+    ///
+    /// After this function is called, `self.image` will be `None`.
     pub fn integrate_image(&mut self, image: &ConvertedImage) -> Result<(), String> {
         let image_use = self.image.take().unwrap().r#use;
         if image_use.contains(ImageUse::Layers) {
