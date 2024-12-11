@@ -1,19 +1,15 @@
 pub mod task;
 
-use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay, JobSpec, JobTty,
-    NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
-};
+use crate::collapsed_job_spec::CollapsedJobSpec;
+use maelstrom_base::{ArtifactType, JobNetwork, JobRootOverlay, JobSpec, NonEmpty, Sha256Digest};
 use maelstrom_client_base::spec::{
-    ContainerParent, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageRef, ImageUse,
-    JobSpec as ClientJobSpec, LayerSpec,
+    ContainerSpec, ConvertedImage, EnvironmentSpec, ImageRef, JobSpec as ClientJobSpec, LayerSpec,
 };
 use maelstrom_util::ext::OptionExt as _;
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap, VecDeque},
     mem,
     num::NonZeroUsize,
-    time::Duration,
 };
 
 pub trait Deps {
@@ -129,17 +125,24 @@ impl<DepsT: Deps> Preparer<DepsT> {
         }
     }
 
-    fn receive_prepare_job(&mut self, handle: DepsT::PrepareJobHandle, spec: ClientJobSpec) {
-        let container = spec.container;
-
+    fn receive_prepare_job(&mut self, handle: DepsT::PrepareJobHandle, job_spec: ClientJobSpec) {
         let ijid = self.next_ijid;
         self.next_ijid = self.next_ijid.checked_add(1).unwrap();
+
+        let job_spec = match CollapsedJobSpec::new(job_spec, &|c| self.containers.get(c)) {
+            Ok(job_spec) => job_spec,
+            Err(err) => {
+                self.deps
+                    .job_prepared(handle, Err(DepsT::error_from_string(err)));
+                return;
+            }
+        };
 
         let layers = match Self::evaluate_layers(
             &self.deps,
             &mut self.layer_builds,
             &mut self.layers,
-            container.layers,
+            &job_spec.layers,
             ijid,
             false,
         ) {
@@ -150,41 +153,15 @@ impl<DepsT: Deps> Preparer<DepsT> {
             }
         };
 
-        let (pending_image, get_image) = {
-            match container.parent {
-                None | Some(ContainerParent::Container(_)) => (None, None),
-                Some(ContainerParent::Image(ImageRef { name, r#use })) => {
-                    if r#use.is_empty() {
-                        (None, None)
-                    } else {
-                        (Some(r#use), Some(name))
-                    }
-                }
-            }
-        };
-
         let job = Job {
             handle,
-            pending_image,
+            job_spec,
             image_layers: vec![],
             layers,
-            root_overlay: container.root_overlay.unwrap_or_default(),
-            initial_environment: Default::default(),
-            environment: container.environment,
-            working_directory: container.working_directory,
-            mounts: container.mounts,
-            network: container.network.unwrap_or_default(),
-            user: container.user,
-            group: container.group,
-            program: spec.program,
-            arguments: spec.arguments,
-            timeout: spec.timeout,
-            estimated_duration: spec.estimated_duration,
-            allocate_tty: spec.allocate_tty,
-            priority: spec.priority,
         };
 
-        if let Some(image_name) = get_image {
+        if let Some(ImageRef { name, .. }) = &job.job_spec.image {
+            let image_name = name.clone();
             self.jobs.insert(ijid, job).assert_is_none();
             match self.images.get_mut(&image_name) {
                 None => {
@@ -231,7 +208,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
             ImageEntry::Getting(waiting) => match &result {
                 Ok(image) => {
                     for ijid in waiting {
-                        self.got_image_success(ijid, image);
+                        self.got_image_success(ijid, &image);
                     }
                 }
                 Err(err) => {
@@ -258,32 +235,18 @@ impl<DepsT: Deps> Preparer<DepsT> {
             return Ok(());
         };
         let job = job_entry.get_mut();
-        let image_use = job.pending_image.take().unwrap();
 
-        if image_use.contains(ImageUse::Layers) {
-            job.image_layers = Self::evaluate_layers(
-                &self.deps,
-                &mut self.layer_builds,
-                &mut self.layers,
-                image.layers().map_err(DepsT::error_from_string)?,
-                ijid,
-                true,
-            )?;
-        }
-
-        if image_use.contains(ImageUse::Environment) {
-            job.initial_environment = image.environment().map_err(DepsT::error_from_string)?;
-        }
-
-        if image_use.contains(ImageUse::WorkingDirectory) {
-            if job.working_directory.is_some() {
-                return Err(DepsT::error_from_string(
-                    "can't provide both `working_directory` and `image.use_working_directory`"
-                        .into(),
-                ));
-            }
-            job.working_directory = image.working_directory();
-        }
+        job.job_spec
+            .integrate_image(image)
+            .map_err(DepsT::error_from_string)?;
+        job.image_layers = Self::evaluate_layers(
+            &self.deps,
+            &mut self.layer_builds,
+            &mut self.layers,
+            &job.job_spec.image_layers,
+            ijid,
+            true,
+        )?;
 
         if job.is_ready() {
             Self::start_job(&self.deps, job_entry.remove());
@@ -296,30 +259,32 @@ impl<DepsT: Deps> Preparer<DepsT> {
         deps: &DepsT,
         layer_builds: &mut LayerBuilds,
         layer_map: &mut HashMap<LayerSpec, LayerEntry<DepsT>>,
-        layers: Vec<LayerSpec>,
+        layers: &Vec<LayerSpec>,
         ijid: u64,
         image: bool,
     ) -> Result<Vec<Option<(Sha256Digest, ArtifactType)>>, DepsT::Error> {
         layers
-            .into_iter()
+            .iter()
             .enumerate()
-            .map(|(idx, layer_spec)| match layer_map.entry(layer_spec) {
-                Entry::Occupied(entry) => match entry.into_mut() {
-                    LayerEntry::Got(Ok((digest, artifact_type))) => {
-                        Ok(Some((digest.clone(), *artifact_type)))
-                    }
-                    LayerEntry::Got(Err(err)) => Err(err.clone()),
-                    LayerEntry::Getting(ijids) => {
-                        ijids.push((image, ijid, idx));
+            .map(
+                |(idx, layer_spec)| match layer_map.entry(layer_spec.clone()) {
+                    Entry::Occupied(entry) => match entry.into_mut() {
+                        LayerEntry::Got(Ok((digest, artifact_type))) => {
+                            Ok(Some((digest.clone(), *artifact_type)))
+                        }
+                        LayerEntry::Got(Err(err)) => Err(err.clone()),
+                        LayerEntry::Getting(ijids) => {
+                            ijids.push((image, ijid, idx));
+                            Ok(None)
+                        }
+                    },
+                    Entry::Vacant(entry) => {
+                        layer_builds.push(deps, entry.key().clone());
+                        entry.insert(LayerEntry::Getting(vec![(image, ijid, idx)]));
                         Ok(None)
                     }
                 },
-                Entry::Vacant(entry) => {
-                    layer_builds.push(deps, entry.key().clone());
-                    entry.insert(LayerEntry::Getting(vec![(image, ijid, idx)]));
-                    Ok(None)
-                }
-            })
+            )
             .collect()
     }
 
@@ -387,23 +352,9 @@ impl<DepsT: Deps> Preparer<DepsT> {
 
 struct Job<DepsT: Deps> {
     handle: DepsT::PrepareJobHandle,
-    pending_image: Option<EnumSet<ImageUse>>,
+    job_spec: CollapsedJobSpec,
     image_layers: Vec<Option<(Sha256Digest, ArtifactType)>>,
     layers: Vec<Option<(Sha256Digest, ArtifactType)>>,
-    root_overlay: JobRootOverlay,
-    initial_environment: BTreeMap<String, String>,
-    environment: Vec<EnvironmentSpec>,
-    working_directory: Option<Utf8PathBuf>,
-    mounts: Vec<JobMount>,
-    network: JobNetwork,
-    user: Option<UserId>,
-    group: Option<GroupId>,
-    program: Utf8PathBuf,
-    arguments: Vec<String>,
-    timeout: Option<Timeout>,
-    estimated_duration: Option<Duration>,
-    allocate_tty: Option<JobTty>,
-    priority: i8,
 }
 
 impl<DepsT: Deps> Job<DepsT> {
@@ -412,58 +363,67 @@ impl<DepsT: Deps> Job<DepsT> {
         deps: &DepsT,
     ) -> (DepsT::PrepareJobHandle, Result<JobSpec, DepsT::Error>) {
         assert!(self.is_ready());
+        let Job {
+            handle,
+            job_spec,
+            image_layers,
+            layers,
+        } = self;
         (
-            self.handle,
-            if self.network == JobNetwork::Local
-                && self
-                    .mounts
-                    .iter()
-                    .any(|m| matches!(m, JobMount::Sys { .. }))
-            {
-                Err(DepsT::error_from_string(
-                    "A \"sys\" mount is not compatible with local networking. \
-                    Check the documentation for the \"network\" field of \"JobSpec\"."
-                        .into(),
-                ))
-            } else if self.image_layers.is_empty() && self.layers.is_empty() {
-                Err(DepsT::error_from_string(
-                    "job specification has no layers".into(),
-                ))
+            handle,
+            if let Err(err) = job_spec.check() {
+                Err(DepsT::error_from_string(err))
             } else {
-                deps.evaluate_environment(self.initial_environment, self.environment)
+                let CollapsedJobSpec {
+                    layers: _,
+                    root_overlay,
+                    environment,
+                    working_directory,
+                    mounts,
+                    network,
+                    user,
+                    group,
+                    image: _,
+                    initial_environment,
+                    image_layers: _,
+                    program,
+                    arguments,
+                    timeout,
+                    estimated_duration,
+                    allocate_tty,
+                    priority,
+                } = job_spec;
+                deps.evaluate_environment(initial_environment, environment)
                     .map(|environment| JobSpec {
-                        program: self.program,
-                        arguments: self.arguments,
+                        program,
+                        arguments,
                         environment,
-                        layers: NonEmpty::collect(
-                            self.image_layers
-                                .into_iter()
-                                .chain(self.layers)
-                                .map(|layer| {
-                                    let Some((digest, artifact_type)) = layer else {
-                                        panic!("shouldn't be called while awaiting any layers");
-                                    };
-                                    (digest, artifact_type)
-                                }),
-                        )
+                        layers: NonEmpty::collect(image_layers.into_iter().chain(layers).map(
+                            |layer| {
+                                let Some((digest, artifact_type)) = layer else {
+                                    panic!("shouldn't be called while awaiting any layers");
+                                };
+                                (digest, artifact_type)
+                            },
+                        ))
                         .unwrap(),
-                        mounts: self.mounts,
-                        network: self.network,
-                        root_overlay: self.root_overlay,
-                        working_directory: self.working_directory.unwrap_or_else(|| "/".into()),
-                        user: self.user.unwrap_or_else(|| 0.into()),
-                        group: self.group.unwrap_or_else(|| 0.into()),
-                        timeout: self.timeout,
-                        estimated_duration: self.estimated_duration,
-                        allocate_tty: self.allocate_tty,
-                        priority: self.priority,
+                        mounts,
+                        network: network.unwrap_or(JobNetwork::Disabled),
+                        root_overlay: root_overlay.unwrap_or(JobRootOverlay::None),
+                        working_directory: working_directory.unwrap_or_else(|| "/".into()),
+                        user: user.unwrap_or(0.into()),
+                        group: group.unwrap_or(0.into()),
+                        timeout,
+                        estimated_duration,
+                        allocate_tty,
+                        priority,
                     })
             },
         )
     }
 
     fn is_ready(&self) -> bool {
-        self.pending_image.is_none()
+        self.job_spec.image.is_none()
             && self.image_layers.iter().all(Option::is_some)
             && self.layers.iter().all(Option::is_some)
     }
@@ -472,14 +432,16 @@ impl<DepsT: Deps> Job<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use maelstrom_base::{job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, WindowSize};
+    use maelstrom_base::{
+        job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, JobTty, WindowSize,
+    };
     use maelstrom_client::spec;
     use maelstrom_client_base::{
         container_spec, converted_image, environment_spec, image_container_parent,
         job_spec as client_job_spec,
     };
     use maelstrom_test::{millis, string, tar_layer};
-    use std::{cell::RefCell, ffi::OsStr, rc::Rc};
+    use std::{cell::RefCell, ffi::OsStr, rc::Rc, time::Duration};
     use TestMessage::*;
 
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -602,7 +564,13 @@ mod tests {
     script_test! {
         prepare_job_no_layers,
         PrepareJob(1, client_job_spec!{"foo"}) => {
-            JobPrepared(1, Err(string!("job specification has no layers"))),
+            JobPrepared(
+                1,
+                Err(string!(
+                    "At least one layer must be specified, or an image must be used \
+                    that has at least one layer."
+                ))
+            ),
         };
     }
 
@@ -1180,17 +1148,15 @@ mod tests {
             layers: [tar_layer!("foo.tar")],
             working_directory: "/root2",
         }) => {
-            GetImage(string!("image")),
             BuildLayer(tar_layer!("foo.tar")),
         };
 
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
-
-        GotImage(string!("image"), Ok(converted_image! {
-            "image",
-            working_directory: "/root",
-        })) => {
-            JobPrepared(1, Err(string!("can't provide both `working_directory` and `image.use_working_directory`"))),
+        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {
+            JobPrepared(1, Ok(job_spec!{
+                "one",
+                [tar_digest!(1)],
+                working_directory: "/root2",
+            })),
         };
     }
 

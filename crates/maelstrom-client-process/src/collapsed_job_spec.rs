@@ -246,7 +246,7 @@ impl CollapsedJobSpec {
         })
     }
 
-    pub fn integrate_image(&mut self, image: ConvertedImage) -> Result<(), String> {
+    pub fn integrate_image(&mut self, image: &ConvertedImage) -> Result<(), String> {
         let image_use = self.image.take().unwrap().r#use;
         if image_use.contains(ImageUse::Layers) {
             assert!(self.image_layers.is_empty());
@@ -263,7 +263,7 @@ impl CollapsedJobSpec {
         Ok(())
     }
 
-    pub fn check(&mut self) -> Result<(), String> {
+    pub fn check(&self) -> Result<(), String> {
         assert!(self.image.is_none());
         if self.network == Some(JobNetwork::Local)
             && self
@@ -1622,7 +1622,7 @@ mod tests {
             image: image_ref!("image", layers),
         };
         job_spec
-            .integrate_image(converted_image! {"image", layers: ["foo.tar", "bar.tar"]})
+            .integrate_image(&converted_image! {"image", layers: ["foo.tar", "bar.tar"]})
             .unwrap();
         assert_eq!(
             job_spec,
@@ -1640,7 +1640,7 @@ mod tests {
             image: image_ref!("image", environment),
         };
         job_spec
-            .integrate_image(converted_image! {"image", environment: ["FOO=foo", "BAR=bar"]})
+            .integrate_image(&converted_image! {"image", environment: ["FOO=foo", "BAR=bar"]})
             .unwrap();
         assert_eq!(
             job_spec,
@@ -1658,7 +1658,7 @@ mod tests {
             image: image_ref!("image", environment),
         };
         job_spec
-            .integrate_image(converted_image! {"image", working_directory: "/root" })
+            .integrate_image(&converted_image! {"image", working_directory: "/root" })
             .unwrap();
         assert_eq!(job_spec, collapsed_job_spec! {"prog"});
     }
@@ -1671,7 +1671,7 @@ mod tests {
         };
         assert_eq!(
             job_spec
-                .integrate_image(converted_image! {"image", environment: ["FOO"]})
+                .integrate_image(&converted_image! {"image", environment: ["FOO"]})
                 .unwrap_err(),
             "image image has an invalid environment variable FOO"
         );
@@ -1684,7 +1684,7 @@ mod tests {
             image: image_ref!("image", working_directory),
         };
         job_spec
-            .integrate_image(converted_image! {"image", working_directory: "/root"})
+            .integrate_image(&converted_image! {"image", working_directory: "/root"})
             .unwrap();
         assert_eq!(
             job_spec,
@@ -1702,7 +1702,7 @@ mod tests {
             image: image_ref!("image", layers),
         };
         job_spec
-            .integrate_image(converted_image! {"image"})
+            .integrate_image(&converted_image! {"image"})
             .unwrap();
         assert_eq!(job_spec, collapsed_job_spec! {"prog"});
     }
