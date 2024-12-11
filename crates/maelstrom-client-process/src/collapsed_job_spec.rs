@@ -6,7 +6,7 @@ use maelstrom_client_base::spec::{
     ContainerParent, ContainerSpec, ContainerUse, ConvertedImage, EnvironmentSpec, ImageRef,
     ImageUse, JobSpec, LayerSpec,
 };
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, mem, time::Duration};
 
 /// A [`CollapsedJobSpec`] is a bridge between a [`maelstrom_client_base::spec::JobSpec`] and a
 /// [`maelstrom_base::JobSpec`]. The former has an embedded
@@ -26,23 +26,23 @@ use std::{collections::BTreeMap, time::Duration};
 /// fields separately to make the job of the [`crate::preparer::Preparer`] easier.
 #[derive(Debug, Eq, PartialEq)]
 pub struct CollapsedJobSpec {
-    pub layers: Vec<LayerSpec>,
-    pub root_overlay: Option<JobRootOverlay>,
-    pub environment: Vec<EnvironmentSpec>,
-    pub working_directory: Option<Utf8PathBuf>,
-    pub mounts: Vec<JobMount>,
-    pub network: Option<JobNetwork>,
-    pub user: Option<UserId>,
-    pub group: Option<GroupId>,
-    pub image: Option<ImageRef>,
-    pub initial_environment: BTreeMap<String, String>,
-    pub image_layers: Vec<LayerSpec>,
-    pub program: Utf8PathBuf,
-    pub arguments: Vec<String>,
-    pub timeout: Option<Timeout>,
-    pub estimated_duration: Option<Duration>,
-    pub allocate_tty: Option<JobTty>,
-    pub priority: i8,
+    layers: Vec<LayerSpec>,
+    root_overlay: Option<JobRootOverlay>,
+    environment: Vec<EnvironmentSpec>,
+    working_directory: Option<Utf8PathBuf>,
+    mounts: Vec<JobMount>,
+    network: Option<JobNetwork>,
+    user: Option<UserId>,
+    group: Option<GroupId>,
+    image: Option<ImageRef>,
+    initial_environment: BTreeMap<String, String>,
+    image_layers: Vec<LayerSpec>,
+    program: Utf8PathBuf,
+    arguments: Vec<String>,
+    timeout: Option<Timeout>,
+    estimated_duration: Option<Duration>,
+    allocate_tty: Option<JobTty>,
+    priority: i8,
 }
 
 /// Easily create a [`CollapsedJobSpec`].
@@ -320,6 +320,25 @@ impl CollapsedJobSpec {
             }
         }
         Ok(())
+    }
+
+    pub fn layers(&self) -> &[LayerSpec] {
+        &self.layers
+    }
+
+    pub fn image_layers(&self) -> &[LayerSpec] {
+        &self.image_layers
+    }
+
+    pub fn image(&self) -> Option<&ImageRef> {
+        self.image.as_ref()
+    }
+
+    pub fn take_environment(&mut self) -> (BTreeMap<String, String>, Vec<EnvironmentSpec>) {
+        (
+            mem::take(&mut self.initial_environment),
+            mem::take(&mut self.environment),
+        )
     }
 
     fn check(&self) -> Result<(), String> {

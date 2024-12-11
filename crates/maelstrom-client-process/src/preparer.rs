@@ -142,7 +142,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
             &self.deps,
             &mut self.layer_builds,
             &mut self.layers,
-            &job_spec.layers,
+            job_spec.layers(),
             ijid,
             false,
         ) {
@@ -160,7 +160,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
             layers,
         };
 
-        if let Some(ImageRef { name, .. }) = &job.job_spec.image {
+        if let Some(ImageRef { name, .. }) = job.job_spec.image() {
             let image_name = name.clone();
             self.jobs.insert(ijid, job).assert_is_none();
             match self.images.get_mut(&image_name) {
@@ -243,7 +243,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
             &self.deps,
             &mut self.layer_builds,
             &mut self.layers,
-            &job.job_spec.image_layers,
+            job.job_spec.image_layers(),
             ijid,
             true,
         )?;
@@ -370,28 +370,26 @@ impl<DepsT: Deps> Job<DepsT> {
             layers,
         } = self;
         (handle, {
-            deps.evaluate_environment(
-                mem::take(&mut job_spec.initial_environment),
-                mem::take(&mut job_spec.environment),
-            )
-            .and_then(|environment| {
-                job_spec
-                    .into_job_spec(
-                        image_layers.into_iter().chain(layers).map(|layer| {
-                            let Some((digest, artifact_type)) = layer else {
-                                panic!("shouldn't be called while awaiting any layers");
-                            };
-                            (digest, artifact_type)
-                        }),
-                        environment,
-                    )
-                    .map_err(DepsT::error_from_string)
-            })
+            let (initial_environment, environment) = job_spec.take_environment();
+            deps.evaluate_environment(initial_environment, environment)
+                .and_then(|environment| {
+                    job_spec
+                        .into_job_spec(
+                            image_layers.into_iter().chain(layers).map(|layer| {
+                                let Some((digest, artifact_type)) = layer else {
+                                    panic!("shouldn't be called while awaiting any layers");
+                                };
+                                (digest, artifact_type)
+                            }),
+                            environment,
+                        )
+                        .map_err(DepsT::error_from_string)
+                })
         })
     }
 
     fn is_ready(&self) -> bool {
-        self.job_spec.image.is_none()
+        self.job_spec.image().is_none()
             && self.image_layers.iter().all(Option::is_some)
             && self.layers.iter().all(Option::is_some)
     }
@@ -401,7 +399,8 @@ impl<DepsT: Deps> Job<DepsT> {
 mod tests {
     use super::{Message::*, *};
     use maelstrom_base::{
-        job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, JobTty, WindowSize, JobNetwork, JobRootOverlay,
+        job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, JobNetwork, JobRootOverlay, JobTty,
+        WindowSize,
     };
     use maelstrom_client::spec;
     use maelstrom_client_base::{
