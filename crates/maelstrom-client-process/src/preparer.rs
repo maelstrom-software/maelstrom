@@ -208,7 +208,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
             ImageEntry::Getting(waiting) => match &result {
                 Ok(image) => {
                     for ijid in waiting {
-                        self.got_image_success(ijid, &image);
+                        self.got_image_success(ijid, image);
                     }
                 }
                 Err(err) => {
@@ -259,7 +259,7 @@ impl<DepsT: Deps> Preparer<DepsT> {
         deps: &DepsT,
         layer_builds: &mut LayerBuilds,
         layer_map: &mut HashMap<LayerSpec, LayerEntry<DepsT>>,
-        layers: &Vec<LayerSpec>,
+        layers: &[LayerSpec],
         ijid: u64,
         image: bool,
     ) -> Result<Vec<Option<(Sha256Digest, ArtifactType)>>, DepsT::Error> {
