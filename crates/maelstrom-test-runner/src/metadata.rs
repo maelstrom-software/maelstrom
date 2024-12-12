@@ -40,85 +40,86 @@ pub struct TestMetadataContainer {
     pub mounts: Vec<JobMount>,
 }
 
-impl TestMetadataContainer {
-    fn try_fold(mut self, container: &TestContainer) -> Result<Self> {
-        let mut image_use = EnumSet::new();
+fn fold_test_container_into_container_spec(
+    mut lhs: TestMetadataContainer,
+    rhs: &TestContainer,
+) -> Result<TestMetadataContainer> {
+    let mut image_use = EnumSet::new();
 
-        self.network = container.network.or(self.network);
-        self.enable_writable_file_system = container
-            .enable_writable_file_system
-            .or(self.enable_writable_file_system);
-        self.user = container.user.or(self.user);
-        self.group = container.group.or(self.group);
+    lhs.network = rhs.network.or(lhs.network);
+    lhs.enable_writable_file_system = rhs
+        .enable_writable_file_system
+        .or(lhs.enable_writable_file_system);
+    lhs.user = rhs.user.or(lhs.user);
+    lhs.group = rhs.group.or(lhs.group);
 
-        match &container.layers {
-            Some(PossiblyImage::Explicit(layers)) => {
-                self.layers = layers.to_vec();
-            }
-            Some(PossiblyImage::Image) => {
-                if container.image.is_none() {
-                    bail!("no image provided");
-                }
-                image_use.insert(ImageUse::Layers);
-                self.layers = vec![];
-            }
-            None => {}
+    match &rhs.layers {
+        Some(PossiblyImage::Explicit(layers)) => {
+            lhs.layers = layers.to_vec();
         }
-        self.layers.extend(container.added_layers.iter().cloned());
-
-        self.mounts = container.mounts.as_ref().map_or(self.mounts, |mounts| {
-            mounts.iter().cloned().map(Into::into).collect()
-        });
-        self.mounts
-            .extend(container.added_mounts.iter().cloned().map(Into::into));
-
-        match &container.environment {
-            Some(PossiblyImage::Explicit(environment)) => {
-                self.environment.push(EnvironmentSpec {
-                    vars: environment.clone(),
-                    extend: false,
-                });
+        Some(PossiblyImage::Image) => {
+            if rhs.image.is_none() {
+                bail!("no image provided");
             }
-            Some(PossiblyImage::Image) => {
-                if container.image.is_none() {
-                    bail!("no image provided");
-                }
-                image_use.insert(ImageUse::Environment);
-            }
-            None => {}
+            image_use.insert(ImageUse::Layers);
+            lhs.layers = vec![];
         }
-        if !container.added_environment.is_empty() {
-            self.environment.push(EnvironmentSpec {
-                vars: container.added_environment.clone(),
-                extend: true,
-            });
-        }
-
-        match &container.working_directory {
-            Some(PossiblyImage::Explicit(working_directory)) => {
-                self.working_directory = Some(working_directory.clone());
-            }
-            Some(PossiblyImage::Image) => {
-                if container.image.is_none() {
-                    bail!("no image provided");
-                }
-                image_use.insert(ImageUse::WorkingDirectory);
-                self.working_directory = None;
-            }
-            None => {}
-        }
-
-        if container.image.is_some() {
-            self.parent = container.image.as_ref().map(|image| {
-                ContainerParent::Image(ImageRef {
-                    name: image.into(),
-                    r#use: image_use,
-                })
-            });
-        }
-
-        Ok(self)
+        None => {}
     }
+    lhs.layers.extend(rhs.added_layers.iter().cloned());
+
+    lhs.mounts = rhs.mounts.as_ref().map_or(lhs.mounts, |mounts| {
+        mounts.iter().cloned().map(Into::into).collect()
+    });
+    lhs.mounts
+        .extend(rhs.added_mounts.iter().cloned().map(Into::into));
+
+    match &rhs.environment {
+        Some(PossiblyImage::Explicit(environment)) => {
+            lhs.environment.push(EnvironmentSpec {
+                vars: environment.clone(),
+                extend: false,
+            });
+        }
+        Some(PossiblyImage::Image) => {
+            if rhs.image.is_none() {
+                bail!("no image provided");
+            }
+            image_use.insert(ImageUse::Environment);
+        }
+        None => {}
+    }
+    if !rhs.added_environment.is_empty() {
+        lhs.environment.push(EnvironmentSpec {
+            vars: rhs.added_environment.clone(),
+            extend: true,
+        });
+    }
+
+    match &rhs.working_directory {
+        Some(PossiblyImage::Explicit(working_directory)) => {
+            lhs.working_directory = Some(working_directory.clone());
+        }
+        Some(PossiblyImage::Image) => {
+            if rhs.image.is_none() {
+                bail!("no image provided");
+            }
+            image_use.insert(ImageUse::WorkingDirectory);
+            lhs.working_directory = None;
+        }
+        None => {}
+    }
+
+    if rhs.image.is_some() {
+        lhs.parent = rhs.image.as_ref().map(|image| {
+            ContainerParent::Image(ImageRef {
+                name: image.into(),
+                r#use: image_use,
+            })
+        });
+    }
+
+    Ok(lhs)
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -145,7 +146,8 @@ impl TestMetadata {
     }
 
     fn try_fold<TestFilterT>(mut self, directive: &TestDirective<TestFilterT>) -> Result<Self> {
-        self.container = self.container.try_fold(&directive.container)?;
+        self.container =
+            fold_test_container_into_container_spec(self.container, &directive.container)?;
 
         self.include_shared_libraries = directive
             .include_shared_libraries
