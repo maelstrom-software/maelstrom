@@ -423,6 +423,7 @@ fn test_spec(bin: &str, name: &str) -> JobSpec {
         estimated_duration: None,
         allocate_tty: None,
         priority: 1,
+        capture_file_system_changes: None,
     }
 }
 

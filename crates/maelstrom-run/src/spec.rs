@@ -1,7 +1,6 @@
 use anyhow::{bail, Result};
 use maelstrom_base::{
-    EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, JobRootOverlay, NonEmpty, Timeout,
-    UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, NonEmpty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
     incompatible, ContainerParent, ContainerSpec, EnvironmentSpec, Image, ImageRef, ImageUse,
@@ -124,13 +123,7 @@ impl Job {
                 .map(Into::into)
                 .collect(),
             network: self.network,
-            root_overlay: self.enable_writable_file_system.map(|writable| {
-                if writable {
-                    JobRootOverlay::Tmp
-                } else {
-                    JobRootOverlay::None
-                }
-            }),
+            enable_writable_file_system: self.enable_writable_file_system,
             working_directory,
             user: self.user,
             group: self.group,
@@ -143,6 +136,7 @@ impl Job {
             estimated_duration: None,
             allocate_tty: None,
             priority: self.priority.unwrap_or_default(),
+            capture_file_system_changes: None,
         })
     }
 }
@@ -482,7 +476,7 @@ mod tests {
             }
             .into_job_spec()
             .unwrap(),
-            job_spec!("program", layers: [tar_layer!("1")], root_overlay: JobRootOverlay::Tmp),
+            job_spec!("program", layers: [tar_layer!("1")], enable_writable_file_system: true),
         );
     }
 
@@ -996,7 +990,7 @@ mod tests {
             .unwrap()
             .into_job_spec()
             .unwrap(),
-            job_spec!("/bin/sh", layers: [tar_layer!("1")], root_overlay: JobRootOverlay::Tmp),
+            job_spec!("/bin/sh", layers: [tar_layer!("1")], enable_writable_file_system: true),
         )
     }
 

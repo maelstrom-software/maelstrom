@@ -129,15 +129,7 @@ enum JobNetwork {
     JOB_NETWORK_LOCAL = 2;
 }
 
-message JobRootOverlay {
-    oneof overlay {
-        Void none = 1;
-        Void tmp = 2;
-        LocalJobRootOverlay local = 3;
-    }
-}
-
-message LocalJobRootOverlay {
+message CaptureFileSystemChanges {
     string upper = 1;
     string work = 2;
 }
@@ -160,7 +152,7 @@ message ImageRef {
 
 enum ContainerUse {
     CONTAINER_USE_LAYERS = 0;
-    CONTAINER_USE_ROOT_OVERLAY = 1;
+    CONTAINER_USE_ENABLE_WRITABLE_FILE_SYSTEM = 1;
     CONTAINER_USE_ENVIRONMENT = 2;
     CONTAINER_USE_WORKING_DIRECTORY = 3;
     CONTAINER_USE_MOUNTS = 4;
@@ -194,7 +186,7 @@ message ContainerParent {
 message ContainerSpec {
     optional ContainerParent parent = 1;
     repeated LayerSpec layers = 2;
-    optional JobRootOverlay root_overlay = 3;
+    optional bool enable_writable_file_system = 3;
     repeated EnvironmentSpec environment = 4;
     optional string working_directory = 5;
     repeated JobMount mounts = 6;
@@ -211,6 +203,7 @@ message JobSpec {
     optional Duration estimated_duration = 5;
     optional JobTty allocate_tty = 6;
     int32 priority = 7;
+    optional CaptureFileSystemChanges capture_file_system_changes = 8;
 }
 
 message RunJobRequest {

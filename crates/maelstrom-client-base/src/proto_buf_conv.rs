@@ -2,17 +2,16 @@ use crate::proto;
 use anyhow::{anyhow, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    client_job_id_pocket_definition, group_id_pocket_definition,
-    job_broker_status_pocket_definition, job_completed_pocket_definition,
-    job_device_pocket_definition, job_effects_pocket_definition, job_mount_pocket_definition,
-    job_network_pocket_definition, job_outcome_pocket_definition,
-    job_output_result_pocket_definition, job_root_overlay_pocket_definition,
-    job_termination_status_pocket_definition, job_tty_pocket_definition,
-    job_worker_status_pocket_definition, timeout_pocket_definition, user_id_pocket_definition,
-    window_size_pocket_definition, worker_id_pocket_definition, ClientJobId, GroupId,
-    JobBrokerStatus, JobCompleted, JobDevice, JobEffects, JobMount, JobNetwork, JobOutcome,
-    JobOutputResult, JobRootOverlay, JobTerminationStatus, JobTty, JobWorkerStatus, Timeout,
-    UserId, Utf8PathBuf, WindowSize, WorkerId,
+    capture_file_system_changes_pocket_definition, client_job_id_pocket_definition,
+    group_id_pocket_definition, job_broker_status_pocket_definition,
+    job_completed_pocket_definition, job_device_pocket_definition, job_effects_pocket_definition,
+    job_mount_pocket_definition, job_network_pocket_definition, job_outcome_pocket_definition,
+    job_output_result_pocket_definition, job_termination_status_pocket_definition,
+    job_tty_pocket_definition, job_worker_status_pocket_definition, timeout_pocket_definition,
+    user_id_pocket_definition, window_size_pocket_definition, worker_id_pocket_definition,
+    CaptureFileSystemChanges, ClientJobId, GroupId, JobBrokerStatus, JobCompleted, JobDevice,
+    JobEffects, JobMount, JobNetwork, JobOutcome, JobOutputResult, JobTerminationStatus, JobTty,
+    JobWorkerStatus, Timeout, UserId, Utf8PathBuf, WindowSize, WorkerId,
 };
 use maelstrom_macro::{
     into_proto_buf_remote_derive, remote_derive, try_from_proto_buf_remote_derive,
@@ -511,6 +510,12 @@ remote_derive!(
 );
 
 remote_derive!(
+    CaptureFileSystemChanges,
+    (IntoProtoBuf, TryFromProtoBuf),
+    proto(proto_buf_type = "proto::CaptureFileSystemChanges")
+);
+
+remote_derive!(
     JobEffects,
     (IntoProtoBuf, TryFromProtoBuf),
     proto(proto_buf_type = "proto::JobEffects", option_all)
@@ -534,16 +539,6 @@ remote_derive!(
     @Proc: proto(proto_buf_type = "proto::ProcMount"),
     @Sys: proto(proto_buf_type = "proto::SysMount"),
     @Tmp: proto(proto_buf_type = "proto::TmpMount"),
-);
-
-remote_derive!(
-    JobRootOverlay,
-    (IntoProtoBuf, TryFromProtoBuf),
-    proto(
-        proto_buf_type = "proto::JobRootOverlay",
-        enum_type = "proto::job_root_overlay::Overlay"
-    ),
-    @Local: proto(proto_buf_type = "proto::LocalJobRootOverlay"),
 );
 
 remote_derive!(

@@ -5,8 +5,8 @@ mod pytest;
 
 use anyhow::{anyhow, bail, Result};
 use maelstrom_base::{
-    enum_set, JobDevice, JobMount, JobNetwork, JobOutcome, JobRootOverlay, JobTerminationStatus,
-    Timeout, Utf8PathBuf,
+    enum_set, CaptureFileSystemChanges, JobDevice, JobMount, JobNetwork, JobOutcome,
+    JobTerminationStatus, Timeout, Utf8PathBuf,
 };
 use maelstrom_client::{
     job_spec,
@@ -263,15 +263,15 @@ impl PytestTestCollector<'_> {
             ],
             parent: ContainerParent::Image(image_spec),
             network: JobNetwork::Local,
-            root_overlay: JobRootOverlay::Local {
-                upper: upper.clone().try_into()?,
-                work: work.clone().try_into()?,
-            },
             mounts: [
                 JobMount::Devices {
                     devices: enum_set![JobDevice::Null],
                 },
             ],
+            capture_file_system_changes: CaptureFileSystemChanges {
+                upper: upper.clone().try_into()?,
+                work: work.clone().try_into()?,
+            },
         })?;
         let outcome = outcome.map_err(|err| anyhow!("error installing pip packages: {err:?}"))?;
         match outcome {

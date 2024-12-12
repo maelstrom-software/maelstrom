@@ -7,8 +7,9 @@ use bumpalo::{
 };
 use maelstrom_base::{
     tty::{self, DecodeInputChunk, DecodeInputRemainder},
-    GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork, JobOutputResult,
-    JobResult, JobRootOverlay, JobTerminationStatus, JobTty, UserId, Utf8PathBuf, WindowSize,
+    CaptureFileSystemChanges, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount,
+    JobNetwork, JobOutputResult, JobResult, JobRootOverlay, JobTerminationStatus, JobTty, UserId,
+    Utf8PathBuf, WindowSize,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -725,10 +726,10 @@ impl<ClockT: Clock> Executor<'_, ClockT> {
                 (upper, work)
             }
 
-            JobRootOverlay::Local {
+            JobRootOverlay::Local(CaptureFileSystemChanges {
                 ref upper,
                 ref work,
-            } => {
+            }) => {
                 // We're going to use the upper and work directories provided to us. We assume the
                 // directories have been created and are on the same file system.
                 (
@@ -2134,10 +2135,10 @@ mod tests {
 
         Test::new(bash_spec! {
             "echo bar > /foo && cat /foo",
-            root_overlay: JobRootOverlay::Local {
+            root_overlay: JobRootOverlay::Local(CaptureFileSystemChanges {
                 upper: upper_path.clone().try_into().unwrap(),
                 work: work_path.clone().try_into().unwrap(),
-            },
+            }),
         })
         .expected_status(JobTerminationStatus::Exited(0))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
@@ -2147,10 +2148,10 @@ mod tests {
         // Run another job to ensure that the file persisted.
         Test::new(bash_spec! {
             "test -e /foo",
-            root_overlay: JobRootOverlay::Local {
+            root_overlay: JobRootOverlay::Local(CaptureFileSystemChanges {
                 upper: upper_path.clone().try_into().unwrap(),
                 work: work_path.clone().try_into().unwrap(),
-            },
+            }),
         })
         .expected_status(JobTerminationStatus::Exited(0))
         .run()

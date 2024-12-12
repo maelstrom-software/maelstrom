@@ -11,7 +11,8 @@ use anyhow::{Error, Result};
 use derive_more::From;
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    enum_set, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Timeout, UserId, Utf8PathBuf,
+    enum_set, CaptureFileSystemChanges, GroupId, JobMount, JobNetwork, JobTty, Timeout, UserId,
+    Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Deserializer, Serialize};
@@ -103,7 +104,7 @@ macro_rules! container_ref {
     (@expand [] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -118,8 +119,8 @@ macro_rules! container_ref {
                 if $layers {
                     r#use.insert($crate::spec::ContainerUse::Layers);
                 }
-                if $root_overlay {
-                    r#use.insert($crate::spec::ContainerUse::RootOverlay);
+                if $enable_writable_file_system {
+                    r#use.insert($crate::spec::ContainerUse::EnableWritableFileSystem);
                 }
                 if $environment {
                     r#use.insert($crate::spec::ContainerUse::Environment);
@@ -146,7 +147,7 @@ macro_rules! container_ref {
     (@expand [all $(,$($field_in:ident),*)?] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -157,7 +158,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [] -> [
             name: $name,
             layers: true,
-            root_overlay: true,
+            enable_writable_file_system: true,
             environment: true,
             working_directory: true,
             mounts: true,
@@ -169,7 +170,7 @@ macro_rules! container_ref {
     (@expand [layers $(,$($field_in:ident),*)?] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -180,7 +181,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [$($($field_in),*)?] -> [
             name: $name,
             layers: true,
-            root_overlay: $root_overlay,
+            enable_writable_file_system: $enable_writable_file_system,
             environment: $environment,
             working_directory: $working_directory,
             mounts: $mounts,
@@ -189,10 +190,10 @@ macro_rules! container_ref {
             group: $group,
         ])
     };
-    (@expand [root_overlay $(,$($field_in:ident),*)?] -> [
+    (@expand [enable_writable_file_system $(,$($field_in:ident),*)?] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -203,7 +204,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [$($($field_in),*)?] -> [
             name: $name,
             layers: $layers,
-            root_overlay: true,
+            enable_writable_file_system: true,
             environment: $environment,
             working_directory: $working_directory,
             mounts: $mounts,
@@ -215,7 +216,7 @@ macro_rules! container_ref {
     (@expand [environment $(,$($field_in:ident),*)?] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -226,7 +227,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [$($($field_in),*)?] -> [
             name: $name,
             layers: $layers,
-            root_overlay: $root_overlay,
+            enable_writable_file_system: $enable_writable_file_system,
             environment: true,
             working_directory: $working_directory,
             mounts: $mounts,
@@ -238,7 +239,7 @@ macro_rules! container_ref {
     (@expand [working_directory $(,$($field_in:ident),*)?] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -249,7 +250,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [$($($field_in),*)?] -> [
             name: $name,
             layers: $layers,
-            root_overlay: $root_overlay,
+            enable_writable_file_system: $enable_writable_file_system,
             environment: $environment,
             working_directory: true,
             mounts: $mounts,
@@ -261,7 +262,7 @@ macro_rules! container_ref {
     (@expand [mounts $(,$($field_in:ident),*)?] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -272,7 +273,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [$($($field_in),*)?] -> [
             name: $name,
             layers: $layers,
-            root_overlay: $root_overlay,
+            enable_writable_file_system: $enable_writable_file_system,
             environment: $environment,
             working_directory: $working_directory,
             mounts: true,
@@ -284,7 +285,7 @@ macro_rules! container_ref {
     (@expand [network $(,$($field_in:ident),*)?] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -295,7 +296,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [$($($field_in),*)?] -> [
             name: $name,
             layers: $layers,
-            root_overlay: $root_overlay,
+            enable_writable_file_system: $enable_writable_file_system,
             environment: $environment,
             working_directory: $working_directory,
             mounts: $mounts,
@@ -307,7 +308,7 @@ macro_rules! container_ref {
     (@expand [user $(,$($field_in:ident),*)?] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -318,7 +319,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [$($($field_in),*)?] -> [
             name: $name,
             layers: $layers,
-            root_overlay: $root_overlay,
+            enable_writable_file_system: $enable_writable_file_system,
             environment: $environment,
             working_directory: $working_directory,
             mounts: $mounts,
@@ -330,7 +331,7 @@ macro_rules! container_ref {
     (@expand [group $(,$($field_in:ident),*)?] -> [
          name: $name:expr,
          layers: $layers:literal,
-         root_overlay: $root_overlay:literal,
+         enable_writable_file_system: $enable_writable_file_system:literal,
          environment: $environment:literal,
          working_directory: $working_directory:literal,
          mounts: $mounts:literal,
@@ -341,7 +342,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [$($($field_in),*)?] -> [
             name: $name,
             layers: $layers,
-            root_overlay: $root_overlay,
+            enable_writable_file_system: $enable_writable_file_system,
             environment: $environment,
             working_directory: $working_directory,
             mounts: $mounts,
@@ -354,7 +355,7 @@ macro_rules! container_ref {
         $crate::container_ref!(@expand [$($($use),+)?] -> [
             name: $name,
             layers: false,
-            root_overlay: false,
+            enable_writable_file_system: false,
             environment: false,
             working_directory: false,
             mounts: false,
@@ -522,7 +523,7 @@ pub fn environment_eval(
 pub struct ContainerSpec {
     pub parent: Option<ContainerParent>,
     pub layers: Vec<LayerSpec>,
-    pub root_overlay: Option<JobRootOverlay>,
+    pub enable_writable_file_system: Option<bool>,
     pub environment: Vec<EnvironmentSpec>,
     pub working_directory: Option<Utf8PathBuf>,
     pub mounts: Vec<JobMount>,
@@ -548,8 +549,8 @@ macro_rules! container_spec {
     (@expand [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: $layers.into()])
     };
-    (@expand [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? root_overlay: Some($root_overlay)])
+    (@expand [enable_writable_file_system: $enable_writable_file_system:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? enable_writable_file_system: Some($enable_writable_file_system)])
     };
     (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: $crate::spec::IntoEnvironment::into_environment($environment)])
@@ -585,6 +586,7 @@ pub struct JobSpec {
     pub estimated_duration: Option<Duration>,
     pub allocate_tty: Option<JobTty>,
     pub priority: i8,
+    pub capture_file_system_changes: Option<CaptureFileSystemChanges>,
 }
 
 #[macro_export]
@@ -598,6 +600,7 @@ macro_rules! job_spec {
             estimated_duration: Default::default(),
             allocate_tty: Default::default(),
             priority: Default::default(),
+            capture_file_system_changes: Default::default(),
         }
     };
     (@expand [$program:expr] [] -> [$($field:tt)+] [$($container_field:tt)*]) => {
@@ -626,6 +629,10 @@ macro_rules! job_spec {
     (@expand [$program:expr] [priority: $priority:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($($field_out)+,)? priority: $priority] [$($container_field)*])
+    };
+    (@expand [$program:expr] [capture_file_system_changes: $capture_file_system_changes:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        $crate::job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? capture_file_system_changes: Some($capture_file_system_changes)] [$($container_field)*])
     };
 
     (@expand [$program:expr] [$container_field_name:ident: $container_field_value:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
@@ -786,7 +793,7 @@ pub enum ImageUse {
 #[proto(proto_buf_type = "proto::ContainerUse")]
 pub enum ContainerUse {
     Layers,
-    RootOverlay,
+    EnableWritableFileSystem,
     Environment,
     WorkingDirectory,
     Mounts,
@@ -802,7 +809,7 @@ pub fn project_container_use_set_to_image_use_set(
         .into_iter()
         .filter_map(|container_use| match container_use {
             ContainerUse::Layers => Some(ImageUse::Layers),
-            ContainerUse::RootOverlay => None,
+            ContainerUse::EnableWritableFileSystem => None,
             ContainerUse::Environment => Some(ImageUse::Environment),
             ContainerUse::WorkingDirectory => Some(ImageUse::WorkingDirectory),
             ContainerUse::Mounts => None,

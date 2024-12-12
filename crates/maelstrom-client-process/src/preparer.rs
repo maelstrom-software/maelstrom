@@ -399,8 +399,8 @@ impl<DepsT: Deps> Job<DepsT> {
 mod tests {
     use super::{Message::*, *};
     use maelstrom_base::{
-        job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, JobNetwork, JobRootOverlay, JobTty,
-        WindowSize,
+        job_spec, proc_mount, sys_mount, tar_digest, tmp_mount, CaptureFileSystemChanges,
+        JobNetwork, JobRootOverlay, JobTty, WindowSize,
     };
     use maelstrom_client::spec;
     use maelstrom_client_base::{
@@ -898,7 +898,7 @@ mod tests {
         PrepareJob(1, client_job_spec! {
             "one",
             layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
-            root_overlay: JobRootOverlay::Tmp,
+            enable_writable_file_system: true,
             environment: [
                 environment_spec!{false, "FOO" => "foo", "BAR" => "bar"},
                 environment_spec!{true, "FOO" => "frob", "BAZ" => "baz"},
@@ -916,6 +916,10 @@ mod tests {
             estimated_duration: millis!(100),
             allocate_tty: JobTty::new(b"123456", WindowSize::new(50, 100)),
             priority: 42,
+            capture_file_system_changes: CaptureFileSystemChanges {
+                upper: "upper".into(),
+                work: "work".into(),
+            },
         }) => {
             BuildLayer(tar_layer!("foo.tar")),
             BuildLayer(tar_layer!("bar.tar")),
@@ -936,7 +940,10 @@ mod tests {
                     tmp_mount!("/tmp"),
                 ],
                 network: JobNetwork::Local,
-                root_overlay: JobRootOverlay::Tmp,
+                root_overlay: JobRootOverlay::Local(CaptureFileSystemChanges {
+                    upper: "upper".into(),
+                    work: "work".into(),
+                }),
                 working_directory: "/root",
                 user: 100,
                 group: 101,

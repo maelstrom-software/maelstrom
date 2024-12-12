@@ -239,6 +239,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             estimated_duration,
             allocate_tty: None,
             priority,
+            capture_file_system_changes: None,
         };
 
         let job_id = self.vend_job_id();

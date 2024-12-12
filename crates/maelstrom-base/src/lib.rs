@@ -300,15 +300,19 @@ pub enum JobNetwork {
 
 #[pocket_definition(export)]
 #[derive(Clone, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct CaptureFileSystemChanges {
+    pub upper: Utf8PathBuf,
+    pub work: Utf8PathBuf,
+}
+
+#[pocket_definition(export)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum JobRootOverlay {
     #[default]
     None,
     Tmp,
-    Local {
-        upper: Utf8PathBuf,
-        work: Utf8PathBuf,
-    },
+    Local(CaptureFileSystemChanges),
 }
 
 /// ID of a user. This should be compatible with uid_t.
@@ -1142,10 +1146,10 @@ mod tests {
         let spec = job_spec! {
             "foo",
             [tar_digest!(0)],
-            root_overlay: JobRootOverlay::Local {
+            root_overlay: JobRootOverlay::Local(CaptureFileSystemChanges {
                 upper: "upper".into(),
                 work: "work".into(),
-            },
+            }),
         };
         assert!(spec.must_be_run_locally());
     }

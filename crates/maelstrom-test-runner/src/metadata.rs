@@ -5,7 +5,7 @@ use crate::TestFilter;
 use anyhow::{bail, Context as _, Result};
 use container::TestContainer;
 use directive::TestDirective;
-use maelstrom_base::{EnumSet, JobRootOverlay, Timeout};
+use maelstrom_base::{EnumSet, Timeout};
 use maelstrom_client::{
     spec::{ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, PossiblyImage},
     ProjectDir,
@@ -34,16 +34,9 @@ fn fold_test_container_into_container_spec(
     let mut image_use = EnumSet::new();
 
     lhs.network = rhs.network.or(lhs.network);
-    lhs.root_overlay = rhs
+    lhs.enable_writable_file_system = rhs
         .enable_writable_file_system
-        .map(|enable| {
-            if enable {
-                JobRootOverlay::Tmp
-            } else {
-                JobRootOverlay::None
-            }
-        })
-        .or(lhs.root_overlay);
+        .or(lhs.enable_writable_file_system);
     lhs.user = rhs.user.or(lhs.user);
     lhs.group = rhs.group.or(lhs.group);
 
@@ -268,9 +261,7 @@ mod tests {
     use super::*;
     use crate::{NoCaseMetadata, SimpleFilter};
     use anyhow::Error;
-    use maelstrom_base::{
-        enum_set, GroupId, JobDevice, JobMount, JobNetwork, JobRootOverlay, UserId,
-    };
+    use maelstrom_base::{enum_set, GroupId, JobDevice, JobMount, JobNetwork, UserId};
     use maelstrom_client::image_container_parent;
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maelstrom_util::root::RootBuf;
@@ -548,8 +539,8 @@ mod tests {
             )
             .unwrap()
             .container
-            .root_overlay,
-            Some(JobRootOverlay::None),
+            .enable_writable_file_system,
+            Some(false),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -559,8 +550,8 @@ mod tests {
             )
             .unwrap()
             .container
-            .root_overlay,
-            Some(JobRootOverlay::Tmp),
+            .enable_writable_file_system,
+            Some(true),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -570,7 +561,7 @@ mod tests {
             )
             .unwrap()
             .container
-            .root_overlay,
+            .enable_writable_file_system,
             None,
         );
     }

@@ -1,7 +1,7 @@
 use indexmap::IndexSet;
 use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay, JobSpec as BaseJobSpec,
-    JobTty, NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
+    ArtifactType, CaptureFileSystemChanges, EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay,
+    JobSpec as BaseJobSpec, JobTty, NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
     self, ContainerParent, ContainerSpec, ContainerUse, ConvertedImage, EnvironmentSpec, ImageRef,
@@ -28,7 +28,7 @@ use std::{collections::BTreeMap, mem, time::Duration};
 #[derive(Debug, Eq, PartialEq)]
 pub struct CollapsedJobSpec {
     layers: Vec<LayerSpec>,
-    root_overlay: Option<JobRootOverlay>,
+    enable_writable_file_system: Option<bool>,
     environment: Vec<EnvironmentSpec>,
     working_directory: Option<Utf8PathBuf>,
     mounts: Vec<JobMount>,
@@ -44,6 +44,7 @@ pub struct CollapsedJobSpec {
     estimated_duration: Option<Duration>,
     allocate_tty: Option<JobTty>,
     priority: i8,
+    capture_file_system_changes: Option<CaptureFileSystemChanges>,
 }
 
 /// Easily create a [`CollapsedJobSpec`].
@@ -73,7 +74,7 @@ macro_rules! collapsed_job_spec {
     (@expand [$program:expr] [] -> []) => {
         $crate::collapsed_job_spec::CollapsedJobSpec {
             layers: Default::default(),
-            root_overlay: Default::default(),
+            enable_writable_file_system: Default::default(),
             environment: Default::default(),
             working_directory: Default::default(),
             mounts: Default::default(),
@@ -89,6 +90,7 @@ macro_rules! collapsed_job_spec {
             estimated_duration: Default::default(),
             allocate_tty: Default::default(),
             priority: Default::default(),
+            capture_file_system_changes: Default::default(),
         }
     };
     (@expand [$program:expr] [] -> [$($field:tt)+]) => {
@@ -113,9 +115,9 @@ macro_rules! collapsed_job_spec {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($($field_out)+,)? layers: $layers.into_iter().map(Into::into).collect()])
     };
-    (@expand [$program:expr] [root_overlay: $root_overlay:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+    (@expand [$program:expr] [enable_writable_file_system: $enable_writable_file_system:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
-            [$($($field_out)+,)? root_overlay: $root_overlay.into()])
+            [$($($field_out)+,)? enable_writable_file_system: $enable_writable_file_system.into()])
     };
     (@expand [$program:expr] [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
@@ -161,6 +163,10 @@ macro_rules! collapsed_job_spec {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
             [$($($field_out)+,)? priority: $priority.into()])
     };
+    (@expand [$program:expr] [capture_file_system_changes: $capture_file_system_changes:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] ->
+            [$($($field_out)+,)? capture_file_system_changes: Some($capture_file_system_changes.into())])
+    };
     ($program:expr $(,$($field_in:tt)*)?) => {
         collapsed_job_spec!(@expand [$program] [$($($field_in)*)?] -> [])
     };
@@ -187,7 +193,7 @@ impl CollapsedJobSpec {
                 ContainerSpec {
                     parent: mut next_parent,
                     mut layers,
-                    mut root_overlay,
+                    mut enable_writable_file_system,
                     mut environment,
                     mut working_directory,
                     mut mounts,
@@ -201,6 +207,7 @@ impl CollapsedJobSpec {
             estimated_duration,
             allocate_tty,
             priority,
+            capture_file_system_changes,
         } = job_spec;
         let mut image = None;
         let mut ancestors = IndexSet::<String>::default();
@@ -208,7 +215,7 @@ impl CollapsedJobSpec {
             .into_iter()
             .filter(|container_use| match container_use {
                 ContainerUse::Layers | ContainerUse::Environment | ContainerUse::Mounts => true,
-                ContainerUse::RootOverlay => root_overlay.is_none(),
+                ContainerUse::EnableWritableFileSystem => enable_writable_file_system.is_none(),
                 ContainerUse::WorkingDirectory => working_directory.is_none(),
                 ContainerUse::Network => network.is_none(),
                 ContainerUse::User => user.is_none(),
@@ -261,9 +268,9 @@ impl CollapsedJobSpec {
                                     .collect();
                                 true
                             }
-                            ContainerUse::RootOverlay => {
-                                root_overlay = parent.root_overlay.clone();
-                                root_overlay.is_none()
+                            ContainerUse::EnableWritableFileSystem => {
+                                enable_writable_file_system = parent.enable_writable_file_system;
+                                enable_writable_file_system.is_none()
                             }
                             ContainerUse::Environment => {
                                 environment = parent
@@ -308,7 +315,7 @@ impl CollapsedJobSpec {
 
         Ok(CollapsedJobSpec {
             layers,
-            root_overlay,
+            enable_writable_file_system,
             environment,
             working_directory,
             mounts,
@@ -324,6 +331,7 @@ impl CollapsedJobSpec {
             estimated_duration,
             allocate_tty,
             priority,
+            capture_file_system_changes,
         })
     }
 
@@ -404,7 +412,7 @@ impl CollapsedJobSpec {
         assert_eq!(layers.len(), self.image_layers.len() + self.layers.len());
         let Self {
             layers: _,
-            root_overlay,
+            enable_writable_file_system,
             environment: _,
             working_directory,
             mounts,
@@ -420,7 +428,22 @@ impl CollapsedJobSpec {
             estimated_duration,
             allocate_tty,
             priority,
+            capture_file_system_changes,
         } = self;
+        let root_overlay = capture_file_system_changes
+            .map_or_else(
+                || {
+                    enable_writable_file_system.map(|enable| {
+                        if enable {
+                            JobRootOverlay::Tmp
+                        } else {
+                            JobRootOverlay::None
+                        }
+                    })
+                },
+                |capture| Some(JobRootOverlay::Local(capture)),
+            )
+            .unwrap_or_default();
         Ok(BaseJobSpec {
             program,
             arguments,
@@ -428,7 +451,7 @@ impl CollapsedJobSpec {
             layers,
             mounts,
             network: network.unwrap_or_default(),
-            root_overlay: root_overlay.unwrap_or_default(),
+            root_overlay,
             working_directory: working_directory.unwrap_or_else(|| "/".into()),
             user: user.unwrap_or(0.into()),
             group: group.unwrap_or(0.into()),
@@ -670,13 +693,13 @@ mod tests {
     }
 
     #[test]
-    fn root_overlay() {
+    fn enable_writable_file_system() {
         let containers = HashMap::from([
             (
                 "p1",
                 container_spec! {
                     parent: image_container_parent!("image", all),
-                    root_overlay: JobRootOverlay::Tmp,
+                    enable_writable_file_system: true,
                 },
             ),
             (
@@ -689,7 +712,7 @@ mod tests {
                 "p3",
                 container_spec! {
                     parent: container_container_parent!("p2", all),
-                    root_overlay: JobRootOverlay::None,
+                    enable_writable_file_system: false,
                 },
             ),
             (
@@ -707,39 +730,27 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    root_overlay: JobRootOverlay::Local {
-                        upper: "upper".into(),
-                        work: "work".into(),
-                    },
+                    enable_writable_file_system: true,
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                root_overlay: JobRootOverlay::Local {
-                    upper: "upper".into(),
-                    work: "work".into(),
-                },
+                enable_writable_file_system: true,
             }),
         );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    root_overlay: JobRootOverlay::Local {
-                        upper: "upper".into(),
-                        work: "work".into(),
-                    },
+                    enable_writable_file_system: true,
                     parent: container_container_parent!("p1", all),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                root_overlay: JobRootOverlay::Local {
-                    upper: "upper".into(),
-                    work: "work".into(),
-                },
+                enable_writable_file_system: true,
                 image: image_ref!("image", all),
             }),
         );
@@ -747,20 +758,14 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    root_overlay: JobRootOverlay::Local {
-                        upper: "upper".into(),
-                        work: "work".into(),
-                    },
+                    enable_writable_file_system: true,
                     parent: image_container_parent!("image", all),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                root_overlay: JobRootOverlay::Local {
-                    upper: "upper".into(),
-                    work: "work".into(),
-                },
+                enable_writable_file_system: true,
                 image: image_ref!("image", all),
             }),
         );
@@ -774,7 +779,7 @@ mod tests {
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                root_overlay: JobRootOverlay::Tmp,
+                enable_writable_file_system: true,
                 image: image_ref!("image", all),
             }),
         );
@@ -788,7 +793,7 @@ mod tests {
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                root_overlay: JobRootOverlay::Tmp,
+                enable_writable_file_system: true,
                 image: image_ref!("image", all),
             }),
         );
@@ -802,7 +807,7 @@ mod tests {
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                root_overlay: JobRootOverlay::None,
+                enable_writable_file_system: false,
                 image: image_ref!("image", all),
             }),
         );
