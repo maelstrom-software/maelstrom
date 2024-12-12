@@ -780,16 +780,6 @@ pub enum ImageUse {
     WorkingDirectory,
 }
 
-impl ImageUse {
-    pub fn to_container_use(self) -> ContainerUse {
-        match self {
-            Self::Layers => ContainerUse::Layers,
-            Self::Environment => ContainerUse::Environment,
-            Self::WorkingDirectory => ContainerUse::WorkingDirectory,
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, EnumSetType, IntoProtoBuf, Serialize, TryFromProtoBuf)]
 #[serde(rename_all = "snake_case")]
 #[enumset(serialize_repr = "list")]
@@ -803,6 +793,24 @@ pub enum ContainerUse {
     Network,
     User,
     Group,
+}
+
+pub fn project_container_use_set_to_image_use_set(
+    container_use: EnumSet<ContainerUse>,
+) -> EnumSet<ImageUse> {
+    container_use
+        .into_iter()
+        .filter_map(|container_use| match container_use {
+            ContainerUse::Layers => Some(ImageUse::Layers),
+            ContainerUse::RootOverlay => None,
+            ContainerUse::Environment => Some(ImageUse::Environment),
+            ContainerUse::WorkingDirectory => Some(ImageUse::WorkingDirectory),
+            ContainerUse::Mounts => None,
+            ContainerUse::Network => None,
+            ContainerUse::User => None,
+            ContainerUse::Group => None,
+        })
+        .collect()
 }
 
 /// A struct used for deserializing "image" statements in JSON, TOML, or other similar formats.

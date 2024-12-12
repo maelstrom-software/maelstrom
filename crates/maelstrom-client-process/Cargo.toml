@@ -19,6 +19,7 @@ bracoxide.workspace = true
 chrono.workspace = true
 futures.workspace = true
 globset.workspace = true
+indexmap.workspace = true
 itertools.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client-base.workspace = true

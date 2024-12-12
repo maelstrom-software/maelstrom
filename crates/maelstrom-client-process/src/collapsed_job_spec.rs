@@ -1,9 +1,10 @@
+use indexmap::IndexSet;
 use maelstrom_base::{
     ArtifactType, EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay, JobSpec as BaseJobSpec,
     JobTty, NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
-    ContainerParent, ContainerSpec, ContainerUse, ConvertedImage, EnvironmentSpec, ImageRef,
+    self, ContainerParent, ContainerSpec, ContainerUse, ConvertedImage, EnvironmentSpec, ImageRef,
     ImageUse, JobSpec, LayerSpec,
 };
 use std::{collections::BTreeMap, mem, time::Duration};
@@ -201,73 +202,105 @@ impl CollapsedJobSpec {
             allocate_tty,
             priority,
         } = job_spec;
-        let mut use_mask = EnumSet::all();
         let mut image = None;
+        let mut ancestors = IndexSet::<String>::default();
+        let mut use_mask = EnumSet::all()
+            .into_iter()
+            .filter(|container_use| match container_use {
+                ContainerUse::Layers | ContainerUse::Environment | ContainerUse::Mounts => true,
+                ContainerUse::RootOverlay => root_overlay.is_none(),
+                ContainerUse::WorkingDirectory => working_directory.is_none(),
+                ContainerUse::Network => network.is_none(),
+                ContainerUse::User => user.is_none(),
+                ContainerUse::Group => group.is_none(),
+            })
+            .collect();
 
         while let Some(parent) = next_parent {
             match parent {
                 ContainerParent::Image(mut image_ref) => {
                     // Remove fields that have been previously masked out by more direct ancestors.
-                    for image_use in EnumSet::<ImageUse>::all() {
-                        if !use_mask.contains(image_use.to_container_use()) {
-                            image_ref.r#use.remove(image_use);
-                        }
-                    }
-
-                    // If the working directory has been set by a more direct ancestor, don't
-                    // include it from the image.
-                    if working_directory.is_some() {
-                        image_ref.r#use.remove(ImageUse::WorkingDirectory);
-                    }
-
                     // If we're not going to use any fields from the image, don't bother getting
                     // it.
+                    image_ref.r#use &= spec::project_container_use_set_to_image_use_set(use_mask);
                     if !image_ref.r#use.is_empty() {
                         image = Some(image_ref);
                     }
-
                     break;
                 }
 
                 ContainerParent::Container(container_ref) => {
+                    use_mask &= container_ref.r#use;
+                    if use_mask.is_empty() {
+                        break;
+                    }
                     let parent = container_resolver(&container_ref.name).ok_or_else(|| {
                         format!("couldn't find parent container {:?}", &container_ref.name)
                     })?;
-                    use_mask = use_mask.intersection(container_ref.r#use);
-                    for container_use in use_mask {
-                        match container_use {
+                    if !ancestors.insert(container_ref.name.clone()) {
+                        return Err(ancestors.iter().chain(Some(&container_ref.name)).fold(
+                            String::default(),
+                            |lhs, ancestor| {
+                                if lhs.is_empty() {
+                                    format!("parent loop found: {ancestor:?}")
+                                } else {
+                                    format!("{lhs} -> {ancestor:?}")
+                                }
+                            },
+                        ));
+                    }
+                    use_mask = use_mask
+                        .into_iter()
+                        .filter(|container_use| match container_use {
                             ContainerUse::Layers => {
-                                layers = parent.layers.iter().cloned().chain(layers).collect();
+                                layers = parent
+                                    .layers
+                                    .iter()
+                                    .cloned()
+                                    .chain(layers.drain(..))
+                                    .collect();
+                                true
                             }
                             ContainerUse::RootOverlay => {
-                                root_overlay = root_overlay.or_else(|| parent.root_overlay.clone());
+                                root_overlay = parent.root_overlay.clone();
+                                root_overlay.is_none()
                             }
                             ContainerUse::Environment => {
                                 environment = parent
                                     .environment
                                     .iter()
                                     .cloned()
-                                    .chain(environment)
+                                    .chain(environment.drain(..))
                                     .collect();
+                                true
                             }
                             ContainerUse::WorkingDirectory => {
-                                working_directory =
-                                    working_directory.or_else(|| parent.working_directory.clone());
+                                working_directory = parent.working_directory.clone();
+                                working_directory.is_none()
                             }
                             ContainerUse::Mounts => {
-                                mounts = parent.mounts.iter().cloned().chain(mounts).collect();
+                                mounts = parent
+                                    .mounts
+                                    .iter()
+                                    .cloned()
+                                    .chain(mounts.drain(..))
+                                    .collect();
+                                true
                             }
                             ContainerUse::Network => {
-                                network = network.or(parent.network);
+                                network = parent.network;
+                                network.is_none()
                             }
                             ContainerUse::User => {
-                                user = user.or(parent.user);
+                                user = parent.user;
+                                user.is_none()
                             }
                             ContainerUse::Group => {
-                                group = group.or(parent.group);
+                                group = parent.group;
+                                group.is_none()
                             }
-                        }
-                    }
+                        })
+                        .collect();
                     next_parent = parent.parent.clone();
                 }
             }
@@ -419,53 +452,72 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn program() {
+    fn missing_parent() {
+        assert_eq!(
+            CollapsedJobSpec::new(
+                job_spec! {"prog", parent: container_container_parent!("unknown", all)},
+                &|_| None
+            ),
+            Err(r#"couldn't find parent container "unknown""#.into()),
+        );
+    }
+
+    #[test]
+    fn parent_loop() {
         let containers = HashMap::from([
             (
                 "p1",
-                container_spec! {parent: image_container_parent!("image", all)},
+                container_spec! { parent: container_container_parent!("p3", all) },
             ),
             (
                 "p2",
-                container_spec! {parent: container_container_parent!("p1", all)},
+                container_spec! { parent: container_container_parent!("p1", all) },
             ),
             (
                 "p3",
-                container_spec! {parent: container_container_parent!("p2", all)},
+                container_spec! { parent: container_container_parent!("p2", all) },
             ),
-            ("p4", container_spec! {}),
+            (
+                "p4",
+                container_spec! { parent: container_container_parent!("p4", all) },
+            ),
         ]);
-        assert_eq!(
-            CollapsedJobSpec::new(job_spec! {"prog"}, &|c| containers.get(c)),
-            Ok(collapsed_job_spec! {"prog"}),
-        );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {"prog", parent: container_container_parent!("p1", all)},
-                &|c| containers.get(c),
+                &|c| containers.get(c)
             ),
-            Ok(collapsed_job_spec! {"prog", image: image_ref!("image", all)}),
-        );
-        assert_eq!(
-            CollapsedJobSpec::new(
-                job_spec! {"prog", parent: container_container_parent!("p3", all)},
-                &|c| containers.get(c),
-            ),
-            Ok(collapsed_job_spec! {"prog", image: image_ref!("image", all)}),
+            Err(r#"parent loop found: "p1" -> "p3" -> "p2" -> "p1""#.into()),
         );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {"prog", parent: container_container_parent!("p4", all)},
-                &|c| containers.get(c),
+                &|c| containers.get(c)
             ),
-            Ok(collapsed_job_spec! {"prog"}),
+            Err(r#"parent loop found: "p4" -> "p4""#.into()),
         );
+    }
+
+    #[test]
+    fn parent_traversal_short_circuits() {
+        let containers = HashMap::from([(
+            "p1",
+            container_spec! { group: 202, parent: container_container_parent!("unknown", all) },
+        )]);
         assert_eq!(
             CollapsedJobSpec::new(
-                job_spec! {"prog", parent: image_container_parent!("image", all)},
-                &|c| containers.get(c),
+                job_spec! {
+                    "prog",
+                    parent: container_container_parent!("p1", user, group),
+                    user: 101,
+                },
+                &|c| containers.get(c)
             ),
-            Ok(collapsed_job_spec! {"prog", image: image_ref!("image", all)}),
+            Ok(collapsed_job_spec! {
+                "prog",
+                user: 101,
+                group: 202,
+            }),
         );
     }
 

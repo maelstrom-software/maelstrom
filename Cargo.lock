@@ -3468,6 +3468,7 @@ dependencies = [
  "enum-map",
  "futures",
  "globset",
+ "indexmap 2.6.0",
  "itertools 0.13.0",
  "maelstrom-base",
  "maelstrom-client-base",
