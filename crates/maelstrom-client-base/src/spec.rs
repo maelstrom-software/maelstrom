@@ -15,7 +15,7 @@ use maelstrom_base::{
     Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
-use serde::{de, Deserialize, Deserializer, Serialize};
+use serde::{de, Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     env::{self, VarError},
@@ -822,10 +822,23 @@ pub fn project_container_use_set_to_image_use_set(
 
 /// A struct used for deserializing "image" statements in JSON, TOML, or other similar formats.
 /// This allows the user to specify an image name and the parts of the image they want to use.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(from = "ImageForDeserialize")]
 pub struct Image {
     pub name: String,
     pub use_: EnumSet<ImageUse>,
+}
+
+impl From<ImageForDeserialize> for Image {
+    fn from(image: ImageForDeserialize) -> Self {
+        match image {
+            ImageForDeserialize::AsString(name) => Self {
+                name,
+                use_: use_default(),
+            },
+            ImageForDeserialize::AsStruct { name, use_ } => Self { name, use_ },
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -841,21 +854,6 @@ enum ImageForDeserialize {
 
 fn use_default() -> EnumSet<ImageUse> {
     enum_set! {ImageUse::Layers | ImageUse::Environment}
-}
-
-impl<'de> Deserialize<'de> for Image {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        ImageForDeserialize::deserialize(deserializer).map(|i| match i {
-            ImageForDeserialize::AsString(name) => Image {
-                name,
-                use_: use_default(),
-            },
-            ImageForDeserialize::AsStruct { name, use_ } => Image { name, use_ },
-        })
-    }
 }
 
 /// A simple wrapper struct for the config of a local OCI image. This is used for dependency
