@@ -45,7 +45,6 @@ pub struct CollapsedJobSpec {
     pub priority: i8,
 }
 
-#[macro_export]
 /// Easily create a [`CollapsedJobSpec`].
 ///
 /// The macro must be passed at least one argument. The first argument will be set to the
