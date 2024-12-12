@@ -268,7 +268,9 @@ mod tests {
     use super::*;
     use crate::{NoCaseMetadata, SimpleFilter};
     use anyhow::Error;
-    use maelstrom_base::{enum_set, JobDevice};
+    use maelstrom_base::{
+        enum_set, GroupId, JobDevice, JobMount, JobNetwork, JobRootOverlay, UserId,
+    };
     use maelstrom_client::image_container_parent;
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maelstrom_util::root::RootBuf;
@@ -546,8 +548,8 @@ mod tests {
             )
             .unwrap()
             .container
-            .enable_writable_file_system,
-            Some(false),
+            .root_overlay,
+            Some(JobRootOverlay::None),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -557,8 +559,8 @@ mod tests {
             )
             .unwrap()
             .container
-            .enable_writable_file_system,
-            Some(true),
+            .root_overlay,
+            Some(JobRootOverlay::Tmp),
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -568,7 +570,7 @@ mod tests {
             )
             .unwrap()
             .container
-            .enable_writable_file_system,
+            .root_overlay,
             None,
         );
     }
