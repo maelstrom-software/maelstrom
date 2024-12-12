@@ -561,15 +561,6 @@ mod tests {
         };
     }
 
-    /*
-    script_test! {
-        prepare_job_unknown_named_container,
-        PrepareJob(3, client_job_spec!{"foo", container: named_container!{"foo"}}) => {
-            JobPrepared(3, Err(string!("container \"foo\" unknown"))),
-        };
-    }
-    */
-
     script_test! {
         prepare_job_one_layer,
         PrepareJob(
