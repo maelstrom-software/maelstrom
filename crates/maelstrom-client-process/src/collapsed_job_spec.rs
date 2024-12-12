@@ -303,18 +303,21 @@ impl CollapsedJobSpec {
     ///
     /// After this function is called, `self.image` will be `None`.
     pub fn integrate_image(&mut self, image: &ConvertedImage) -> Result<(), String> {
-        let image_use = self.image.take().unwrap().r#use;
-        if image_use.contains(ImageUse::Layers) {
-            assert!(self.image_layers.is_empty());
-            self.image_layers = image.layers()?;
-        }
-        if image_use.contains(ImageUse::Environment) {
-            assert!(self.initial_environment.is_empty());
-            self.initial_environment = image.environment()?;
-        }
-        if image_use.contains(ImageUse::WorkingDirectory) {
-            assert!(self.working_directory.is_none());
-            self.working_directory = image.working_directory();
+        for image_use in self.image.take().unwrap().r#use {
+            match image_use {
+                ImageUse::Layers => {
+                    assert!(self.image_layers.is_empty());
+                    self.image_layers = image.layers()?;
+                }
+                ImageUse::Environment => {
+                    assert!(self.initial_environment.is_empty());
+                    self.initial_environment = image.environment()?;
+                }
+                ImageUse::WorkingDirectory => {
+                    assert!(self.working_directory.is_none());
+                    self.working_directory = image.working_directory();
+                }
+            }
         }
         Ok(())
     }
