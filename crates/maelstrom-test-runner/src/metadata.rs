@@ -5,9 +5,9 @@ use crate::TestFilter;
 use anyhow::{bail, Context as _, Result};
 use container::TestContainer;
 use directive::TestDirective;
-use maelstrom_base::{EnumSet, GroupId, JobMount, JobNetwork, Timeout, UserId, Utf8PathBuf};
+use maelstrom_base::{EnumSet, JobRootOverlay, Timeout};
 use maelstrom_client::{
-    spec::{ContainerParent, EnvironmentSpec, ImageRef, ImageUse, LayerSpec, PossiblyImage},
+    spec::{ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, PossiblyImage},
     ProjectDir,
 };
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
@@ -27,29 +27,23 @@ pub struct AllMetadata<TestFilterT> {
     containers: HashMap<String, TestContainer>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TestMetadataContainer {
-    pub parent: Option<ContainerParent>,
-    pub network: Option<JobNetwork>,
-    pub enable_writable_file_system: Option<bool>,
-    pub working_directory: Option<Utf8PathBuf>,
-    pub user: Option<UserId>,
-    pub group: Option<GroupId>,
-    pub layers: Vec<LayerSpec>,
-    pub environment: Vec<EnvironmentSpec>,
-    pub mounts: Vec<JobMount>,
-}
-
 fn fold_test_container_into_container_spec(
-    mut lhs: TestMetadataContainer,
+    mut lhs: ContainerSpec,
     rhs: &TestContainer,
-) -> Result<TestMetadataContainer> {
+) -> Result<ContainerSpec> {
     let mut image_use = EnumSet::new();
 
     lhs.network = rhs.network.or(lhs.network);
-    lhs.enable_writable_file_system = rhs
+    lhs.root_overlay = rhs
         .enable_writable_file_system
-        .or(lhs.enable_writable_file_system);
+        .map(|enable| {
+            if enable {
+                JobRootOverlay::Tmp
+            } else {
+                JobRootOverlay::None
+            }
+        })
+        .or(lhs.root_overlay);
     lhs.user = rhs.user.or(lhs.user);
     lhs.group = rhs.group.or(lhs.group);
 
@@ -124,7 +118,7 @@ fn fold_test_container_into_container_spec(
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TestMetadata {
-    pub container: TestMetadataContainer,
+    pub container: ContainerSpec,
     include_shared_libraries: Option<bool>,
     pub timeout: Option<Timeout>,
     pub ignore: bool,

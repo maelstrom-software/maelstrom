@@ -9,7 +9,7 @@ use crate::ui::{
     UiJobEnqueued, UiJobId as JobId, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,
 };
 use crate::*;
-use maelstrom_base::{ClientJobId, JobOutcomeResult, JobRootOverlay};
+use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client::{spec::JobSpec, ContainerSpec, JobStatus};
 use maelstrom_util::{ext::OptionExt as _, process::ExitCode};
 use std::collections::{BTreeMap, HashMap};
@@ -225,24 +225,8 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
         let (program, arguments) = artifact.build_command(case_name, case_metadata);
         let container = ContainerSpec {
-            parent: test_metadata.container.parent,
-            environment: test_metadata.container.environment,
             layers,
-            mounts: test_metadata.container.mounts,
-            network: test_metadata.container.network,
-            root_overlay: test_metadata
-                .container
-                .enable_writable_file_system
-                .map(|enable| {
-                    if enable {
-                        JobRootOverlay::Tmp
-                    } else {
-                        JobRootOverlay::None
-                    }
-                }),
-            working_directory: test_metadata.container.working_directory,
-            user: test_metadata.container.user,
-            group: test_metadata.container.group,
+            ..test_metadata.container
         };
         let spec = JobSpec {
             container,
