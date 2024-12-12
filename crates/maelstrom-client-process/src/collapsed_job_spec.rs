@@ -203,6 +203,7 @@ impl CollapsedJobSpec {
         } = job_spec;
         let mut use_mask = EnumSet::all();
         let mut image = None;
+
         while let Some(parent) = next_parent {
             match parent {
                 ContainerParent::Image(mut image_ref) => {
@@ -271,6 +272,7 @@ impl CollapsedJobSpec {
                 }
             }
         }
+
         Ok(CollapsedJobSpec {
             layers,
             root_overlay,
