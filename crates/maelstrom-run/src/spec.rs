@@ -1,11 +1,10 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use maelstrom_base::{
-    EnumSet, GroupId, JobMount, JobMountForTomlAndJson, JobNetwork, NonEmpty, Timeout, UserId,
-    Utf8PathBuf,
+    GroupId, JobMount, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
     ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, IntoEnvironment, JobSpec,
-    LayerSpec, PossiblyImage,
+    LayerSpec,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -24,7 +23,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
             Err(err) => Err(err.into()),
-            Ok(job) => job.into_job_spec(),
+            Ok(job) => Ok(job.into_job_spec()),
         })
     }
 }
@@ -39,92 +38,52 @@ pub fn job_spec_iter_from_reader(reader: impl Read) -> impl Iterator<Item = Resu
 struct Job {
     program: Utf8PathBuf,
     arguments: Vec<String>,
-    environment: Option<Vec<EnvironmentSpec>>,
-    use_image_environment: bool,
-    layers: PossiblyImage<NonEmpty<LayerSpec>>,
-    added_layers: Vec<LayerSpec>,
+    environment: Vec<EnvironmentSpec>,
+    layers: Vec<LayerSpec>,
     mounts: Vec<JobMount>,
     network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
-    working_directory: Option<PossiblyImage<Utf8PathBuf>>,
+    working_directory: Option<Utf8PathBuf>,
     user: Option<UserId>,
     group: Option<GroupId>,
-    image: Option<String>,
+    parent: Option<ContainerParent>,
     timeout: Option<Timeout>,
     priority: i8,
 }
 
 impl Job {
     #[cfg(test)]
-    fn new(program: Utf8PathBuf, layers: NonEmpty<LayerSpec>) -> Self {
+    fn new(program: Utf8PathBuf, layers: Vec<LayerSpec>) -> Self {
         Job {
             program,
-            layers: PossiblyImage::Explicit(layers),
-            added_layers: Default::default(),
+            layers: layers.into(),
             arguments: Default::default(),
             environment: Default::default(),
-            use_image_environment: Default::default(),
             mounts: Default::default(),
             network: Default::default(),
             enable_writable_file_system: Default::default(),
             working_directory: Default::default(),
             user: Default::default(),
             group: Default::default(),
-            image: Default::default(),
+            parent: Default::default(),
             timeout: Default::default(),
             priority: Default::default(),
         }
     }
 
-    fn into_job_spec(self) -> Result<JobSpec> {
-        let environment = self.environment.unwrap_or_default();
-        let mut image_use = EnumSet::new();
-        if self.use_image_environment {
-            if self.image.is_none() {
-                bail!("no image provided");
-            }
-            image_use.insert(ImageUse::Environment);
-        }
-        let mut layers = match self.layers {
-            PossiblyImage::Explicit(layers) => layers.into(),
-            PossiblyImage::Image => {
-                if self.image.is_none() {
-                    bail!("no image provided");
-                }
-                image_use.insert(ImageUse::Layers);
-                vec![]
-            }
-        };
-        layers.extend(self.added_layers);
-        let working_directory = match self.working_directory {
-            None => None,
-            Some(PossiblyImage::Explicit(working_directory)) => Some(working_directory),
-            Some(PossiblyImage::Image) => {
-                if self.image.is_none() {
-                    bail!("no image provided");
-                }
-                image_use.insert(ImageUse::WorkingDirectory);
-                None
-            }
-        };
-        let parent = self.image.map(|image| {
-            ContainerParent::Image(ImageRef {
-                name: image,
-                r#use: image_use,
-            })
-        });
+    fn into_job_spec(self) -> JobSpec {
         let container = ContainerSpec {
-            parent,
-            environment,
-            layers,
+            parent: self.parent,
+            environment: self.environment,
+            layers: self.layers,
             mounts: self.mounts,
             network: self.network,
             enable_writable_file_system: self.enable_writable_file_system,
-            working_directory,
+            working_directory: self.working_directory,
             user: self.user,
             group: self.group,
         };
-        Ok(JobSpec {
+        JobSpec {
             container,
             program: self.program,
             arguments: self.arguments,
@@ -133,7 +92,7 @@ impl Job {
             allocate_tty: None,
             priority: self.priority,
             capture_file_system_changes: None,
-        })
+        }
     }
 }
 
@@ -214,12 +173,10 @@ impl TryFrom<JobForDeserialize> for Job {
         Ok(Job {
             program,
             arguments: arguments.unwrap_or_default(),
-            environment: environment.map(IntoEnvironment::into_environment),
-            use_image_environment: image_use.contains(ImageUse::Environment),
-            layers: layers
-                .map(|layers| PossiblyImage::Explicit(NonEmpty::try_from(layers).unwrap()))
-                .unwrap_or(PossiblyImage::Image),
-            added_layers: added_layers.unwrap_or_default(),
+            environment: environment
+                .map(IntoEnvironment::into_environment)
+                .unwrap_or_default(),
+            layers: layers.into_iter().chain(added_layers).flatten().collect(),
             mounts: mounts
                 .unwrap_or_default()
                 .into_iter()
@@ -227,14 +184,10 @@ impl TryFrom<JobForDeserialize> for Job {
                 .collect(),
             network,
             enable_writable_file_system,
-            working_directory: working_directory.map(PossiblyImage::Explicit).or_else(|| {
-                image_use
-                    .contains(ImageUse::WorkingDirectory)
-                    .then_some(PossiblyImage::Image)
-            }),
+            working_directory,
             user,
             group,
-            image: image.map(|image_ref| image_ref.name.clone()),
+            parent: image.map(ContainerParent::Image),
             timeout: timeout.and_then(Timeout::new),
             priority: priority.unwrap_or_default(),
         })
@@ -278,7 +231,7 @@ impl IntoEnvironment for EnvSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::{enum_set, nonempty, JobDevice, JobMount};
+    use maelstrom_base::{enum_set, JobDevice, JobMount};
     use maelstrom_client::{image_container_parent, job_spec};
     use maelstrom_test::{string_vec, tar_layer, utf8_path_buf};
     use maplit::btreemap;
@@ -286,9 +239,7 @@ mod tests {
     #[test]
     fn minimum_into_job_spec() {
         assert_eq!(
-            Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
-                .into_job_spec()
-                .unwrap(),
+            Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")]).into_job_spec(),
             job_spec!("program", layers: [tar_layer!("1")]),
         );
     }
@@ -298,7 +249,7 @@ mod tests {
         assert_eq!(
             Job {
                 arguments: string_vec!["arg1", "arg2"],
-                environment: Some([("FOO", "foo"), ("BAR", "bar")].into_environment()),
+                environment: [("FOO", "foo"), ("BAR", "bar")].into_environment(),
                 mounts: vec![
                     JobMount::Tmp {
                         mount_point: utf8_path_buf!("/tmp"),
@@ -307,13 +258,12 @@ mod tests {
                         devices: enum_set! {JobDevice::Null},
                     },
                 ],
-                working_directory: Some(PossiblyImage::Explicit("/working-directory".into())),
+                working_directory: Some("/working-directory".into()),
                 user: Some(UserId::from(101)),
                 group: Some(GroupId::from(202)),
-                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
+                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
             }
-            .into_job_spec()
-            .unwrap(),
+            .into_job_spec(),
             job_spec! {
                 "program",
                 layers: [tar_layer!("1")],
@@ -337,9 +287,7 @@ mod tests {
     #[test]
     fn network_none_into_job_spec() {
         assert_eq!(
-            Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
-                .into_job_spec()
-                .unwrap(),
+            Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")]).into_job_spec(),
             job_spec!("program", layers: [tar_layer!("1")]),
         );
     }
@@ -349,10 +297,9 @@ mod tests {
         assert_eq!(
             Job {
                 network: Some(JobNetwork::Disabled),
-                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
+                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
             }
-            .into_job_spec()
-            .unwrap(),
+            .into_job_spec(),
             job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Disabled),
         );
     }
@@ -362,10 +309,9 @@ mod tests {
         assert_eq!(
             Job {
                 network: Some(JobNetwork::Loopback),
-                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
+                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
             }
-            .into_job_spec()
-            .unwrap(),
+            .into_job_spec(),
             job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Loopback),
         );
     }
@@ -375,10 +321,9 @@ mod tests {
         assert_eq!(
             Job {
                 network: Some(JobNetwork::Local),
-                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
+                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
             }
-            .into_job_spec()
-            .unwrap(),
+            .into_job_spec(),
             job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Local),
         );
     }
@@ -388,16 +333,15 @@ mod tests {
         assert_eq!(
             Job {
                 enable_writable_file_system: Some(true),
-                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
+                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
             }
-            .into_job_spec()
-            .unwrap(),
+            .into_job_spec(),
             job_spec!("program", layers: [tar_layer!("1")], enable_writable_file_system: true),
         );
     }
 
-    fn parse_job(str_: &str) -> serde_json::Result<Job> {
-        serde_json::from_str(str_)
+    fn parse_job(str_: &str) -> serde_json::Result<JobSpec> {
+        serde_json::from_str(str_).map(Job::into_job_spec)
     }
 
     fn assert_error(err: serde_json::Error, expected: &str) {
@@ -417,8 +361,6 @@ mod tests {
                     "layers": [ { "tar": "1" } ]
                 }"#
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")]),
         );
@@ -476,8 +418,6 @@ mod tests {
                     }
                 }"#
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -541,8 +481,6 @@ mod tests {
                     "added_layers": [ { "tar": "1" } ]
                 }"#
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -612,8 +550,6 @@ mod tests {
                     }
                 }"#
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -633,8 +569,6 @@ mod tests {
                     "arguments": [ "-e", "echo foo" ]
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -654,8 +588,6 @@ mod tests {
                     "environment": { "FOO": "foo", "BAR": "bar" }
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -675,8 +607,6 @@ mod tests {
                     "image": { "name": "image1", "use": [ "environment" ] }
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -716,8 +646,6 @@ mod tests {
                     "image": { "name": "image1", "use": [ "environment" ] }
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -766,8 +694,6 @@ mod tests {
                     "environment": [ { "vars": { "FOO": "foo", "BAR": "bar" }, "extend": true } ]
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -800,8 +726,6 @@ mod tests {
                     ]
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -839,8 +763,6 @@ mod tests {
                     ]
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -869,8 +791,6 @@ mod tests {
                     ]
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -907,8 +827,6 @@ mod tests {
                     "network": "loopback"
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], network: JobNetwork::Loopback),
         )
@@ -924,8 +842,6 @@ mod tests {
                     "enable_writable_file_system": true
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], enable_writable_file_system: true),
         )
@@ -941,8 +857,6 @@ mod tests {
                     "working_directory": "/foo/bar"
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], working_directory: "/foo/bar"),
         )
@@ -961,8 +875,6 @@ mod tests {
                     }
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec! {
                 "/bin/sh",
@@ -1026,8 +938,6 @@ mod tests {
                     "user": 1234
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], user: 1234),
         )
@@ -1043,8 +953,6 @@ mod tests {
                     "group": 4321
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], group: 4321),
         )
@@ -1060,8 +968,6 @@ mod tests {
                     "timeout": 1234
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], timeout: 1234),
         )
@@ -1077,8 +983,6 @@ mod tests {
                     "timeout": 0
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], timeout: 0),
         )
@@ -1094,8 +998,6 @@ mod tests {
                     "priority": -42
                 }"#,
             )
-            .unwrap()
-            .into_job_spec()
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], priority: -42),
         )
