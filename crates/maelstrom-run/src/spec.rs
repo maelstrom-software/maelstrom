@@ -141,14 +141,30 @@ impl TryFrom<JobForDeserialize> for Job {
     type Error = String;
 
     fn try_from(job: JobForDeserialize) -> Result<Self, Self::Error> {
-        let image_use = job
-            .image
+        let JobForDeserialize {
+            program,
+            arguments,
+            environment,
+            layers,
+            added_layers,
+            mounts,
+            network,
+            enable_writable_file_system,
+            working_directory,
+            user,
+            group,
+            timeout,
+            priority,
+            image,
+        } = job;
+
+        let image_use = image
             .as_ref()
             .map(|image_ref| image_ref.r#use)
             .unwrap_or_default();
 
-        if job.added_layers.is_some() {
-            if job.layers.is_some() {
+        if added_layers.is_some() {
+            if layers.is_some() {
                 return Err("field `added_layers` cannot be set with `layers` field".into());
             } else if !image_use.contains(ImageUse::Layers) {
                 return Err(concat!(
@@ -159,26 +175,26 @@ impl TryFrom<JobForDeserialize> for Job {
             }
         }
 
-        if image_use.contains(ImageUse::Layers) && job.layers.is_some() {
+        if image_use.contains(ImageUse::Layers) && layers.is_some() {
             return Err(concat!(
                 "field `layers` cannot be set if `image` with a `use` of ",
                 "`layers` is also specified (try `added_layers` instead)",
             )
             .into());
         }
-        if !image_use.contains(ImageUse::Layers) && job.layers.is_none() {
+        if !image_use.contains(ImageUse::Layers) && layers.is_none() {
             return Err(concat!(
                 "either field `layers` must be set or and `image` with a `use` of ",
                 "`layers` must be specified",
             )
             .into());
         }
-        if let Some([]) = job.layers.as_deref() {
+        if let Some([]) = layers.as_deref() {
             return Err("field `layers` cannot be empty".into());
         }
 
         if image_use.contains(ImageUse::Environment)
-            && matches!(job.environment, Some(EnvSelector::Implicit(_)))
+            && matches!(environment, Some(EnvSelector::Implicit(_)))
         {
             return Err(concat!(
                 "field `environment` must provide `extend` flags if `image` with a ",
@@ -187,7 +203,7 @@ impl TryFrom<JobForDeserialize> for Job {
             .into());
         }
 
-        if image_use.contains(ImageUse::WorkingDirectory) && job.working_directory.is_some() {
+        if image_use.contains(ImageUse::WorkingDirectory) && working_directory.is_some() {
             return Err(concat!(
                 "field `working_directory` cannot be set if `image` with a `use` of ",
                 "`working_directory` is also specified",
@@ -196,36 +212,31 @@ impl TryFrom<JobForDeserialize> for Job {
         }
 
         Ok(Job {
-            program: job.program,
-            arguments: job.arguments.unwrap_or_default(),
-            environment: job.environment.map(IntoEnvironment::into_environment),
+            program,
+            arguments: arguments.unwrap_or_default(),
+            environment: environment.map(IntoEnvironment::into_environment),
             use_image_environment: image_use.contains(ImageUse::Environment),
-            layers: job
-                .layers
+            layers: layers
                 .map(|layers| PossiblyImage::Explicit(NonEmpty::try_from(layers).unwrap()))
                 .unwrap_or(PossiblyImage::Image),
-            added_layers: job.added_layers.unwrap_or_default(),
-            mounts: job
-                .mounts
+            added_layers: added_layers.unwrap_or_default(),
+            mounts: mounts
                 .unwrap_or_default()
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            network: job.network,
-            enable_writable_file_system: job.enable_writable_file_system,
-            working_directory: job
-                .working_directory
-                .map(PossiblyImage::Explicit)
-                .or_else(|| {
-                    image_use
-                        .contains(ImageUse::WorkingDirectory)
-                        .then_some(PossiblyImage::Image)
-                }),
-            user: job.user,
-            group: job.group,
-            image: job.image.map(|image_ref| image_ref.name.clone()),
-            timeout: job.timeout.and_then(Timeout::new),
-            priority: job.priority.unwrap_or_default(),
+            network,
+            enable_writable_file_system,
+            working_directory: working_directory.map(PossiblyImage::Explicit).or_else(|| {
+                image_use
+                    .contains(ImageUse::WorkingDirectory)
+                    .then_some(PossiblyImage::Image)
+            }),
+            user,
+            group,
+            image: image.map(|image_ref| image_ref.name.clone()),
+            timeout: timeout.and_then(Timeout::new),
+            priority: priority.unwrap_or_default(),
         })
     }
 }
