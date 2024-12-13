@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use maelstrom_base::{
-    EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, NonEmpty, Timeout, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobMount, JobMountForTomlAndJson, JobNetwork, NonEmpty, Timeout, UserId,
+    Utf8PathBuf,
 };
 use maelstrom_client::spec::{
     ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, IntoEnvironment, JobSpec,
@@ -37,20 +38,20 @@ pub fn job_spec_iter_from_reader(reader: impl Read) -> impl Iterator<Item = Resu
 #[serde(try_from = "JobForDeserialize")]
 struct Job {
     program: Utf8PathBuf,
-    arguments: Option<Vec<String>>,
+    arguments: Vec<String>,
     environment: Option<Vec<EnvironmentSpec>>,
     use_image_environment: bool,
     layers: PossiblyImage<NonEmpty<LayerSpec>>,
     added_layers: Vec<LayerSpec>,
-    mounts: Option<Vec<JobMountForTomlAndJson>>,
+    mounts: Vec<JobMount>,
     network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
     working_directory: Option<PossiblyImage<Utf8PathBuf>>,
     user: Option<UserId>,
     group: Option<GroupId>,
     image: Option<String>,
-    timeout: Option<u32>,
-    priority: Option<i8>,
+    timeout: Option<Timeout>,
+    priority: i8,
 }
 
 impl Job {
@@ -60,18 +61,18 @@ impl Job {
             program,
             layers: PossiblyImage::Explicit(layers),
             added_layers: Default::default(),
-            arguments: None,
-            environment: None,
-            use_image_environment: false,
-            mounts: None,
-            network: None,
-            enable_writable_file_system: None,
-            working_directory: None,
-            user: None,
-            group: None,
-            image: None,
-            timeout: None,
-            priority: None,
+            arguments: Default::default(),
+            environment: Default::default(),
+            use_image_environment: Default::default(),
+            mounts: Default::default(),
+            network: Default::default(),
+            enable_writable_file_system: Default::default(),
+            working_directory: Default::default(),
+            user: Default::default(),
+            group: Default::default(),
+            image: Default::default(),
+            timeout: Default::default(),
+            priority: Default::default(),
         }
     }
 
@@ -116,12 +117,7 @@ impl Job {
             parent,
             environment,
             layers,
-            mounts: self
-                .mounts
-                .unwrap_or_default()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            mounts: self.mounts,
             network: self.network,
             enable_writable_file_system: self.enable_writable_file_system,
             working_directory,
@@ -131,11 +127,11 @@ impl Job {
         Ok(JobSpec {
             container,
             program: self.program,
-            arguments: self.arguments.unwrap_or_default(),
-            timeout: self.timeout.and_then(Timeout::new),
+            arguments: self.arguments,
+            timeout: self.timeout,
             estimated_duration: None,
             allocate_tty: None,
-            priority: self.priority.unwrap_or_default(),
+            priority: self.priority,
             capture_file_system_changes: None,
         })
     }
@@ -201,7 +197,7 @@ impl TryFrom<JobForDeserialize> for Job {
 
         Ok(Job {
             program: job.program,
-            arguments: job.arguments,
+            arguments: job.arguments.unwrap_or_default(),
             environment: job.environment.map(IntoEnvironment::into_environment),
             use_image_environment: image_use.contains(ImageUse::Environment),
             layers: job
@@ -209,7 +205,12 @@ impl TryFrom<JobForDeserialize> for Job {
                 .map(|layers| PossiblyImage::Explicit(NonEmpty::try_from(layers).unwrap()))
                 .unwrap_or(PossiblyImage::Image),
             added_layers: job.added_layers.unwrap_or_default(),
-            mounts: job.mounts,
+            mounts: job
+                .mounts
+                .unwrap_or_default()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             network: job.network,
             enable_writable_file_system: job.enable_writable_file_system,
             working_directory: job
@@ -223,8 +224,8 @@ impl TryFrom<JobForDeserialize> for Job {
             user: job.user,
             group: job.group,
             image: job.image.map(|image_ref| image_ref.name.clone()),
-            timeout: job.timeout,
-            priority: job.priority,
+            timeout: job.timeout.and_then(Timeout::new),
+            priority: job.priority.unwrap_or_default(),
         })
     }
 }
@@ -266,9 +267,9 @@ impl IntoEnvironment for EnvSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::{enum_set, nonempty, JobDevice, JobDeviceForTomlAndJson, JobMount};
+    use maelstrom_base::{enum_set, nonempty, JobDevice, JobMount};
     use maelstrom_client::{image_container_parent, job_spec};
-    use maelstrom_test::{non_root_utf8_path_buf, string_vec, tar_layer, utf8_path_buf};
+    use maelstrom_test::{string_vec, tar_layer, utf8_path_buf};
     use maplit::btreemap;
 
     #[test]
@@ -285,16 +286,16 @@ mod tests {
     fn most_into_job_spec() {
         assert_eq!(
             Job {
-                arguments: Some(string_vec!["arg1", "arg2"]),
+                arguments: string_vec!["arg1", "arg2"],
                 environment: Some([("FOO", "foo"), ("BAR", "bar")].into_environment()),
-                mounts: Some(vec![
-                    JobMountForTomlAndJson::Tmp {
-                        mount_point: non_root_utf8_path_buf!("/tmp"),
+                mounts: vec![
+                    JobMount::Tmp {
+                        mount_point: utf8_path_buf!("/tmp"),
                     },
-                    JobMountForTomlAndJson::Devices {
-                        devices: enum_set! {JobDeviceForTomlAndJson::Null},
+                    JobMount::Devices {
+                        devices: enum_set! {JobDevice::Null},
                     },
-                ]),
+                ],
                 working_directory: Some(PossiblyImage::Explicit("/working-directory".into())),
                 user: Some(UserId::from(101)),
                 group: Some(GroupId::from(202)),
