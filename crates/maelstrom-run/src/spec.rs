@@ -8,27 +8,12 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io::Read;
 
-struct JobSpecIterator<InnerT> {
-    inner: InnerT,
-}
-
-impl<InnerT> Iterator for JobSpecIterator<InnerT>
-where
-    InnerT: Iterator<Item = serde_json::Result<Job>>,
-{
-    type Item = Result<JobSpec>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        Some(match self.inner.next()? {
-            Err(err) => Err(err.into()),
-            Ok(job) => Ok(job.0),
-        })
-    }
-}
-
-pub fn job_spec_iter_from_reader(reader: impl Read) -> impl Iterator<Item = Result<JobSpec>> {
-    let inner = serde_json::Deserializer::from_reader(reader).into_iter::<Job>();
-    JobSpecIterator { inner }
+pub fn job_spec_iter_from_reader(
+    reader: impl Read,
+) -> impl Iterator<Item = serde_json::Result<JobSpec>> {
+    serde_json::Deserializer::from_reader(reader)
+        .into_iter::<Job>()
+        .map(|result| result.map(|job| job.0))
 }
 
 #[derive(Deserialize)]
