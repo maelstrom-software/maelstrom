@@ -3,11 +3,10 @@ use maelstrom_base::{
     EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, NonEmpty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
-    incompatible, ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse,
-    IntoEnvironment, JobSpec, LayerSpec, PossiblyImage,
+    ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, IntoEnvironment, JobSpec,
+    LayerSpec, PossiblyImage,
 };
-use serde::de::Error as _;
-use serde::{de, Deserialize, Deserializer};
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io::Read;
 
@@ -34,7 +33,8 @@ pub fn job_spec_iter_from_reader(reader: impl Read) -> impl Iterator<Item = Resu
     JobSpecIterator { inner }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(try_from = "JobForDeserialize")]
 struct Job {
     program: Utf8PathBuf,
     arguments: Option<Vec<String>>,
@@ -141,40 +141,110 @@ impl Job {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(field_identifier, rename_all = "snake_case")]
-enum JobField {
-    Program,
-    Arguments,
-    Environment,
-    Layers,
-    AddedLayers,
-    Mounts,
-    Network,
-    EnableWritableFileSystem,
-    WorkingDirectory,
-    User,
-    Group,
-    Image,
-    Timeout,
-    Priority,
+impl TryFrom<JobForDeserialize> for Job {
+    type Error = String;
+
+    fn try_from(job: JobForDeserialize) -> Result<Self, Self::Error> {
+        let image_use = job
+            .image
+            .as_ref()
+            .map(|image_ref| image_ref.r#use)
+            .unwrap_or_default();
+
+        if job.added_layers.is_some() {
+            if job.layers.is_some() {
+                return Err("field `added_layers` cannot be set with `layers` field".into());
+            } else if !image_use.contains(ImageUse::Layers) {
+                return Err(concat!(
+                    "field `added_layers` canot be set without ",
+                    "`image` with a `use` of `layers` also being specified",
+                )
+                .into());
+            }
+        }
+
+        if image_use.contains(ImageUse::Layers) && job.layers.is_some() {
+            return Err(concat!(
+                "field `layers` cannot be set if `image` with a `use` of ",
+                "`layers` is also specified (try `added_layers` instead)",
+            )
+            .into());
+        }
+        if !image_use.contains(ImageUse::Layers) && job.layers.is_none() {
+            return Err(concat!(
+                "either field `layers` must be set or and `image` with a `use` of ",
+                "`layers` must be specified",
+            )
+            .into());
+        }
+        if let Some([]) = job.layers.as_deref() {
+            return Err("field `layers` cannot be empty".into());
+        }
+
+        if image_use.contains(ImageUse::Environment)
+            && matches!(job.environment, Some(EnvSelector::Implicit(_)))
+        {
+            return Err(concat!(
+                "field `environment` must provide `extend` flags if `image` with a ",
+                "`use` of `environment` is also specified",
+            )
+            .into());
+        }
+
+        if image_use.contains(ImageUse::WorkingDirectory) && job.working_directory.is_some() {
+            return Err(concat!(
+                "field `working_directory` cannot be set if `image` with a `use` of ",
+                "`working_directory` is also specified",
+            )
+            .into());
+        }
+
+        Ok(Job {
+            program: job.program,
+            arguments: job.arguments,
+            environment: job.environment.map(IntoEnvironment::into_environment),
+            use_image_environment: image_use.contains(ImageUse::Environment),
+            layers: job
+                .layers
+                .map(|layers| PossiblyImage::Explicit(NonEmpty::try_from(layers).unwrap()))
+                .unwrap_or(PossiblyImage::Image),
+            added_layers: job.added_layers.unwrap_or_default(),
+            mounts: job.mounts,
+            network: job.network,
+            enable_writable_file_system: job.enable_writable_file_system,
+            working_directory: job
+                .working_directory
+                .map(PossiblyImage::Explicit)
+                .or_else(|| {
+                    image_use
+                        .contains(ImageUse::WorkingDirectory)
+                        .then_some(PossiblyImage::Image)
+                }),
+            user: job.user,
+            group: job.group,
+            image: job.image.map(|image_ref| image_ref.name.clone()),
+            timeout: job.timeout,
+            priority: job.priority,
+        })
+    }
 }
 
-struct JobVisitor;
-
-fn must_be_image<T, E>(
-    var: &Option<PossiblyImage<T>>,
-    if_none: &str,
-    if_explicit: &str,
-) -> std::result::Result<(), E>
-where
-    E: de::Error,
-{
-    match var {
-        None => Err(E::custom(format_args!("{}", if_none))),
-        Some(PossiblyImage::Explicit(_)) => Err(E::custom(format_args!("{}", if_explicit))),
-        Some(PossiblyImage::Image) => Ok(()),
-    }
+#[derive(Deserialize)]
+struct JobForDeserialize {
+    program: Utf8PathBuf,
+    arguments: Option<Vec<String>>,
+    environment: Option<EnvSelector>,
+    layers: Option<Vec<LayerSpec>>,
+    added_layers: Option<Vec<LayerSpec>>,
+    mounts: Option<Vec<JobMountForTomlAndJson>>,
+    network: Option<JobNetwork>,
+    enable_writable_file_system: Option<bool>,
+    working_directory: Option<Utf8PathBuf>,
+    user: Option<UserId>,
+    group: Option<GroupId>,
+    timeout: Option<u32>,
+    priority: Option<i8>,
+    image: Option<ImageRef>,
 }
 
 #[derive(Deserialize)]
@@ -190,172 +260,6 @@ impl IntoEnvironment for EnvSelector {
             Self::Implicit(v) => v.into_environment(),
             Self::Explicit(v) => v,
         }
-    }
-}
-
-impl<'de> de::Visitor<'de> for JobVisitor {
-    type Value = Job;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "Job")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: de::MapAccess<'de>,
-    {
-        let mut program = None;
-        let mut arguments = None;
-        let mut environment: Option<EnvSelector> = None;
-        let mut use_image_environment = false;
-        let mut layers = None;
-        let mut added_layers = None;
-        let mut mounts = None;
-        let mut network = None;
-        let mut enable_writable_file_system = None;
-        let mut working_directory = None;
-        let mut user = None;
-        let mut group = None;
-        let mut image = None;
-        let mut timeout = None;
-        let mut priority = None;
-        while let Some(key) = map.next_key()? {
-            match key {
-                JobField::Program => {
-                    program = Some(map.next_value()?);
-                }
-                JobField::Arguments => {
-                    arguments = Some(map.next_value()?);
-                }
-                JobField::Environment => {
-                    environment = Some(map.next_value()?);
-                    if matches!(environment, Some(EnvSelector::Implicit(_)))
-                        && use_image_environment
-                    {
-                        return Err(A::Error::custom(concat!(
-                            "field `environment` must provide `extend` flags if `image` with a ",
-                            "`use` of `environment` is also set"
-                        )));
-                    }
-                }
-                JobField::Layers => {
-                    incompatible(
-                        &layers,
-                        concat!(
-                            "field `layers` cannot be set if `image` with a `use` of ",
-                            "`layers` is also set (try `added_layers` instead)"
-                        ),
-                    )?;
-                    layers = Some(PossiblyImage::Explicit(
-                        NonEmpty::from_vec(map.next_value()?).ok_or_else(|| {
-                            de::Error::custom(format_args!("field `layers` cannot be empty"))
-                        })?,
-                    ));
-                }
-                JobField::AddedLayers => {
-                    must_be_image(
-                        &layers,
-                        "field `added_layers` set before `image` with a `use` of `layers`",
-                        "field `added_layers` cannot be set with `layer` field",
-                    )?;
-                    added_layers = Some(map.next_value()?);
-                }
-                JobField::Mounts => {
-                    mounts = Some(map.next_value()?);
-                }
-                JobField::Network => {
-                    network = Some(map.next_value()?);
-                }
-                JobField::EnableWritableFileSystem => {
-                    enable_writable_file_system = Some(map.next_value()?);
-                }
-                JobField::WorkingDirectory => {
-                    incompatible(
-                        &working_directory,
-                        concat!(
-                            "field `working_directory` cannot be set if `image` with a `use` of ",
-                            "`working_directory` is also set"
-                        ),
-                    )?;
-                    working_directory = Some(PossiblyImage::Explicit(map.next_value()?));
-                }
-                JobField::User => {
-                    user = Some(map.next_value()?);
-                }
-                JobField::Group => {
-                    group = Some(map.next_value()?);
-                }
-                JobField::Timeout => {
-                    timeout = Some(map.next_value()?);
-                }
-                JobField::Priority => {
-                    priority = Some(map.next_value()?);
-                }
-                JobField::Image => {
-                    let i = map.next_value::<ImageRef>()?;
-                    image = Some(i.name);
-                    for image_use in i.r#use {
-                        match image_use {
-                            ImageUse::WorkingDirectory => {
-                                incompatible(
-                                    &working_directory,
-                                    concat!(
-                                        "field `image` cannot use `working_directory` if field ",
-                                        "`working_directory` is also set",
-                                    ),
-                                )?;
-                                working_directory = Some(PossiblyImage::Image);
-                            }
-                            ImageUse::Layers => {
-                                incompatible(
-                                    &layers,
-                                    concat!(
-                                        "field `image` cannot use `layers` if field `layers` ",
-                                        "is also set"
-                                    ),
-                                )?;
-                                layers = Some(PossiblyImage::Image);
-                            }
-                            ImageUse::Environment => {
-                                use_image_environment = true;
-                                if matches!(environment, Some(EnvSelector::Implicit(_))) {
-                                    return Err(A::Error::custom(concat!(
-                                        "field `image` cannot use `environment` if `environment` ",
-                                        "has not provided `extend` flags"
-                                    )));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(Job {
-            program: program.ok_or_else(|| de::Error::missing_field("program"))?,
-            arguments,
-            environment: environment.map(|e| e.into_environment()),
-            use_image_environment,
-            layers: layers.ok_or_else(|| de::Error::missing_field("layers"))?,
-            added_layers: added_layers.unwrap_or_default(),
-            mounts,
-            network,
-            enable_writable_file_system,
-            working_directory,
-            user,
-            group,
-            image,
-            timeout,
-            priority,
-        })
-    }
-}
-
-impl<'de> de::Deserialize<'de> for Job {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(JobVisitor)
     }
 }
 
@@ -530,7 +434,7 @@ mod tests {
                 }"#,
             )
             .unwrap_err(),
-            "missing field `layers`",
+            "either field `layers` must be set or and `image` with a `use` of `layers` must be specified",
         );
     }
 
@@ -584,7 +488,10 @@ mod tests {
                 }"#,
             )
             .unwrap_err(),
-            "field `layers` cannot be set if `image` with a `use` of `layers` is also set",
+            concat!(
+                "field `layers` cannot be set if `image` with a `use` of `layers` ",
+                "is also specified (try `added_layers` instead)",
+            ),
         );
     }
 
@@ -602,7 +509,10 @@ mod tests {
                 }"#,
             )
             .unwrap_err(),
-            "field `image` cannot use `layers` if field `layers` is also set",
+            concat!(
+                "field `layers` cannot be set if `image` with a `use` of `layers` ",
+                "is also specified (try `added_layers` instead)",
+            ),
         );
     }
 
@@ -640,7 +550,10 @@ mod tests {
                 }"#,
             )
             .unwrap_err(),
-            "field `added_layers` set before `image` with a `use` of `layers`",
+            concat!(
+                "field `added_layers` canot be set without `image` with a `use` of ",
+                "`layers` also being specified",
+            ),
         );
     }
 
@@ -655,7 +568,7 @@ mod tests {
                 }"#,
             )
             .unwrap_err(),
-            "field `added_layers` set before `image` with a `use` of `layers`",
+            "field `added_layers` cannot be set with `layers` field",
         );
     }
 
@@ -670,22 +583,31 @@ mod tests {
                 }"#,
             )
             .unwrap_err(),
-            "field `added_layers` cannot be set with `layer` field",
+            "field `added_layers` cannot be set with `layers` field",
         );
     }
 
     #[test]
-    fn added_layers_before_image_with_layers() {
-        assert_error(
+    fn added_layers_before_layers_from_image() {
+        assert_eq!(
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "added_layers": [ "3" ],
-                    "image": { "name": "image1", "use": [ "layers" ] }
-                }"#,
+                    "added_layers": [ { "tar": "1" } ],
+                    "image": {
+                        "name": "image1",
+                        "use": [ "layers" ]
+                    }
+                }"#
             )
-            .unwrap_err(),
-            "field `added_layers` set before `image` with a `use` of `layers`",
+            .unwrap()
+            .into_job_spec()
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1")],
+                parent: image_container_parent!("image1", layers),
+            },
         );
     }
 
@@ -764,7 +686,10 @@ mod tests {
                 }"#,
             )
             .unwrap_err(),
-            "field `image` cannot use `environment` if `environment` has not provided `extend` flags"
+            concat!(
+                "field `environment` must provide `extend` flags if `image` with a ",
+                "`use` of `environment` is also specified",
+            ),
         )
     }
 
@@ -813,7 +738,7 @@ mod tests {
             .unwrap_err(),
             concat!(
                 "field `environment` must provide `extend` flags if `image` with a `use` of ",
-                "`environment` is also set"
+                "`environment` is also specified",
             ),
         )
     }
@@ -1050,7 +975,10 @@ mod tests {
                 }"#,
             )
             .unwrap_err(),
-            "field `image` cannot use `working_directory` if field `working_directory` is also set",
+            concat!(
+                "field `working_directory` cannot be set if `image` with a `use` of ",
+                "`working_directory` is also specified",
+            ),
         )
     }
 
@@ -1071,7 +999,7 @@ mod tests {
             .unwrap_err(),
             concat!(
                 "field `working_directory` cannot be set if `image` with a `use` of ",
-                "`working_directory` is also set",
+                "`working_directory` is also specified",
             ),
         )
     }
