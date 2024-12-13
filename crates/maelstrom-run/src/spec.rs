@@ -5,22 +5,26 @@ use maelstrom_client::spec::{
     LayerSpec,
 };
 use serde::Deserialize;
-use std::collections::BTreeMap;
-use std::io::Read;
+use std::{
+    collections::{BTreeMap, HashMap},
+    io::Read,
+};
 
-pub fn job_spec_iter_from_reader(
+pub fn job_spec_or_containers_iter_from_reader(
     reader: impl Read,
-) -> impl Iterator<Item = serde_json::Result<JobSpec>> {
-    serde_json::Deserializer::from_reader(reader)
-        .into_iter::<Job>()
-        .map(|result| result.map(|job| job.0))
+) -> impl Iterator<Item = serde_json::Result<JobSpecOrContainers>> {
+    serde_json::Deserializer::from_reader(reader).into_iter::<JobSpecOrContainers>()
 }
 
 #[derive(Deserialize)]
 #[serde(try_from = "JobForDeserialize")]
-struct Job(JobSpec);
+#[allow(clippy::large_enum_variant)]
+pub enum JobSpecOrContainers {
+    JobSpec(JobSpec),
+    Containers(HashMap<String, ContainerSpec>),
+}
 
-impl TryFrom<JobForDeserialize> for Job {
+impl TryFrom<JobForDeserialize> for JobSpecOrContainers {
     type Error = String;
 
     fn try_from(job: JobForDeserialize) -> Result<Self, Self::Error> {
@@ -94,7 +98,7 @@ impl TryFrom<JobForDeserialize> for Job {
             .into());
         }
 
-        Ok(Job(JobSpec {
+        Ok(JobSpecOrContainers::JobSpec(JobSpec {
             container: ContainerSpec {
                 parent: image.map(ContainerParent::Image),
                 layers: layers.into_iter().chain(added_layers).flatten().collect(),
@@ -165,8 +169,13 @@ mod tests {
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maplit::btreemap;
 
-    fn parse_job(str_: &str) -> serde_json::Result<JobSpec> {
-        serde_json::from_str(str_).map(|job: Job| job.0)
+    fn parse_job_spec(str_: &str) -> serde_json::Result<JobSpec> {
+        serde_json::from_str(str_).map(|job_spec: JobSpecOrContainers| {
+            let JobSpecOrContainers::JobSpec(job_spec) = job_spec else {
+                panic!("expected JobSpec")
+            };
+            job_spec
+        })
     }
 
     fn assert_error(err: serde_json::Error, expected: &str) {
@@ -180,7 +189,7 @@ mod tests {
     #[test]
     fn basic() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ]
@@ -194,7 +203,7 @@ mod tests {
     #[test]
     fn missing_program() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "layers": [ { "tar": "1" } ]
                 }"#,
@@ -207,7 +216,7 @@ mod tests {
     #[test]
     fn missing_layers() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh"
                 }"#,
@@ -220,7 +229,7 @@ mod tests {
     #[test]
     fn empty_layers() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": []
@@ -234,7 +243,7 @@ mod tests {
     #[test]
     fn layers_from_image() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "image": {
@@ -254,7 +263,7 @@ mod tests {
     #[test]
     fn layers_after_layers_from_image() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "image": {
@@ -275,7 +284,7 @@ mod tests {
     #[test]
     fn layers_from_image_after_layers() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -296,7 +305,7 @@ mod tests {
     #[test]
     fn added_layers_after_layers_from_image() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "image": {
@@ -318,7 +327,7 @@ mod tests {
     #[test]
     fn added_layers_only() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "added_layers": [ { "tar": "1" } ]
@@ -335,7 +344,7 @@ mod tests {
     #[test]
     fn added_layers_before_layers() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "added_layers": [ { "tar": "3" } ],
@@ -350,7 +359,7 @@ mod tests {
     #[test]
     fn added_layers_after_layers() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" }, { "tar": "2" } ],
@@ -365,7 +374,7 @@ mod tests {
     #[test]
     fn added_layers_before_layers_from_image() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "added_layers": [ { "tar": "1" } ],
@@ -387,7 +396,7 @@ mod tests {
     #[test]
     fn arguments() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -406,7 +415,7 @@ mod tests {
     #[test]
     fn environment() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -425,7 +434,7 @@ mod tests {
     #[test]
     fn environment_from_image() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -444,7 +453,7 @@ mod tests {
     #[test]
     fn environment_from_image_after_implicit_environment() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -463,7 +472,7 @@ mod tests {
     #[test]
     fn environment_from_image_after_explicit_environment() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -492,7 +501,7 @@ mod tests {
     #[test]
     fn implicit_environment_after_environment_from_image() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -511,7 +520,7 @@ mod tests {
     #[test]
     fn explicit_environment_after_environment_from_image() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -540,7 +549,7 @@ mod tests {
     #[test]
     fn multi_explicit_environment() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -579,7 +588,7 @@ mod tests {
     #[test]
     fn devices() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -604,7 +613,7 @@ mod tests {
     #[test]
     fn mounts() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -645,7 +654,7 @@ mod tests {
     #[test]
     fn foo() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -660,7 +669,7 @@ mod tests {
     #[test]
     fn enable_writable_file_system() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -675,7 +684,7 @@ mod tests {
     #[test]
     fn working_directory() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -690,7 +699,7 @@ mod tests {
     #[test]
     fn working_directory_from_image() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -712,7 +721,7 @@ mod tests {
     #[test]
     fn working_directory_from_image_after_working_directory() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -734,7 +743,7 @@ mod tests {
     #[test]
     fn working_directory_after_working_directory_from_image() {
         assert_error(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -756,7 +765,7 @@ mod tests {
     #[test]
     fn user() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -771,7 +780,7 @@ mod tests {
     #[test]
     fn group() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -786,7 +795,7 @@ mod tests {
     #[test]
     fn timeout() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -801,7 +810,7 @@ mod tests {
     #[test]
     fn timeout_0() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
@@ -816,7 +825,7 @@ mod tests {
     #[test]
     fn priority() {
         assert_eq!(
-            parse_job(
+            parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],

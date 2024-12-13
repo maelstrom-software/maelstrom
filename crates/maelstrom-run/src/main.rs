@@ -12,7 +12,7 @@ use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, 
 use maelstrom_macro::Config;
 use maelstrom_run::{
     escape::{self, EscapeChar, EscapeChunk},
-    spec,
+    spec::{self, JobSpecOrContainers},
 };
 use maelstrom_util::{
     config::common::{
@@ -773,16 +773,19 @@ fn main_with_logger(
         config.artifact_transfer_strategy,
         log,
     )?;
-    let mut job_specs = spec::job_spec_iter_from_reader(reader);
+    let mut job_specs = spec::job_spec_or_containers_iter_from_reader(reader);
     if extra_options.one_or_tty.any() {
         if extra_options.one_or_tty.tty {
             // Unblock the signals for the local thread. We'll re-block them again once we've read
             // the job spec and started up.
             linux::pthread_sigmask(SigprocmaskHow::UNBLOCK, Some(&blocked_signals))?;
         }
-        let mut job_spec = job_specs
+        let JobSpecOrContainers::JobSpec(mut job_spec) = job_specs
             .next()
-            .ok_or_else(|| anyhow!("no job specification provided"))??;
+            .ok_or_else(|| anyhow!("no job specification provided"))??
+        else {
+            todo!();
+        };
         drop(job_specs);
         match &mem::take(&mut extra_options.args)[..] {
             [] => {}
@@ -801,9 +804,12 @@ fn main_with_logger(
     } else {
         let tracker = Arc::new(JobTracker::default());
         for job_spec in job_specs {
+            let JobSpecOrContainers::JobSpec(job_spec) = job_spec? else {
+                todo!();
+            };
             let tracker = tracker.clone();
             tracker.add_outstanding();
-            client.add_job(job_spec?, move |res| visitor(res, &tracker))?;
+            client.add_job(job_spec, move |res| visitor(res, &tracker))?;
         }
         tracker.wait_for_outstanding();
         Ok(tracker.accum.get())
