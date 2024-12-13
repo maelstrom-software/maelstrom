@@ -1,7 +1,5 @@
 use anyhow::Result;
-use maelstrom_base::{
-    GroupId, JobMount, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf,
-};
+use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{
     ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, IntoEnvironment, JobSpec,
     LayerSpec,
@@ -23,7 +21,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next()? {
             Err(err) => Err(err.into()),
-            Ok(job) => Ok(job.into_job_spec()),
+            Ok(job) => Ok(job.0),
         })
     }
 }
@@ -33,68 +31,9 @@ pub fn job_spec_iter_from_reader(reader: impl Read) -> impl Iterator<Item = Resu
     JobSpecIterator { inner }
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Deserialize)]
 #[serde(try_from = "JobForDeserialize")]
-struct Job {
-    program: Utf8PathBuf,
-    arguments: Vec<String>,
-    environment: Vec<EnvironmentSpec>,
-    layers: Vec<LayerSpec>,
-    mounts: Vec<JobMount>,
-    network: Option<JobNetwork>,
-    enable_writable_file_system: Option<bool>,
-    working_directory: Option<Utf8PathBuf>,
-    user: Option<UserId>,
-    group: Option<GroupId>,
-    parent: Option<ContainerParent>,
-    timeout: Option<Timeout>,
-    priority: i8,
-}
-
-impl Job {
-    #[cfg(test)]
-    fn new(program: Utf8PathBuf, layers: Vec<LayerSpec>) -> Self {
-        Job {
-            program,
-            layers: layers.into(),
-            arguments: Default::default(),
-            environment: Default::default(),
-            mounts: Default::default(),
-            network: Default::default(),
-            enable_writable_file_system: Default::default(),
-            working_directory: Default::default(),
-            user: Default::default(),
-            group: Default::default(),
-            parent: Default::default(),
-            timeout: Default::default(),
-            priority: Default::default(),
-        }
-    }
-
-    fn into_job_spec(self) -> JobSpec {
-        let container = ContainerSpec {
-            parent: self.parent,
-            environment: self.environment,
-            layers: self.layers,
-            mounts: self.mounts,
-            network: self.network,
-            enable_writable_file_system: self.enable_writable_file_system,
-            working_directory: self.working_directory,
-            user: self.user,
-            group: self.group,
-        };
-        JobSpec {
-            container,
-            program: self.program,
-            arguments: self.arguments,
-            timeout: self.timeout,
-            estimated_duration: None,
-            allocate_tty: None,
-            priority: self.priority,
-            capture_file_system_changes: None,
-        }
-    }
-}
+struct Job(JobSpec);
 
 impl TryFrom<JobForDeserialize> for Job {
     type Error = String;
@@ -170,27 +109,32 @@ impl TryFrom<JobForDeserialize> for Job {
             .into());
         }
 
-        Ok(Job {
+        Ok(Job(JobSpec {
+            container: ContainerSpec {
+                parent: image.map(ContainerParent::Image),
+                layers: layers.into_iter().chain(added_layers).flatten().collect(),
+                enable_writable_file_system,
+                environment: environment
+                    .map(IntoEnvironment::into_environment)
+                    .unwrap_or_default(),
+                working_directory,
+                mounts: mounts
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                network,
+                user,
+                group,
+            },
             program,
             arguments: arguments.unwrap_or_default(),
-            environment: environment
-                .map(IntoEnvironment::into_environment)
-                .unwrap_or_default(),
-            layers: layers.into_iter().chain(added_layers).flatten().collect(),
-            mounts: mounts
-                .unwrap_or_default()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            network,
-            enable_writable_file_system,
-            working_directory,
-            user,
-            group,
-            parent: image.map(ContainerParent::Image),
             timeout: timeout.and_then(Timeout::new),
+            estimated_duration: None,
+            allocate_tty: None,
             priority: priority.unwrap_or_default(),
-        })
+            capture_file_system_changes: None,
+        }))
     }
 }
 
@@ -233,115 +177,11 @@ mod tests {
     use super::*;
     use maelstrom_base::{enum_set, JobDevice, JobMount};
     use maelstrom_client::{image_container_parent, job_spec};
-    use maelstrom_test::{string_vec, tar_layer, utf8_path_buf};
+    use maelstrom_test::{tar_layer, utf8_path_buf};
     use maplit::btreemap;
 
-    #[test]
-    fn minimum_into_job_spec() {
-        assert_eq!(
-            Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")]).into_job_spec(),
-            job_spec!("program", layers: [tar_layer!("1")]),
-        );
-    }
-
-    #[test]
-    fn most_into_job_spec() {
-        assert_eq!(
-            Job {
-                arguments: string_vec!["arg1", "arg2"],
-                environment: [("FOO", "foo"), ("BAR", "bar")].into_environment(),
-                mounts: vec![
-                    JobMount::Tmp {
-                        mount_point: utf8_path_buf!("/tmp"),
-                    },
-                    JobMount::Devices {
-                        devices: enum_set! {JobDevice::Null},
-                    },
-                ],
-                working_directory: Some("/working-directory".into()),
-                user: Some(UserId::from(101)),
-                group: Some(GroupId::from(202)),
-                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
-            }
-            .into_job_spec(),
-            job_spec! {
-                "program",
-                layers: [tar_layer!("1")],
-                arguments: ["arg1", "arg2"],
-                environment: [("BAR", "bar"), ("FOO", "foo")],
-                mounts: [
-                    JobMount::Tmp {
-                        mount_point: utf8_path_buf!("/tmp"),
-                    },
-                    JobMount::Devices {
-                        devices: enum_set! {JobDevice::Null},
-                    },
-                ],
-                working_directory: "/working-directory",
-                user: 101,
-                group: 202,
-            },
-        );
-    }
-
-    #[test]
-    fn network_none_into_job_spec() {
-        assert_eq!(
-            Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")]).into_job_spec(),
-            job_spec!("program", layers: [tar_layer!("1")]),
-        );
-    }
-
-    #[test]
-    fn network_disabled_into_job_spec() {
-        assert_eq!(
-            Job {
-                network: Some(JobNetwork::Disabled),
-                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
-            }
-            .into_job_spec(),
-            job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Disabled),
-        );
-    }
-
-    #[test]
-    fn network_loopback_into_job_spec() {
-        assert_eq!(
-            Job {
-                network: Some(JobNetwork::Loopback),
-                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
-            }
-            .into_job_spec(),
-            job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Loopback),
-        );
-    }
-
-    #[test]
-    fn network_local_into_job_spec() {
-        assert_eq!(
-            Job {
-                network: Some(JobNetwork::Local),
-                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
-            }
-            .into_job_spec(),
-            job_spec!("program", layers: [tar_layer!("1")], network: JobNetwork::Local),
-        );
-    }
-
-    #[test]
-    fn enable_writable_file_system_into_job_spec() {
-        assert_eq!(
-            Job {
-                enable_writable_file_system: Some(true),
-                ..Job::new(utf8_path_buf!("program"), vec![tar_layer!("1")])
-            }
-            .into_job_spec(),
-            job_spec!("program", layers: [tar_layer!("1")], enable_writable_file_system: true),
-        );
-    }
-
     fn parse_job(str_: &str) -> serde_json::Result<JobSpec> {
-        serde_json::from_str(str_).map(Job::into_job_spec)
+        serde_json::from_str(str_).map(|job: Job| job.0)
     }
 
     fn assert_error(err: serde_json::Error, expected: &str) {
