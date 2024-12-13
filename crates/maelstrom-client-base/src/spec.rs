@@ -48,8 +48,11 @@ where
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
+#[derive(
+    Clone, Debug, Deserialize, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf,
+)]
 #[proto(proto_buf_type = "proto::ImageRef")]
+#[serde(from = "ImageRefForDeserialize")]
 pub struct ImageRef {
     pub name: String,
     pub r#use: EnumSet<ImageUse>,
@@ -90,6 +93,33 @@ macro_rules! image_ref {
     ($name:expr $(, $($use:ident),+ $(,)?)?) => {
         $crate::image_ref!(@expand [$($($use),+)?] -> [$name, false, false, false])
     };
+}
+
+impl From<ImageRefForDeserialize> for ImageRef {
+    fn from(image: ImageRefForDeserialize) -> Self {
+        match image {
+            ImageRefForDeserialize::AsString(name) => Self {
+                name,
+                r#use: use_default(),
+            },
+            ImageRefForDeserialize::AsStruct { name, r#use } => Self { name, r#use },
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ImageRefForDeserialize {
+    AsString(String),
+    AsStruct {
+        name: String,
+        #[serde(default = "use_default")]
+        r#use: EnumSet<ImageUse>,
+    },
+}
+
+fn use_default() -> EnumSet<ImageUse> {
+    enum_set! {ImageUse::Layers | ImageUse::Environment}
 }
 
 #[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
@@ -820,42 +850,6 @@ pub fn project_container_use_set_to_image_use_set(
         .collect()
 }
 
-/// A struct used for deserializing "image" statements in JSON, TOML, or other similar formats.
-/// This allows the user to specify an image name and the parts of the image they want to use.
-#[derive(Debug, Deserialize, PartialEq)]
-#[serde(from = "ImageForDeserialize")]
-pub struct Image {
-    pub name: String,
-    pub use_: EnumSet<ImageUse>,
-}
-
-impl From<ImageForDeserialize> for Image {
-    fn from(image: ImageForDeserialize) -> Self {
-        match image {
-            ImageForDeserialize::AsString(name) => Self {
-                name,
-                use_: use_default(),
-            },
-            ImageForDeserialize::AsStruct { name, use_ } => Self { name, use_ },
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ImageForDeserialize {
-    AsString(String),
-    AsStruct {
-        name: String,
-        #[serde(rename = "use", default = "use_default")]
-        use_: EnumSet<ImageUse>,
-    },
-}
-
-fn use_default() -> EnumSet<ImageUse> {
-    enum_set! {ImageUse::Layers | ImageUse::Environment}
-}
-
 /// A simple wrapper struct for the config of a local OCI image. This is used for dependency
 /// injection for the other functions in this module.
 #[derive(Default)]
@@ -1188,59 +1182,51 @@ mod tests {
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
-    struct ImageContainer {
-        image: Image,
+    struct ImageRefContainer {
+        #[serde(rename = "image")]
+        image_ref: ImageRef,
     }
 
-    impl ImageContainer {
-        fn new(image: Image) -> Self {
-            Self { image }
+    impl ImageRefContainer {
+        fn new(image_ref: ImageRef) -> Self {
+            Self { image_ref }
         }
     }
 
-    fn parse_image_container(file: &str) -> ImageContainer {
+    fn parse_image_container(file: &str) -> ImageRefContainer {
         toml::from_str(file).unwrap()
     }
 
     #[test]
-    fn image_deserialize() {
+    fn image_ref_deserialize() {
         assert_eq!(
             parse_image_container(indoc! {r#"
                 [image]
                 name = "name"
                 use = [ "layers", "environment", "working_directory" ]
             "#}),
-            ImageContainer::new(Image {
-                name: "name".into(),
-                use_: enum_set! {ImageUse::Layers | ImageUse::Environment | ImageUse::WorkingDirectory},
-            })
+            ImageRefContainer::new(image_ref!("name", layers, environment, working_directory)),
         );
     }
 
     #[test]
-    fn image_deserialize_no_use() {
+    fn image_ref_deserialize_no_use() {
         assert_eq!(
             parse_image_container(indoc! {r#"
                 [image]
                 name = "name"
             "#}),
-            ImageContainer::new(Image {
-                name: "name".into(),
-                use_: enum_set! {ImageUse::Layers | ImageUse::Environment},
-            })
+            ImageRefContainer::new(image_ref!("name", layers, environment)),
         );
     }
 
     #[test]
-    fn image_deserialize_as_string() {
+    fn image_ref_deserialize_as_string() {
         assert_eq!(
             parse_image_container(indoc! {r#"
                 image = "name"
             "#}),
-            ImageContainer::new(Image {
-                name: "name".into(),
-                use_: enum_set! {ImageUse::Layers | ImageUse::Environment},
-            })
+            ImageRefContainer::new(image_ref!("name", layers, environment)),
         );
     }
 

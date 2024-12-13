@@ -3,7 +3,7 @@ use maelstrom_base::{
     EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, NonEmpty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
-    incompatible, ContainerParent, ContainerSpec, EnvironmentSpec, Image, ImageRef, ImageUse,
+    incompatible, ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse,
     IntoEnvironment, JobSpec, LayerSpec, PossiblyImage,
 };
 use serde::de::Error as _;
@@ -292,10 +292,10 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                     priority = Some(map.next_value()?);
                 }
                 JobField::Image => {
-                    let i = map.next_value::<Image>()?;
+                    let i = map.next_value::<ImageRef>()?;
                     image = Some(i.name);
-                    for use_ in i.use_ {
-                        match use_ {
+                    for image_use in i.r#use {
+                        match image_use {
                             ImageUse::WorkingDirectory => {
                                 incompatible(
                                     &working_directory,

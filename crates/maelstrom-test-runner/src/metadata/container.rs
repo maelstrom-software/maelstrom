@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, UserId, Utf8PathBuf};
-use maelstrom_client::spec::{incompatible, Image, ImageUse, LayerSpec, PossiblyImage};
+use maelstrom_client::spec::{incompatible, ImageRef, ImageUse, LayerSpec, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{
     collections::BTreeMap,
@@ -68,10 +68,10 @@ impl TestContainer {
                 self.added_mounts = map.next_value()?;
             }
             ContainerField::Image => {
-                let i = map.next_value::<Image>()?;
+                let i = map.next_value::<ImageRef>()?;
                 self.image = Some(i.name);
-                for use_ in i.use_ {
-                    match use_ {
+                for image_use in i.r#use {
+                    match image_use {
                         ImageUse::WorkingDirectory => {
                             incompatible(
                                 &self.working_directory,

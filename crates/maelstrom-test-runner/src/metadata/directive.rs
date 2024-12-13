@@ -2,7 +2,7 @@
 use super::container::{ContainerField, TestContainer};
 use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
-use maelstrom_client::spec::{incompatible, Image, ImageUse, LayerSpec, PossiblyImage};
+use maelstrom_client::spec::{incompatible, ImageUse, LayerSpec, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{
     collections::BTreeMap,
