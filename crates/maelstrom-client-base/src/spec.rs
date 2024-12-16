@@ -119,8 +119,11 @@ fn use_default() -> EnumSet<ImageUse> {
     enum_set! {ImageUse::Layers | ImageUse::Environment}
 }
 
-#[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
+#[derive(
+    Clone, Debug, Deserialize, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf,
+)]
 #[proto(proto_buf_type = "proto::ContainerRef")]
+#[serde(from = "ContainerRefForDeserialize")]
 pub struct ContainerRef {
     pub name: String,
     pub r#use: EnumSet<ContainerUse>,
@@ -188,6 +191,29 @@ macro_rules! container_ref {
     ($name:literal $(, $($field:tt)*)?) => {
         $crate::container_ref!(@expand [$($($field)*)?] -> [$name, ::maelstrom_base::EnumSet::empty()])
     };
+}
+
+impl From<ContainerRefForDeserialize> for ContainerRef {
+    fn from(image: ContainerRefForDeserialize) -> Self {
+        match image {
+            ContainerRefForDeserialize::AsString(name) => Self {
+                name,
+                r#use: EnumSet::all(),
+            },
+            ContainerRefForDeserialize::AsStruct { name, r#use } => Self { name, r#use },
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ContainerRefForDeserialize {
+    AsString(String),
+    AsStruct {
+        name: String,
+        #[serde(default = "EnumSet::<ContainerUse>::all")]
+        r#use: EnumSet<ContainerUse>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
