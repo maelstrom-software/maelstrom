@@ -1,5 +1,7 @@
 use anyhow::Result;
-use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
+use maelstrom_base::{
+    EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf,
+};
 use maelstrom_client::spec::{
     ContainerParent, ContainerRef, ContainerRefWithImplicitOrExplicitUse, ContainerSpec,
     ContainerUse, EnvironmentSpec, ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse,
@@ -144,123 +146,190 @@ impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
             parent,
         } = container;
 
-        let image_use = image
-            .as_ref()
-            .map(|image_ref| ImageRef::from(image_ref.clone()).r#use)
-            .unwrap_or_default();
-        let parent_use = parent
-            .as_ref()
-            .map(|container_ref| ContainerRef::from(container_ref.clone()).r#use)
-            .unwrap_or_default();
+        let mut to_remove_from_image_use = EnumSet::default();
+        let mut to_remove_from_parent_use = EnumSet::default();
 
         if image.is_some() && parent.is_some() {
             return Err("both `image` and `parent` cannot be specified".into());
         }
 
-        if added_layers.is_some() {
-            if layers.is_some() {
+        let layers = match (layers, added_layers, &image, &parent) {
+            (None, None, _, _) => vec![],
+            (Some(_), Some(_), _, _) => {
                 return Err("field `added_layers` cannot be set with `layers` field".into());
-            } else if image.is_some() && !image_use.contains(ImageUse::Layers) {
+            }
+            (_, _, Some(_), Some(_)) => {
+                unreachable!();
+            }
+            (None, Some(_), None, None) => {
                 return Err(concat!(
                     "field `added_layers` cannot be set without ",
-                    "`image` with a `use` of `layers` also being specified",
-                )
-                .into());
-            } else if parent.is_some() && !parent_use.contains(ContainerUse::Layers) {
-                return Err(concat!(
-                    "field `added_layers` cannot be set without ",
-                    "`parent` with a `use` of `layers` also being specified",
-                )
-                .into());
-            } else if image.is_none() && parent.is_none() {
-                return Err(concat!(
-                    "field `added_layers` cannot be set without ",
-                    "`image` or `parent` with a `use` of `layers` also being specified",
+                    "`image` or `parent` also being specified (try `layers` instead)",
                 )
                 .into());
             }
-        }
+            (None, Some(added_layers), Some(image), None) => {
+                if !image.r#use.as_set().contains(ImageUse::Layers) {
+                    return Err(concat!(
+                        "field `added_layers` requires `image` being specified ",
+                        "with a `use` of `layers` (try `layers` instead)",
+                    )
+                    .into());
+                }
+                added_layers
+            }
+            (None, Some(added_layers), None, Some(parent)) => {
+                if !parent.r#use.as_set().contains(ContainerUse::Layers) {
+                    return Err(concat!(
+                        "field `added_layers` requires `parent` being specified ",
+                        "with a `use` of `layers` (try `layers` instead)",
+                    )
+                    .into());
+                }
+                added_layers
+            }
+            (Some(layers), None, None, None) => layers,
+            (Some(layers), None, Some(image), None) => {
+                if image.r#use.explicit().contains(ImageUse::Layers) {
+                    return Err(concat!(
+                        "field `layers` cannot be set if `image` with an explicit `use` of ",
+                        "`layers` is also specified (try `added_layers` instead)",
+                    )
+                    .into());
+                }
+                to_remove_from_image_use.insert(ImageUse::Layers);
+                layers
+            }
+            (Some(layers), None, None, Some(parent)) => {
+                if parent.r#use.explicit().contains(ContainerUse::Layers) {
+                    return Err(concat!(
+                        "field `layers` cannot be set if `parent` with an explicit `use` of ",
+                        "`layers` is also specified (try `added_layers` instead)",
+                    )
+                    .into());
+                }
+                to_remove_from_parent_use.insert(ContainerUse::Layers);
+                layers
+            }
+        };
 
-        if layers.is_some() {
-            if image_use.contains(ImageUse::Layers) {
-                return Err(concat!(
-                    "field `layers` cannot be set if `image` with a `use` of ",
-                    "`layers` is also specified (try `added_layers` instead)",
-                )
-                .into());
-            } else if parent_use.contains(ContainerUse::Layers) {
-                return Err(concat!(
-                    "field `layers` cannot be set if `parent` with a `use` of ",
-                    "`layers` is also specified (try `added_layers` instead)",
-                )
-                .into());
+        if enable_writable_file_system.is_some() {
+            if let Some(parent) = &parent {
+                if parent
+                    .r#use
+                    .explicit()
+                    .contains(ContainerUse::EnableWritableFileSystem)
+                {
+                    return Err(concat!(
+                        "field `enable_writable_file_system` cannot be set if `parent` with an ",
+                        "explicit `use` of `enable_writable_file_system` is also specified",
+                    )
+                    .into());
+                }
+                to_remove_from_parent_use.insert(ContainerUse::EnableWritableFileSystem);
             }
-        }
-        if layers.is_none()
-            && !image_use.contains(ImageUse::Layers)
-            && !parent_use.contains(ContainerUse::Layers)
-        {
-            if image.is_some() {
-                return Err(
-                    "either field `layers` must be set or `image` must specify a `use` of `layers`"
-                        .into(),
-                );
-            } else if parent.is_some() {
-                return Err(
-                    "either field `layers` must be set or `parent` must specify a `use` of `layers`"
-                        .into(),
-                );
-            } else {
-                return Err(concat!(
-                    "either field `layers` must be set or an `image` or `parent` with a `use` of ",
-                    "`layers` must be specified",
-                )
-                .into());
-            }
-        }
-        if let Some([]) = layers.as_deref() {
-            return Err("field `layers` cannot be empty".into());
         }
 
         if matches!(environment, Some(EnvSelector::Implicit(_))) {
-            if image_use.contains(ImageUse::Environment) {
-                return Err(concat!(
-                    "field `environment` must provide `extend` flags if `image` with a ",
-                    "`use` of `environment` is also specified",
-                )
-                .into());
-            } else if parent_use.contains(ContainerUse::Environment) {
-                return Err(concat!(
-                    "field `environment` must provide `extend` flags if `parent` with a ",
-                    "`use` of `environment` is also specified",
-                )
-                .into());
+            if let Some(image) = &image {
+                if image.r#use.as_set().contains(ImageUse::Environment) {
+                    return Err(concat!(
+                        "field `environment` must provide `extend` flags if `image` with a ",
+                        "`use` of `environment` is also specified",
+                    )
+                    .into());
+                }
+            }
+            if let Some(parent) = &parent {
+                if parent.r#use.as_set().contains(ContainerUse::Environment) {
+                    return Err(concat!(
+                        "field `environment` must provide `extend` flags if `parent` with a ",
+                        "`use` of `environment` is also specified",
+                    )
+                    .into());
+                }
             }
         }
 
         if working_directory.is_some() {
-            if image_use.contains(ImageUse::WorkingDirectory) {
-                return Err(concat!(
-                    "field `working_directory` cannot be set if `image` with a `use` of ",
-                    "`working_directory` is also specified",
-                )
-                .into());
-            } else if parent_use.contains(ContainerUse::WorkingDirectory) {
-                return Err(concat!(
-                    "field `working_directory` cannot be set if `parent` with a `use` of ",
-                    "`working_directory` is also specified",
-                )
-                .into());
+            if let Some(image) = &image {
+                if image.r#use.explicit().contains(ImageUse::WorkingDirectory) {
+                    return Err(concat!(
+                        "field `working_directory` cannot be set if `image` with an ",
+                        "explicit `use` of `working_directory` is also specified",
+                    )
+                    .into());
+                }
+                to_remove_from_image_use.insert(ImageUse::WorkingDirectory);
+            }
+            if let Some(parent) = &parent {
+                if parent
+                    .r#use
+                    .explicit()
+                    .contains(ContainerUse::WorkingDirectory)
+                {
+                    return Err(concat!(
+                        "field `working_directory` cannot be set if `parent` with an ",
+                        "explicit `use` of `working_directory` is also specified",
+                    )
+                    .into());
+                }
+                to_remove_from_parent_use.insert(ContainerUse::WorkingDirectory);
+            }
+        }
+
+        if network.is_some() {
+            if let Some(parent) = &parent {
+                if parent.r#use.explicit().contains(ContainerUse::Network) {
+                    return Err(concat!(
+                        "field `network` cannot be set if `parent` with an ",
+                        "explicit `use` of `network` is also specified",
+                    )
+                    .into());
+                }
+                to_remove_from_parent_use.insert(ContainerUse::Network);
+            }
+        }
+
+        if user.is_some() {
+            if let Some(parent) = &parent {
+                if parent.r#use.explicit().contains(ContainerUse::User) {
+                    return Err(concat!(
+                        "field `user` cannot be set if `parent` with an ",
+                        "explicit `use` of `user` is also specified",
+                    )
+                    .into());
+                }
+                to_remove_from_parent_use.insert(ContainerUse::User);
+            }
+        }
+
+        if group.is_some() {
+            if let Some(parent) = &parent {
+                if parent.r#use.explicit().contains(ContainerUse::Group) {
+                    return Err(concat!(
+                        "field `group` cannot be set if `parent` with an ",
+                        "explicit `use` of `group` is also specified",
+                    )
+                    .into());
+                }
+                to_remove_from_parent_use.insert(ContainerUse::Group);
             }
         }
 
         Ok(ContainerSpec {
             parent: match (image, parent) {
-                (Some(image), _) => Some(ContainerParent::Image(image.into())),
-                (_, Some(parent)) => Some(ContainerParent::Container(parent.into())),
+                (Some(image), _) => Some(ContainerParent::Image(ImageRef {
+                    name: image.name,
+                    r#use: image.r#use.as_set().difference(to_remove_from_image_use),
+                })),
+                (_, Some(parent)) => Some(ContainerParent::Container(ContainerRef {
+                    name: parent.name,
+                    r#use: parent.r#use.as_set().difference(to_remove_from_parent_use),
+                })),
                 (None, None) => None,
             },
-            layers: layers.into_iter().chain(added_layers).flatten().collect(),
+            layers,
             enable_writable_file_system,
             environment: environment
                 .map(IntoEnvironment::into_environment)
@@ -406,7 +475,26 @@ mod tests {
     }
 
     #[test]
-    fn added_layers_and_image_with_layers() {
+    fn added_layers_and_image_with_implicit_layers() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": "image1",
+                    "added_layers": [ { "tar": "1" } ]
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1")],
+                parent: image_container_parent!("image1", all),
+            },
+        );
+    }
+
+    #[test]
+    fn added_layers_and_image_with_explicit_layers() {
         assert_eq!(
             parse_job_spec(
                 r#"{
@@ -442,14 +530,33 @@ mod tests {
             )
             .unwrap_err(),
             concat!(
-                "field `added_layers` cannot be set without `image` with a ",
-                "`use` of `layers` also being specified",
+                "field `added_layers` requires `image` being specified with a ",
+                "`use` of `layers` (try `layers` instead)",
             ),
         );
     }
 
     #[test]
-    fn added_layers_and_parent_with_layers() {
+    fn added_layers_and_parent_with_implicit_layers() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent",
+                    "added_layers": [ { "tar": "1" } ]
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1")],
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn added_layers_and_parent_with_explicit_layers() {
         assert_eq!(
             parse_job_spec(
                 r#"{
@@ -485,14 +592,14 @@ mod tests {
             )
             .unwrap_err(),
             concat!(
-                "field `added_layers` cannot be set without `parent` with a ",
-                "`use` of `layers` also being specified",
+                "field `added_layers` requires `parent` being specified with a ",
+                "`use` of `layers` (try `layers` instead)",
             ),
         );
     }
 
     #[test]
-    fn added_layers_and_no_image_nor_parent() {
+    fn added_layers_and_neither_image_nor_parent() {
         assert_error(
             parse_job_spec(
                 r#"{
@@ -502,14 +609,49 @@ mod tests {
             )
             .unwrap_err(),
             concat!(
-                "field `added_layers` cannot be set without `image` or `parent` ",
-                "with a `use` of `layers` also being specified",
+                "field `added_layers` cannot be set without ",
+                "`image` or `parent` also being specified (try `layers` instead)",
             ),
         );
     }
 
     #[test]
-    fn image_with_layers() {
+    fn empty_added_layers() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent",
+                    "added_layers": []
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn image_with_implicit_layers() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": "image1"
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: image_container_parent!("image1", all),
+            },
+        );
+    }
+
+    #[test]
+    fn image_with_explicit_layers() {
         assert_eq!(
             parse_job_spec(
                 r#"{
@@ -529,7 +671,24 @@ mod tests {
     }
 
     #[test]
-    fn parent_with_layers() {
+    fn parent_with_implicit_layers() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent"
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn parent_with_explicit_layers() {
         assert_eq!(
             parse_job_spec(
                 r#"{
@@ -549,7 +708,26 @@ mod tests {
     }
 
     #[test]
-    fn layers_and_image_with_layers() {
+    fn layers_and_image_with_implicit_layers() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": "image1",
+                    "layers": [ { "tar": "1" } ]
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1")],
+                parent: image_container_parent!("image1", all, -layers),
+            },
+        );
+    }
+
+    #[test]
+    fn layers_and_image_with_explicit_layers() {
         assert_error(
             parse_job_spec(
                 r#"{
@@ -563,8 +741,8 @@ mod tests {
             )
             .unwrap_err(),
             concat!(
-                "field `layers` cannot be set if `image` with a `use` of `layers` ",
-                "is also specified (try `added_layers` instead)",
+                "field `layers` cannot be set if `image` with an explicit `use` of ",
+                "`layers` is also specified (try `added_layers` instead)",
             ),
         );
     }
@@ -592,7 +770,26 @@ mod tests {
     }
 
     #[test]
-    fn layers_and_parent_with_layers() {
+    fn layers_and_parent_with_implicit_layers() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent",
+                    "layers": [ { "tar": "1" } ]
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1")],
+                parent: container_container_parent!("parent", all, -layers),
+            },
+        );
+    }
+
+    #[test]
+    fn layers_and_parent_with_explicit_layers() {
         assert_error(
             parse_job_spec(
                 r#"{
@@ -606,8 +803,8 @@ mod tests {
             )
             .unwrap_err(),
             concat!(
-                "field `layers` cannot be set if `parent` with a `use` of `layers` ",
-                "is also specified (try `added_layers` instead)",
+                "field `layers` cannot be set if `parent` with an explicit `use` of ",
+                "`layers` is also specified (try `added_layers` instead)",
             ),
         );
     }
@@ -635,24 +832,23 @@ mod tests {
     }
 
     #[test]
-    fn no_layers_and_no_image_nor_parent() {
-        assert_error(
+    fn no_layers_and_neither_image_nor_parent() {
+        assert_eq!(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh"
                 }"#,
             )
-            .unwrap_err(),
-            concat!(
-                "either field `layers` must be set or an `image` or `parent` ",
-                "with a `use` of `layers` must be specified",
-            ),
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+            },
         );
     }
 
     #[test]
     fn no_layers_and_image_without_layers() {
-        assert_error(
+        assert_eq!(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
@@ -662,17 +858,17 @@ mod tests {
                     }
                 }"#,
             )
-            .unwrap_err(),
-            concat!(
-                "either field `layers` must be set or ",
-                "`image` must specify a `use` of `layers`",
-            ),
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: image_container_parent!("image1", environment),
+            },
         );
     }
 
     #[test]
     fn no_layers_and_parent_without_layers() {
-        assert_error(
+        assert_eq!(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
@@ -682,25 +878,27 @@ mod tests {
                     }
                 }"#,
             )
-            .unwrap_err(),
-            concat!(
-                "either field `layers` must be set or ",
-                "`parent` must specify a `use` of `layers`",
-            ),
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", environment),
+            },
         );
     }
 
     #[test]
     fn empty_layers() {
-        assert_error(
+        assert_eq!(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": []
                 }"#,
             )
-            .unwrap_err(),
-            "field `layers` cannot be empty",
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+            },
         );
     }
 
@@ -982,32 +1180,115 @@ mod tests {
     }
 
     #[test]
-    fn foo() {
-        assert_eq!(
-            parse_job_spec(
-                r#"{
-                    "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "network": "loopback"
-                }"#,
-            )
-            .unwrap(),
-            job_spec!("/bin/sh", layers: [tar_layer!("1")], network: JobNetwork::Loopback),
-        )
-    }
-
-    #[test]
     fn enable_writable_file_system() {
         assert_eq!(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
                     "enable_writable_file_system": true
                 }"#,
             )
             .unwrap(),
-            job_spec!("/bin/sh", layers: [tar_layer!("1")], enable_writable_file_system: true),
+            job_spec!("/bin/sh", enable_writable_file_system: true),
+        )
+    }
+
+    #[test]
+    fn parent_with_implicit_enable_writable_file_system() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        )
+    }
+
+    #[test]
+    fn parent_with_explicit_enable_writable_file_system() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "enable_writable_file_system" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", enable_writable_file_system),
+            },
+        )
+    }
+
+    #[test]
+    fn enable_writable_file_system_and_parent_with_implicit_enable_writable_file_system() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "enable_writable_file_system": true,
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                enable_writable_file_system: true,
+                parent: container_container_parent!("parent", all, -enable_writable_file_system),
+            },
+        )
+    }
+
+    #[test]
+    fn enable_writable_file_system_and_parent_with_explicit_enable_writable_file_system() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "enable_writable_file_system": true,
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "enable_writable_file_system" ]
+                    }
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `enable_writable_file_system` cannot be set if `parent` with an explicit `use` of ",
+                "`enable_writable_file_system` is also specified",
+            ),
+        )
+    }
+
+    #[test]
+    fn enable_writable_file_system_and_parent_without_enable_writable_file_system() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "enable_writable_file_system": true,
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                enable_writable_file_system: true,
+                parent: container_container_parent!("parent", environment),
+            },
         )
     }
 
@@ -1027,7 +1308,24 @@ mod tests {
     }
 
     #[test]
-    fn working_directory_from_image() {
+    fn image_with_implicit_working_directory() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": "image1"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: image_container_parent!("image1", all),
+            },
+        )
+    }
+
+    #[test]
+    fn image_with_explicit_working_directory() {
         assert_eq!(
             parse_job_spec(
                 r#"{
@@ -1049,7 +1347,26 @@ mod tests {
     }
 
     #[test]
-    fn working_directory_from_image_and_working_directory() {
+    fn working_directory_and_image_with_implicit_working_directory() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "working_directory": "/foo/bar",
+                    "image": "image1"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                working_directory: "/foo/bar",
+                parent: image_container_parent!("image1", all, -working_directory),
+            },
+        )
+    }
+
+    #[test]
+    fn working_directory_and_image_with_explicit_working_directory() {
         assert_error(
             parse_job_spec(
                 r#"{
@@ -1064,31 +1381,250 @@ mod tests {
             )
             .unwrap_err(),
             concat!(
-                "field `working_directory` cannot be set if `image` with a `use` of ",
+                "field `working_directory` cannot be set if `image` with an explicit `use` of ",
                 "`working_directory` is also specified",
             ),
         )
     }
 
     #[test]
-    fn working_directory_and_working_directory_from_image() {
+    fn working_directory_and_image_without_working_directory() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ { "tar": "1" } ],
+                    "working_directory": "/foo/bar",
+                    "image": {
+                        "name": "image1",
+                        "use": [ "environment" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1")],
+                working_directory: "/foo/bar",
+                parent: image_container_parent!("image1", environment),
+            },
+        )
+    }
+
+    #[test]
+    fn parent_with_implicit_working_directory() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        )
+    }
+
+    #[test]
+    fn parent_with_explicit_working_directory() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ { "tar": "1" } ],
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "working_directory" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1")],
+                parent: container_container_parent!("parent", working_directory),
+            },
+        )
+    }
+
+    #[test]
+    fn working_directory_and_parent_with_implicit_working_directory() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "working_directory": "/foo/bar",
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                working_directory: "/foo/bar",
+                parent: container_container_parent!("parent", all, -working_directory),
+            },
+        )
+    }
+
+    #[test]
+    fn working_directory_and_parent_with_explicit_working_directory() {
         assert_error(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
-                    "image": {
-                        "name": "image1",
+                    "working_directory": "/foo/bar",
+                    "parent": {
+                        "name": "parent",
                         "use": [ "working_directory" ]
-                    },
-                    "working_directory": "/foo/bar"
+                    }
                 }"#,
             )
             .unwrap_err(),
             concat!(
-                "field `working_directory` cannot be set if `image` with a `use` of ",
+                "field `working_directory` cannot be set if `parent` with an explicit `use` of ",
                 "`working_directory` is also specified",
             ),
+        )
+    }
+
+    #[test]
+    fn working_directory_and_parent_without_working_directory() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ { "tar": "1" } ],
+                    "working_directory": "/foo/bar",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1")],
+                working_directory: "/foo/bar",
+                parent: container_container_parent!("parent", environment),
+            },
+        )
+    }
+
+    #[test]
+    fn network() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "network": "loopback"
+                }"#,
+            )
+            .unwrap(),
+            job_spec!("/bin/sh", network: JobNetwork::Loopback),
+        )
+    }
+
+    #[test]
+    fn parent_with_implicit_network() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        )
+    }
+
+    #[test]
+    fn parent_with_explicit_network() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "network" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", network),
+            },
+        )
+    }
+
+    #[test]
+    fn network_and_parent_with_implicit_network() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "network": "loopback",
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                network: JobNetwork::Loopback,
+                parent: container_container_parent!("parent", all, -network),
+            },
+        )
+    }
+
+    #[test]
+    fn network_and_parent_with_explicit_network() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "network": "loopback",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "network" ]
+                    }
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `network` cannot be set if `parent` with an explicit `use` of ",
+                "`network` is also specified",
+            ),
+        )
+    }
+
+    #[test]
+    fn network_and_parent_without_network() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "network": "loopback",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                network: JobNetwork::Loopback,
+                parent: container_container_parent!("parent", environment),
+            },
         )
     }
 
@@ -1108,6 +1644,105 @@ mod tests {
     }
 
     #[test]
+    fn parent_with_implicit_user() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        )
+    }
+
+    #[test]
+    fn parent_with_explicit_user() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "user" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", user),
+            },
+        )
+    }
+
+    #[test]
+    fn user_and_parent_with_implicit_user() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "user": 101,
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                user: 101,
+                parent: container_container_parent!("parent", all, -user),
+            },
+        )
+    }
+
+    #[test]
+    fn user_and_parent_with_explicit_user() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "user": 101,
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "user" ]
+                    }
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `user` cannot be set if `parent` with an explicit `use` of ",
+                "`user` is also specified",
+            ),
+        )
+    }
+
+    #[test]
+    fn user_and_parent_without_user() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "user": 101,
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                user: 101,
+                parent: container_container_parent!("parent", environment),
+            },
+        )
+    }
+
+    #[test]
     fn group() {
         assert_eq!(
             parse_job_spec(
@@ -1119,6 +1754,105 @@ mod tests {
             )
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], group: 4321),
+        )
+    }
+
+    #[test]
+    fn parent_with_implicit_group() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        )
+    }
+
+    #[test]
+    fn parent_with_explicit_group() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "group" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", group),
+            },
+        )
+    }
+
+    #[test]
+    fn group_and_parent_with_implicit_group() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "group": 101,
+                    "parent": "parent"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                group: 101,
+                parent: container_container_parent!("parent", all, -group),
+            },
+        )
+    }
+
+    #[test]
+    fn group_and_parent_with_explicit_group() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "group": 101,
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "group" ]
+                    }
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `group` cannot be set if `parent` with an explicit `use` of ",
+                "`group` is also specified",
+            ),
+        )
+    }
+
+    #[test]
+    fn group_and_parent_without_group() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "group": 101,
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                group: 101,
+                parent: container_container_parent!("parent", environment),
+            },
         )
     }
 
@@ -1217,8 +1951,8 @@ mod tests {
             )
             .unwrap_err(),
             concat!(
-                "field `layers` cannot be set if `image` with a `use` of `layers` ",
-                "is also specified (try `added_layers` instead)",
+                "field `layers` cannot be set if `image` with an explicit `use` ",
+                "of `layers` is also specified (try `added_layers` instead)",
             ),
         );
     }
