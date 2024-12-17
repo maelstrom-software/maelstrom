@@ -60,38 +60,35 @@ pub struct ImageRef {
 
 #[macro_export]
 macro_rules! image_ref {
-    (@expand [] -> [$name:expr, $layers:literal, $environment:literal, $working_directory:literal]) => {
+    (@expand [] -> [$name:expr, $use:expr]) => {
         $crate::spec::ImageRef {
             name: $name.into(),
-            r#use: {
-                let mut r#use = ::maelstrom_base::EnumSet::new();
-                if $layers {
-                    r#use.insert($crate::spec::ImageUse::Layers);
-                }
-                if $environment {
-                    r#use.insert($crate::spec::ImageUse::Environment);
-                }
-                if $working_directory {
-                    r#use.insert($crate::spec::ImageUse::WorkingDirectory);
-                }
-                r#use
-            },
+            r#use: $use,
         }
     };
-    (@expand [all $(,$($field_in:ident),*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
-        $crate::image_ref!(@expand [] -> [$name, true, true, true])
+    (@expand [all $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::image_ref!(@expand [$($($field_in)*)?] -> [$name, ::maelstrom_base::EnumSet::all()])
     };
-    (@expand [layers $(,$($field_in:ident),*)?] -> [$name:expr, $old_layers:literal, $environment:literal, $working_directory:literal]) => {
-        $crate::image_ref!(@expand [$($($field_in),*)?] -> [$name, true, $environment, $working_directory])
+    (@expand [layers $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::image_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ImageUse::Layers])
     };
-    (@expand [environment $(,$($field_in:ident),*)?] -> [$name:expr, $layers:literal, $old_environment:literal, $working_directory:literal]) => {
-        $crate::image_ref!(@expand [$($($field_in),*)?] -> [$name, $layers, true, $working_directory])
+    (@expand [-layers $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::image_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ImageUse::Layers])
     };
-    (@expand [working_directory $(,$($field_in:ident),*)?] -> [$name:expr, $layers:literal, $environment:literal, $old_working_directory:literal]) => {
-        $crate::image_ref!(@expand [$($($field_in),*)?] -> [$name, $layers, $environment, true])
+    (@expand [environment $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::image_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ImageUse::Environment])
     };
-    ($name:expr $(, $($use:ident),+ $(,)?)?) => {
-        $crate::image_ref!(@expand [$($($use),+)?] -> [$name, false, false, false])
+    (@expand [-environment $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::image_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ImageUse::Environment])
+    };
+    (@expand [working_directory $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::image_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ImageUse::WorkingDirectory])
+    };
+    (@expand [-working_directory $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::image_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ImageUse::WorkingDirectory])
+    };
+    ($name:literal $(, $($field:tt)*)?) => {
+        $crate::image_ref!(@expand [$($($field)*)?] -> [$name, ::maelstrom_base::EnumSet::empty()])
     };
 }
 
@@ -1179,6 +1176,248 @@ mod tests {
             ],
             vec!["D=1"],
         )
+    }
+
+    #[test]
+    fn image_ref_macro_empty() {
+        assert_eq!(
+            image_ref!("foo"),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_empty_trailing_comma() {
+        assert_eq!(
+            image_ref!("foo",),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_all() {
+        assert_eq!(
+            image_ref!("foo", all),
+            ImageRef {
+                name: "foo".into(),
+                r#use: EnumSet::all(),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_all_trailing_comma() {
+        assert_eq!(
+            image_ref!("foo", all,),
+            ImageRef {
+                name: "foo".into(),
+                r#use: EnumSet::all(),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_layers() {
+        assert_eq!(
+            image_ref!("foo", layers),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Layers),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_layers_trailing_comma() {
+        assert_eq!(
+            image_ref!("foo", layers,),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Layers),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_minus_layers() {
+        assert_eq!(
+            image_ref!("foo", -layers),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_all_minus_layers() {
+        assert_eq!(
+            image_ref!("foo", all, -layers),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Environment | ImageUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_all_minus_layers_trailing_comma() {
+        assert_eq!(
+            image_ref!("foo", all, -layers,),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Environment | ImageUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_environment() {
+        assert_eq!(
+            image_ref!("foo", environment),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Environment),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_environment_trailing_comma() {
+        assert_eq!(
+            image_ref!("foo", environment,),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Environment),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_minus_environment() {
+        assert_eq!(
+            image_ref!("foo", -environment),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_all_minus_environment() {
+        assert_eq!(
+            image_ref!("foo", all, -environment),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Layers | ImageUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_all_minus_environment_trailing_comma() {
+        assert_eq!(
+            image_ref!("foo", all, -environment,),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Layers | ImageUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_working_directory() {
+        assert_eq!(
+            image_ref!("foo", working_directory),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_working_directory_trailing_comma() {
+        assert_eq!(
+            image_ref!("foo", working_directory),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_minus_working_directory() {
+        assert_eq!(
+            image_ref!("foo", -working_directory),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_all_minus_working_directory() {
+        assert_eq!(
+            image_ref!("foo", all, -working_directory),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Layers | ImageUse::Environment),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_all_minus_working_directory_trailing_comma() {
+        assert_eq!(
+            image_ref!("foo", all, -working_directory,),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Layers | ImageUse::Environment),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_union() {
+        assert_eq!(
+            image_ref!("foo", layers, working_directory, layers, layers),
+            ImageRef {
+                name: "foo".into(),
+                r#use: enum_set!(ImageUse::Layers | ImageUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_union_after_all() {
+        assert_eq!(
+            image_ref!("foo", all, working_directory, layers, layers),
+            ImageRef {
+                name: "foo".into(),
+                r#use: EnumSet::all(),
+            },
+        );
+    }
+
+    #[test]
+    fn image_ref_macro_union_before_all() {
+        assert_eq!(
+            image_ref!("foo", working_directory, layers, layers, all),
+            ImageRef {
+                name: "foo".into(),
+                r#use: EnumSet::all(),
+            },
+        );
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
