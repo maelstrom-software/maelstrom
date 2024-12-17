@@ -128,268 +128,65 @@ pub struct ContainerRef {
 
 #[macro_export]
 macro_rules! container_ref {
-    (@expand [] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
+    (@expand [] -> [$name:expr, $use:expr]) => {
         $crate::spec::ContainerRef {
             name: $name.into(),
-            r#use: {
-                let mut r#use = ::maelstrom_base::EnumSet::new();
-                if $layers {
-                    r#use.insert($crate::spec::ContainerUse::Layers);
-                }
-                if $enable_writable_file_system {
-                    r#use.insert($crate::spec::ContainerUse::EnableWritableFileSystem);
-                }
-                if $environment {
-                    r#use.insert($crate::spec::ContainerUse::Environment);
-                }
-                if $working_directory {
-                    r#use.insert($crate::spec::ContainerUse::WorkingDirectory);
-                }
-                if $mounts {
-                    r#use.insert($crate::spec::ContainerUse::Mounts);
-                }
-                if $network {
-                    r#use.insert($crate::spec::ContainerUse::Network);
-                }
-                if $user {
-                    r#use.insert($crate::spec::ContainerUse::User);
-                }
-                if $group {
-                    r#use.insert($crate::spec::ContainerUse::Group);
-                }
-                r#use
-            },
+            r#use: $use,
         }
     };
-    (@expand [all $(,$($field_in:ident),*)?] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
-        $crate::container_ref!(@expand [] -> [
-            name: $name,
-            layers: true,
-            enable_writable_file_system: true,
-            environment: true,
-            working_directory: true,
-            mounts: true,
-            network: true,
-            user: true,
-            group: true,
-        ])
+    (@expand [all $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, ::maelstrom_base::EnumSet::all()])
     };
-    (@expand [layers $(,$($field_in:ident),*)?] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
-        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
-            name: $name,
-            layers: true,
-            enable_writable_file_system: $enable_writable_file_system,
-            environment: $environment,
-            working_directory: $working_directory,
-            mounts: $mounts,
-            network: $network,
-            user: $user,
-            group: $group,
-        ])
+    (@expand [layers $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ContainerUse::Layers])
     };
-    (@expand [enable_writable_file_system $(,$($field_in:ident),*)?] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
-        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
-            name: $name,
-            layers: $layers,
-            enable_writable_file_system: true,
-            environment: $environment,
-            working_directory: $working_directory,
-            mounts: $mounts,
-            network: $network,
-            user: $user,
-            group: $group,
-        ])
+    (@expand [-layers $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ContainerUse::Layers])
     };
-    (@expand [environment $(,$($field_in:ident),*)?] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
-        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
-            name: $name,
-            layers: $layers,
-            enable_writable_file_system: $enable_writable_file_system,
-            environment: true,
-            working_directory: $working_directory,
-            mounts: $mounts,
-            network: $network,
-            user: $user,
-            group: $group,
-        ])
+    (@expand [enable_writable_file_system $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ContainerUse::EnableWritableFileSystem])
     };
-    (@expand [working_directory $(,$($field_in:ident),*)?] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
-        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
-            name: $name,
-            layers: $layers,
-            enable_writable_file_system: $enable_writable_file_system,
-            environment: $environment,
-            working_directory: true,
-            mounts: $mounts,
-            network: $network,
-            user: $user,
-            group: $group,
-        ])
+    (@expand [-enable_writable_file_system $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ContainerUse::EnableWritableFileSystem])
     };
-    (@expand [mounts $(,$($field_in:ident),*)?] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
-        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
-            name: $name,
-            layers: $layers,
-            enable_writable_file_system: $enable_writable_file_system,
-            environment: $environment,
-            working_directory: $working_directory,
-            mounts: true,
-            network: $network,
-            user: $user,
-            group: $group,
-        ])
+    (@expand [environment $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ContainerUse::Environment])
     };
-    (@expand [network $(,$($field_in:ident),*)?] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
-        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
-            name: $name,
-            layers: $layers,
-            enable_writable_file_system: $enable_writable_file_system,
-            environment: $environment,
-            working_directory: $working_directory,
-            mounts: $mounts,
-            network: true,
-            user: $user,
-            group: $group,
-        ])
+    (@expand [-environment $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ContainerUse::Environment])
     };
-    (@expand [user $(,$($field_in:ident),*)?] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
-        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
-            name: $name,
-            layers: $layers,
-            enable_writable_file_system: $enable_writable_file_system,
-            environment: $environment,
-            working_directory: $working_directory,
-            mounts: $mounts,
-            network: $network,
-            user: true,
-            group: $group,
-        ])
+    (@expand [working_directory $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ContainerUse::WorkingDirectory])
     };
-    (@expand [group $(,$($field_in:ident),*)?] -> [
-         name: $name:expr,
-         layers: $layers:literal,
-         enable_writable_file_system: $enable_writable_file_system:literal,
-         environment: $environment:literal,
-         working_directory: $working_directory:literal,
-         mounts: $mounts:literal,
-         network: $network:literal,
-         user: $user:literal,
-         group: $group:literal,
-    ]) => {
-        $crate::container_ref!(@expand [$($($field_in),*)?] -> [
-            name: $name,
-            layers: $layers,
-            enable_writable_file_system: $enable_writable_file_system,
-            environment: $environment,
-            working_directory: $working_directory,
-            mounts: $mounts,
-            network: $network,
-            user: $user,
-            group: true,
-        ])
+    (@expand [-working_directory $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ContainerUse::WorkingDirectory])
     };
-    ($name:expr $(, $($use:ident),+ $(,)?)?) => {
-        $crate::container_ref!(@expand [$($($use),+)?] -> [
-            name: $name,
-            layers: false,
-            enable_writable_file_system: false,
-            environment: false,
-            working_directory: false,
-            mounts: false,
-            network: false,
-            user: false,
-            group: false,
-        ])
+    (@expand [mounts $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ContainerUse::Mounts])
+    };
+    (@expand [-mounts $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ContainerUse::Mounts])
+    };
+    (@expand [network $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ContainerUse::Network])
+    };
+    (@expand [-network $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ContainerUse::Network])
+    };
+    (@expand [user $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ContainerUse::User])
+    };
+    (@expand [-user $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ContainerUse::User])
+    };
+    (@expand [group $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use | $crate::spec::ContainerUse::Group])
+    };
+    (@expand [-group $(, $($field_in:tt)*)?] -> [$name:literal, $use:expr]) => {
+        $crate::container_ref!(@expand [$($($field_in)*)?] -> [$name, $use - $crate::spec::ContainerUse::Group])
+    };
+    ($name:literal $(, $($field:tt)*)?) => {
+        $crate::container_ref!(@expand [$($($field)*)?] -> [$name, ::maelstrom_base::EnumSet::empty()])
     };
 }
 
@@ -1414,6 +1211,651 @@ mod tests {
         assert_eq!(
             image_ref!("foo", working_directory, layers, layers, all),
             ImageRef {
+                name: "foo".into(),
+                r#use: EnumSet::all(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_empty() {
+        assert_eq!(
+            container_ref!("foo"),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_empty_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo",),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all() {
+        assert_eq!(
+            container_ref!("foo", all),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: EnumSet::all(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", all,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: EnumSet::all(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_layers() {
+        assert_eq!(
+            container_ref!("foo", layers),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Layers),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_layers_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", layers,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Layers),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_minus_layers() {
+        assert_eq!(
+            container_ref!("foo", -layers),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_layers() {
+        assert_eq!(
+            container_ref!("foo", all, -layers),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_layers_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", all, -layers,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_enable_writable_file_system() {
+        assert_eq!(
+            container_ref!("foo", enable_writable_file_system),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::EnableWritableFileSystem),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_enable_writable_file_system_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", enable_writable_file_system,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::EnableWritableFileSystem),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_minus_enable_writable_file_system() {
+        assert_eq!(
+            container_ref!("foo", -enable_writable_file_system),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_enable_writable_file_system() {
+        assert_eq!(
+            container_ref!("foo", all, -enable_writable_file_system),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_enable_writable_file_system_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", all, -enable_writable_file_system,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_environment() {
+        assert_eq!(
+            container_ref!("foo", environment),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Environment),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_environment_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", environment,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Environment),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_minus_environment() {
+        assert_eq!(
+            container_ref!("foo", -environment),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_environment() {
+        assert_eq!(
+            container_ref!("foo", all, -environment),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_environment_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", all, -environment,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_working_directory() {
+        assert_eq!(
+            container_ref!("foo", working_directory),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_working_directory_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", working_directory),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_minus_working_directory() {
+        assert_eq!(
+            container_ref!("foo", -working_directory),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_working_directory() {
+        assert_eq!(
+            container_ref!("foo", all, -working_directory),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_working_directory_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", all, -working_directory,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_mounts() {
+        assert_eq!(
+            container_ref!("foo", mounts),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Mounts),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_mounts_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", mounts),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Mounts),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_minus_mounts() {
+        assert_eq!(
+            container_ref!("foo", -mounts),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_mounts() {
+        assert_eq!(
+            container_ref!("foo", all, -mounts),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_mounts_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", all, -mounts,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Network |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_network() {
+        assert_eq!(
+            container_ref!("foo", network),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Network),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_network_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", network),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Network),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_minus_network() {
+        assert_eq!(
+            container_ref!("foo", -network),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_network() {
+        assert_eq!(
+            container_ref!("foo", all, -network),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_network_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", all, -network,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::User |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_user() {
+        assert_eq!(
+            container_ref!("foo", user),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::User),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_user_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", user),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::User),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_minus_user() {
+        assert_eq!(
+            container_ref!("foo", -user),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_user() {
+        assert_eq!(
+            container_ref!("foo", all, -user),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_user_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", all, -user,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::Group
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_group() {
+        assert_eq!(
+            container_ref!("foo", group),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Group),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_group_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", group),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Group),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_minus_group() {
+        assert_eq!(
+            container_ref!("foo", -group),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_group() {
+        assert_eq!(
+            container_ref!("foo", all, -group),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_all_minus_group_trailing_comma() {
+        assert_eq!(
+            container_ref!("foo", all, -group,),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set! {
+                    ContainerUse::Layers |
+                    ContainerUse::EnableWritableFileSystem |
+                    ContainerUse::Environment |
+                    ContainerUse::WorkingDirectory |
+                    ContainerUse::Mounts |
+                    ContainerUse::Network |
+                    ContainerUse::User
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_union() {
+        assert_eq!(
+            container_ref!("foo", layers, working_directory, layers, layers),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: enum_set!(ContainerUse::Layers | ContainerUse::WorkingDirectory),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_union_after_all() {
+        assert_eq!(
+            container_ref!("foo", all, working_directory, layers, layers),
+            ContainerRef {
+                name: "foo".into(),
+                r#use: EnumSet::all(),
+            },
+        );
+    }
+
+    #[test]
+    fn container_ref_macro_union_before_all() {
+        assert_eq!(
+            container_ref!("foo", working_directory, layers, layers, all),
+            ContainerRef {
                 name: "foo".into(),
                 r#use: EnumSet::all(),
             },
