@@ -1,6 +1,6 @@
 use anyhow::Result;
 use maelstrom_base::{Timeout, Utf8PathBuf};
-use maelstrom_client::spec::{ContainerSpec, ContainerSpecForTomlAndJson, JobSpec};
+use maelstrom_client::spec::{ContainerSpec, JobSpec};
 use serde::{
     de::Deserializer,
     Deserialize,
@@ -67,17 +67,15 @@ impl<'de> Deserialize<'de> for JobSpecOrContainersForDeserialize {
 #[derive(Deserialize)]
 struct JobSpecForDeserialize {
     #[serde(flatten)]
-    container: ContainerSpecForTomlAndJson,
+    container: ContainerSpec,
     program: Utf8PathBuf,
     arguments: Option<Vec<String>>,
     timeout: Option<u32>,
     priority: Option<i8>,
 }
 
-impl TryFrom<JobSpecForDeserialize> for JobSpec {
-    type Error = String;
-
-    fn try_from(job_spec: JobSpecForDeserialize) -> Result<Self, Self::Error> {
+impl From<JobSpecForDeserialize> for JobSpec {
+    fn from(job_spec: JobSpecForDeserialize) -> Self {
         let JobSpecForDeserialize {
             container,
             program,
@@ -85,8 +83,8 @@ impl TryFrom<JobSpecForDeserialize> for JobSpec {
             timeout,
             priority,
         } = job_spec;
-        Ok(JobSpec {
-            container: ContainerSpec::try_from(container)?,
+        JobSpec {
+            container,
             program,
             arguments: arguments.unwrap_or_default(),
             timeout: timeout.and_then(Timeout::new),
@@ -94,7 +92,7 @@ impl TryFrom<JobSpecForDeserialize> for JobSpec {
             allocate_tty: None,
             priority: priority.unwrap_or_default(),
             capture_file_system_changes: None,
-        })
+        }
     }
 }
 

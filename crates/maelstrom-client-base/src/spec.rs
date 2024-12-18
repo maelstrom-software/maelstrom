@@ -494,7 +494,7 @@ macro_rules! container_spec {
 }
 
 #[derive(Deserialize)]
-pub struct ContainerSpecForTomlAndJson {
+struct ContainerSpecForTomlAndJson {
     image: Option<ImageRefWithImplicitOrExplicitUse>,
     parent: Option<ContainerRefWithImplicitOrExplicitUse>,
     layers: Option<Vec<LayerSpec>>,
