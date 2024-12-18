@@ -115,18 +115,19 @@ impl TryFrom<JobSpecForDeserialize> for JobSpec {
 
 #[derive(Deserialize)]
 struct ContainerSpecForDeserialize {
-    environment: Option<EnvSelector>,
+    image: Option<ImageRefWithImplicitOrExplicitUse>,
+    parent: Option<ContainerRefWithImplicitOrExplicitUse>,
     layers: Option<Vec<LayerSpec>>,
     added_layers: Option<Vec<LayerSpec>>,
+    enable_writable_file_system: Option<bool>,
+    environment: Option<EnvSelector>,
+    added_environment: Option<EnvSelector>,
+    working_directory: Option<Utf8PathBuf>,
     mounts: Option<Vec<JobMountForTomlAndJson>>,
     added_mounts: Option<Vec<JobMountForTomlAndJson>>,
     network: Option<JobNetwork>,
-    enable_writable_file_system: Option<bool>,
-    working_directory: Option<Utf8PathBuf>,
     user: Option<UserId>,
     group: Option<GroupId>,
-    image: Option<ImageRefWithImplicitOrExplicitUse>,
-    parent: Option<ContainerRefWithImplicitOrExplicitUse>,
 }
 
 impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
@@ -134,18 +135,19 @@ impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
 
     fn try_from(container: ContainerSpecForDeserialize) -> Result<Self, Self::Error> {
         let ContainerSpecForDeserialize {
-            environment,
+            image,
+            parent,
             layers,
             added_layers,
+            enable_writable_file_system,
+            environment,
+            added_environment,
+            working_directory,
             mounts,
             added_mounts,
             network,
-            enable_writable_file_system,
-            working_directory,
             user,
             group,
-            image,
-            parent,
         } = container;
 
         let mut to_remove_from_image_use = EnumSet::default();
@@ -232,26 +234,67 @@ impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
             }
         }
 
-        if matches!(environment, Some(EnvSelector::Implicit(_))) {
-            if let Some(image) = &image {
-                if image.r#use.as_set().contains(ImageUse::Environment) {
+        let environment = match (environment, added_environment, &image, &parent) {
+            (None, None, _, _) => vec![],
+            (Some(_), Some(_), _, _) => {
+                return Err(
+                    "field `added_environment` cannot be set with `environment` field".into(),
+                );
+            }
+            (_, _, Some(_), Some(_)) => {
+                unreachable!();
+            }
+            (None, Some(_), None, None) => {
+                return Err(concat!(
+                    "field `added_environment` cannot be set without ",
+                    "`image` or `parent` also being specified (try `environment` instead)",
+                )
+                .into());
+            }
+            (None, Some(added_environment), Some(image), None) => {
+                if !image.r#use.as_set().contains(ImageUse::Environment) {
                     return Err(concat!(
-                        "field `environment` must provide `extend` flags if `image` with a ",
-                        "`use` of `environment` is also specified",
+                        "field `added_environment` requires `image` being specified ",
+                        "with a `use` of `environment` (try `environment` instead)",
                     )
                     .into());
                 }
+                added_environment.into_environment()
             }
-            if let Some(parent) = &parent {
-                if parent.r#use.as_set().contains(ContainerUse::Environment) {
+            (None, Some(added_environment), None, Some(parent)) => {
+                if !parent.r#use.as_set().contains(ContainerUse::Environment) {
                     return Err(concat!(
-                        "field `environment` must provide `extend` flags if `parent` with a ",
-                        "`use` of `environment` is also specified",
+                        "field `added_environment` requires `parent` being specified ",
+                        "with a `use` of `environment` (try `environment` instead)",
                     )
                     .into());
                 }
+                added_environment.into_environment()
             }
-        }
+            (Some(environment), None, None, None) => environment.into_environment(),
+            (Some(environment), None, Some(image), None) => {
+                if image.r#use.explicit().contains(ImageUse::Environment) {
+                    return Err(concat!(
+                        "field `environment` cannot be set if `image` with an explicit `use` of ",
+                        "`environment` is also specified (try `added_environment` instead)",
+                    )
+                    .into());
+                }
+                to_remove_from_image_use.insert(ImageUse::Environment);
+                environment.into_environment()
+            }
+            (Some(environment), None, None, Some(parent)) => {
+                if parent.r#use.explicit().contains(ContainerUse::Environment) {
+                    return Err(concat!(
+                        "field `environment` cannot be set if `parent` with an explicit `use` of ",
+                        "`environment` is also specified (try `added_environment` instead)",
+                    )
+                    .into());
+                }
+                to_remove_from_parent_use.insert(ContainerUse::Environment);
+                environment.into_environment()
+            }
+        };
 
         if working_directory.is_some() {
             if let Some(image) = &image {
@@ -372,9 +415,7 @@ impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
             },
             layers,
             enable_writable_file_system,
-            environment: environment
-                .map(IntoEnvironment::into_environment)
-                .unwrap_or_default(),
+            environment,
             working_directory,
             mounts,
             network,
@@ -422,10 +463,11 @@ mod tests {
     use super::*;
     use maelstrom_base::{proc_mount, tmp_mount, JobMount};
     use maelstrom_client::{
-        container_container_parent, container_spec, image_container_parent, job_spec,
+        container_container_parent, container_spec, environment_spec, image_container_parent,
+        job_spec,
     };
     use maelstrom_test::{tar_layer, utf8_path_buf};
-    use maplit::{btreemap, hashmap};
+    use maplit::hashmap;
 
     fn parse_job_spec(str_: &str) -> serde_json::Result<JobSpec> {
         serde_json::from_str(str_).map(|job_spec: JobSpecOrContainers| {
@@ -959,195 +1001,512 @@ mod tests {
     }
 
     #[test]
-    fn implicit_environment() {
+    fn added_environment_and_environment() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "environment": { "FOO": "foo", "BAR": "bar" },
+                    "added_environment": { "FROB": "frob" }
+                }"#,
+            )
+            .unwrap_err(),
+            "field `added_environment` cannot be set with `environment` field",
+        );
+    }
+
+    #[test]
+    fn added_environment_and_image_with_implicit_environment() {
         assert_eq!(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "environment": { "FOO": "foo", "BAR": "bar" }
+                    "image": "image1",
+                    "added_environment": { "FROB": "frob" }
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                environment: environment_spec!(false, "FROB" => "frob"),
+                parent: image_container_parent!("image1", all),
+            },
+        );
+    }
+
+    #[test]
+    fn added_environment_and_image_with_explicit_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": {
+                        "name": "image1",
+                        "use": [ "environment" ]
+                    },
+                    "added_environment": { "FROB": "frob" }
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                environment: environment_spec!(false, "FROB" => "frob"),
+                parent: image_container_parent!("image1", environment),
+            },
+        );
+    }
+
+    #[test]
+    fn added_environment_and_image_without_environment() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": {
+                        "name": "image1",
+                        "use": [ "layers" ]
+                    },
+                    "added_environment": { "FROB": "frob" }
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `added_environment` requires `image` being specified with a ",
+                "`use` of `environment` (try `environment` instead)",
+            ),
+        );
+    }
+
+    #[test]
+    fn added_environment_and_parent_with_implicit_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent",
+                    "added_environment": [
+                        {
+                            "vars": { "FROB": "frob" },
+                            "extend": false
+                        },
+                        {
+                            "vars": { "BAZ": "baz" },
+                            "extend": true
+                        }
+                    ]
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                environment: [
+                    environment_spec!(false, "FROB" => "frob"),
+                    environment_spec!(true, "BAZ" => "baz"),
+                ],
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn added_environment_and_parent_with_explicit_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    },
+                    "added_environment": [
+                        {
+                            "vars": { "FROB": "frob" },
+                            "extend": false
+                        },
+                        {
+                            "vars": { "BAZ": "baz" },
+                            "extend": true
+                        }
+                    ]
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                environment: [
+                    environment_spec!(false, "FROB" => "frob"),
+                    environment_spec!(true, "BAZ" => "baz"),
+                ],
+                parent: container_container_parent!("parent", environment),
+            },
+        );
+    }
+
+    #[test]
+    fn added_environment_and_parent_without_environment() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "layers" ]
+                    },
+                    "added_environment": [
+                        {
+                            "vars": { "FROB": "frob" },
+                            "extend": false
+                        },
+                        {
+                            "vars": { "BAZ": "baz" },
+                            "extend": true
+                        }
+                    ]
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `added_environment` requires `parent` being specified with a ",
+                "`use` of `environment` (try `environment` instead)",
+            ),
+        );
+    }
+
+    #[test]
+    fn added_environment_and_neither_image_nor_parent() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "added_environment": { "FROB": "frob" }
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `added_environment` cannot be set without ",
+                "`image` or `parent` also being specified (try `environment` instead)",
+            ),
+        );
+    }
+
+    #[test]
+    fn empty_added_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent",
+                    "added_environment": []
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn image_with_implicit_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": "image1"
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: image_container_parent!("image1", all),
+            },
+        );
+    }
+
+    #[test]
+    fn image_with_explicit_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": {
+                        "name": "image1",
+                        "use": [ "environment" ]
+                    }
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: image_container_parent!("image1", environment),
+            },
+        );
+    }
+
+    #[test]
+    fn parent_with_implicit_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent"
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn parent_with_explicit_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    }
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", environment),
+            },
+        );
+    }
+
+    #[test]
+    fn environment_and_image_with_implicit_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": "image1",
+                    "environment": { "FROB": "frob" }
                 }"#,
             )
             .unwrap(),
             job_spec! {
                 "/bin/sh",
-                layers: [tar_layer!("1")],
-                environment: [("BAR", "bar"), ("FOO", "foo")],
+                environment: environment_spec!(false, "FROB" => "frob"),
+                parent: image_container_parent!("image1", all, -environment),
             },
-        )
+        );
     }
 
     #[test]
-    fn explicit_environment() {
+    fn environment_and_image_with_explicit_environment() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": {
+                        "name": "image1",
+                        "use": [ "environment" ]
+                    },
+                    "environment": { "FROB": "frob" }
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `environment` cannot be set if `image` with an explicit `use` of ",
+                "`environment` is also specified (try `added_environment` instead)",
+            ),
+        );
+    }
+
+    #[test]
+    fn environment_and_image_without_environment() {
         assert_eq!(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "image": { "name": "image1", "use": [ "environment" ] },
+                    "image": {
+                        "name": "image1",
+                        "use": [ "layers" ]
+                    },
+                    "environment": { "FROB": "frob" }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                environment: environment_spec!(false, "FROB" => "frob"),
+                parent: image_container_parent!("image1", layers),
+            },
+        );
+    }
+
+    #[test]
+    fn environment_and_parent_with_implicit_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent",
                     "environment": [
-                        { "vars": { "FOO": "foo", "BAR": "bar" }, "extend": true },
-                        { "vars": { "BAZ": "baz", "QUX": "qux" }, "extend": false }
+                        {
+                            "vars": { "FROB": "frob" },
+                            "extend": false
+                        },
+                        {
+                            "vars": { "BAZ": "baz" },
+                            "extend": true
+                        }
                     ]
                 }"#,
             )
             .unwrap(),
             job_spec! {
                 "/bin/sh",
-                layers: [tar_layer!("1")],
-                parent: image_container_parent!("image1", environment),
                 environment: [
-                    EnvironmentSpec {
-                        vars: btreemap! {
-                            "FOO".into() => "foo".into(),
-                            "BAR".into() => "bar".into(),
-                        },
-                        extend: true,
-                    },
-                    EnvironmentSpec {
-                        vars: btreemap! {
-                            "BAZ".into() => "baz".into(),
-                            "QUX".into() => "qux".into(),
-                        },
-                        extend: false,
-                    },
+                    environment_spec!(false, "FROB" => "frob"),
+                    environment_spec!(true, "BAZ" => "baz"),
                 ],
+                parent: container_container_parent!("parent", all, -environment),
             },
-        )
+        );
     }
 
     #[test]
-    fn image_with_environment() {
-        assert_eq!(
-            parse_job_spec(
-                r#"{
-                    "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "image": { "name": "image1", "use": [ "environment" ] }
-                }"#,
-            )
-            .unwrap(),
-            job_spec! {
-                "/bin/sh",
-                layers: [tar_layer!("1")],
-                parent: image_container_parent!("image1", environment),
-            },
-        )
-    }
-
-    #[test]
-    fn parent_with_environment() {
-        assert_eq!(
-            parse_job_spec(
-                r#"{
-                    "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "parent": { "name": "parent", "use": [ "environment" ] }
-                }"#,
-            )
-            .unwrap(),
-            job_spec! {
-                "/bin/sh",
-                layers: [tar_layer!("1")],
-                parent: container_container_parent!("parent", environment),
-            },
-        )
-    }
-
-    #[test]
-    fn implicit_environment_and_image_with_environment() {
+    fn environment_and_parent_with_explicit_environment() {
         assert_error(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "environment": { "FOO": "foo", "BAR": "bar" },
-                    "image": { "name": "image1", "use": [ "environment" ] }
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    },
+                    "environment": [
+                        {
+                            "vars": { "FROB": "frob" },
+                            "extend": false
+                        },
+                        {
+                            "vars": { "BAZ": "baz" },
+                            "extend": true
+                        }
+                    ]
                 }"#,
             )
             .unwrap_err(),
             concat!(
-                "field `environment` must provide `extend` flags if `image` with a ",
-                "`use` of `environment` is also specified",
+                "field `environment` cannot be set if `parent` with an explicit `use` of ",
+                "`environment` is also specified (try `added_environment` instead)",
             ),
-        )
+        );
     }
 
     #[test]
-    fn explicit_environment_and_image_with_environment() {
+    fn environment_and_parent_without_environment() {
         assert_eq!(
             parse_job_spec(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "environment": [ { "vars": { "FOO": "foo", "BAR": "bar" }, "extend": true } ],
-                    "image": { "name": "image1", "use": [ "environment" ] }
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "layers" ]
+                    },
+                    "environment": [
+                        {
+                            "vars": { "FROB": "frob" },
+                            "extend": false
+                        },
+                        {
+                            "vars": { "BAZ": "baz" },
+                            "extend": true
+                        }
+                    ]
                 }"#,
             )
             .unwrap(),
             job_spec! {
                 "/bin/sh",
-                layers: [tar_layer!("1")],
-                parent: image_container_parent!("image1", environment),
                 environment: [
-                    EnvironmentSpec {
-                        vars: btreemap! {
-                            "FOO".into() => "foo".into(),
-                            "BAR".into() => "bar".into(),
-                        },
-                        extend: true,
-                    }
+                    environment_spec!(false, "FROB" => "frob"),
+                    environment_spec!(true, "BAZ" => "baz"),
                 ],
+                parent: container_container_parent!("parent", layers),
             },
-        )
+        );
     }
 
     #[test]
-    fn implicit_environment_and_parent_with_environment() {
-        assert_error(
-            parse_job_spec(
-                r#"{
-                    "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "environment": { "FOO": "foo", "BAR": "bar" },
-                    "parent": { "name": "parent", "use": [ "environment" ] }
-                }"#,
-            )
-            .unwrap_err(),
-            concat!(
-                "field `environment` must provide `extend` flags if `parent` with a ",
-                "`use` of `environment` is also specified",
-            ),
-        )
-    }
-
-    #[test]
-    fn explicit_environment_and_parent_with_environment() {
+    fn no_environment_and_neither_image_nor_parent() {
         assert_eq!(
             parse_job_spec(
                 r#"{
-                    "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "environment": [ { "vars": { "FOO": "foo", "BAR": "bar" }, "extend": true } ],
-                    "parent": { "name": "parent", "use": [ "environment" ] }
+                    "program": "/bin/sh"
                 }"#,
             )
             .unwrap(),
             job_spec! {
                 "/bin/sh",
-                layers: [tar_layer!("1")],
-                parent: container_container_parent!("parent", environment),
-                environment: [
-                    EnvironmentSpec {
-                        vars: btreemap! {
-                            "FOO".into() => "foo".into(),
-                            "BAR".into() => "bar".into(),
-                        },
-                        extend: true,
-                    }
-                ],
             },
-        )
+        );
+    }
+
+    #[test]
+    fn no_environment_and_image_without_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "image": {
+                        "name": "image1",
+                        "use": [ "layers" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: image_container_parent!("image1", layers),
+            },
+        );
+    }
+
+    #[test]
+    fn no_environment_and_parent_without_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "layers" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", layers),
+            },
+        );
+    }
+
+    #[test]
+    fn empty_environment() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "environment": []
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+            },
+        );
     }
 
     #[test]
