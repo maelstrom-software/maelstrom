@@ -12,7 +12,7 @@ use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, 
 use maelstrom_macro::Config;
 use maelstrom_run::{
     escape::{self, EscapeChar, EscapeChunk},
-    spec::JobSpecOrContainers,
+    job_spec_or_containers::JobSpecOrContainers,
 };
 use maelstrom_util::{
     config::common::{
