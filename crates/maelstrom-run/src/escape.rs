@@ -1,5 +1,3 @@
-#![allow(bindings_with_variant_name)]
-
 use ascii::AsAsciiStr as _;
 use derive_more::Debug;
 use maelstrom_util::config::common::StringError;
@@ -75,8 +73,8 @@ pub fn parse_escape_char(input: &str) -> Result<u8, StringError> {
         [] => Err(StringError::new("invalid character literal: empty string")),
         [c] => Ok(*c),
         [b'^', c] => {
-            if let Some(c) = ascii::caret_decode(*c) {
-                Ok(c.as_byte())
+            if let Some(character) = ascii::caret_decode(*c) {
+                Ok(character.as_byte())
             } else {
                 Err(StringError::new(
                     "invalid character literal: invalid character after caret",
@@ -138,8 +136,8 @@ impl Default for EscapeChar {
 
 impl Display for EscapeChar {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if let Some(c) = ascii::caret_encode(self.0) {
-            Display::fmt(&format!("^{}", char::from(c.as_byte())), f)
+        if let Some(character) = ascii::caret_encode(self.0) {
+            Display::fmt(&format!("^{}", char::from(character.as_byte())), f)
         } else {
             Display::fmt(&char::from(self.0), f)
         }
