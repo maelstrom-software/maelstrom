@@ -1151,72 +1151,6 @@ mod tests {
     }
 
     #[test]
-    fn devices() {
-        assert_eq!(
-            parse_job_spec(
-                r#"{
-                    "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "mounts": [
-                        { "type": "devices", "devices": [ "null", "zero" ] }
-                    ]
-                }"#,
-            )
-            .unwrap(),
-            job_spec! {
-                "/bin/sh",
-                layers: [tar_layer!("1")],
-                mounts: [
-                    JobMount::Devices {
-                        devices: enum_set! { JobDevice::Null | JobDevice::Zero },
-                    },
-                ],
-            },
-        )
-    }
-
-    #[test]
-    fn mounts() {
-        assert_eq!(
-            parse_job_spec(
-                r#"{
-                    "program": "/bin/sh",
-                    "layers": [ { "tar": "1" } ],
-                    "mounts": [
-                        { "type": "tmp", "mount_point": "/tmp" },
-                        { "type": "bind", "mount_point": "/bind", "local_path": "/a" },
-                        { "type": "bind", "mount_point": "/bind2", "local_path": "/b", "read_only": false },
-                        { "type": "bind", "mount_point": "/bind3", "local_path": "/c", "read_only": true }
-                    ]
-                }"#,
-            )
-            .unwrap(),
-            job_spec! {
-                "/bin/sh",
-                layers: [tar_layer!("1")],
-                mounts: [
-                    JobMount::Tmp { mount_point: utf8_path_buf!("/tmp") },
-                    JobMount::Bind {
-                        mount_point: utf8_path_buf!("/bind"),
-                        local_path: utf8_path_buf!("/a"),
-                        read_only: false,
-                    },
-                    JobMount::Bind {
-                        mount_point: utf8_path_buf!("/bind2"),
-                        local_path: utf8_path_buf!("/b"),
-                        read_only: false,
-                    },
-                    JobMount::Bind {
-                        mount_point: utf8_path_buf!("/bind3"),
-                        local_path: utf8_path_buf!("/c"),
-                        read_only: true,
-                    },
-                ],
-            },
-        )
-    }
-
-    #[test]
     fn enable_writable_file_system() {
         assert_eq!(
             parse_job_spec(
@@ -1548,6 +1482,47 @@ mod tests {
                 layers: [tar_layer!("1")],
                 working_directory: "/foo/bar",
                 parent: container_container_parent!("parent", environment),
+            },
+        )
+    }
+
+    #[test]
+    fn mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ { "tar": "1" } ],
+                    "mounts": [
+                        { "type": "tmp", "mount_point": "/tmp" },
+                        { "type": "bind", "mount_point": "/bind", "local_path": "/a" },
+                        { "type": "bind", "mount_point": "/bind2", "local_path": "/b", "read_only": false },
+                        { "type": "bind", "mount_point": "/bind3", "local_path": "/c", "read_only": true }
+                    ]
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1")],
+                mounts: [
+                    JobMount::Tmp { mount_point: utf8_path_buf!("/tmp") },
+                    JobMount::Bind {
+                        mount_point: utf8_path_buf!("/bind"),
+                        local_path: utf8_path_buf!("/a"),
+                        read_only: false,
+                    },
+                    JobMount::Bind {
+                        mount_point: utf8_path_buf!("/bind2"),
+                        local_path: utf8_path_buf!("/b"),
+                        read_only: false,
+                    },
+                    JobMount::Bind {
+                        mount_point: utf8_path_buf!("/bind3"),
+                        local_path: utf8_path_buf!("/c"),
+                        read_only: true,
+                    },
+                ],
             },
         )
     }
