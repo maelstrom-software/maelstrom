@@ -1,21 +1,12 @@
 use anyhow::Result;
-use maelstrom_base::{
-    EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf,
-};
-use maelstrom_client::spec::{
-    ContainerParent, ContainerRef, ContainerRefWithImplicitOrExplicitUse, ContainerSpec,
-    ContainerUse, EnvironmentSpec, ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse,
-    IntoEnvironment, JobSpec, LayerSpec,
-};
+use maelstrom_base::{Timeout, Utf8PathBuf};
+use maelstrom_client::spec::{ContainerSpec, ContainerSpecForTomlAndJson, JobSpec};
 use serde::{
     de::Deserializer,
     Deserialize,
     __private::de::{Content, ContentRefDeserializer},
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    io::Read,
-};
+use std::{collections::HashMap, io::Read};
 
 pub fn job_spec_or_containers_iter_from_reader(
     reader: impl Read,
@@ -82,7 +73,7 @@ impl<'de> Deserialize<'de> for JobSpecOrContainersForDeserialize {
 #[derive(Deserialize)]
 struct JobSpecForDeserialize {
     #[serde(flatten)]
-    container: ContainerSpecForDeserialize,
+    container: ContainerSpecForTomlAndJson,
     program: Utf8PathBuf,
     arguments: Option<Vec<String>>,
     timeout: Option<u32>,
@@ -114,347 +105,19 @@ impl TryFrom<JobSpecForDeserialize> for JobSpec {
 }
 
 #[derive(Deserialize)]
-struct ContainerSpecForDeserialize {
-    image: Option<ImageRefWithImplicitOrExplicitUse>,
-    parent: Option<ContainerRefWithImplicitOrExplicitUse>,
-    layers: Option<Vec<LayerSpec>>,
-    added_layers: Option<Vec<LayerSpec>>,
-    environment: Option<EnvSelector>,
-    added_environment: Option<EnvSelector>,
-    working_directory: Option<Utf8PathBuf>,
-    enable_writable_file_system: Option<bool>,
-    mounts: Option<Vec<JobMountForTomlAndJson>>,
-    added_mounts: Option<Vec<JobMountForTomlAndJson>>,
-    network: Option<JobNetwork>,
-    user: Option<UserId>,
-    group: Option<GroupId>,
-}
-
-impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
-    type Error = String;
-
-    fn try_from(container: ContainerSpecForDeserialize) -> Result<Self, Self::Error> {
-        let ContainerSpecForDeserialize {
-            image,
-            parent,
-            layers,
-            added_layers,
-            environment,
-            added_environment,
-            working_directory,
-            enable_writable_file_system,
-            mounts,
-            added_mounts,
-            network,
-            user,
-            group,
-        } = container;
-
-        let mut to_remove_from_image_use = EnumSet::default();
-        let mut to_remove_from_parent_use = EnumSet::default();
-
-        if image.is_some() && parent.is_some() {
-            return Err("both `image` and `parent` cannot be specified".into());
-        }
-
-        let layers = match (layers, added_layers, &image, &parent) {
-            (None, None, _, _) => vec![],
-            (Some(_), Some(_), _, _) => {
-                return Err("field `added_layers` cannot be set with `layers` field".into());
-            }
-            (_, _, Some(_), Some(_)) => {
-                unreachable!();
-            }
-            (None, Some(_), None, None) => {
-                return Err(concat!(
-                    "field `added_layers` cannot be set without ",
-                    "`image` or `parent` also being specified (try `layers` instead)",
-                )
-                .into());
-            }
-            (None, Some(added_layers), Some(image), None) => {
-                if !image.r#use.as_set().contains(ImageUse::Layers) {
-                    return Err(concat!(
-                        "field `added_layers` requires `image` being specified ",
-                        "with a `use` of `layers` (try `layers` instead)",
-                    )
-                    .into());
-                }
-                added_layers
-            }
-            (None, Some(added_layers), None, Some(parent)) => {
-                if !parent.r#use.as_set().contains(ContainerUse::Layers) {
-                    return Err(concat!(
-                        "field `added_layers` requires `parent` being specified ",
-                        "with a `use` of `layers` (try `layers` instead)",
-                    )
-                    .into());
-                }
-                added_layers
-            }
-            (Some(layers), None, None, None) => layers,
-            (Some(layers), None, Some(image), None) => {
-                if image.r#use.explicit().contains(ImageUse::Layers) {
-                    return Err(concat!(
-                        "field `layers` cannot be set if `image` with an explicit `use` of ",
-                        "`layers` is also specified (try `added_layers` instead)",
-                    )
-                    .into());
-                }
-                to_remove_from_image_use.insert(ImageUse::Layers);
-                layers
-            }
-            (Some(layers), None, None, Some(parent)) => {
-                if parent.r#use.explicit().contains(ContainerUse::Layers) {
-                    return Err(concat!(
-                        "field `layers` cannot be set if `parent` with an explicit `use` of ",
-                        "`layers` is also specified (try `added_layers` instead)",
-                    )
-                    .into());
-                }
-                to_remove_from_parent_use.insert(ContainerUse::Layers);
-                layers
-            }
-        };
-
-        let environment = match (environment, added_environment, &image, &parent) {
-            (None, None, _, _) => vec![],
-            (Some(_), Some(_), _, _) => {
-                return Err(
-                    "field `added_environment` cannot be set with `environment` field".into(),
-                );
-            }
-            (_, _, Some(_), Some(_)) => {
-                unreachable!();
-            }
-            (None, Some(_), None, None) => {
-                return Err(concat!(
-                    "field `added_environment` cannot be set without ",
-                    "`image` or `parent` also being specified (try `environment` instead)",
-                )
-                .into());
-            }
-            (None, Some(added_environment), Some(image), None) => {
-                if !image.r#use.as_set().contains(ImageUse::Environment) {
-                    return Err(concat!(
-                        "field `added_environment` requires `image` being specified ",
-                        "with a `use` of `environment` (try `environment` instead)",
-                    )
-                    .into());
-                }
-                added_environment.into_environment()
-            }
-            (None, Some(added_environment), None, Some(parent)) => {
-                if !parent.r#use.as_set().contains(ContainerUse::Environment) {
-                    return Err(concat!(
-                        "field `added_environment` requires `parent` being specified ",
-                        "with a `use` of `environment` (try `environment` instead)",
-                    )
-                    .into());
-                }
-                added_environment.into_environment()
-            }
-            (Some(environment), None, None, None) => environment.into_environment(),
-            (Some(environment), None, Some(image), None) => {
-                if image.r#use.explicit().contains(ImageUse::Environment) {
-                    return Err(concat!(
-                        "field `environment` cannot be set if `image` with an explicit `use` of ",
-                        "`environment` is also specified (try `added_environment` instead)",
-                    )
-                    .into());
-                }
-                to_remove_from_image_use.insert(ImageUse::Environment);
-                environment.into_environment()
-            }
-            (Some(environment), None, None, Some(parent)) => {
-                if parent.r#use.explicit().contains(ContainerUse::Environment) {
-                    return Err(concat!(
-                        "field `environment` cannot be set if `parent` with an explicit `use` of ",
-                        "`environment` is also specified (try `added_environment` instead)",
-                    )
-                    .into());
-                }
-                to_remove_from_parent_use.insert(ContainerUse::Environment);
-                environment.into_environment()
-            }
-        };
-
-        if working_directory.is_some() {
-            if let Some(image) = &image {
-                if image.r#use.explicit().contains(ImageUse::WorkingDirectory) {
-                    return Err(concat!(
-                        "field `working_directory` cannot be set if `image` with an ",
-                        "explicit `use` of `working_directory` is also specified",
-                    )
-                    .into());
-                }
-                to_remove_from_image_use.insert(ImageUse::WorkingDirectory);
-            }
-            if let Some(parent) = &parent {
-                if parent
-                    .r#use
-                    .explicit()
-                    .contains(ContainerUse::WorkingDirectory)
-                {
-                    return Err(concat!(
-                        "field `working_directory` cannot be set if `parent` with an ",
-                        "explicit `use` of `working_directory` is also specified",
-                    )
-                    .into());
-                }
-                to_remove_from_parent_use.insert(ContainerUse::WorkingDirectory);
-            }
-        }
-
-        if enable_writable_file_system.is_some() {
-            if let Some(parent) = &parent {
-                if parent
-                    .r#use
-                    .explicit()
-                    .contains(ContainerUse::EnableWritableFileSystem)
-                {
-                    return Err(concat!(
-                        "field `enable_writable_file_system` cannot be set if `parent` with an ",
-                        "explicit `use` of `enable_writable_file_system` is also specified",
-                    )
-                    .into());
-                }
-                to_remove_from_parent_use.insert(ContainerUse::EnableWritableFileSystem);
-            }
-        }
-
-        let mounts = match (mounts, added_mounts, &parent) {
-            (None, None, _) => vec![],
-            (Some(_), Some(_), _) => {
-                return Err("field `added_mounts` cannot be set with `mounts` field".into());
-            }
-            (None, Some(_), None) => {
-                return Err(concat!(
-                    "field `added_mounts` cannot be set without ",
-                    "`parent` also being specified (try `mounts` instead)",
-                )
-                .into());
-            }
-            (None, Some(added_mounts), Some(parent)) => {
-                if !parent.r#use.as_set().contains(ContainerUse::Mounts) {
-                    return Err(concat!(
-                        "field `added_mounts` requires `parent` being specified ",
-                        "with a `use` of `mounts` (try `mounts` instead)",
-                    )
-                    .into());
-                }
-                added_mounts
-            }
-            (Some(mounts), None, None) => mounts,
-            (Some(mounts), None, Some(parent)) => {
-                if parent.r#use.explicit().contains(ContainerUse::Mounts) {
-                    return Err(concat!(
-                        "field `mounts` cannot be set if `parent` with an explicit `use` of ",
-                        "`mounts` is also specified (try `added_mounts` instead)",
-                    )
-                    .into());
-                }
-                to_remove_from_parent_use.insert(ContainerUse::Mounts);
-                mounts
-            }
-        }
-        .into_iter()
-        .map(Into::into)
-        .collect();
-
-        if network.is_some() {
-            if let Some(parent) = &parent {
-                if parent.r#use.explicit().contains(ContainerUse::Network) {
-                    return Err(concat!(
-                        "field `network` cannot be set if `parent` with an ",
-                        "explicit `use` of `network` is also specified",
-                    )
-                    .into());
-                }
-                to_remove_from_parent_use.insert(ContainerUse::Network);
-            }
-        }
-
-        if user.is_some() {
-            if let Some(parent) = &parent {
-                if parent.r#use.explicit().contains(ContainerUse::User) {
-                    return Err(concat!(
-                        "field `user` cannot be set if `parent` with an ",
-                        "explicit `use` of `user` is also specified",
-                    )
-                    .into());
-                }
-                to_remove_from_parent_use.insert(ContainerUse::User);
-            }
-        }
-
-        if group.is_some() {
-            if let Some(parent) = &parent {
-                if parent.r#use.explicit().contains(ContainerUse::Group) {
-                    return Err(concat!(
-                        "field `group` cannot be set if `parent` with an ",
-                        "explicit `use` of `group` is also specified",
-                    )
-                    .into());
-                }
-                to_remove_from_parent_use.insert(ContainerUse::Group);
-            }
-        }
-
-        Ok(ContainerSpec {
-            parent: match (image, parent) {
-                (Some(image), _) => Some(ContainerParent::Image(ImageRef {
-                    name: image.name,
-                    r#use: image.r#use.as_set().difference(to_remove_from_image_use),
-                })),
-                (_, Some(parent)) => Some(ContainerParent::Container(ContainerRef {
-                    name: parent.name,
-                    r#use: parent.r#use.as_set().difference(to_remove_from_parent_use),
-                })),
-                (None, None) => None,
-            },
-            layers,
-            enable_writable_file_system,
-            environment,
-            working_directory,
-            mounts,
-            network,
-            user,
-            group,
-        })
-    }
-}
-
-#[derive(Deserialize)]
 struct ContainerMapForDeserialize {
     containers: HashMap<String, ContainerMapForDeserializeElement>,
 }
 
 #[derive(Deserialize)]
-#[serde(try_from = "ContainerSpecForDeserialize")]
+#[serde(try_from = "ContainerSpecForTomlAndJson")]
 struct ContainerMapForDeserializeElement(ContainerSpec);
 
-impl TryFrom<ContainerSpecForDeserialize> for ContainerMapForDeserializeElement {
-    type Error = <ContainerSpec as TryFrom<ContainerSpecForDeserialize>>::Error;
+impl TryFrom<ContainerSpecForTomlAndJson> for ContainerMapForDeserializeElement {
+    type Error = <ContainerSpec as TryFrom<ContainerSpecForTomlAndJson>>::Error;
 
-    fn try_from(container: ContainerSpecForDeserialize) -> Result<Self, Self::Error> {
+    fn try_from(container: ContainerSpecForTomlAndJson) -> Result<Self, Self::Error> {
         Ok(Self(ContainerSpec::try_from(container)?))
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum EnvSelector {
-    Implicit(BTreeMap<String, String>),
-    Explicit(Vec<EnvironmentSpec>),
-}
-
-impl IntoEnvironment for EnvSelector {
-    fn into_environment(self) -> Vec<EnvironmentSpec> {
-        match self {
-            Self::Implicit(v) => v.into_environment(),
-            Self::Explicit(v) => v,
-        }
     }
 }
 
@@ -462,7 +125,7 @@ impl IntoEnvironment for EnvSelector {
 mod tests {
     use super::*;
     use indoc::indoc;
-    use maelstrom_base::{proc_mount, tmp_mount, JobMount};
+    use maelstrom_base::{proc_mount, tmp_mount, JobMount, JobNetwork};
     use maelstrom_client::{
         container_container_parent, container_spec, environment_spec, image_container_parent,
         job_spec,
