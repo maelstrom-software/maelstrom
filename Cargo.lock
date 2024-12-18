@@ -3701,6 +3701,7 @@ dependencies = [
  "derive_more",
  "enumset",
  "indicatif",
+ "indoc",
  "maelstrom-base",
  "maelstrom-client",
  "maelstrom-linux",

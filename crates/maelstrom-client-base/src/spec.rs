@@ -428,9 +428,9 @@ pub fn environment_eval(
 pub struct ContainerSpec {
     pub parent: Option<ContainerParent>,
     pub layers: Vec<LayerSpec>,
-    pub enable_writable_file_system: Option<bool>,
     pub environment: Vec<EnvironmentSpec>,
     pub working_directory: Option<Utf8PathBuf>,
+    pub enable_writable_file_system: Option<bool>,
     pub mounts: Vec<JobMount>,
     pub network: Option<JobNetwork>,
     pub user: Option<UserId>,
@@ -454,14 +454,14 @@ macro_rules! container_spec {
     (@expand [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: $layers.into()])
     };
-    (@expand [enable_writable_file_system: $enable_writable_file_system:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? enable_writable_file_system: Some($enable_writable_file_system)])
-    };
     (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: $crate::spec::IntoEnvironment::into_environment($environment)])
     };
     (@expand [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? working_directory: Some($dir.into())])
+    };
+    (@expand [enable_writable_file_system: $enable_writable_file_system:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? enable_writable_file_system: Some($enable_writable_file_system)])
     };
     (@expand [mounts: $mounts:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? mounts: $mounts.into()])

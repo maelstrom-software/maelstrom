@@ -19,15 +19,16 @@ crossterm.workspace = true
 derive_more.workspace = true
 enumset.workspace = true
 indicatif.workspace = true
+indoc.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client.workspace = true
 maelstrom-linux.workspace = true
 maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
-slog.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+serde.workspace = true
+slog.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]
