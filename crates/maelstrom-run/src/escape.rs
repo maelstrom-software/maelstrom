@@ -15,6 +15,7 @@ use std::{
     str::FromStr,
 };
 
+/// The type yielded by [`decode_escapes`].
 #[derive(Debug, PartialEq)]
 pub enum EscapeChunk<'a> {
     /// A chunk of bytes to be passed to the pseudo-terminal untouched.
@@ -90,6 +91,15 @@ pub fn decode_escapes(bytes: &[u8], escape_char: u8) -> EscapeIterator {
     EscapeIterator { bytes, escape_char }
 }
 
+/// A type to for parsing and printing an escape character configuration value. This type can be
+/// parsed using a variety of schemes:
+///   - As a raw ASCII character.
+///   - Using caret notation (like `^C`).
+///   - Using C-style character escapes (like `\n`, `\x1d`).
+///
+/// It is printed using caret notation.
+///
+/// The default is `^]`.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[debug("{_0:?}")]
 pub struct EscapeChar(u8);

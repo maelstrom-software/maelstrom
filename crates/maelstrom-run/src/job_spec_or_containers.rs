@@ -1,3 +1,5 @@
+//! An iterator of objects read from stdin or the command-line-specified file.
+
 use anyhow::Result;
 use maelstrom_client::spec::{ContainerSpec, JobSpec};
 use serde::{
