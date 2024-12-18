@@ -13,36 +13,13 @@ pub fn job_spec_or_containers_iter_from_reader(
     serde_json::Deserializer::from_reader(reader).into_iter::<JobSpecOrContainers>()
 }
 
-#[derive(Deserialize)]
-#[serde(try_from = "JobSpecOrContainersForDeserialize")]
 #[allow(clippy::large_enum_variant)]
 pub enum JobSpecOrContainers {
     JobSpec(JobSpec),
     Containers(HashMap<String, ContainerSpec>),
 }
 
-#[allow(clippy::large_enum_variant)]
-enum JobSpecOrContainersForDeserialize {
-    JobSpec(JobSpec),
-    Containers(ContainerMapForDeserialize),
-}
-
-impl TryFrom<JobSpecOrContainersForDeserialize> for JobSpecOrContainers {
-    type Error = String;
-
-    fn try_from(job: JobSpecOrContainersForDeserialize) -> Result<Self, Self::Error> {
-        Ok(match job {
-            JobSpecOrContainersForDeserialize::JobSpec(job_spec) => {
-                JobSpecOrContainers::JobSpec(job_spec)
-            }
-            JobSpecOrContainersForDeserialize::Containers(containers) => {
-                JobSpecOrContainers::Containers(containers.into())
-            }
-        })
-    }
-}
-
-impl<'de> Deserialize<'de> for JobSpecOrContainersForDeserialize {
+impl<'de> Deserialize<'de> for JobSpecOrContainers {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let content = Content::deserialize(deserializer)?;
         if let Content::Map(fields) = &content {
@@ -54,6 +31,7 @@ impl<'de> Deserialize<'de> for JobSpecOrContainersForDeserialize {
                         >::new(
                             &content
                         ))
+                        .map(Into::into)
                         .map(Self::Containers);
                     }
                 }
