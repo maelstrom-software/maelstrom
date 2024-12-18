@@ -23,32 +23,18 @@ impl<'de> Deserialize<'de> for JobSpecOrContainers {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let content = Content::deserialize(deserializer)?;
         if let Content::Map(fields) = &content {
-            if let [(key, _)] = fields.as_slice() {
+            if let [(key, value)] = fields.as_slice() {
                 if let Some(key) = key.as_str() {
                     if key == "containers" {
-                        return ContainerMapForDeserialize::deserialize(ContentRefDeserializer::<
-                            D::Error,
-                        >::new(
-                            &content
-                        ))
-                        .map(Into::into)
+                        return HashMap::<String, ContainerSpec>::deserialize(
+                            ContentRefDeserializer::<D::Error>::new(value),
+                        )
                         .map(Self::Containers);
                     }
                 }
             }
         }
         JobSpec::deserialize(ContentRefDeserializer::<D::Error>::new(&content)).map(Self::JobSpec)
-    }
-}
-
-#[derive(Deserialize)]
-struct ContainerMapForDeserialize {
-    containers: HashMap<String, ContainerSpec>,
-}
-
-impl From<ContainerMapForDeserialize> for HashMap<String, ContainerSpec> {
-    fn from(map: ContainerMapForDeserialize) -> Self {
-        map.containers
     }
 }
 
