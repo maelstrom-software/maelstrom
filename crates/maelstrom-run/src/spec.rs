@@ -22,6 +22,11 @@ pub enum JobSpecOrContainers {
     Containers(HashMap<String, ContainerSpec>),
 }
 
+enum JobSpecOrContainersForDeserialize {
+    JobSpec(JobSpecForDeserialize),
+    Containers(ContainerMapForDeserialize),
+}
+
 impl TryFrom<JobSpecOrContainersForDeserialize> for JobSpecOrContainers {
     type Error = String;
 
@@ -31,15 +36,10 @@ impl TryFrom<JobSpecOrContainersForDeserialize> for JobSpecOrContainers {
                 JobSpecOrContainers::JobSpec(job_spec.try_into()?)
             }
             JobSpecOrContainersForDeserialize::Containers(containers) => {
-                JobSpecOrContainers::Containers(containers.containers)
+                JobSpecOrContainers::Containers(containers.into())
             }
         })
     }
-}
-
-enum JobSpecOrContainersForDeserialize {
-    JobSpec(JobSpecForDeserialize),
-    Containers(ContainerMapForDeserialize),
 }
 
 impl<'de> Deserialize<'de> for JobSpecOrContainersForDeserialize {
@@ -101,6 +101,12 @@ impl TryFrom<JobSpecForDeserialize> for JobSpec {
 #[derive(Deserialize)]
 struct ContainerMapForDeserialize {
     containers: HashMap<String, ContainerSpec>,
+}
+
+impl From<ContainerMapForDeserialize> for HashMap<String, ContainerSpec> {
+    fn from(map: ContainerMapForDeserialize) -> Self {
+        map.containers
+    }
 }
 
 #[cfg(test)]
