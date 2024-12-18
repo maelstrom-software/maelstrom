@@ -1,3 +1,11 @@
+//! When sending keyboard input over a pseudo-terminal, we are presented with a problem: If the
+//! user types a control sequence like ^C or ^Z, do we interpret that locally, or send it to the
+//! pseudo-terminal for it to interpret. The standard way to deal with this problem is to normally
+//! send raw ! sequences over the pseudo-terminal, but to have a special prefix --- an escape
+//! sequence --- that indicates that the next character should be interpretted locally instead of
+//! being sent. This module provides types and functions to encode and decode such escape
+//! sequences.
+
 use ascii::AsAsciiStr as _;
 use derive_more::Debug;
 use maelstrom_util::config::common::StringError;
@@ -9,12 +17,21 @@ use std::{
 
 #[derive(Debug, PartialEq)]
 pub enum EscapeChunk<'a> {
+    /// A chunk of bytes to be passed to the pseudo-terminal untouched.
     Bytes(&'a [u8]),
+
+    /// A `^C` character. This will be detected when the user types `<escape-char>` folled by `^C`.
     ControlC,
+
+    /// A `^Z` character. This will be detected when the user types `<escape-char>` folled by `^Z`.
     ControlZ,
+
+    /// A single `<escape-char>` at the end of the slice. We don't have enough information yet to
+    /// know how to handle it.
     Remainder,
 }
 
+/// Iterator type returned by [`decode_escapes`]. It yields [`EscapeChunk`]s.
 pub struct EscapeIterator<'a> {
     bytes: &'a [u8],
     escape_char: u8,
@@ -61,6 +78,14 @@ impl<'a> Iterator for EscapeIterator<'a> {
     }
 }
 
+/// Process a slice of bytes looking for escape sequences. This function always starts in a state
+/// where it hasn't just seen an `escape_char`. If the caller wants to start with an `escape_char`,
+/// it should make it the first byte in `bytes`.
+///
+/// This function looks for the special sequences `escape_char`-`^C`, `escape_char`-`^Z`, and
+/// `escape_char`-`escape_char`. The first two are dealt with by the callers, while the last gets
+/// sent as a single `escape_char`. It lets everthing else pass untouched, including `escape_char`
+/// followed by any other character.
 pub fn decode_escapes(bytes: &[u8], escape_char: u8) -> EscapeIterator {
     EscapeIterator { bytes, escape_char }
 }

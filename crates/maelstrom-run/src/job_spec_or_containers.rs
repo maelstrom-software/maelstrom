@@ -7,6 +7,31 @@ use serde::{
 };
 use std::{collections::HashMap, io::Read};
 
+/// These are the objects that we read from stdin or the file specified on the command-line. We
+/// expect a series of these. We will execute each job immediately after we parse it.
+///
+/// We want to allow the specification of named containers so that `maelstrom-run` has the same
+/// capabilities as `cargo-maelstrom`, etc. To do so, we allow a special pseudo-job which just
+/// specifies a map of containers. An input stream may have any number of these.
+///
+/// To identify when an object should be parsed as a `JobSpec` and when to parse it as a map of
+/// containers, we look for an object with the single key `containers`. For example:
+/// ```json
+///     { "program": "my-program", "image": "my-image" }
+///     {
+///         "containers": {
+///             "my-grandparent": {
+///                 "image": "my-image",
+///                 "mounts": { ... }
+///             },
+///             "my-parent": {
+///                 "parent": "my-grandparent",
+///                 "user": 101
+///             }
+///         }
+///     }
+///     { "program": "my-program", "parent": "my-parent" }
+/// ```
 #[allow(clippy::large_enum_variant)]
 pub enum JobSpecOrContainers {
     JobSpec(JobSpec),
