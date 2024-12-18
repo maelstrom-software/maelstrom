@@ -4,7 +4,11 @@ use maelstrom_client::spec::{
     ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, IntoEnvironment, JobSpec,
     LayerSpec,
 };
-use serde::Deserialize;
+use serde::{
+    de::Deserializer,
+    Deserialize,
+    __private::de::{Content, ContentRefDeserializer},
+};
 use std::{
     collections::{BTreeMap, HashMap},
     io::Read,
@@ -17,20 +21,114 @@ pub fn job_spec_or_containers_iter_from_reader(
 }
 
 #[derive(Deserialize)]
-#[serde(try_from = "JobForDeserialize")]
+#[serde(try_from = "JobSpecOrContainersForDeserialize")]
 #[allow(clippy::large_enum_variant)]
 pub enum JobSpecOrContainers {
     JobSpec(JobSpec),
     Containers(HashMap<String, ContainerSpec>),
 }
 
-impl TryFrom<JobForDeserialize> for JobSpecOrContainers {
+impl TryFrom<JobSpecOrContainersForDeserialize> for JobSpecOrContainers {
     type Error = String;
 
-    fn try_from(job: JobForDeserialize) -> Result<Self, Self::Error> {
-        let JobForDeserialize {
+    fn try_from(job: JobSpecOrContainersForDeserialize) -> Result<Self, Self::Error> {
+        Ok(match job {
+            JobSpecOrContainersForDeserialize::JobSpec(job_spec) => {
+                JobSpecOrContainers::JobSpec(job_spec.try_into()?)
+            }
+            JobSpecOrContainersForDeserialize::Containers(containers) => {
+                JobSpecOrContainers::Containers(
+                    containers
+                        .containers
+                        .into_iter()
+                        .map(|(name, container)| (name, container.0))
+                        .collect(),
+                )
+            }
+        })
+    }
+}
+
+enum JobSpecOrContainersForDeserialize {
+    JobSpec(JobSpecForDeserialize),
+    Containers(ContainerMapForDeserialize),
+}
+
+impl<'de> Deserialize<'de> for JobSpecOrContainersForDeserialize {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let content = Content::deserialize(deserializer)?;
+        if let Content::Map(fields) = &content {
+            if let [(key, _)] = fields.as_slice() {
+                if let Some(key) = key.as_str() {
+                    if key == "containers" {
+                        return ContainerMapForDeserialize::deserialize(ContentRefDeserializer::<
+                            D::Error,
+                        >::new(
+                            &content
+                        ))
+                        .map(Self::Containers);
+                    }
+                }
+            }
+        }
+        JobSpecForDeserialize::deserialize(ContentRefDeserializer::<D::Error>::new(&content))
+            .map(Self::JobSpec)
+    }
+}
+
+#[derive(Deserialize)]
+struct JobSpecForDeserialize {
+    #[serde(flatten)]
+    container: ContainerSpecForDeserialize,
+    program: Utf8PathBuf,
+    arguments: Option<Vec<String>>,
+    timeout: Option<u32>,
+    priority: Option<i8>,
+}
+
+impl TryFrom<JobSpecForDeserialize> for JobSpec {
+    type Error = String;
+
+    fn try_from(job_spec: JobSpecForDeserialize) -> Result<Self, Self::Error> {
+        let JobSpecForDeserialize {
+            container,
             program,
             arguments,
+            timeout,
+            priority,
+        } = job_spec;
+        Ok(JobSpec {
+            container: ContainerSpec::try_from(container)?,
+            program,
+            arguments: arguments.unwrap_or_default(),
+            timeout: timeout.and_then(Timeout::new),
+            estimated_duration: None,
+            allocate_tty: None,
+            priority: priority.unwrap_or_default(),
+            capture_file_system_changes: None,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct ContainerSpecForDeserialize {
+    environment: Option<EnvSelector>,
+    layers: Option<Vec<LayerSpec>>,
+    added_layers: Option<Vec<LayerSpec>>,
+    mounts: Option<Vec<JobMountForTomlAndJson>>,
+    network: Option<JobNetwork>,
+    enable_writable_file_system: Option<bool>,
+    working_directory: Option<Utf8PathBuf>,
+    user: Option<UserId>,
+    group: Option<GroupId>,
+    image: Option<ImageRef>,
+}
+
+impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
+    type Error = String;
+
+    fn try_from(container: ContainerSpecForDeserialize) -> Result<Self, Self::Error> {
+        let ContainerSpecForDeserialize {
             environment,
             layers,
             added_layers,
@@ -40,10 +138,8 @@ impl TryFrom<JobForDeserialize> for JobSpecOrContainers {
             working_directory,
             user,
             group,
-            timeout,
-            priority,
             image,
-        } = job;
+        } = container;
 
         let image_use = image
             .as_ref()
@@ -98,51 +194,41 @@ impl TryFrom<JobForDeserialize> for JobSpecOrContainers {
             .into());
         }
 
-        Ok(JobSpecOrContainers::JobSpec(JobSpec {
-            container: ContainerSpec {
-                parent: image.map(ContainerParent::Image),
-                layers: layers.into_iter().chain(added_layers).flatten().collect(),
-                enable_writable_file_system,
-                environment: environment
-                    .map(IntoEnvironment::into_environment)
-                    .unwrap_or_default(),
-                working_directory,
-                mounts: mounts
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-                network,
-                user,
-                group,
-            },
-            program,
-            arguments: arguments.unwrap_or_default(),
-            timeout: timeout.and_then(Timeout::new),
-            estimated_duration: None,
-            allocate_tty: None,
-            priority: priority.unwrap_or_default(),
-            capture_file_system_changes: None,
-        }))
+        Ok(ContainerSpec {
+            parent: image.map(ContainerParent::Image),
+            layers: layers.into_iter().chain(added_layers).flatten().collect(),
+            enable_writable_file_system,
+            environment: environment
+                .map(IntoEnvironment::into_environment)
+                .unwrap_or_default(),
+            working_directory,
+            mounts: mounts
+                .unwrap_or_default()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            network,
+            user,
+            group,
+        })
     }
 }
 
 #[derive(Deserialize)]
-struct JobForDeserialize {
-    program: Utf8PathBuf,
-    arguments: Option<Vec<String>>,
-    environment: Option<EnvSelector>,
-    layers: Option<Vec<LayerSpec>>,
-    added_layers: Option<Vec<LayerSpec>>,
-    mounts: Option<Vec<JobMountForTomlAndJson>>,
-    network: Option<JobNetwork>,
-    enable_writable_file_system: Option<bool>,
-    working_directory: Option<Utf8PathBuf>,
-    user: Option<UserId>,
-    group: Option<GroupId>,
-    timeout: Option<u32>,
-    priority: Option<i8>,
-    image: Option<ImageRef>,
+struct ContainerMapForDeserialize {
+    containers: HashMap<String, ContainerMapForDeserializeElement>,
+}
+
+#[derive(Deserialize)]
+#[serde(try_from = "ContainerSpecForDeserialize")]
+struct ContainerMapForDeserializeElement(ContainerSpec);
+
+impl TryFrom<ContainerSpecForDeserialize> for ContainerMapForDeserializeElement {
+    type Error = <ContainerSpec as TryFrom<ContainerSpecForDeserialize>>::Error;
+
+    fn try_from(container: ContainerSpecForDeserialize) -> Result<Self, Self::Error> {
+        Ok(Self(ContainerSpec::try_from(container)?))
+    }
 }
 
 #[derive(Deserialize)]
@@ -165,9 +251,9 @@ impl IntoEnvironment for EnvSelector {
 mod tests {
     use super::*;
     use maelstrom_base::{enum_set, JobDevice, JobMount};
-    use maelstrom_client::{image_container_parent, job_spec};
+    use maelstrom_client::{container_spec, image_container_parent, job_spec};
     use maelstrom_test::{tar_layer, utf8_path_buf};
-    use maplit::btreemap;
+    use maplit::{btreemap, hashmap};
 
     fn parse_job_spec(str_: &str) -> serde_json::Result<JobSpec> {
         serde_json::from_str(str_).map(|job_spec: JobSpecOrContainers| {
@@ -178,6 +264,16 @@ mod tests {
         })
     }
 
+    fn parse_container_map(str_: &str) -> serde_json::Result<HashMap<String, ContainerSpec>> {
+        serde_json::from_str(str_).map(|containers: JobSpecOrContainers| {
+            let JobSpecOrContainers::Containers(containers) = containers else {
+                panic!("expected HashMap<String, ContainerSpec>")
+            };
+            containers
+        })
+    }
+
+    #[track_caller]
     fn assert_error(err: serde_json::Error, expected: &str) {
         let message = format!("{err}");
         assert!(
@@ -222,7 +318,10 @@ mod tests {
                 }"#,
             )
             .unwrap_err(),
-            "either field `layers` must be set or and `image` with a `use` of `layers` must be specified",
+            concat!(
+                "either field `layers` must be set or and `image` with ",
+                "a `use` of `layers` must be specified",
+            ),
         );
     }
 
@@ -835,5 +934,61 @@ mod tests {
             .unwrap(),
             job_spec!("/bin/sh", layers: [tar_layer!("1")], priority: -42),
         )
+    }
+
+    #[test]
+    fn basic_container_map() {
+        assert_eq!(
+            parse_container_map(
+                r#"{
+                    "containers": {
+                        "container-1": {
+                            "layers": [ { "tar": "1" } ],
+                            "user": 101
+                        },
+                        "container-2": {
+                            "layers": [ { "tar": "2" } ],
+                            "network": "loopback"
+                        }
+                    }
+                }"#
+            )
+            .unwrap(),
+            hashmap! {
+                "container-1".into() => container_spec!{
+                    layers: [tar_layer!("1")],
+                    user: 101,
+                },
+                "container-2".into() => container_spec!{
+                    layers: [tar_layer!("2")],
+                    network: JobNetwork::Loopback,
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn basic_container_map_error() {
+        assert_error(
+            parse_container_map(
+                r#"{
+                    "containers": {
+                        "container-1": {
+                            "program": "/bin/sh",
+                            "image": {
+                                "name": "image1",
+                                "use": [ "layers" ]
+                            },
+                            "layers": [ { "tar": "1" } ]
+                        }
+                    }
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `layers` cannot be set if `image` with a `use` of `layers` ",
+                "is also specified (try `added_layers` instead)",
+            ),
+        );
     }
 }

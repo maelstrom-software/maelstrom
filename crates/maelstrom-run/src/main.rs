@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Error, Result};
+use anyhow::{bail, Error, Result};
 use clap::Args;
 use maelstrom_base::{
     tty, ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult,
@@ -773,20 +773,30 @@ fn main_with_logger(
         config.artifact_transfer_strategy,
         log,
     )?;
-    let mut job_specs = spec::job_spec_or_containers_iter_from_reader(reader);
+    let job_spec_or_containers_iter = spec::job_spec_or_containers_iter_from_reader(reader);
     if extra_options.one_or_tty.any() {
         if extra_options.one_or_tty.tty {
             // Unblock the signals for the local thread. We'll re-block them again once we've read
             // the job spec and started up.
             linux::pthread_sigmask(SigprocmaskHow::UNBLOCK, Some(&blocked_signals))?;
         }
-        let JobSpecOrContainers::JobSpec(mut job_spec) = job_specs
-            .next()
-            .ok_or_else(|| anyhow!("no job specification provided"))??
-        else {
-            todo!();
+        let mut job_spec = None;
+        for job_spec_or_containers in job_spec_or_containers_iter {
+            match job_spec_or_containers? {
+                JobSpecOrContainers::JobSpec(inner_job_spec) => {
+                    job_spec = Some(inner_job_spec);
+                    break;
+                }
+                JobSpecOrContainers::Containers(containers) => {
+                    for (name, container) in containers {
+                        client.add_container(name, container)?;
+                    }
+                }
+            }
+        }
+        let Some(mut job_spec) = job_spec else {
+            bail!("no job specification provided");
         };
-        drop(job_specs);
         match &mem::take(&mut extra_options.args)[..] {
             [] => {}
             [program, arguments @ ..] => {
@@ -803,13 +813,19 @@ fn main_with_logger(
         }
     } else {
         let tracker = Arc::new(JobTracker::default());
-        for job_spec in job_specs {
-            let JobSpecOrContainers::JobSpec(job_spec) = job_spec? else {
-                todo!();
-            };
-            let tracker = tracker.clone();
-            tracker.add_outstanding();
-            client.add_job(job_spec, move |res| visitor(res, &tracker))?;
+        for job_spec_or_containers in job_spec_or_containers_iter {
+            match job_spec_or_containers? {
+                JobSpecOrContainers::JobSpec(job_spec) => {
+                    let tracker = tracker.clone();
+                    tracker.add_outstanding();
+                    client.add_job(job_spec, move |res| visitor(res, &tracker))?;
+                }
+                JobSpecOrContainers::Containers(containers) => {
+                    for (name, container) in containers {
+                        client.add_container(name, container)?;
+                    }
+                }
+            }
         }
         tracker.wait_for_outstanding();
         Ok(tracker.accum.get())
