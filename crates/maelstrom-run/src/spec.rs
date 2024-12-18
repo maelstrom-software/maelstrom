@@ -1028,7 +1028,7 @@ mod tests {
             .unwrap(),
             job_spec! {
                 "/bin/sh",
-                environment: environment_spec!(false, "FROB" => "frob"),
+                environment: environment_spec!(true, "FROB" => "frob"),
                 parent: image_container_parent!("image1", all),
             },
         );
@@ -1050,7 +1050,7 @@ mod tests {
             .unwrap(),
             job_spec! {
                 "/bin/sh",
-                environment: environment_spec!(false, "FROB" => "frob"),
+                environment: environment_spec!(true, "FROB" => "frob"),
                 parent: image_container_parent!("image1", environment),
             },
         );
@@ -1294,7 +1294,7 @@ mod tests {
             .unwrap(),
             job_spec! {
                 "/bin/sh",
-                environment: environment_spec!(false, "FROB" => "frob"),
+                environment: environment_spec!(true, "FROB" => "frob"),
                 parent: image_container_parent!("image1", all, -environment),
             },
         );
@@ -1337,7 +1337,7 @@ mod tests {
             .unwrap(),
             job_spec! {
                 "/bin/sh",
-                environment: environment_spec!(false, "FROB" => "frob"),
+                environment: environment_spec!(true, "FROB" => "frob"),
                 parent: image_container_parent!("image1", layers),
             },
         );
