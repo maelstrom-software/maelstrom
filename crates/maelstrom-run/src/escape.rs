@@ -90,49 +90,6 @@ pub fn decode_escapes(bytes: &[u8], escape_char: u8) -> EscapeIterator {
     EscapeIterator { bytes, escape_char }
 }
 
-pub fn parse_escape_char(input: &str) -> Result<u8, StringError> {
-    let input = input
-        .as_ascii_str()
-        .map_err(|err| StringError(format!("invalid character literal: {err}")))?;
-    match input.as_bytes() {
-        [] => Err(StringError::new("invalid character literal: empty string")),
-        [c] => Ok(*c),
-        [b'^', c] => {
-            if let Some(character) = ascii::caret_decode(*c) {
-                Ok(character.as_byte())
-            } else {
-                Err(StringError::new(
-                    "invalid character literal: invalid character after caret",
-                ))
-            }
-        }
-        [b'^', _, ..] => Err(StringError::new(
-            "invalid character literal: too many characters after caret",
-        )),
-        [b'\\', b'n'] => Ok(b'\n'),
-        [b'\\', b'r'] => Ok(b'\r'),
-        [b'\\', b't'] => Ok(b'\t'),
-        [b'\\', b'\\'] => Ok(b'\\'),
-        [b'\\', b'0'] => Ok(b'\0'),
-        [b'\\', b'\''] => Ok(b'\''),
-        [b'\\', b'"'] => Ok(b'\"'),
-        [b'\\', b'x', a @ (b'0'..=b'7'), b @ (b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')] => Ok(
-            (char::from(*a).to_digit(16).unwrap() * 16 + char::from(*b).to_digit(16).unwrap())
-                .try_into()
-                .unwrap(),
-        ),
-        [b'\\', b'x', b'8'..=b'9' | b'a'..=b'f' | b'A'..=b'F', b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F'] => {
-            Err(StringError::new(
-                "invalid character literal: hex escape yields value too large for ASCII",
-            ))
-        }
-        [b'\\', ..] => Err(StringError::new(
-            "invalid character literal: bad byte escape",
-        )),
-        [..] => Err(StringError::new("invalid character literal: too long")),
-    }
-}
-
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[debug("{_0:?}")]
 pub struct EscapeChar(u8);
@@ -171,8 +128,56 @@ impl Display for EscapeChar {
 
 impl FromStr for EscapeChar {
     type Err = StringError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(parse_escape_char(s)?))
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let input = input
+            .as_ascii_str()
+            .map_err(|err| StringError(format!("invalid character literal: {err}")))?;
+        Ok(Self(match input.as_bytes() {
+            [] => {
+                return Err(StringError::new("invalid character literal: empty string"));
+            }
+            [c] => *c,
+            [b'^', c] => {
+                if let Some(character) = ascii::caret_decode(*c) {
+                    character.as_byte()
+                } else {
+                    return Err(StringError::new(
+                        "invalid character literal: invalid character after caret",
+                    ));
+                }
+            }
+            [b'^', _, ..] => {
+                return Err(StringError::new(
+                    "invalid character literal: too many characters after caret",
+                ));
+            }
+            [b'\\', b'n'] => b'\n',
+            [b'\\', b'r'] => b'\r',
+            [b'\\', b't'] => b'\t',
+            [b'\\', b'\\'] => b'\\',
+            [b'\\', b'0'] => b'\0',
+            [b'\\', b'\''] => b'\'',
+            [b'\\', b'"'] => b'\"',
+            [b'\\', b'x', a @ (b'0'..=b'7'), b @ (b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')] => {
+                (char::from(*a).to_digit(16).unwrap() * 16 + char::from(*b).to_digit(16).unwrap())
+                    .try_into()
+                    .unwrap()
+            }
+            [b'\\', b'x', b'8'..=b'9' | b'a'..=b'f' | b'A'..=b'F', b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F'] =>
+            {
+                return Err(StringError::new(
+                    "invalid character literal: hex escape yields value too large for ASCII",
+                ));
+            }
+            [b'\\', ..] => {
+                return Err(StringError::new(
+                    "invalid character literal: bad byte escape",
+                ));
+            }
+            [..] => {
+                return Err(StringError::new("invalid character literal: too long"));
+            }
+        }))
     }
 }
 
@@ -248,13 +253,15 @@ mod tests {
         );
     }
 
+    #[track_caller]
     fn assert_parse_escape_char(input: &str, expected: u8) {
-        assert_eq!(parse_escape_char(input).unwrap(), expected);
+        assert_eq!(input.parse::<EscapeChar>().unwrap().as_byte(), expected);
     }
 
+    #[track_caller]
     fn assert_parse_escape_char_error(input: &str, expected_message: &str) {
         assert_eq!(
-            parse_escape_char(input).unwrap_err().to_string(),
+            input.parse::<EscapeChar>().unwrap_err().to_string(),
             expected_message
         );
     }
