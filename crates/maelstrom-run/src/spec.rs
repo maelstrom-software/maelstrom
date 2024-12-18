@@ -119,6 +119,7 @@ struct ContainerSpecForDeserialize {
     layers: Option<Vec<LayerSpec>>,
     added_layers: Option<Vec<LayerSpec>>,
     mounts: Option<Vec<JobMountForTomlAndJson>>,
+    added_mounts: Option<Vec<JobMountForTomlAndJson>>,
     network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
     working_directory: Option<Utf8PathBuf>,
@@ -137,6 +138,7 @@ impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
             layers,
             added_layers,
             mounts,
+            added_mounts,
             network,
             enable_writable_file_system,
             working_directory,
@@ -278,6 +280,45 @@ impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
             }
         }
 
+        let mounts = match (mounts, added_mounts, &parent) {
+            (None, None, _) => vec![],
+            (Some(_), Some(_), _) => {
+                return Err("field `added_mounts` cannot be set with `mounts` field".into());
+            }
+            (None, Some(_), None) => {
+                return Err(concat!(
+                    "field `added_mounts` cannot be set without ",
+                    "`parent` also being specified (try `mounts` instead)",
+                )
+                .into());
+            }
+            (None, Some(added_mounts), Some(parent)) => {
+                if !parent.r#use.as_set().contains(ContainerUse::Mounts) {
+                    return Err(concat!(
+                        "field `added_mounts` requires `parent` being specified ",
+                        "with a `use` of `mounts` (try `mounts` instead)",
+                    )
+                    .into());
+                }
+                added_mounts
+            }
+            (Some(mounts), None, None) => mounts,
+            (Some(mounts), None, Some(parent)) => {
+                if parent.r#use.explicit().contains(ContainerUse::Mounts) {
+                    return Err(concat!(
+                        "field `mounts` cannot be set if `parent` with an explicit `use` of ",
+                        "`mounts` is also specified (try `added_mounts` instead)",
+                    )
+                    .into());
+                }
+                to_remove_from_parent_use.insert(ContainerUse::Mounts);
+                mounts
+            }
+        }
+        .into_iter()
+        .map(Into::into)
+        .collect();
+
         if network.is_some() {
             if let Some(parent) = &parent {
                 if parent.r#use.explicit().contains(ContainerUse::Network) {
@@ -335,11 +376,7 @@ impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
                 .map(IntoEnvironment::into_environment)
                 .unwrap_or_default(),
             working_directory,
-            mounts: mounts
-                .unwrap_or_default()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            mounts,
             network,
             user,
             group,
@@ -383,7 +420,7 @@ impl IntoEnvironment for EnvSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::{enum_set, JobDevice, JobMount};
+    use maelstrom_base::{enum_set, proc_mount, tmp_mount, JobDevice, JobMount};
     use maelstrom_client::{
         container_container_parent, container_spec, image_container_parent, job_spec,
     };
@@ -1513,6 +1550,268 @@ mod tests {
                 parent: container_container_parent!("parent", environment),
             },
         )
+    }
+
+    #[test]
+    fn added_mounts_and_mounts() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "mounts": [{ "type": "proc", "mount_point": "/proc" }],
+                    "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                }"#,
+            )
+            .unwrap_err(),
+            "field `added_mounts` cannot be set with `mounts` field",
+        );
+    }
+
+    #[test]
+    fn added_mounts_and_parent_with_implicit_mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent",
+                    "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                mounts: [tmp_mount!("/tmp")],
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn added_mounts_and_parent_with_explicit_mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "mounts" ]
+                    },
+                    "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                mounts: [tmp_mount!("/tmp")],
+                parent: container_container_parent!("parent", mounts),
+            },
+        );
+    }
+
+    #[test]
+    fn added_mounts_and_parent_without_mounts() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    },
+                    "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `added_mounts` requires `parent` being specified with a ",
+                "`use` of `mounts` (try `mounts` instead)",
+            ),
+        );
+    }
+
+    #[test]
+    fn added_mounts_and_no_parent() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `added_mounts` cannot be set without ",
+                "`parent` also being specified (try `mounts` instead)",
+            ),
+        );
+    }
+
+    #[test]
+    fn empty_added_mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent",
+                    "added_mounts": []
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn parent_with_implicit_mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent"
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn parent_with_explicit_mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "mounts" ]
+                    }
+                }"#
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", mounts),
+            },
+        );
+    }
+
+    #[test]
+    fn mounts_and_parent_with_implicit_mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": "parent",
+                    "mounts": [{ "type": "proc", "mount_point": "/proc" }]
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                mounts: [proc_mount!("/proc")],
+                parent: container_container_parent!("parent", all, -mounts),
+            },
+        );
+    }
+
+    #[test]
+    fn mounts_and_parent_with_explicit_mounts() {
+        assert_error(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "mounts" ]
+                    },
+                    "mounts": [{ "type": "proc", "mount_point": "/proc" }]
+                }"#,
+            )
+            .unwrap_err(),
+            concat!(
+                "field `mounts` cannot be set if `parent` with an explicit `use` of ",
+                "`mounts` is also specified (try `added_mounts` instead)",
+            ),
+        );
+    }
+
+    #[test]
+    fn mounts_and_parent_without_mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    },
+                    "mounts": [{ "type": "proc", "mount_point": "/proc" }]
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                mounts: [proc_mount!("/proc")],
+                parent: container_container_parent!("parent", environment),
+            },
+        );
+    }
+
+    #[test]
+    fn no_mounts_and_no_parent() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh"
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+            },
+        );
+    }
+
+    #[test]
+    fn no_mounts_and_parent_without_mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "parent": {
+                        "name": "parent",
+                        "use": [ "environment" ]
+                    }
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+                parent: container_container_parent!("parent", environment),
+            },
+        );
+    }
+
+    #[test]
+    fn empty_mounts() {
+        assert_eq!(
+            parse_job_spec(
+                r#"{
+                    "program": "/bin/sh",
+                    "mounts": []
+                }"#,
+            )
+            .unwrap(),
+            job_spec! {
+                "/bin/sh",
+            },
+        );
     }
 
     #[test]
