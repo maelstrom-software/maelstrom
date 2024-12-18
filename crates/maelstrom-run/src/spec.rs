@@ -7,16 +7,18 @@ use serde::{
 };
 use std::{collections::HashMap, io::Read};
 
-pub fn job_spec_or_containers_iter_from_reader(
-    reader: impl Read,
-) -> impl Iterator<Item = serde_json::Result<JobSpecOrContainers>> {
-    serde_json::Deserializer::from_reader(reader).into_iter::<JobSpecOrContainers>()
-}
-
 #[allow(clippy::large_enum_variant)]
 pub enum JobSpecOrContainers {
     JobSpec(JobSpec),
     Containers(HashMap<String, ContainerSpec>),
+}
+
+impl JobSpecOrContainers {
+    pub fn iter_from_json_reader(
+        reader: impl Read,
+    ) -> impl Iterator<Item = serde_json::Result<Self>> {
+        serde_json::Deserializer::from_reader(reader).into_iter::<Self>()
+    }
 }
 
 impl<'de> Deserialize<'de> for JobSpecOrContainers {

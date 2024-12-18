@@ -12,7 +12,7 @@ use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, 
 use maelstrom_macro::Config;
 use maelstrom_run::{
     escape::{self, EscapeChar, EscapeChunk},
-    spec::{self, JobSpecOrContainers},
+    spec::JobSpecOrContainers,
 };
 use maelstrom_util::{
     config::common::{
@@ -773,7 +773,7 @@ fn main_with_logger(
         config.artifact_transfer_strategy,
         log,
     )?;
-    let job_spec_or_containers_iter = spec::job_spec_or_containers_iter_from_reader(reader);
+    let job_spec_or_containers_iter = JobSpecOrContainers::iter_from_json_reader(reader);
     if extra_options.one_or_tty.any() {
         if extra_options.one_or_tty.tty {
             // Unblock the signals for the local thread. We'll re-block them again once we've read
