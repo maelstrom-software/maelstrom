@@ -1,7 +1,9 @@
 #![allow(unused_imports)]
 use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, UserId, Utf8PathBuf};
-use maelstrom_client::spec::{incompatible, ImageRef, ImageUse, LayerSpec, PossiblyImage};
+use maelstrom_client::spec::{
+    incompatible, ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse, LayerSpec, PossiblyImage,
+};
 use serde::{de, Deserialize, Deserializer};
 use std::{
     collections::BTreeMap,
@@ -68,7 +70,7 @@ impl TestContainer {
                 self.added_mounts = map.next_value()?;
             }
             ContainerField::Image => {
-                let i = map.next_value::<ImageRef>()?;
+                let i = ImageRef::from(map.next_value::<ImageRefWithImplicitOrExplicitUse>()?);
                 self.image = Some(i.name);
                 for image_use in i.r#use {
                     match image_use {
@@ -283,35 +285,23 @@ mod tests {
 
     #[test]
     fn working_directory_before_image_without_working_directory() {
-        container_parse_test(
+        container_parse_error_test(
             r#"
             working_directory = "/foo"
             image = "rust"
             "#,
-            TestContainer {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Explicit("/foo".into())),
-                layers: Some(PossiblyImage::Image),
-                environment: Some(PossiblyImage::Image),
-                ..Default::default()
-            },
+            "field `image` cannot use `working_directory` if field `working_directory` is also set",
         );
     }
 
     #[test]
     fn working_directory_after_image_without_working_directory() {
-        container_parse_test(
+        container_parse_error_test(
             r#"
             image = "rust"
             working_directory = "/foo"
             "#,
-            TestContainer {
-                image: Some(string!("rust")),
-                working_directory: Some(PossiblyImage::Explicit("/foo".into())),
-                layers: Some(PossiblyImage::Image),
-                environment: Some(PossiblyImage::Image),
-                ..Default::default()
-            },
+            "field `image` cannot use `working_directory` if field `working_directory` is also set",
         );
     }
 
@@ -735,6 +725,7 @@ mod tests {
                 image: Some(string!("rust")),
                 layers: Some(PossiblyImage::Image),
                 environment: Some(PossiblyImage::Image),
+                working_directory: Some(PossiblyImage::Image),
                 ..Default::default()
             },
         );
@@ -750,6 +741,7 @@ mod tests {
                 image: Some(string!("rust")),
                 layers: Some(PossiblyImage::Image),
                 environment: Some(PossiblyImage::Image),
+                working_directory: Some(PossiblyImage::Image),
                 ..Default::default()
             },
         );

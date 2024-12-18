@@ -11,8 +11,7 @@ use anyhow::{Error, Result};
 use derive_more::From;
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    enum_set, CaptureFileSystemChanges, GroupId, JobMount, JobNetwork, JobTty, Timeout, UserId,
-    Utf8PathBuf,
+    CaptureFileSystemChanges, GroupId, JobMount, JobNetwork, JobTty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
@@ -48,11 +47,8 @@ where
     }
 }
 
-#[derive(
-    Clone, Debug, Deserialize, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf,
-)]
+#[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::ImageRef")]
-#[serde(from = "ImageRefForDeserialize")]
 pub struct ImageRef {
     pub name: String,
     pub r#use: EnumSet<ImageUse>,
@@ -92,14 +88,59 @@ macro_rules! image_ref {
     };
 }
 
-impl From<ImageRefForDeserialize> for ImageRef {
+impl From<ImageRefWithImplicitOrExplicitUse> for ImageRef {
+    fn from(image_ref: ImageRefWithImplicitOrExplicitUse) -> Self {
+        Self {
+            name: image_ref.name,
+            r#use: image_ref.r#use.as_set(),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum ImplicitOrExplicitUse<T: EnumSetType> {
+    Implicit,
+    Explicit(EnumSet<T>),
+}
+
+impl<T: EnumSetType> ImplicitOrExplicitUse<T> {
+    pub fn as_set(&self) -> EnumSet<T> {
+        match self {
+            Self::Implicit => EnumSet::all(),
+            Self::Explicit(explicit) => *explicit,
+        }
+    }
+
+    pub fn explicit(&self) -> EnumSet<T> {
+        match self {
+            Self::Implicit => EnumSet::empty(),
+            Self::Explicit(explicit) => *explicit,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(from = "ImageRefForDeserialize")]
+pub struct ImageRefWithImplicitOrExplicitUse {
+    pub name: String,
+    pub r#use: ImplicitOrExplicitUse<ImageUse>,
+}
+
+impl From<ImageRefForDeserialize> for ImageRefWithImplicitOrExplicitUse {
     fn from(image: ImageRefForDeserialize) -> Self {
         match image {
-            ImageRefForDeserialize::AsString(name) => Self {
+            ImageRefForDeserialize::AsString(name)
+            | ImageRefForDeserialize::AsStruct { name, r#use: None } => Self {
                 name,
-                r#use: use_default(),
+                r#use: ImplicitOrExplicitUse::Implicit,
             },
-            ImageRefForDeserialize::AsStruct { name, r#use } => Self { name, r#use },
+            ImageRefForDeserialize::AsStruct {
+                name,
+                r#use: Some(r#use),
+            } => Self {
+                name,
+                r#use: ImplicitOrExplicitUse::Explicit(r#use),
+            },
         }
     }
 }
@@ -110,20 +151,12 @@ enum ImageRefForDeserialize {
     AsString(String),
     AsStruct {
         name: String,
-        #[serde(default = "use_default")]
-        r#use: EnumSet<ImageUse>,
+        r#use: Option<EnumSet<ImageUse>>,
     },
 }
 
-fn use_default() -> EnumSet<ImageUse> {
-    enum_set! {ImageUse::Layers | ImageUse::Environment}
-}
-
-#[derive(
-    Clone, Debug, Deserialize, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf,
-)]
+#[derive(Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::ContainerRef")]
-#[serde(from = "ContainerRefForDeserialize")]
 pub struct ContainerRef {
     pub name: String,
     pub r#use: EnumSet<ContainerUse>,
@@ -193,14 +226,37 @@ macro_rules! container_ref {
     };
 }
 
-impl From<ContainerRefForDeserialize> for ContainerRef {
+impl From<ContainerRefWithImplicitOrExplicitUse> for ContainerRef {
+    fn from(image_ref: ContainerRefWithImplicitOrExplicitUse) -> Self {
+        Self {
+            name: image_ref.name,
+            r#use: image_ref.r#use.as_set(),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(from = "ContainerRefForDeserialize")]
+pub struct ContainerRefWithImplicitOrExplicitUse {
+    pub name: String,
+    pub r#use: ImplicitOrExplicitUse<ContainerUse>,
+}
+
+impl From<ContainerRefForDeserialize> for ContainerRefWithImplicitOrExplicitUse {
     fn from(image: ContainerRefForDeserialize) -> Self {
         match image {
-            ContainerRefForDeserialize::AsString(name) => Self {
+            ContainerRefForDeserialize::AsString(name)
+            | ContainerRefForDeserialize::AsStruct { name, r#use: None } => Self {
                 name,
-                r#use: EnumSet::all(),
+                r#use: ImplicitOrExplicitUse::Implicit,
             },
-            ContainerRefForDeserialize::AsStruct { name, r#use } => Self { name, r#use },
+            ContainerRefForDeserialize::AsStruct {
+                name,
+                r#use: Some(r#use),
+            } => Self {
+                name,
+                r#use: ImplicitOrExplicitUse::Explicit(r#use),
+            },
         }
     }
 }
@@ -211,8 +267,7 @@ enum ContainerRefForDeserialize {
     AsString(String),
     AsStruct {
         name: String,
-        #[serde(default = "EnumSet::<ContainerUse>::all")]
-        r#use: EnumSet<ContainerUse>,
+        r#use: Option<EnumSet<ContainerUse>>,
     },
 }
 
@@ -798,6 +853,7 @@ impl ConvertedImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use enumset::enum_set;
     use indoc::indoc;
     use maelstrom_test::{
         glob_layer, path_buf_vec, paths_layer, shared_library_dependencies_layer, string,
@@ -1890,13 +1946,12 @@ mod tests {
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct ImageRefContainer {
-        #[serde(rename = "image")]
-        image_ref: ImageRef,
+        image: ImageRefWithImplicitOrExplicitUse,
     }
 
     impl ImageRefContainer {
-        fn new(image_ref: ImageRef) -> Self {
-            Self { image_ref }
+        fn new(image: ImageRefWithImplicitOrExplicitUse) -> Self {
+            Self { image }
         }
     }
 
@@ -1905,35 +1960,84 @@ mod tests {
     }
 
     #[test]
-    fn image_ref_deserialize() {
+    fn image_ref_deserialize_explicit_use_of_all() {
         assert_eq!(
             parse_image_container(indoc! {r#"
                 [image]
                 name = "name"
                 use = [ "layers", "environment", "working_directory" ]
             "#}),
-            ImageRefContainer::new(image_ref!("name", layers, environment, working_directory)),
+            ImageRefContainer::new(ImageRefWithImplicitOrExplicitUse {
+                name: "name".into(),
+                r#use: ImplicitOrExplicitUse::Explicit(EnumSet::all()),
+            }),
         );
     }
 
     #[test]
-    fn image_ref_deserialize_no_use() {
+    fn image_ref_deserialize_explicit_use_of_one() {
+        assert_eq!(
+            parse_image_container(indoc! {r#"
+                [image]
+                name = "name"
+                use = [ "environment" ]
+            "#}),
+            ImageRefContainer::new(ImageRefWithImplicitOrExplicitUse {
+                name: "name".into(),
+                r#use: ImplicitOrExplicitUse::Explicit(ImageUse::Environment.into()),
+            }),
+        );
+    }
+
+    #[test]
+    fn image_ref_deserialize_implicit_only_name() {
         assert_eq!(
             parse_image_container(indoc! {r#"
                 [image]
                 name = "name"
             "#}),
-            ImageRefContainer::new(image_ref!("name", layers, environment)),
+            ImageRefContainer::new(ImageRefWithImplicitOrExplicitUse {
+                name: "name".into(),
+                r#use: ImplicitOrExplicitUse::Implicit,
+            }),
         );
     }
 
     #[test]
-    fn image_ref_deserialize_as_string() {
+    fn image_ref_deserialize_implicit_as_string() {
         assert_eq!(
             parse_image_container(indoc! {r#"
                 image = "name"
             "#}),
-            ImageRefContainer::new(image_ref!("name", layers, environment)),
+            ImageRefContainer::new(ImageRefWithImplicitOrExplicitUse {
+                name: "name".into(),
+                r#use: ImplicitOrExplicitUse::Implicit,
+            }),
+        );
+    }
+
+    #[test]
+    fn implicit_or_explicit_image_use_implicit() {
+        let r#use = ImplicitOrExplicitUse::Implicit;
+        assert_eq!(r#use.explicit(), enum_set!());
+        assert_eq!(
+            r#use.as_set(),
+            enum_set!(ImageUse::Layers | ImageUse::Environment | ImageUse::WorkingDirectory),
+        );
+    }
+
+    #[test]
+    fn implicit_or_explicit_image_use_explicit() {
+        let r#use = ImplicitOrExplicitUse::Explicit(enum_set!(
+            ImageUse::Layers | ImageUse::WorkingDirectory
+        ));
+        assert_eq!(
+            r#use.explicit(),
+            enum_set!(ImageUse::Layers | ImageUse::WorkingDirectory),
+        );
+        assert_eq!(
+            r#use.as_set(),
+            enum_set!(ImageUse::Layers | ImageUse::WorkingDirectory),
         );
     }
 

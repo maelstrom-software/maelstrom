@@ -1,8 +1,9 @@
 use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{
-    ContainerParent, ContainerRef, ContainerSpec, ContainerUse, EnvironmentSpec, ImageRef,
-    ImageUse, IntoEnvironment, JobSpec, LayerSpec,
+    ContainerParent, ContainerRef, ContainerRefWithImplicitOrExplicitUse, ContainerSpec,
+    ContainerUse, EnvironmentSpec, ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse,
+    IntoEnvironment, JobSpec, LayerSpec,
 };
 use serde::{
     de::Deserializer,
@@ -121,8 +122,8 @@ struct ContainerSpecForDeserialize {
     working_directory: Option<Utf8PathBuf>,
     user: Option<UserId>,
     group: Option<GroupId>,
-    image: Option<ImageRef>,
-    parent: Option<ContainerRef>,
+    image: Option<ImageRefWithImplicitOrExplicitUse>,
+    parent: Option<ContainerRefWithImplicitOrExplicitUse>,
 }
 
 impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
@@ -145,11 +146,11 @@ impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
 
         let image_use = image
             .as_ref()
-            .map(|image_ref| image_ref.r#use)
+            .map(|image_ref| ImageRef::from(image_ref.clone()).r#use)
             .unwrap_or_default();
         let parent_use = parent
             .as_ref()
-            .map(|container_ref| container_ref.r#use)
+            .map(|container_ref| ContainerRef::from(container_ref.clone()).r#use)
             .unwrap_or_default();
 
         if image.is_some() && parent.is_some() {
@@ -255,8 +256,8 @@ impl TryFrom<ContainerSpecForDeserialize> for ContainerSpec {
 
         Ok(ContainerSpec {
             parent: match (image, parent) {
-                (Some(image), _) => Some(ContainerParent::Image(image)),
-                (_, Some(parent)) => Some(ContainerParent::Container(parent)),
+                (Some(image), _) => Some(ContainerParent::Image(image.into())),
+                (_, Some(parent)) => Some(ContainerParent::Container(parent.into())),
                 (None, None) => None,
             },
             layers: layers.into_iter().chain(added_layers).flatten().collect(),
