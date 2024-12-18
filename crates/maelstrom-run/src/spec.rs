@@ -420,7 +420,7 @@ impl IntoEnvironment for EnvSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::{enum_set, proc_mount, tmp_mount, JobDevice, JobMount};
+    use maelstrom_base::{proc_mount, tmp_mount, JobMount};
     use maelstrom_client::{
         container_container_parent, container_spec, image_container_parent, job_spec,
     };
