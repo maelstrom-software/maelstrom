@@ -31,13 +31,7 @@ impl TryFrom<JobSpecOrContainersForDeserialize> for JobSpecOrContainers {
                 JobSpecOrContainers::JobSpec(job_spec.try_into()?)
             }
             JobSpecOrContainersForDeserialize::Containers(containers) => {
-                JobSpecOrContainers::Containers(
-                    containers
-                        .containers
-                        .into_iter()
-                        .map(|(name, container)| (name, container.0))
-                        .collect(),
-                )
+                JobSpecOrContainers::Containers(containers.containers)
             }
         })
     }
@@ -106,19 +100,7 @@ impl TryFrom<JobSpecForDeserialize> for JobSpec {
 
 #[derive(Deserialize)]
 struct ContainerMapForDeserialize {
-    containers: HashMap<String, ContainerMapForDeserializeElement>,
-}
-
-#[derive(Deserialize)]
-#[serde(try_from = "ContainerSpecForTomlAndJson")]
-struct ContainerMapForDeserializeElement(ContainerSpec);
-
-impl TryFrom<ContainerSpecForTomlAndJson> for ContainerMapForDeserializeElement {
-    type Error = <ContainerSpec as TryFrom<ContainerSpecForTomlAndJson>>::Error;
-
-    fn try_from(container: ContainerSpecForTomlAndJson) -> Result<Self, Self::Error> {
-        Ok(Self(ContainerSpec::try_from(container)?))
-    }
+    containers: HashMap<String, ContainerSpec>,
 }
 
 #[cfg(test)]
