@@ -1,5 +1,4 @@
 use anyhow::Result;
-use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::spec::{ContainerSpec, JobSpec};
 use serde::{
     de::Deserializer,
@@ -22,8 +21,9 @@ pub enum JobSpecOrContainers {
     Containers(HashMap<String, ContainerSpec>),
 }
 
+#[allow(clippy::large_enum_variant)]
 enum JobSpecOrContainersForDeserialize {
-    JobSpec(JobSpecForDeserialize),
+    JobSpec(JobSpec),
     Containers(ContainerMapForDeserialize),
 }
 
@@ -33,7 +33,7 @@ impl TryFrom<JobSpecOrContainersForDeserialize> for JobSpecOrContainers {
     fn try_from(job: JobSpecOrContainersForDeserialize) -> Result<Self, Self::Error> {
         Ok(match job {
             JobSpecOrContainersForDeserialize::JobSpec(job_spec) => {
-                JobSpecOrContainers::JobSpec(job_spec.try_into()?)
+                JobSpecOrContainers::JobSpec(job_spec)
             }
             JobSpecOrContainersForDeserialize::Containers(containers) => {
                 JobSpecOrContainers::Containers(containers.into())
@@ -59,40 +59,7 @@ impl<'de> Deserialize<'de> for JobSpecOrContainersForDeserialize {
                 }
             }
         }
-        JobSpecForDeserialize::deserialize(ContentRefDeserializer::<D::Error>::new(&content))
-            .map(Self::JobSpec)
-    }
-}
-
-#[derive(Deserialize)]
-struct JobSpecForDeserialize {
-    #[serde(flatten)]
-    container: ContainerSpec,
-    program: Utf8PathBuf,
-    arguments: Option<Vec<String>>,
-    timeout: Option<u32>,
-    priority: Option<i8>,
-}
-
-impl From<JobSpecForDeserialize> for JobSpec {
-    fn from(job_spec: JobSpecForDeserialize) -> Self {
-        let JobSpecForDeserialize {
-            container,
-            program,
-            arguments,
-            timeout,
-            priority,
-        } = job_spec;
-        JobSpec {
-            container,
-            program,
-            arguments: arguments.unwrap_or_default(),
-            timeout: timeout.and_then(Timeout::new),
-            estimated_duration: None,
-            allocate_tty: None,
-            priority: priority.unwrap_or_default(),
-            capture_file_system_changes: None,
-        }
+        JobSpec::deserialize(ContentRefDeserializer::<D::Error>::new(&content)).map(Self::JobSpec)
     }
 }
 

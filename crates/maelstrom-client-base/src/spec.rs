@@ -821,8 +821,9 @@ impl IntoEnvironment for EnvSelector {
     }
 }
 
-#[derive(Clone, Debug, Eq, IntoProtoBuf, PartialEq, TryFromProtoBuf)]
+#[derive(Clone, Debug, Deserialize, Eq, IntoProtoBuf, PartialEq, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::JobSpec")]
+#[serde(from = "JobSpecForTomlAndJson")]
 pub struct JobSpec {
     #[proto(option)]
     pub container: ContainerSpec,
@@ -889,6 +890,40 @@ macro_rules! job_spec {
     ($program:expr $(,$($field_in:tt)*)?) => {
         $crate::job_spec!(@expand [$program] [$($($field_in)*)?] -> [] [])
     };
+}
+
+/// Currently, this is only used by maelstrom-run, though it seems like it's concieveable that it
+/// may be used by other clients. Also, it's nice to have all of the parsing code in one place.
+#[derive(Deserialize)]
+struct JobSpecForTomlAndJson {
+    #[serde(flatten)]
+    container: ContainerSpec,
+    program: Utf8PathBuf,
+    arguments: Option<Vec<String>>,
+    timeout: Option<u32>,
+    priority: Option<i8>,
+}
+
+impl From<JobSpecForTomlAndJson> for JobSpec {
+    fn from(job_spec: JobSpecForTomlAndJson) -> Self {
+        let JobSpecForTomlAndJson {
+            container,
+            program,
+            arguments,
+            timeout,
+            priority,
+        } = job_spec;
+        JobSpec {
+            container,
+            program,
+            arguments: arguments.unwrap_or_default(),
+            timeout: timeout.and_then(Timeout::new),
+            estimated_duration: None,
+            allocate_tty: None,
+            priority: priority.unwrap_or_default(),
+            capture_file_system_changes: None,
+        }
+    }
 }
 
 #[derive(
