@@ -896,6 +896,7 @@ macro_rules! job_spec {
 /// Currently, this is only used by maelstrom-run, though it seems like it's concieveable that it
 /// may be used by other clients. Also, it's nice to have all of the parsing code in one place.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct JobSpecForTomlAndJson {
     #[serde(flatten)]
     container: ContainerSpec,
@@ -4027,6 +4028,13 @@ mod tests {
         }
 
         #[track_caller]
+        fn parse_job_spec_error_toml(file: &str) -> String {
+            format!("{}", toml::from_str::<JobSpec>(file).unwrap_err())
+                .trim_end()
+                .into()
+        }
+
+        #[track_caller]
         fn parse_job_spec_error_json(file: &str) -> String {
             format!("{}", serde_json::from_str::<JobSpec>(file).unwrap_err())
         }
@@ -4037,6 +4045,15 @@ mod tests {
                 parse_job_spec_error_json("{}"),
                 "missing field `program` at line 1 column 2",
             );
+        }
+
+        #[test]
+        fn unknown_field() {
+            assert!(parse_job_spec_error_toml(indoc! {r#"
+                program = "/bin/sh"
+                foo_bar_baz = 3
+            "#})
+            .contains("unknown field `foo_bar_baz`"));
         }
 
         #[test]
