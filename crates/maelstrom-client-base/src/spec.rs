@@ -2527,6 +2527,18 @@ mod tests {
         use super::*;
 
         #[track_caller]
+        fn parse_container_spec_toml(file: &str) -> ContainerSpec {
+            toml::from_str(file).unwrap()
+        }
+
+        #[track_caller]
+        fn parse_container_spec_error_toml(file: &str) -> String {
+            format!("{}", toml::from_str::<ContainerSpec>(file).unwrap_err())
+                .trim_end()
+                .into()
+        }
+
+        #[track_caller]
         fn parse_container_spec_json(file: &str) -> ContainerSpec {
             serde_json::from_str(file).unwrap()
         }
@@ -2550,16 +2562,21 @@ mod tests {
             );
         }
 
+        #[test]
+        fn empty() {
+            assert_eq!(parse_container_spec_json("{}"), container_spec! {});
+        }
+
         mod layers {
             use super::*;
 
             #[test]
             fn added_layers_and_layers() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "layers": [ { "tar": "1" }, { "tar": "2" } ],
-                        "added_layers": [ { "tar": "3" } ]
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        layers = [ { tar = "1" }, { tar = "2" } ]
+                        added_layers = [ { tar = "3" } ]
+                    "#}),
                     "field `added_layers` cannot be set with `layers` field",
                 );
             }
@@ -2567,10 +2584,10 @@ mod tests {
             #[test]
             fn added_layers_and_image_with_implicit_layers() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": "image1",
-                        "added_layers": [ { "tar": "1" } ]
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image = "image1"
+                        added_layers = [ { tar = "1" } ]
+                    "#}),
                     container_spec! {
                         layers: [tar_layer!("1")],
                         parent: image_container_parent!("image1", all),
@@ -2598,13 +2615,11 @@ mod tests {
             #[test]
             fn added_layers_and_image_without_layers() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "image": {
-                            "name": "image1",
-                            "use": [ "environment" ]
-                        },
-                        "added_layers": [ { "tar": "1" } ]
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        image.name = "image1"
+                        image.use = [ "environment" ]
+                        added_layers = [ { tar = "1" } ]
+                    "#}),
                     concat!(
                         "field `added_layers` requires `image` being specified with a ",
                         "`use` of `layers` (try `layers` instead)",
@@ -2629,13 +2644,11 @@ mod tests {
             #[test]
             fn added_layers_and_parent_with_explicit_layers() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "layers" ]
-                        },
-                        "added_layers": [ { "tar": "1" } ]
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        parent.name = "parent"
+                        parent.use = [ "layers" ]
+                        added_layers = [ { tar = "1" } ]
+                    "#}),
                     container_spec! {
                         layers: [tar_layer!("1")],
                         parent: container_container_parent!("parent", layers),
@@ -2663,9 +2676,9 @@ mod tests {
             #[test]
             fn added_layers_and_neither_image_nor_parent() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "added_layers": [ { "tar": "1" } ]
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        added_layers = [ { tar = "1" } ]
+                    "#}),
                     concat!(
                         "field `added_layers` cannot be set without ",
                         "`image` or `parent` also being specified (try `layers` instead)",
@@ -2689,9 +2702,9 @@ mod tests {
             #[test]
             fn image_with_implicit_layers() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": "image1"
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image = "image1"
+                    "#}),
                     container_spec! {
                         parent: image_container_parent!("image1", all),
                     },
@@ -2716,9 +2729,9 @@ mod tests {
             #[test]
             fn parent_with_implicit_layers() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": "parent"
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        parent = "parent"
+                    "#}),
                     container_spec! {
                         parent: container_container_parent!("parent", all),
                     },
@@ -2743,10 +2756,10 @@ mod tests {
             #[test]
             fn layers_and_image_with_implicit_layers() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": "image1",
-                        "layers": [ { "tar": "1" } ]
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image = "image1"
+                        layers = [ { tar = "1" } ]
+                    "#}),
                     container_spec! {
                         layers: [tar_layer!("1")],
                         parent: image_container_parent!("image1", all, -layers),
@@ -2774,13 +2787,10 @@ mod tests {
             #[test]
             fn layers_and_image_without_layers() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": {
-                            "name": "image1",
-                            "use": [ "environment" ]
-                        },
-                        "layers": [ { "tar": "1" } ]
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image = { name = "image1", use = [ "environment" ] }
+                        layers = [ { tar = "1" } ]
+                    "#}),
                     container_spec! {
                         layers: [tar_layer!("1")],
                         parent: image_container_parent!("image1", environment),
@@ -2805,13 +2815,11 @@ mod tests {
             #[test]
             fn layers_and_parent_with_explicit_layers() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "layers" ]
-                        },
-                        "layers": [ { "tar": "1" } ]
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        parent.name = "parent"
+                        parent.use = [ "layers" ]
+                        layers = [ { tar = "1" } ]
+                    "#}),
                     concat!(
                         "field `layers` cannot be set if `parent` with an explicit `use` of ",
                         "`layers` is also specified (try `added_layers` instead)",
@@ -2837,19 +2845,12 @@ mod tests {
             }
 
             #[test]
-            fn no_layers_and_neither_image_nor_parent() {
-                assert_eq!(parse_container_spec_json("{}"), container_spec! {},);
-            }
-
-            #[test]
             fn no_layers_and_image_without_layers() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": {
-                            "name": "image1",
-                            "use": [ "environment" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image.name = "image1"
+                        image.use = [ "environment" ]
+                    "#}),
                     container_spec! {
                         parent: image_container_parent!("image1", environment),
                     },
@@ -2874,9 +2875,9 @@ mod tests {
             #[test]
             fn empty_layers() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "layers": []
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        layers = []
+                    "#}),
                     container_spec! {},
                 );
             }
@@ -2899,10 +2900,10 @@ mod tests {
             #[test]
             fn added_environment_and_image_with_implicit_environment() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": "image1",
-                        "added_environment": { "FROB": "frob" }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image = "image1"
+                        added_environment = { FROB = "frob" }
+                    "#}),
                     container_spec! {
                         environment: environment_spec!(true, "FROB" => "frob"),
                         parent: image_container_parent!("image1", all),
@@ -2930,13 +2931,11 @@ mod tests {
             #[test]
             fn added_environment_and_image_without_environment() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "image": {
-                            "name": "image1",
-                            "use": [ "layers" ]
-                        },
-                        "added_environment": { "FROB": "frob" }
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        image.name = "image1"
+                        image.use = [ "layers" ]
+                        added_environment = { FROB = "frob" }
+                    "#}),
                     concat!(
                         "field `added_environment` requires `image` being specified with a ",
                         "`use` of `environment` (try `environment` instead)",
@@ -2973,22 +2972,16 @@ mod tests {
             #[test]
             fn added_environment_and_parent_with_explicit_environment() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "environment" ]
-                        },
-                        "added_environment": [
-                            {
-                                "vars": { "FROB": "frob" },
-                                "extend": false
-                            },
-                            {
-                                "vars": { "BAZ": "baz" },
-                                "extend": true
-                            }
-                        ]
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        parent.name = "parent"
+                        parent.use = [ "environment" ]
+                        [[added_environment]]
+                        vars = { FROB = "frob" }
+                        extend = false
+                        [[added_environment]]
+                        vars = { BAZ = "baz" }
+                        extend = true
+                    "#}),
                     container_spec! {
                         environment: [
                             environment_spec!(false, "FROB" => "frob"),
@@ -3028,9 +3021,9 @@ mod tests {
             #[test]
             fn added_environment_and_neither_image_nor_parent() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "added_environment": { "FROB": "frob" }
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        added_environment = { FROB = "frob" }
+                    "#}),
                     concat!(
                         "field `added_environment` cannot be set without ",
                         "`image` or `parent` also being specified (try `environment` instead)",
@@ -3054,9 +3047,9 @@ mod tests {
             #[test]
             fn image_with_implicit_environment() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": "image1"
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image = "image1"
+                    "#}),
                     container_spec! {
                         parent: image_container_parent!("image1", all),
                     },
@@ -3081,9 +3074,9 @@ mod tests {
             #[test]
             fn parent_with_implicit_environment() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": "parent"
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        parent = "parent"
+                    "#}),
                     container_spec! {
                         parent: container_container_parent!("parent", all),
                     },
@@ -3108,10 +3101,10 @@ mod tests {
             #[test]
             fn environment_and_image_with_implicit_environment() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": "image1",
-                        "environment": { "FROB": "frob" }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image = "image1"
+                        environment = { FROB = "frob" }
+                    "#}),
                     container_spec! {
                         environment: environment_spec!(true, "FROB" => "frob"),
                         parent: image_container_parent!("image1", all, -environment),
@@ -3139,13 +3132,11 @@ mod tests {
             #[test]
             fn environment_and_image_without_environment() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": {
-                            "name": "image1",
-                            "use": [ "layers" ]
-                        },
-                        "environment": { "FROB": "frob" }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image.name = "image1"
+                        image.use = [ "layers" ]
+                        environment = { FROB = "frob" }
+                    "#}),
                     container_spec! {
                         environment: environment_spec!(true, "FROB" => "frob"),
                         parent: image_container_parent!("image1", layers),
@@ -3182,22 +3173,19 @@ mod tests {
             #[test]
             fn environment_and_parent_with_explicit_environment() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "environment" ]
-                        },
-                        "environment": [
-                            {
-                                "vars": { "FROB": "frob" },
-                                "extend": false
-                            },
-                            {
-                                "vars": { "BAZ": "baz" },
-                                "extend": true
-                            }
-                        ]
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        [parent]
+                        name = "parent"
+                        use = [ "environment" ]
+
+                        [[environment]]
+                        vars = { FROB = "frob" }
+                        extend = false
+
+                        [[environment]]
+                        vars = { BAZ = "baz" }
+                        extend = true
+                    "#}),
                     concat!(
                         "field `environment` cannot be set if `parent` with an explicit `use` of ",
                         "`environment` is also specified (try `added_environment` instead)",
@@ -3235,19 +3223,13 @@ mod tests {
             }
 
             #[test]
-            fn no_environment_and_neither_image_nor_parent() {
-                assert_eq!(parse_container_spec_json("{}"), container_spec! {},);
-            }
-
-            #[test]
             fn no_environment_and_image_without_environment() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": {
-                            "name": "image1",
-                            "use": [ "layers" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        [image]
+                        name = "image1"
+                        use = [ "layers" ]
+                    "#}),
                     container_spec! {
                         parent: image_container_parent!("image1", layers),
                     },
@@ -3272,9 +3254,9 @@ mod tests {
             #[test]
             fn empty_environment() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "environment": []
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        environment = []
+                    "#}),
                     container_spec! {},
                 );
             }
@@ -3300,9 +3282,9 @@ mod tests {
             #[test]
             fn image_with_implicit_working_directory() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "image": "image1"
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        image = "image1"
+                    "#}),
                     container_spec! {
                         parent: image_container_parent!("image1", all),
                     },
@@ -3329,10 +3311,10 @@ mod tests {
             #[test]
             fn working_directory_and_image_with_implicit_working_directory() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "working_directory": "/foo/bar",
-                        "image": "image1"
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        working_directory = "/foo/bar"
+                        image = "image1"
+                    "#}),
                     container_spec! {
                         working_directory: "/foo/bar",
                         parent: image_container_parent!("image1", all, -working_directory),
@@ -3361,14 +3343,12 @@ mod tests {
             #[test]
             fn working_directory_and_image_without_working_directory() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "layers": [ { "tar": "1" } ],
-                        "working_directory": "/foo/bar",
-                        "image": {
-                            "name": "image1",
-                            "use": [ "environment" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        layers = [ { tar = "1" } ]
+                        working_directory = "/foo/bar"
+                        image.name = "image1"
+                        image.use = [ "environment" ]
+                    "#}),
                     container_spec! {
                         layers: [tar_layer!("1")],
                         working_directory: "/foo/bar",
@@ -3392,13 +3372,11 @@ mod tests {
             #[test]
             fn parent_with_explicit_working_directory() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "layers": [ { "tar": "1" } ],
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "working_directory" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        layers = [ { tar = "1" } ]
+                        parent.name = "parent"
+                        parent.use = [ "working_directory" ]
+                    "#}),
                     container_spec! {
                         layers: [tar_layer!("1")],
                         parent: container_container_parent!("parent", working_directory),
@@ -3423,14 +3401,12 @@ mod tests {
             #[test]
             fn working_directory_and_parent_with_explicit_working_directory() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "layers": [ { "tar": "1" } ],
-                        "working_directory": "/foo/bar",
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "working_directory" ]
-                        }
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        layers = [ { tar = "1" } ]
+                        working_directory = "/foo/bar"
+                        parent.name = "parent"
+                        parent.use = [ "working_directory" ]
+                    "#}),
                     concat!(
                         "field `working_directory` cannot be set if `parent` with an explicit `use` of ",
                         "`working_directory` is also specified",
@@ -3464,9 +3440,9 @@ mod tests {
             #[test]
             fn enable_writable_file_system() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "enable_writable_file_system": true
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        enable_writable_file_system = true
+                    "#}),
                     container_spec! {
                         enable_writable_file_system: true,
                     },
@@ -3488,12 +3464,11 @@ mod tests {
             #[test]
             fn parent_with_explicit_enable_writable_file_system() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "enable_writable_file_system" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        [parent]
+                        name = "parent"
+                        use = [ "enable_writable_file_system" ]
+                    "#}),
                     container_spec! {
                         parent: container_container_parent!("parent", enable_writable_file_system),
                     },
@@ -3517,13 +3492,11 @@ mod tests {
             #[test]
             fn enable_writable_file_system_and_parent_with_explicit_enable_writable_file_system() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "enable_writable_file_system": true,
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "enable_writable_file_system" ]
-                        }
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        enable_writable_file_system = true
+                        parent.name = "parent"
+                        parent.use = [ "enable_writable_file_system" ]
+                    "#}),
                     concat!(
                         "field `enable_writable_file_system` cannot be set if `parent` with an explicit `use` of ",
                         "`enable_writable_file_system` is also specified",
@@ -3555,15 +3528,15 @@ mod tests {
             #[test]
             fn mounts() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "layers": [ { "tar": "1" } ],
-                        "mounts": [
-                            { "type": "tmp", "mount_point": "/tmp" },
-                            { "type": "bind", "mount_point": "/bind", "local_path": "/a" },
-                            { "type": "bind", "mount_point": "/bind2", "local_path": "/b", "read_only": false },
-                            { "type": "bind", "mount_point": "/bind3", "local_path": "/c", "read_only": true }
+                    parse_container_spec_toml(indoc! {r#"
+                        layers = [ { tar = "1" } ]
+                        mounts = [
+                            { type = "tmp", mount_point = "/tmp" },
+                            { type = "bind", mount_point = "/bind", local_path = "/a" },
+                            { type = "bind", mount_point = "/bind2", local_path = "/b", read_only = false },
+                            { type = "bind", mount_point = "/bind3", local_path = "/c", read_only = true },
                         ]
-                    }"#}),
+                    "#}),
                     container_spec! {
                         layers: [tar_layer!("1")],
                         mounts: [
@@ -3602,10 +3575,10 @@ mod tests {
             #[test]
             fn added_mounts_and_parent_with_implicit_mounts() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": "parent",
-                        "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        parent = "parent"
+                        added_mounts = [{ type = "tmp", mount_point = "/tmp" }]
+                    "#}),
                     container_spec! {
                         mounts: [tmp_mount!("/tmp")],
                         parent: container_container_parent!("parent", all),
@@ -3633,13 +3606,11 @@ mod tests {
             #[test]
             fn added_mounts_and_parent_without_mounts() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "environment" ]
-                        },
-                        "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        parent.name = "parent"
+                        parent.use = [ "environment" ]
+                        added_mounts = [{ type = "tmp", mount_point = "/tmp" }]
+                    "#}),
                     concat!(
                         "field `added_mounts` requires `parent` being specified with a ",
                         "`use` of `mounts` (try `mounts` instead)",
@@ -3663,10 +3634,10 @@ mod tests {
             #[test]
             fn empty_added_mounts() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": "parent",
-                        "added_mounts": []
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        parent = "parent"
+                        added_mounts = []
+                    "#}),
                     container_spec! {
                         parent: container_container_parent!("parent", all),
                     },
@@ -3688,12 +3659,11 @@ mod tests {
             #[test]
             fn parent_with_explicit_mounts() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "mounts" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        [parent]
+                        name = "parent"
+                        use = [ "mounts" ]
+                    "#}),
                     container_spec! {
                         parent: container_container_parent!("parent", mounts),
                     },
@@ -3717,13 +3687,11 @@ mod tests {
             #[test]
             fn mounts_and_parent_with_explicit_mounts() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "mounts" ]
-                        },
-                        "mounts": [{ "type": "proc", "mount_point": "/proc" }]
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        parent.name = "parent"
+                        parent.use = [ "mounts" ]
+                        mounts = [{ type = "proc", mount_point = "/proc" }]
+                    "#}),
                     concat!(
                         "field `mounts` cannot be set if `parent` with an explicit `use` of ",
                         "`mounts` is also specified (try `added_mounts` instead)",
@@ -3749,19 +3717,12 @@ mod tests {
             }
 
             #[test]
-            fn no_mounts_and_no_parent() {
-                assert_eq!(parse_container_spec_json("{}"), container_spec! {},);
-            }
-
-            #[test]
             fn no_mounts_and_parent_without_mounts() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "environment" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        parent.name = "parent"
+                        parent.use =  [ "environment" ]
+                    "#}),
                     container_spec! {
                         parent: container_container_parent!("parent", environment),
                     },
@@ -3785,9 +3746,9 @@ mod tests {
             #[test]
             fn network() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "network": "loopback"
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        network = "loopback"
+                    "#}),
                     container_spec! {
                         network: JobNetwork::Loopback,
                     },
@@ -3809,12 +3770,11 @@ mod tests {
             #[test]
             fn parent_with_explicit_network() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "network" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        [parent]
+                        name = "parent"
+                        use = [ "network" ]
+                    "#}),
                     container_spec! {
                         parent: container_container_parent!("parent", network),
                     },
@@ -3838,13 +3798,11 @@ mod tests {
             #[test]
             fn network_and_parent_with_explicit_network() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "network": "loopback",
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "network" ]
-                        }
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        network = "loopback"
+                        parent.name = "parent"
+                        parent.use = [ "network" ]
+                    "#}),
                     concat!(
                         "field `network` cannot be set if `parent` with an explicit `use` of ",
                         "`network` is also specified",
@@ -3876,9 +3834,9 @@ mod tests {
             #[test]
             fn user() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "user": 1234
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        user = 1234
+                    "#}),
                     container_spec! {
                         user: 1234,
                     },
@@ -3900,12 +3858,11 @@ mod tests {
             #[test]
             fn parent_with_explicit_user() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "user" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        [parent]
+                        name = "parent"
+                        use = [ "user" ]
+                    "#}),
                     container_spec! {
                         parent: container_container_parent!("parent", user),
                     },
@@ -3929,13 +3886,11 @@ mod tests {
             #[test]
             fn user_and_parent_with_explicit_user() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "user": 101,
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "user" ]
-                        }
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        user = 101
+                        parent.name = "parent"
+                        parent.use = [ "user" ]
+                    "#}),
                     concat!(
                         "field `user` cannot be set if `parent` with an explicit `use` of ",
                         "`user` is also specified",
@@ -3966,12 +3921,10 @@ mod tests {
             #[test]
             fn group() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "layers": [ { "tar": "1" } ],
-                        "group": 4321
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        group = 4321
+                    "#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
                         group: 4321,
                     },
                 )
@@ -3992,12 +3945,11 @@ mod tests {
             #[test]
             fn parent_with_explicit_group() {
                 assert_eq!(
-                    parse_container_spec_json(indoc! {r#"{
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "group" ]
-                        }
-                    }"#}),
+                    parse_container_spec_toml(indoc! {r#"
+                        [parent]
+                        name = "parent"
+                        use = [ "group" ]
+                    "#}),
                     container_spec! {
                         parent: container_container_parent!("parent", group),
                     },
@@ -4021,13 +3973,11 @@ mod tests {
             #[test]
             fn group_and_parent_with_explicit_group() {
                 assert_eq!(
-                    parse_container_spec_error_json(indoc! {r#"{
-                        "group": 101,
-                        "parent": {
-                            "name": "parent",
-                            "use": [ "group" ]
-                        }
-                    }"#}),
+                    parse_container_spec_error_toml(indoc! {r#"
+                        group = 101
+                        parent.name = "parent"
+                        parent.use = [ "group" ]
+                    "#}),
                     concat!(
                         "field `group` cannot be set if `parent` with an explicit `use` of ",
                         "`group` is also specified",
