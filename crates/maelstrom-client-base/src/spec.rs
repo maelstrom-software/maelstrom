@@ -494,6 +494,7 @@ macro_rules! container_spec {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ContainerSpecForTomlAndJson {
     image: Option<ImageRefWithImplicitOrExplicitUse>,
     parent: Option<ContainerRefWithImplicitOrExplicitUse>,
@@ -2565,6 +2566,14 @@ mod tests {
         #[test]
         fn empty() {
             assert_eq!(parse_container_spec_json("{}"), container_spec! {});
+        }
+
+        #[test]
+        fn unknown_field() {
+            assert!(parse_container_spec_error_toml(indoc! {r#"
+                foo_bar_baz = 3
+            "#})
+            .contains("unknown field `foo_bar_baz`"));
         }
 
         mod layers {

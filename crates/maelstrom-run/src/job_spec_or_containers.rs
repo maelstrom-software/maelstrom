@@ -73,7 +73,9 @@ mod tests {
     use super::*;
     use indoc::indoc;
     use maelstrom_base::JobNetwork;
-    use maelstrom_client::{container_spec, job_spec, environment_spec, container_container_parent};
+    use maelstrom_client::{
+        container_container_parent, container_spec, environment_spec, job_spec,
+    };
     use maelstrom_test::tar_layer;
     use maplit::hashmap;
 
@@ -163,7 +165,6 @@ mod tests {
             indoc! {r#"{
                 "containers": {
                     "container-1": {
-                        "program": "/bin/sh",
                         "image": {
                             "name": "image1",
                             "use": [ "layers" ]
