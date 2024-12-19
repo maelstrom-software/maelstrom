@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn map_contains_container_and_bad_job_spec_field() {
+    fn containers_and_job_spec_field_yields_job_spec_error() {
         assert_parse_error(
             indoc! {r#"{
                 "containers": {
@@ -190,9 +190,19 @@ mod tests {
                         "user": 101
                     }
                 },
-                "program": 3
+                "program": "/bin/sh"
             }"#},
-            "invalid type: integer `3`, expected path string",
+            "unknown field `containers`",
+        );
+    }
+
+    #[test]
+    fn containers_field_wrong_type_yields_type_error() {
+        assert_parse_error(
+            indoc! {r#"{
+                "containers": 42
+            }"#},
+            "invalid type: integer `42`, expected a map",
         );
     }
 }
