@@ -3447,6 +3447,7 @@ dependencies = [
  "prost",
  "protoc-bin-vendored",
  "serde",
+ "serde_json",
  "slog",
  "toml",
  "tonic",

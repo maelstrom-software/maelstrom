@@ -1231,9 +1231,10 @@ mod tests {
     use super::*;
     use enumset::enum_set;
     use indoc::indoc;
+    use maelstrom_base::{proc_mount, tmp_mount};
     use maelstrom_test::{
         glob_layer, path_buf_vec, paths_layer, shared_library_dependencies_layer, string,
-        string_vec, stubs_layer, symlinks_layer, tar_layer,
+        string_vec, stubs_layer, symlinks_layer, tar_layer, utf8_path_buf,
     };
     use maplit::btreemap;
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
@@ -2520,5 +2521,1536 @@ mod tests {
                 prepend_prefix = "b",
             ),
         );
+    }
+
+    mod container_spec_parse {
+        use super::*;
+
+        #[track_caller]
+        fn parse_container_spec_json(file: &str) -> ContainerSpec {
+            serde_json::from_str(file).unwrap()
+        }
+
+        #[track_caller]
+        fn parse_container_spec_error_json(file: &str) -> String {
+            format!(
+                "{}",
+                serde_json::from_str::<ContainerSpec>(file).unwrap_err()
+            )
+        }
+
+        #[test]
+        fn image_and_parent() {
+            assert_eq!(
+                parse_container_spec_error_json(indoc! {r#"{
+                    "image": "image",
+                    "parent": "parent"
+                }"#}),
+                "both `image` and `parent` cannot be specified",
+            );
+        }
+
+        mod layers {
+            use super::*;
+
+            #[test]
+            fn added_layers_and_layers() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" }, { "tar": "2" } ],
+                        "added_layers": [ { "tar": "3" } ]
+                    }"#}),
+                    "field `added_layers` cannot be set with `layers` field",
+                );
+            }
+
+            #[test]
+            fn added_layers_and_image_with_implicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": "image1",
+                        "added_layers": [ { "tar": "1" } ]
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: image_container_parent!("image1", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_layers_and_image_with_explicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "layers" ]
+                        },
+                        "added_layers": [ { "tar": "1" } ]
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: image_container_parent!("image1", layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_layers_and_image_without_layers() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "environment" ]
+                        },
+                        "added_layers": [ { "tar": "1" } ]
+                    }"#}),
+                    concat!(
+                        "field `added_layers` requires `image` being specified with a ",
+                        "`use` of `layers` (try `layers` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn added_layers_and_parent_with_implicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent",
+                        "added_layers": [ { "tar": "1" } ]
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: container_container_parent!("parent", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_layers_and_parent_with_explicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "layers" ]
+                        },
+                        "added_layers": [ { "tar": "1" } ]
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: container_container_parent!("parent", layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_layers_and_parent_without_layers() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        },
+                        "added_layers": [ { "tar": "1" } ]
+                    }"#}),
+                    concat!(
+                        "field `added_layers` requires `parent` being specified with a ",
+                        "`use` of `layers` (try `layers` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn added_layers_and_neither_image_nor_parent() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "added_layers": [ { "tar": "1" } ]
+                    }"#}),
+                    concat!(
+                        "field `added_layers` cannot be set without ",
+                        "`image` or `parent` also being specified (try `layers` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn empty_added_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent",
+                        "added_layers": []
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn image_with_implicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": "image1"
+                    }"#}),
+                    container_spec! {
+                        parent: image_container_parent!("image1", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn image_with_explicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "layers" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: image_container_parent!("image1", layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn parent_with_implicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn parent_with_explicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "layers" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn layers_and_image_with_implicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": "image1",
+                        "layers": [ { "tar": "1" } ]
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: image_container_parent!("image1", all, -layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn layers_and_image_with_explicit_layers() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "layers" ]
+                        },
+                        "layers": [ { "tar": "1" } ]
+                    }"#}),
+                    concat!(
+                        "field `layers` cannot be set if `image` with an explicit `use` of ",
+                        "`layers` is also specified (try `added_layers` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn layers_and_image_without_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "environment" ]
+                        },
+                        "layers": [ { "tar": "1" } ]
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: image_container_parent!("image1", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn layers_and_parent_with_implicit_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent",
+                        "layers": [ { "tar": "1" } ]
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: container_container_parent!("parent", all, -layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn layers_and_parent_with_explicit_layers() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "layers" ]
+                        },
+                        "layers": [ { "tar": "1" } ]
+                    }"#}),
+                    concat!(
+                        "field `layers` cannot be set if `parent` with an explicit `use` of ",
+                        "`layers` is also specified (try `added_layers` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn layers_and_parent_without_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        },
+                        "layers": [ { "tar": "1" } ]
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: container_container_parent!("parent", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn no_layers_and_neither_image_nor_parent() {
+                assert_eq!(parse_container_spec_json("{}"), container_spec! {},);
+            }
+
+            #[test]
+            fn no_layers_and_image_without_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: image_container_parent!("image1", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn no_layers_and_parent_without_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn empty_layers() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "layers": []
+                    }"#}),
+                    container_spec! {},
+                );
+            }
+        }
+
+        mod environment {
+            use super::*;
+
+            #[test]
+            fn added_environment_and_environment() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "environment": { "FOO": "foo", "BAR": "bar" },
+                        "added_environment": { "FROB": "frob" }
+                    }"#}),
+                    "field `added_environment` cannot be set with `environment` field",
+                );
+            }
+
+            #[test]
+            fn added_environment_and_image_with_implicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": "image1",
+                        "added_environment": { "FROB": "frob" }
+                    }"#}),
+                    container_spec! {
+                        environment: environment_spec!(true, "FROB" => "frob"),
+                        parent: image_container_parent!("image1", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_environment_and_image_with_explicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "environment" ]
+                        },
+                        "added_environment": { "FROB": "frob" }
+                    }"#}),
+                    container_spec! {
+                        environment: environment_spec!(true, "FROB" => "frob"),
+                        parent: image_container_parent!("image1", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_environment_and_image_without_environment() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "layers" ]
+                        },
+                        "added_environment": { "FROB": "frob" }
+                    }"#}),
+                    concat!(
+                        "field `added_environment` requires `image` being specified with a ",
+                        "`use` of `environment` (try `environment` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn added_environment_and_parent_with_implicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent",
+                        "added_environment": [
+                            {
+                                "vars": { "FROB": "frob" },
+                                "extend": false
+                            },
+                            {
+                                "vars": { "BAZ": "baz" },
+                                "extend": true
+                            }
+                        ]
+                    }"#}),
+                    container_spec! {
+                        environment: [
+                            environment_spec!(false, "FROB" => "frob"),
+                            environment_spec!(true, "BAZ" => "baz"),
+                        ],
+                        parent: container_container_parent!("parent", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_environment_and_parent_with_explicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        },
+                        "added_environment": [
+                            {
+                                "vars": { "FROB": "frob" },
+                                "extend": false
+                            },
+                            {
+                                "vars": { "BAZ": "baz" },
+                                "extend": true
+                            }
+                        ]
+                    }"#}),
+                    container_spec! {
+                        environment: [
+                            environment_spec!(false, "FROB" => "frob"),
+                            environment_spec!(true, "BAZ" => "baz"),
+                        ],
+                        parent: container_container_parent!("parent", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_environment_and_parent_without_environment() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "layers" ]
+                        },
+                        "added_environment": [
+                            {
+                                "vars": { "FROB": "frob" },
+                                "extend": false
+                            },
+                            {
+                                "vars": { "BAZ": "baz" },
+                                "extend": true
+                            }
+                        ]
+                    }"#}),
+                    concat!(
+                        "field `added_environment` requires `parent` being specified with a ",
+                        "`use` of `environment` (try `environment` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn added_environment_and_neither_image_nor_parent() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "added_environment": { "FROB": "frob" }
+                    }"#}),
+                    concat!(
+                        "field `added_environment` cannot be set without ",
+                        "`image` or `parent` also being specified (try `environment` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn empty_added_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent",
+                        "added_environment": []
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn image_with_implicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": "image1"
+                    }"#}),
+                    container_spec! {
+                        parent: image_container_parent!("image1", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn image_with_explicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: image_container_parent!("image1", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn parent_with_implicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn parent_with_explicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn environment_and_image_with_implicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": "image1",
+                        "environment": { "FROB": "frob" }
+                    }"#}),
+                    container_spec! {
+                        environment: environment_spec!(true, "FROB" => "frob"),
+                        parent: image_container_parent!("image1", all, -environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn environment_and_image_with_explicit_environment() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "environment" ]
+                        },
+                        "environment": { "FROB": "frob" }
+                    }"#}),
+                    concat!(
+                        "field `environment` cannot be set if `image` with an explicit `use` of ",
+                        "`environment` is also specified (try `added_environment` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn environment_and_image_without_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "layers" ]
+                        },
+                        "environment": { "FROB": "frob" }
+                    }"#}),
+                    container_spec! {
+                        environment: environment_spec!(true, "FROB" => "frob"),
+                        parent: image_container_parent!("image1", layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn environment_and_parent_with_implicit_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent",
+                        "environment": [
+                            {
+                                "vars": { "FROB": "frob" },
+                                "extend": false
+                            },
+                            {
+                                "vars": { "BAZ": "baz" },
+                                "extend": true
+                            }
+                        ]
+                    }"#}),
+                    container_spec! {
+                        environment: [
+                            environment_spec!(false, "FROB" => "frob"),
+                            environment_spec!(true, "BAZ" => "baz"),
+                        ],
+                        parent: container_container_parent!("parent", all, -environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn environment_and_parent_with_explicit_environment() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        },
+                        "environment": [
+                            {
+                                "vars": { "FROB": "frob" },
+                                "extend": false
+                            },
+                            {
+                                "vars": { "BAZ": "baz" },
+                                "extend": true
+                            }
+                        ]
+                    }"#}),
+                    concat!(
+                        "field `environment` cannot be set if `parent` with an explicit `use` of ",
+                        "`environment` is also specified (try `added_environment` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn environment_and_parent_without_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "layers" ]
+                        },
+                        "environment": [
+                            {
+                                "vars": { "FROB": "frob" },
+                                "extend": false
+                            },
+                            {
+                                "vars": { "BAZ": "baz" },
+                                "extend": true
+                            }
+                        ]
+                    }"#}),
+                    container_spec! {
+                        environment: [
+                            environment_spec!(false, "FROB" => "frob"),
+                            environment_spec!(true, "BAZ" => "baz"),
+                        ],
+                        parent: container_container_parent!("parent", layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn no_environment_and_neither_image_nor_parent() {
+                assert_eq!(parse_container_spec_json("{}"), container_spec! {},);
+            }
+
+            #[test]
+            fn no_environment_and_image_without_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": {
+                            "name": "image1",
+                            "use": [ "layers" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: image_container_parent!("image1", layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn no_environment_and_parent_without_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "layers" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", layers),
+                    },
+                );
+            }
+
+            #[test]
+            fn empty_environment() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "environment": []
+                    }"#}),
+                    container_spec! {},
+                );
+            }
+        }
+
+        mod working_directory {
+            use super::*;
+
+            #[test]
+            fn working_directory() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" } ],
+                        "working_directory": "/foo/bar"
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        working_directory: "/foo/bar",
+                    },
+                )
+            }
+
+            #[test]
+            fn image_with_implicit_working_directory() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "image": "image1"
+                    }"#}),
+                    container_spec! {
+                        parent: image_container_parent!("image1", all),
+                    },
+                )
+            }
+
+            #[test]
+            fn image_with_explicit_working_directory() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" } ],
+                        "image": {
+                            "name": "image1",
+                            "use": [ "working_directory" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: image_container_parent!("image1", working_directory),
+                    },
+                )
+            }
+
+            #[test]
+            fn working_directory_and_image_with_implicit_working_directory() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "working_directory": "/foo/bar",
+                        "image": "image1"
+                    }"#}),
+                    container_spec! {
+                        working_directory: "/foo/bar",
+                        parent: image_container_parent!("image1", all, -working_directory),
+                    },
+                )
+            }
+
+            #[test]
+            fn working_directory_and_image_with_explicit_working_directory() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" } ],
+                        "working_directory": "/foo/bar",
+                        "image": {
+                            "name": "image1",
+                            "use": [ "working_directory" ]
+                        }
+                    }"#}),
+                    concat!(
+                        "field `working_directory` cannot be set if `image` with an explicit `use` of ",
+                        "`working_directory` is also specified",
+                    ),
+                )
+            }
+
+            #[test]
+            fn working_directory_and_image_without_working_directory() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" } ],
+                        "working_directory": "/foo/bar",
+                        "image": {
+                            "name": "image1",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        working_directory: "/foo/bar",
+                        parent: image_container_parent!("image1", environment),
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_implicit_working_directory() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_explicit_working_directory() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" } ],
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "working_directory" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        parent: container_container_parent!("parent", working_directory),
+                    },
+                )
+            }
+
+            #[test]
+            fn working_directory_and_parent_with_implicit_working_directory() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "working_directory": "/foo/bar",
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        working_directory: "/foo/bar",
+                        parent: container_container_parent!("parent", all, -working_directory),
+                    },
+                )
+            }
+
+            #[test]
+            fn working_directory_and_parent_with_explicit_working_directory() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" } ],
+                        "working_directory": "/foo/bar",
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "working_directory" ]
+                        }
+                    }"#}),
+                    concat!(
+                        "field `working_directory` cannot be set if `parent` with an explicit `use` of ",
+                        "`working_directory` is also specified",
+                    ),
+                )
+            }
+
+            #[test]
+            fn working_directory_and_parent_without_working_directory() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" } ],
+                        "working_directory": "/foo/bar",
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        working_directory: "/foo/bar",
+                        parent: container_container_parent!("parent", environment),
+                    },
+                )
+            }
+        }
+
+        mod enable_writable_file_system {
+            use super::*;
+
+            #[test]
+            fn enable_writable_file_system() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "enable_writable_file_system": true
+                    }"#}),
+                    container_spec! {
+                        enable_writable_file_system: true,
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_implicit_enable_writable_file_system() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_explicit_enable_writable_file_system() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "enable_writable_file_system" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", enable_writable_file_system),
+                    },
+                )
+            }
+
+            #[test]
+            fn enable_writable_file_system_and_parent_with_implicit_enable_writable_file_system() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "enable_writable_file_system": true,
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        enable_writable_file_system: true,
+                        parent: container_container_parent!("parent", all, -enable_writable_file_system),
+                    },
+                )
+            }
+
+            #[test]
+            fn enable_writable_file_system_and_parent_with_explicit_enable_writable_file_system() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "enable_writable_file_system": true,
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "enable_writable_file_system" ]
+                        }
+                    }"#}),
+                    concat!(
+                        "field `enable_writable_file_system` cannot be set if `parent` with an explicit `use` of ",
+                        "`enable_writable_file_system` is also specified",
+                    ),
+                )
+            }
+
+            #[test]
+            fn enable_writable_file_system_and_parent_without_enable_writable_file_system() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "enable_writable_file_system": true,
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        enable_writable_file_system: true,
+                        parent: container_container_parent!("parent", environment),
+                    },
+                )
+            }
+        }
+
+        mod mounts {
+            use super::*;
+
+            #[test]
+            fn mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" } ],
+                        "mounts": [
+                            { "type": "tmp", "mount_point": "/tmp" },
+                            { "type": "bind", "mount_point": "/bind", "local_path": "/a" },
+                            { "type": "bind", "mount_point": "/bind2", "local_path": "/b", "read_only": false },
+                            { "type": "bind", "mount_point": "/bind3", "local_path": "/c", "read_only": true }
+                        ]
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        mounts: [
+                            JobMount::Tmp { mount_point: utf8_path_buf!("/tmp") },
+                            JobMount::Bind {
+                                mount_point: utf8_path_buf!("/bind"),
+                                local_path: utf8_path_buf!("/a"),
+                                read_only: false,
+                            },
+                            JobMount::Bind {
+                                mount_point: utf8_path_buf!("/bind2"),
+                                local_path: utf8_path_buf!("/b"),
+                                read_only: false,
+                            },
+                            JobMount::Bind {
+                                mount_point: utf8_path_buf!("/bind3"),
+                                local_path: utf8_path_buf!("/c"),
+                                read_only: true,
+                            },
+                        ],
+                    },
+                )
+            }
+
+            #[test]
+            fn added_mounts_and_mounts() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "mounts": [{ "type": "proc", "mount_point": "/proc" }],
+                        "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                    }"#}),
+                    "field `added_mounts` cannot be set with `mounts` field",
+                );
+            }
+
+            #[test]
+            fn added_mounts_and_parent_with_implicit_mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent",
+                        "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                    }"#}),
+                    container_spec! {
+                        mounts: [tmp_mount!("/tmp")],
+                        parent: container_container_parent!("parent", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_mounts_and_parent_with_explicit_mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "mounts" ]
+                        },
+                        "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                    }"#}),
+                    container_spec! {
+                        mounts: [tmp_mount!("/tmp")],
+                        parent: container_container_parent!("parent", mounts),
+                    },
+                );
+            }
+
+            #[test]
+            fn added_mounts_and_parent_without_mounts() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        },
+                        "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                    }"#}),
+                    concat!(
+                        "field `added_mounts` requires `parent` being specified with a ",
+                        "`use` of `mounts` (try `mounts` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn added_mounts_and_no_parent() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "added_mounts": [{ "type": "tmp", "mount_point": "/tmp" }]
+                    }"#}),
+                    concat!(
+                        "field `added_mounts` cannot be set without ",
+                        "`parent` also being specified (try `mounts` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn empty_added_mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent",
+                        "added_mounts": []
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn parent_with_implicit_mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                );
+            }
+
+            #[test]
+            fn parent_with_explicit_mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "mounts" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", mounts),
+                    },
+                );
+            }
+
+            #[test]
+            fn mounts_and_parent_with_implicit_mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent",
+                        "mounts": [{ "type": "proc", "mount_point": "/proc" }]
+                    }"#}),
+                    container_spec! {
+                        mounts: [proc_mount!("/proc")],
+                        parent: container_container_parent!("parent", all, -mounts),
+                    },
+                );
+            }
+
+            #[test]
+            fn mounts_and_parent_with_explicit_mounts() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "mounts" ]
+                        },
+                        "mounts": [{ "type": "proc", "mount_point": "/proc" }]
+                    }"#}),
+                    concat!(
+                        "field `mounts` cannot be set if `parent` with an explicit `use` of ",
+                        "`mounts` is also specified (try `added_mounts` instead)",
+                    ),
+                );
+            }
+
+            #[test]
+            fn mounts_and_parent_without_mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        },
+                        "mounts": [{ "type": "proc", "mount_point": "/proc" }]
+                    }"#}),
+                    container_spec! {
+                        mounts: [proc_mount!("/proc")],
+                        parent: container_container_parent!("parent", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn no_mounts_and_no_parent() {
+                assert_eq!(parse_container_spec_json("{}"), container_spec! {},);
+            }
+
+            #[test]
+            fn no_mounts_and_parent_without_mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", environment),
+                    },
+                );
+            }
+
+            #[test]
+            fn empty_mounts() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "mounts": []
+                    }"#}),
+                    container_spec! {},
+                );
+            }
+        }
+
+        mod network {
+            use super::*;
+
+            #[test]
+            fn network() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "network": "loopback"
+                    }"#}),
+                    container_spec! {
+                        network: JobNetwork::Loopback,
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_implicit_network() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_explicit_network() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "network" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", network),
+                    },
+                )
+            }
+
+            #[test]
+            fn network_and_parent_with_implicit_network() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "network": "loopback",
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        network: JobNetwork::Loopback,
+                        parent: container_container_parent!("parent", all, -network),
+                    },
+                )
+            }
+
+            #[test]
+            fn network_and_parent_with_explicit_network() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "network": "loopback",
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "network" ]
+                        }
+                    }"#}),
+                    concat!(
+                        "field `network` cannot be set if `parent` with an explicit `use` of ",
+                        "`network` is also specified",
+                    ),
+                )
+            }
+
+            #[test]
+            fn network_and_parent_without_network() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "network": "loopback",
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        network: JobNetwork::Loopback,
+                        parent: container_container_parent!("parent", environment),
+                    },
+                )
+            }
+        }
+
+        mod user {
+            use super::*;
+
+            #[test]
+            fn user() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "user": 1234
+                    }"#}),
+                    container_spec! {
+                        user: 1234,
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_implicit_user() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_explicit_user() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "user" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", user),
+                    },
+                )
+            }
+
+            #[test]
+            fn user_and_parent_with_implicit_user() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "user": 101,
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        user: 101,
+                        parent: container_container_parent!("parent", all, -user),
+                    },
+                )
+            }
+
+            #[test]
+            fn user_and_parent_with_explicit_user() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "user": 101,
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "user" ]
+                        }
+                    }"#}),
+                    concat!(
+                        "field `user` cannot be set if `parent` with an explicit `use` of ",
+                        "`user` is also specified",
+                    ),
+                )
+            }
+
+            #[test]
+            fn user_and_parent_without_user() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "user": 101,
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        user: 101,
+                        parent: container_container_parent!("parent", environment),
+                    },
+                )
+            }
+        }
+
+        mod group {
+            use super::*;
+            #[test]
+            fn group() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "layers": [ { "tar": "1" } ],
+                        "group": 4321
+                    }"#}),
+                    container_spec! {
+                        layers: [tar_layer!("1")],
+                        group: 4321,
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_implicit_group() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", all),
+                    },
+                )
+            }
+
+            #[test]
+            fn parent_with_explicit_group() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "group" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        parent: container_container_parent!("parent", group),
+                    },
+                )
+            }
+
+            #[test]
+            fn group_and_parent_with_implicit_group() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "group": 101,
+                        "parent": "parent"
+                    }"#}),
+                    container_spec! {
+                        group: 101,
+                        parent: container_container_parent!("parent", all, -group),
+                    },
+                )
+            }
+
+            #[test]
+            fn group_and_parent_with_explicit_group() {
+                assert_eq!(
+                    parse_container_spec_error_json(indoc! {r#"{
+                        "group": 101,
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "group" ]
+                        }
+                    }"#}),
+                    concat!(
+                        "field `group` cannot be set if `parent` with an explicit `use` of ",
+                        "`group` is also specified",
+                    ),
+                )
+            }
+
+            #[test]
+            fn group_and_parent_without_group() {
+                assert_eq!(
+                    parse_container_spec_json(indoc! {r#"{
+                        "group": 101,
+                        "parent": {
+                            "name": "parent",
+                            "use": [ "environment" ]
+                        }
+                    }"#}),
+                    container_spec! {
+                        group: 101,
+                        parent: container_container_parent!("parent", environment),
+                    },
+                )
+            }
+        }
     }
 }
