@@ -34,6 +34,7 @@ use std::{collections::HashMap, io::Read};
 ///     }
 ///     { "program": "my-program", "parent": "my-parent" }
 /// ```
+#[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum JobSpecOrContainers {
     JobSpec(JobSpec),
@@ -72,22 +73,36 @@ mod tests {
     use super::*;
     use indoc::indoc;
     use maelstrom_base::JobNetwork;
-    use maelstrom_client::container_spec;
+    use maelstrom_client::{container_spec, job_spec, environment_spec, container_container_parent};
     use maelstrom_test::tar_layer;
     use maplit::hashmap;
 
-    fn parse_container_map(str_: &str) -> serde_json::Result<HashMap<String, ContainerSpec>> {
-        serde_json::from_str(str_).map(|containers: JobSpecOrContainers| {
-            let JobSpecOrContainers::Containers(containers) = containers else {
-                panic!("expected HashMap<String, ContainerSpec>")
-            };
-            containers
-        })
+    #[track_caller]
+    fn parse(file: &str) -> serde_json::Result<JobSpecOrContainers> {
+        serde_json::from_str(file)
     }
 
     #[track_caller]
-    fn assert_error(err: serde_json::Error, expected: &str) {
-        let message = format!("{err}");
+    fn parse_job_spec(file: &str) -> JobSpec {
+        if let JobSpecOrContainers::JobSpec(job_spec) = parse(file).unwrap() {
+            job_spec
+        } else {
+            panic!("expected JobSpec")
+        }
+    }
+
+    #[track_caller]
+    fn parse_container_map(file: &str) -> HashMap<String, ContainerSpec> {
+        if let JobSpecOrContainers::Containers(containers) = parse(file).unwrap() {
+            containers
+        } else {
+            panic!("expected HashMap<String, ContainerSpec>")
+        }
+    }
+
+    #[track_caller]
+    fn assert_parse_error(file: &str, expected: &str) {
+        let message = format!("{}", parse(file).unwrap_err());
         assert!(
             message.starts_with(expected),
             "message: {message:?}, expected: {expected:?}"
@@ -95,21 +110,40 @@ mod tests {
     }
 
     #[test]
-    fn basic_container_map() {
+    fn job_spec() {
+        assert_eq!(
+            parse_job_spec(indoc! {r#"{
+                "program": "/bin/sh",
+                "parent": "parent",
+                "layers": [ { "tar": "1" }, { "tar": "2" } ],
+                "added_environment": { "FOO": "foo" },
+                "working_directory": "/root"
+            }"#}),
+            job_spec! {
+                "/bin/sh",
+                layers: [tar_layer!("1"), tar_layer!("2")],
+                environment: environment_spec!(true, "FOO" => "foo"),
+                working_directory: "/root",
+                parent: container_container_parent!("parent", all, -layers, -working_directory),
+            },
+        );
+    }
+
+    #[test]
+    fn container_map() {
         assert_eq!(
             parse_container_map(indoc! {r#"{
-                    "containers": {
-                        "container-1": {
-                            "layers": [ { "tar": "1" } ],
-                            "user": 101
-                        },
-                        "container-2": {
-                            "layers": [ { "tar": "2" } ],
-                            "network": "loopback"
-                        }
+                "containers": {
+                    "container-1": {
+                        "layers": [ { "tar": "1" } ],
+                        "user": 101
+                    },
+                    "container-2": {
+                        "layers": [ { "tar": "2" } ],
+                        "network": "loopback"
                     }
-                }"#})
-            .unwrap(),
+                }
+            }"#}),
             hashmap! {
                 "container-1".into() => container_spec!{
                     layers: [tar_layer!("1")],
@@ -124,9 +158,9 @@ mod tests {
     }
 
     #[test]
-    fn basic_container_map_error() {
-        assert_error(
-            parse_container_map(indoc! {r#"{
+    fn error_in_container() {
+        assert_parse_error(
+            indoc! {r#"{
                 "containers": {
                     "container-1": {
                         "program": "/bin/sh",
@@ -137,12 +171,27 @@ mod tests {
                         "layers": [ { "tar": "1" } ]
                     }
                 }
-            }"#})
-            .unwrap_err(),
+            }"#},
             concat!(
                 "field `layers` cannot be set if `image` with an explicit `use` ",
                 "of `layers` is also specified (try `added_layers` instead)",
             ),
+        );
+    }
+
+    #[test]
+    fn map_contains_container_and_bad_job_spec_field() {
+        assert_parse_error(
+            indoc! {r#"{
+                "containers": {
+                    "container-1": {
+                        "layers": [ { "tar": "1" } ],
+                        "user": 101
+                    }
+                },
+                "program": 3
+            }"#},
+            "invalid type: integer `3`, expected path string",
         );
     }
 }
