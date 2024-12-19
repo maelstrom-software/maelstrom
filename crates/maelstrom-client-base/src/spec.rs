@@ -2523,7 +2523,7 @@ mod tests {
         );
     }
 
-    mod container_spec_parse {
+    mod container_spec {
         use super::*;
 
         #[track_caller]
@@ -4001,6 +4001,133 @@ mod tests {
                     },
                 )
             }
+        }
+    }
+
+    mod job_spec {
+        use super::*;
+
+        #[track_caller]
+        fn parse_job_spec_toml(file: &str) -> JobSpec {
+            toml::from_str(file).unwrap()
+        }
+
+        #[track_caller]
+        fn parse_job_spec_json(file: &str) -> JobSpec {
+            serde_json::from_str(file).unwrap()
+        }
+
+        #[track_caller]
+        fn parse_job_spec_error_json(file: &str) -> String {
+            format!("{}", serde_json::from_str::<JobSpec>(file).unwrap_err())
+        }
+
+        #[test]
+        fn empty() {
+            assert_eq!(
+                parse_job_spec_error_json("{}"),
+                "missing field `program` at line 1 column 2",
+            );
+        }
+
+        #[test]
+        fn program() {
+            assert_eq!(
+                parse_job_spec_toml(indoc! {r#"
+                    program = "/bin/sh"
+                "#}),
+                job_spec! {
+                    "/bin/sh",
+                },
+            );
+        }
+
+        #[test]
+        fn arguments() {
+            assert_eq!(
+                parse_job_spec_json(indoc! {r#"{
+                    "program": "/bin/sh",
+                    "arguments": ["foo", "bar"]
+                }"#}),
+                job_spec! {
+                    "/bin/sh",
+                    arguments: [ "foo", "bar" ],
+                },
+            );
+        }
+
+        #[test]
+        fn empty_arguments() {
+            assert_eq!(
+                parse_job_spec_toml(indoc! {r#"
+                    program = "/bin/sh"
+                    arguments = []
+                "#}),
+                job_spec! {
+                    "/bin/sh",
+                },
+            );
+        }
+
+        #[test]
+        fn timeout() {
+            assert_eq!(
+                parse_job_spec_json(indoc! {r#"{
+                    "program": "/bin/sh",
+                    "timeout": 42
+                }"#}),
+                job_spec! {
+                    "/bin/sh",
+                    timeout: 42,
+                },
+            );
+        }
+
+        #[test]
+        fn zero_timeout() {
+            assert_eq!(
+                parse_job_spec_toml(indoc! {r#"
+                    program = "/bin/sh"
+                    timeout = 0
+                "#}),
+                job_spec! {
+                    "/bin/sh",
+                },
+            );
+        }
+
+        #[test]
+        fn priority() {
+            assert_eq!(
+                parse_job_spec_json(indoc! {r#"{
+                    "program": "/bin/sh",
+                    "priority": 42
+                }"#}),
+                job_spec! {
+                    "/bin/sh",
+                    priority: 42,
+                },
+            );
+        }
+
+        #[test]
+        fn container_fields() {
+            assert_eq!(
+                parse_job_spec_toml(indoc! {r#"
+                    program = "/bin/sh"
+                    parent = "parent"
+                    layers = [ { tar = "1" }, { tar = "2" } ]
+                    added_environment = { FOO = "foo" }
+                    working_directory = "/root"
+                "#}),
+                job_spec! {
+                    "/bin/sh",
+                    layers: [tar_layer!("1"), tar_layer!("2")],
+                    environment: environment_spec!(true, "FOO" => "foo"),
+                    working_directory: "/root",
+                    parent: container_container_parent!("parent", all, -layers, -working_directory),
+                },
+            );
         }
     }
 }

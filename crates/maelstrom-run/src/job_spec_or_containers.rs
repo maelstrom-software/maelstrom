@@ -72,18 +72,9 @@ mod tests {
     use super::*;
     use indoc::indoc;
     use maelstrom_base::JobNetwork;
-    use maelstrom_client::{container_spec, job_spec};
+    use maelstrom_client::container_spec;
     use maelstrom_test::tar_layer;
     use maplit::hashmap;
-
-    fn parse_job_spec(str_: &str) -> serde_json::Result<JobSpec> {
-        serde_json::from_str(str_).map(|job_spec: JobSpecOrContainers| {
-            let JobSpecOrContainers::JobSpec(job_spec) = job_spec else {
-                panic!("expected JobSpec")
-            };
-            job_spec
-        })
-    }
 
     fn parse_container_map(str_: &str) -> serde_json::Result<HashMap<String, ContainerSpec>> {
         serde_json::from_str(str_).map(|containers: JobSpecOrContainers| {
@@ -101,85 +92,6 @@ mod tests {
             message.starts_with(expected),
             "message: {message:?}, expected: {expected:?}"
         );
-    }
-
-    #[test]
-    fn basic() {
-        assert_eq!(
-            parse_job_spec(indoc! {r#"{
-                "program": "/bin/sh",
-                "layers": [ { "tar": "1" } ]
-            }"#})
-            .unwrap(),
-            job_spec!("/bin/sh", layers: [tar_layer!("1")]),
-        );
-    }
-
-    #[test]
-    fn missing_program() {
-        assert_error(
-            parse_job_spec(indoc! {r#"{
-                "layers": [ { "tar": "1" } ]
-            }"#})
-            .unwrap_err(),
-            "missing field `program`",
-        );
-    }
-
-    #[test]
-    fn arguments() {
-        assert_eq!(
-            parse_job_spec(indoc! {r#"{
-                "program": "/bin/sh",
-                "layers": [ { "tar": "1" } ],
-                "arguments": [ "-e", "echo foo" ]
-            }"#})
-            .unwrap(),
-            job_spec! {
-                "/bin/sh",
-                layers: [tar_layer!("1")],
-                arguments: ["-e", "echo foo"],
-            },
-        )
-    }
-
-    #[test]
-    fn timeout() {
-        assert_eq!(
-            parse_job_spec(indoc! {r#"{
-                "program": "/bin/sh",
-                "layers": [ { "tar": "1" } ],
-                "timeout": 1234
-            }"#})
-            .unwrap(),
-            job_spec!("/bin/sh", layers: [tar_layer!("1")], timeout: 1234),
-        )
-    }
-
-    #[test]
-    fn timeout_0() {
-        assert_eq!(
-            parse_job_spec(indoc! {r#"{
-                "program": "/bin/sh",
-                "layers": [ { "tar": "1" } ],
-                "timeout": 0
-            }"#})
-            .unwrap(),
-            job_spec!("/bin/sh", layers: [tar_layer!("1")], timeout: 0),
-        )
-    }
-
-    #[test]
-    fn priority() {
-        assert_eq!(
-            parse_job_spec(indoc! {r#"{
-                "program": "/bin/sh",
-                "layers": [ { "tar": "1" } ],
-                "priority": -42
-            }"#})
-            .unwrap(),
-            job_spec!("/bin/sh", layers: [tar_layer!("1")], priority: -42),
-        )
     }
 
     #[test]
