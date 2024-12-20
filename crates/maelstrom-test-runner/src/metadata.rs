@@ -161,7 +161,7 @@ where
         Ok(())
     }
 
-    fn get_metadata_for_test(
+    pub fn get_metadata_for_test(
         &self,
         package: &TestFilterT::Package,
         artifact: &TestFilterT::ArtifactKey,
@@ -196,15 +196,6 @@ where
                 }
             })
             .collect()
-    }
-
-    pub fn get_metadata_for_test_with_env(
-        &self,
-        package: &TestFilterT::Package,
-        artifact: &TestFilterT::ArtifactKey,
-        case: (&str, &TestFilterT::CaseMetadata),
-    ) -> Result<TestMetadata> {
-        self.get_metadata_for_test(package, artifact, case)
     }
 
     pub fn load(

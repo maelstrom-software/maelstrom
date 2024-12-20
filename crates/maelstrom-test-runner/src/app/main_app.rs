@@ -316,7 +316,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
         let test_metadata = self
             .options
             .test_metadata
-            .get_metadata_for_test_with_env(package, &artifact.to_key(), case_tuple)
+            .get_metadata_for_test(package, &artifact.to_key(), case_tuple)
             .expect("we always parse valid test metadata");
 
         if ignored_listing.contains(case_name) || test_metadata.ignore {
