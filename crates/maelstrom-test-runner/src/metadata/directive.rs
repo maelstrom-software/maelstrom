@@ -33,7 +33,7 @@ enum DirectiveField {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct TestDirective<TestFilterT> {
+pub struct Directive<TestFilterT> {
     pub filter: Option<TestFilterT>,
     // This will be Some if any of the other fields are Some(AllMetadata::Image).
     pub image: Option<String>,
@@ -54,7 +54,7 @@ pub struct TestDirective<TestFilterT> {
 }
 
 // The derived Default will put a TestFilterT: Default bound on the implementation
-impl<TestFilterT> Default for TestDirective<TestFilterT> {
+impl<TestFilterT> Default for Directive<TestFilterT> {
     fn default() -> Self {
         Self {
             filter: Default::default(),
@@ -77,7 +77,7 @@ impl<TestFilterT> Default for TestDirective<TestFilterT> {
     }
 }
 
-impl<TestFilterT: FromStr> TestDirective<TestFilterT>
+impl<TestFilterT: FromStr> Directive<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
@@ -181,7 +181,7 @@ where
     }
 }
 
-impl<'de, TestFilterT: FromStr> de::Visitor<'de> for TestDirective<TestFilterT>
+impl<'de, TestFilterT: FromStr> de::Visitor<'de> for Directive<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
@@ -203,7 +203,7 @@ where
     }
 }
 
-impl<'de, TestFilterT: FromStr> de::Deserialize<'de> for TestDirective<TestFilterT>
+impl<'de, TestFilterT: FromStr> de::Deserialize<'de> for Directive<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
@@ -227,7 +227,7 @@ mod tests {
         tar_layer, utf8_path_buf,
     };
 
-    fn parse_test_directive(toml: &str) -> Result<TestDirective<String>, toml::de::Error> {
+    fn parse_test_directive(toml: &str) -> Result<Directive<String>, toml::de::Error> {
         toml::from_str(toml)
     }
 
@@ -242,13 +242,13 @@ mod tests {
     }
 
     #[track_caller]
-    fn directive_parse_test(toml: &str, expected: TestDirective<String>) {
+    fn directive_parse_test(toml: &str, expected: Directive<String>) {
         assert_eq!(parse_test_directive(toml).unwrap(), expected);
     }
 
     #[test]
     fn empty() {
-        directive_parse_test("", TestDirective::default());
+        directive_parse_test("", Directive::default());
     }
 
     #[test]
@@ -283,7 +283,7 @@ mod tests {
             user = 101
             group = 202
             "#,
-            TestDirective {
+            Directive {
                 filter: Some(
                     "package.equals(package1) && test.equals(test1)"
                         .parse()
@@ -306,7 +306,7 @@ mod tests {
             filter = "package.equals(package1) && test.equals(test1)"
             timeout = 1
             "#,
-            TestDirective {
+            Directive {
                 filter: Some(
                     "package.equals(package1) && test.equals(test1)"
                         .parse()
@@ -325,7 +325,7 @@ mod tests {
             filter = "package.equals(package1) && test.equals(test1)"
             timeout = 0
             "#,
-            TestDirective {
+            Directive {
                 filter: Some(
                     "package.equals(package1) && test.equals(test1)"
                         .parse()

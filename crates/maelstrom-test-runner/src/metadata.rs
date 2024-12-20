@@ -2,7 +2,7 @@ mod directive;
 
 use crate::TestFilter;
 use anyhow::{bail, Context as _, Result};
-use directive::TestDirective;
+use directive::Directive;
 use maelstrom_base::{EnumSet, Timeout};
 use maelstrom_client::{
     spec::{ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse, PossiblyImage},
@@ -20,7 +20,7 @@ use std::{
 #[serde(deny_unknown_fields)]
 pub struct AllMetadata<TestFilterT> {
     #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
-    directives: Vec<TestDirective<TestFilterT>>,
+    directives: Vec<Directive<TestFilterT>>,
     #[serde(default)]
     containers: HashMap<String, ContainerSpec>,
 }
@@ -48,7 +48,7 @@ impl TestMetadata {
         }
     }
 
-    fn try_fold<TestFilterT>(mut self, directive: &TestDirective<TestFilterT>) -> Result<Self> {
+    fn try_fold<TestFilterT>(mut self, directive: &Directive<TestFilterT>) -> Result<Self> {
         let rhs = directive;
 
         let mut image_use = EnumSet::new();
@@ -177,13 +177,13 @@ where
         self.directives
             .iter()
             .filter(|directive| match directive {
-                TestDirective {
+                Directive {
                     filter: Some(filter),
                     ..
                 } => filter
                     .filter(package, Some(artifact), Some(case))
                     .expect("should have case"),
-                TestDirective { filter: None, .. } => true,
+                Directive { filter: None, .. } => true,
             })
             .try_fold(TestMetadata::default(), |m, d| m.try_fold(d))
     }
@@ -314,11 +314,10 @@ mod tests {
         assert_eq!(
             res,
             AllMetadata {
-                directives: vec![TestDirective::default()],
+                directives: vec![Directive::default()],
                 containers: hashmap! {},
             }
         );
-
         assert_eq!(log_lines.len(), 1, "{log_lines:?}");
         assert_eq!(
             log_lines[0]["msg"],
@@ -339,7 +338,7 @@ mod tests {
         assert_eq!(
             res,
             AllMetadata {
-                directives: vec![TestDirective::default()],
+                directives: vec![Directive::default()],
                 containers: hashmap! {},
             }
         );
