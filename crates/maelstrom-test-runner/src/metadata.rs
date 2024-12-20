@@ -1,9 +1,7 @@
-mod container;
 mod directive;
 
 use crate::TestFilter;
 use anyhow::{bail, Context as _, Result};
-use container::TestContainer;
 use directive::TestDirective;
 use maelstrom_base::{EnumSet, Timeout};
 use maelstrom_client::{
@@ -25,88 +23,6 @@ pub struct AllMetadata<TestFilterT> {
     directives: Vec<TestDirective<TestFilterT>>,
     #[serde(default)]
     containers: HashMap<String, ContainerSpec>,
-}
-
-fn fold_test_container_into_container_spec(
-    mut lhs: ContainerSpec,
-    rhs: &TestContainer,
-) -> Result<ContainerSpec> {
-    let mut image_use = EnumSet::new();
-
-    lhs.network = rhs.network.or(lhs.network);
-    lhs.enable_writable_file_system = rhs
-        .enable_writable_file_system
-        .or(lhs.enable_writable_file_system);
-    lhs.user = rhs.user.or(lhs.user);
-    lhs.group = rhs.group.or(lhs.group);
-
-    match &rhs.layers {
-        Some(PossiblyImage::Explicit(layers)) => {
-            lhs.layers = layers.to_vec();
-        }
-        Some(PossiblyImage::Image) => {
-            if rhs.image.is_none() {
-                bail!("no image provided");
-            }
-            image_use.insert(ImageUse::Layers);
-            lhs.layers = vec![];
-        }
-        None => {}
-    }
-    lhs.layers.extend(rhs.added_layers.iter().cloned());
-
-    lhs.mounts = rhs.mounts.as_ref().map_or(lhs.mounts, |mounts| {
-        mounts.iter().cloned().map(Into::into).collect()
-    });
-    lhs.mounts
-        .extend(rhs.added_mounts.iter().cloned().map(Into::into));
-
-    match &rhs.environment {
-        Some(PossiblyImage::Explicit(environment)) => {
-            lhs.environment.push(EnvironmentSpec {
-                vars: environment.clone(),
-                extend: false,
-            });
-        }
-        Some(PossiblyImage::Image) => {
-            if rhs.image.is_none() {
-                bail!("no image provided");
-            }
-            image_use.insert(ImageUse::Environment);
-        }
-        None => {}
-    }
-    if !rhs.added_environment.is_empty() {
-        lhs.environment.push(EnvironmentSpec {
-            vars: rhs.added_environment.clone(),
-            extend: true,
-        });
-    }
-
-    match &rhs.working_directory {
-        Some(PossiblyImage::Explicit(working_directory)) => {
-            lhs.working_directory = Some(working_directory.clone());
-        }
-        Some(PossiblyImage::Image) => {
-            if rhs.image.is_none() {
-                bail!("no image provided");
-            }
-            image_use.insert(ImageUse::WorkingDirectory);
-            lhs.working_directory = None;
-        }
-        None => {}
-    }
-
-    if rhs.image.is_some() {
-        lhs.parent = rhs.image.as_ref().map(|image| {
-            ContainerParent::Image(ImageRef {
-                name: image.into(),
-                r#use: image_use,
-            })
-        });
-    }
-
-    Ok(lhs)
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -133,8 +49,85 @@ impl TestMetadata {
     }
 
     fn try_fold<TestFilterT>(mut self, directive: &TestDirective<TestFilterT>) -> Result<Self> {
-        self.container =
-            fold_test_container_into_container_spec(self.container, &directive.container)?;
+        let rhs = directive;
+
+        let mut image_use = EnumSet::new();
+
+        self.container.network = rhs.network.or(self.container.network);
+        self.container.enable_writable_file_system = rhs
+            .enable_writable_file_system
+            .or(self.container.enable_writable_file_system);
+        self.container.user = rhs.user.or(self.container.user);
+        self.container.group = rhs.group.or(self.container.group);
+
+        match &rhs.layers {
+            Some(PossiblyImage::Explicit(layers)) => {
+                self.container.layers = layers.to_vec();
+            }
+            Some(PossiblyImage::Image) => {
+                if rhs.image.is_none() {
+                    bail!("no image provided");
+                }
+                image_use.insert(ImageUse::Layers);
+                self.container.layers = vec![];
+            }
+            None => {}
+        }
+        self.container
+            .layers
+            .extend(rhs.added_layers.iter().cloned());
+
+        self.container.mounts = rhs.mounts.as_ref().map_or(self.container.mounts, |mounts| {
+            mounts.iter().cloned().map(Into::into).collect()
+        });
+        self.container
+            .mounts
+            .extend(rhs.added_mounts.iter().cloned().map(Into::into));
+
+        match &rhs.environment {
+            Some(PossiblyImage::Explicit(environment)) => {
+                self.container.environment.push(EnvironmentSpec {
+                    vars: environment.clone(),
+                    extend: false,
+                });
+            }
+            Some(PossiblyImage::Image) => {
+                if rhs.image.is_none() {
+                    bail!("no image provided");
+                }
+                image_use.insert(ImageUse::Environment);
+            }
+            None => {}
+        }
+        if !rhs.added_environment.is_empty() {
+            self.container.environment.push(EnvironmentSpec {
+                vars: rhs.added_environment.clone(),
+                extend: true,
+            });
+        }
+
+        match &rhs.working_directory {
+            Some(PossiblyImage::Explicit(working_directory)) => {
+                self.container.working_directory = Some(working_directory.clone());
+            }
+            Some(PossiblyImage::Image) => {
+                if rhs.image.is_none() {
+                    bail!("no image provided");
+                }
+                image_use.insert(ImageUse::WorkingDirectory);
+                self.container.working_directory = None;
+            }
+            None => {}
+        }
+
+        if rhs.image.is_some() {
+            self.container.parent = rhs.image.as_ref().map(|image| {
+                ContainerParent::Image(ImageRef {
+                    name: image.into(),
+                    r#use: image_use,
+                })
+            });
+        }
 
         self.include_shared_libraries = directive
             .include_shared_libraries
@@ -163,12 +156,12 @@ where
 {
     pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
         for directive in &mut self.directives {
-            if let Some(PossiblyImage::Explicit(layers)) = &mut directive.container.layers {
+            if let Some(PossiblyImage::Explicit(layers)) = &mut directive.layers {
                 for layer in layers {
                     layer.replace_template_vars(vars)?;
                 }
             }
-            for added_layer in &mut directive.container.added_layers {
+            for added_layer in &mut directive.added_layers {
                 added_layer.replace_template_vars(vars)?;
             }
         }
@@ -199,20 +192,17 @@ where
         self.directives
             .iter()
             .filter_map(|directive| {
-                directive.container.image.as_ref().map(|name| ImageRef {
+                directive.image.as_ref().map(|name| ImageRef {
                     name: name.into(),
                     r#use: {
                         let mut image_use = EnumSet::new();
-                        if matches!(&directive.container.layers, Some(PossiblyImage::Image)) {
+                        if matches!(&directive.layers, Some(PossiblyImage::Image)) {
                             image_use.insert(ImageUse::Layers);
                         }
-                        if matches!(&directive.container.environment, Some(PossiblyImage::Image)) {
+                        if matches!(&directive.environment, Some(PossiblyImage::Image)) {
                             image_use.insert(ImageUse::Environment);
                         }
-                        if matches!(
-                            &directive.container.working_directory,
-                            Some(PossiblyImage::Image)
-                        ) {
+                        if matches!(&directive.working_directory, Some(PossiblyImage::Image)) {
                             image_use.insert(ImageUse::WorkingDirectory);
                         }
                         image_use
