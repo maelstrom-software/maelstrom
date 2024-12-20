@@ -2,7 +2,8 @@
 use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{
-    incompatible, ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse, LayerSpec, PossiblyImage,
+    ContainerRefWithImplicitOrExplicitUse, ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse,
+    LayerSpec, PossiblyImage,
 };
 use serde::{de, Deserialize, Deserializer};
 use std::{
@@ -11,30 +12,11 @@ use std::{
     str::{self, FromStr},
 };
 
-#[derive(Deserialize)]
-#[serde(field_identifier, rename_all = "snake_case")]
-enum DirectiveField {
-    Filter,
-    IncludeSharedLibraries,
-    Timeout,
-    Ignore,
-    Network,
-    EnableWritableFileSystem,
-    User,
-    Group,
-    Mounts,
-    AddedMounts,
-    Image,
-    WorkingDirectory,
-    Layers,
-    AddedLayers,
-    Environment,
-    AddedEnvironment,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Directive<TestFilterT> {
-    pub filter: Option<TestFilterT>,
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(try_from = "DirectiveForTomlAndJson")]
+#[serde(bound(deserialize = "FilterT: FromStr, FilterT::Err: Display"))]
+pub struct Directive<FilterT> {
+    pub filter: Option<FilterT>,
     // This will be Some if any of the other fields are Some(AllMetadata::Image).
     pub image: Option<String>,
     pub network: Option<JobNetwork>,
@@ -53,8 +35,8 @@ pub struct Directive<TestFilterT> {
     pub ignore: Option<bool>,
 }
 
-// The derived Default will put a TestFilterT: Default bound on the implementation
-impl<TestFilterT> Default for Directive<TestFilterT> {
+// The derived Default will put a FilterT: Default bound on the implementation
+impl<FilterT> Default for Directive<FilterT> {
     fn default() -> Self {
         Self {
             filter: Default::default(),
@@ -77,141 +59,118 @@ impl<TestFilterT> Default for Directive<TestFilterT> {
     }
 }
 
-impl<TestFilterT: FromStr> Directive<TestFilterT>
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DirectiveForTomlAndJson {
+    filter: Option<String>,
+
+    // This will be Some if any of the other fields are Some(AllMetadata::Image).
+    image: Option<ImageRefWithImplicitOrExplicitUse>,
+    layers: Option<Vec<LayerSpec>>,
+    added_layers: Option<Vec<LayerSpec>>,
+    environment: Option<BTreeMap<String, String>>,
+    added_environment: Option<BTreeMap<String, String>>,
+    working_directory: Option<Utf8PathBuf>,
+    enable_writable_file_system: Option<bool>,
+    mounts: Option<Vec<JobMountForTomlAndJson>>,
+    added_mounts: Option<Vec<JobMountForTomlAndJson>>,
+    network: Option<JobNetwork>,
+    user: Option<UserId>,
+    group: Option<GroupId>,
+
+    include_shared_libraries: Option<bool>,
+    timeout: Option<u32>,
+    ignore: Option<bool>,
+}
+
+impl<FilterT> TryFrom<DirectiveForTomlAndJson> for Directive<FilterT>
 where
-    TestFilterT::Err: Display,
+    FilterT: FromStr,
+    FilterT::Err: Display,
 {
-    fn set_field<'de, A>(&mut self, ident: DirectiveField, map: &mut A) -> Result<(), A::Error>
-    where
-        A: de::MapAccess<'de>,
-    {
-        match ident {
-            DirectiveField::Filter => {
-                self.filter = Some(
-                    map.next_value::<String>()?
-                        .parse()
-                        .map_err(de::Error::custom)?,
+    type Error = String;
+    fn try_from(directive: DirectiveForTomlAndJson) -> Result<Self, Self::Error> {
+        let DirectiveForTomlAndJson {
+            filter,
+            image,
+            layers,
+            added_layers,
+            environment,
+            added_environment,
+            working_directory,
+            enable_writable_file_system,
+            mounts,
+            added_mounts,
+            network,
+            user,
+            group,
+            include_shared_libraries,
+            timeout,
+            ignore,
+        } = directive;
+
+        let filter = filter
+            .map(|filter| filter.parse::<FilterT>())
+            .transpose()
+            .map_err(|err| err.to_string())?;
+
+        let image_use = image
+            .as_ref()
+            .map(|image_ref| image_ref.r#use.as_set())
+            .unwrap_or_default();
+
+        let layers = if image_use.contains(ImageUse::Layers) {
+            if layers.is_some() {
+                return Err(
+                    "field `image` cannot use `layers` if field `layers` is also set".into(),
                 );
             }
-            DirectiveField::IncludeSharedLibraries => {
-                self.include_shared_libraries = Some(map.next_value()?);
-            }
-            DirectiveField::Timeout => {
-                self.timeout = Some(Timeout::new(map.next_value()?));
-            }
-            DirectiveField::Ignore => {
-                self.ignore = Some(map.next_value()?);
-            }
-            DirectiveField::Network => {
-                self.network = Some(map.next_value()?);
-            }
-            DirectiveField::EnableWritableFileSystem => {
-                self.enable_writable_file_system = Some(map.next_value()?);
-            }
-            DirectiveField::User => {
-                self.user = Some(map.next_value()?);
-            }
-            DirectiveField::Group => {
-                self.group = Some(map.next_value()?);
-            }
-            DirectiveField::Mounts => {
-                self.mounts = Some(map.next_value()?);
-            }
-            DirectiveField::AddedMounts => {
-                self.added_mounts = map.next_value()?;
-            }
-            DirectiveField::Image => {
-                let i = ImageRef::from(map.next_value::<ImageRefWithImplicitOrExplicitUse>()?);
-                self.image = Some(i.name);
-                for image_use in i.r#use {
-                    match image_use {
-                        ImageUse::WorkingDirectory => {
-                            incompatible(
-                                &self.working_directory,
-                                "field `image` cannot use `working_directory` if field `working_directory` is also set",
-                            )?;
-                            self.working_directory = Some(PossiblyImage::Image);
-                        }
-                        ImageUse::Layers => {
-                            incompatible(
-                                &self.layers,
-                                "field `image` cannot use `layers` if field `layers` is also set",
-                            )?;
-                            self.layers = Some(PossiblyImage::Image);
-                        }
-                        ImageUse::Environment => {
-                            incompatible(
-                                &self.environment,
-                                "field `image` cannot use `environment` if field `environment` is also set",
-                            )?;
-                            self.environment = Some(PossiblyImage::Image);
-                        }
-                    }
-                }
-            }
-            DirectiveField::WorkingDirectory => {
-                incompatible(
-                    &self.working_directory,
-                    "field `image` cannot use `working_directory` if field `working_directory` is also set",
-                )?;
-                self.working_directory = Some(PossiblyImage::Explicit(map.next_value()?));
-            }
-            DirectiveField::Layers => {
-                incompatible(
-                    &self.layers,
-                    "field `image` cannot use `layers` if field `layers` is also set",
-                )?;
-                self.layers = Some(PossiblyImage::Explicit(map.next_value()?));
-            }
-            DirectiveField::AddedLayers => {
-                self.added_layers = map.next_value()?;
-            }
-            DirectiveField::Environment => {
-                incompatible(
-                    &self.environment,
-                    "field `image` cannot use `environment` if field `environment` is also set",
-                )?;
-                self.environment = Some(PossiblyImage::Explicit(map.next_value()?));
-            }
-            DirectiveField::AddedEnvironment => {
-                self.added_environment = map.next_value()?;
-            }
-        }
-        Ok(())
-    }
-}
+            Some(PossiblyImage::Image)
+        } else {
+            layers.map(PossiblyImage::Explicit)
+        };
 
-impl<'de, TestFilterT: FromStr> de::Visitor<'de> for Directive<TestFilterT>
-where
-    TestFilterT::Err: Display,
-{
-    type Value = Self;
+        let environment = if image_use.contains(ImageUse::Environment) {
+            if environment.is_some() {
+                return Err(
+                    "field `image` cannot use `environment` if field `environment` is also set"
+                        .into(),
+                );
+            }
+            Some(PossiblyImage::Image)
+        } else {
+            environment.map(PossiblyImage::Explicit)
+        };
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "TestDirective")
-    }
+        let working_directory = if image_use.contains(ImageUse::WorkingDirectory) {
+            if working_directory.is_some() {
+                return Err(
+                    "field `image` cannot use `working_directory` if field `working_directory` is also set".into(),
+                );
+            }
+            Some(PossiblyImage::Image)
+        } else {
+            working_directory.map(PossiblyImage::Explicit)
+        };
 
-    fn visit_map<A>(mut self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: de::MapAccess<'de>,
-    {
-        while let Some(key) = map.next_key()? {
-            self.set_field(key, &mut map)?;
-        }
-
-        Ok(self)
-    }
-}
-
-impl<'de, TestFilterT: FromStr> de::Deserialize<'de> for Directive<TestFilterT>
-where
-    TestFilterT::Err: Display,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(Self::default())
+        Ok(Directive {
+            filter,
+            image: image.map(|image_ref| image_ref.name),
+            network,
+            enable_writable_file_system,
+            user,
+            group,
+            layers,
+            environment,
+            working_directory,
+            mounts,
+            added_mounts: added_mounts.unwrap_or_default(),
+            added_layers: added_layers.unwrap_or_default(),
+            added_environment: added_environment.unwrap_or_default(),
+            include_shared_libraries,
+            timeout: timeout.map(Timeout::new),
+            ignore,
+        })
     }
 }
 

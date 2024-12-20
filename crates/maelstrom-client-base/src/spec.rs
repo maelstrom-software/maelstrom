@@ -15,12 +15,11 @@ use maelstrom_base::{
     Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     env::{self, VarError},
     path::PathBuf,
-    result,
     time::Duration,
 };
 use tuple::Map as _;
@@ -32,19 +31,6 @@ pub fn std_env_lookup(var: &str) -> Result<Option<String>> {
         Ok(val) => Ok(Some(val)),
         Err(VarError::NotPresent) => Ok(None),
         Err(err) => Err(Error::new(err)),
-    }
-}
-
-/// A function used when writing customer deserializers for job specification directives to
-/// indicate that two fields are incompatible.
-pub fn incompatible<T, E>(field: &Option<T>, msg: &str) -> result::Result<(), E>
-where
-    E: de::Error,
-{
-    if field.is_some() {
-        Err(E::custom(format_args!("{}", msg)))
-    } else {
-        Ok(())
     }
 }
 
