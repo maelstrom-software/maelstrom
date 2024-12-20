@@ -2,8 +2,8 @@
 use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{
-    ContainerRefWithImplicitOrExplicitUse, ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse,
-    LayerSpec,
+    ContainerRefWithImplicitOrExplicitUse, ContainerSpec, ContainerSpecForTomlAndJson, EnvSelector,
+    ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse, LayerSpec,
 };
 use serde::{de, Deserialize, Deserializer};
 use std::{
@@ -17,19 +17,7 @@ use std::{
 #[serde(bound(deserialize = "FilterT: FromStr, FilterT::Err: Display"))]
 pub struct Directive<FilterT> {
     pub filter: Option<FilterT>,
-    // This will be Some if any of the other fields are Some(AllMetadata::Image).
-    pub image: Option<ImageRef>,
-    pub network: Option<JobNetwork>,
-    pub enable_writable_file_system: Option<bool>,
-    pub user: Option<UserId>,
-    pub group: Option<GroupId>,
-    pub layers: Option<Vec<LayerSpec>>,
-    pub added_layers: Vec<LayerSpec>,
-    pub mounts: Option<Vec<JobMountForTomlAndJson>>,
-    pub added_mounts: Vec<JobMountForTomlAndJson>,
-    pub environment: Option<BTreeMap<String, String>>,
-    pub added_environment: BTreeMap<String, String>,
-    pub working_directory: Option<Utf8PathBuf>,
+    pub container: DirectiveContainer,
     pub include_shared_libraries: Option<bool>,
     pub timeout: Option<Option<Timeout>>,
     pub ignore: Option<bool>,
@@ -40,23 +28,39 @@ impl<FilterT> Default for Directive<FilterT> {
     fn default() -> Self {
         Self {
             filter: Default::default(),
-            image: Default::default(),
-            network: Default::default(),
-            enable_writable_file_system: Default::default(),
-            user: Default::default(),
-            group: Default::default(),
-            layers: Default::default(),
-            added_layers: Default::default(),
-            mounts: Default::default(),
-            added_mounts: Default::default(),
-            environment: Default::default(),
-            added_environment: Default::default(),
-            working_directory: Default::default(),
+            container: Default::default(),
             include_shared_libraries: Default::default(),
             timeout: Default::default(),
             ignore: Default::default(),
         }
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum DirectiveContainer {
+    Override(ContainerSpec),
+    Accumulate(DirectiveContainerAccumulate),
+}
+
+impl Default for DirectiveContainer {
+    fn default() -> Self {
+        Self::Accumulate(Default::default())
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct DirectiveContainerAccumulate {
+    pub layers: Option<Vec<LayerSpec>>,
+    pub added_layers: Option<Vec<LayerSpec>>,
+    pub environment: Option<BTreeMap<String, String>>,
+    pub added_environment: Option<BTreeMap<String, String>>,
+    pub working_directory: Option<Utf8PathBuf>,
+    pub enable_writable_file_system: Option<bool>,
+    pub mounts: Option<Vec<JobMountForTomlAndJson>>,
+    pub added_mounts: Option<Vec<JobMountForTomlAndJson>>,
+    pub network: Option<JobNetwork>,
+    pub user: Option<UserId>,
+    pub group: Option<GroupId>,
 }
 
 #[derive(Deserialize)]
@@ -114,41 +118,46 @@ where
             .transpose()
             .map_err(|err| err.to_string())?;
 
-        let image_use = image
-            .as_ref()
-            .map(|image_ref| image_ref.r#use.as_set())
-            .unwrap_or_default();
-
-        if layers.is_some() && image_use.contains(ImageUse::Layers) {
-            return Err("field `image` cannot use `layers` if field `layers` is also set".into());
-        }
-
-        if environment.is_some() && image_use.contains(ImageUse::Environment) {
-            return Err(
-                "field `image` cannot use `environment` if field `environment` is also set".into(),
-            );
-        }
-
-        if working_directory.is_some() && image_use.contains(ImageUse::WorkingDirectory) {
-            return Err(
-                    "field `image` cannot use `working_directory` if field `working_directory` is also set".into(),
-                );
-        }
+        let container = {
+            if image.is_some() {
+                DirectiveContainer::Override(
+                    ContainerSpecForTomlAndJson {
+                        image,
+                        parent: None,
+                        layers,
+                        added_layers,
+                        environment: environment.map(EnvSelector::Implicit),
+                        added_environment: added_environment.map(EnvSelector::Implicit),
+                        working_directory,
+                        enable_writable_file_system,
+                        mounts,
+                        added_mounts,
+                        network,
+                        user,
+                        group,
+                    }
+                    .try_into()?,
+                )
+            } else {
+                DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    layers,
+                    added_layers,
+                    environment,
+                    added_environment,
+                    working_directory,
+                    enable_writable_file_system,
+                    mounts,
+                    added_mounts,
+                    network,
+                    user,
+                    group,
+                })
+            }
+        };
 
         Ok(Directive {
             filter,
-            image: image.map(ImageRef::from),
-            network,
-            enable_writable_file_system,
-            user,
-            group,
-            layers,
-            environment,
-            working_directory,
-            mounts,
-            added_mounts: added_mounts.unwrap_or_default(),
-            added_layers: added_layers.unwrap_or_default(),
-            added_environment: added_environment.unwrap_or_default(),
+            container,
             include_shared_libraries,
             timeout: timeout.map(Timeout::new),
             ignore,
@@ -231,10 +240,13 @@ mod tests {
                         .unwrap(),
                 ),
                 include_shared_libraries: Some(true),
-                network: Some(JobNetwork::Loopback),
-                enable_writable_file_system: Some(true),
-                user: Some(UserId::from(101)),
-                group: Some(GroupId::from(202)),
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    network: Some(JobNetwork::Loopback),
+                    enable_writable_file_system: Some(true),
+                    user: Some(UserId::from(101)),
+                    group: Some(GroupId::from(202)),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
         );

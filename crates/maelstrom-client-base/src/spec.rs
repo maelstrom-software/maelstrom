@@ -481,20 +481,20 @@ macro_rules! container_spec {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ContainerSpecForTomlAndJson {
-    image: Option<ImageRefWithImplicitOrExplicitUse>,
-    parent: Option<ContainerRefWithImplicitOrExplicitUse>,
-    layers: Option<Vec<LayerSpec>>,
-    added_layers: Option<Vec<LayerSpec>>,
-    environment: Option<EnvSelector>,
-    added_environment: Option<EnvSelector>,
-    working_directory: Option<Utf8PathBuf>,
-    enable_writable_file_system: Option<bool>,
-    mounts: Option<Vec<JobMountForTomlAndJson>>,
-    added_mounts: Option<Vec<JobMountForTomlAndJson>>,
-    network: Option<JobNetwork>,
-    user: Option<UserId>,
-    group: Option<GroupId>,
+pub struct ContainerSpecForTomlAndJson {
+    pub image: Option<ImageRefWithImplicitOrExplicitUse>,
+    pub parent: Option<ContainerRefWithImplicitOrExplicitUse>,
+    pub layers: Option<Vec<LayerSpec>>,
+    pub added_layers: Option<Vec<LayerSpec>>,
+    pub environment: Option<EnvSelector>,
+    pub added_environment: Option<EnvSelector>,
+    pub working_directory: Option<Utf8PathBuf>,
+    pub enable_writable_file_system: Option<bool>,
+    pub mounts: Option<Vec<JobMountForTomlAndJson>>,
+    pub added_mounts: Option<Vec<JobMountForTomlAndJson>>,
+    pub network: Option<JobNetwork>,
+    pub user: Option<UserId>,
+    pub group: Option<GroupId>,
 }
 
 impl TryFrom<ContainerSpecForTomlAndJson> for ContainerSpec {
@@ -794,7 +794,7 @@ impl TryFrom<ContainerSpecForTomlAndJson> for ContainerSpec {
 
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum EnvSelector {
+pub enum EnvSelector {
     Implicit(BTreeMap<String, String>),
     Explicit(Vec<EnvironmentSpec>),
 }

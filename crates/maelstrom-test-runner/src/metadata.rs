@@ -2,10 +2,10 @@ mod directive;
 
 use crate::TestFilter;
 use anyhow::{Context as _, Result};
-use directive::Directive;
+use directive::{Directive, DirectiveContainer, DirectiveContainerAccumulate};
 use maelstrom_base::Timeout;
 use maelstrom_client::{
-    spec::{ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef, ImageUse},
+    spec::{ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef},
     ProjectDir,
 };
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
@@ -51,62 +51,61 @@ impl TestMetadata {
     fn try_fold<TestFilterT>(mut self, directive: &Directive<TestFilterT>) -> Result<Self> {
         let rhs = directive;
 
-        self.container.network = rhs.network.or(self.container.network);
-        self.container.enable_writable_file_system = rhs
-            .enable_writable_file_system
-            .or(self.container.enable_writable_file_system);
-        self.container.user = rhs.user.or(self.container.user);
-        self.container.group = rhs.group.or(self.container.group);
+        self.container = match &rhs.container {
+            DirectiveContainer::Override(container) => container.clone(),
+            DirectiveContainer::Accumulate(rhs) => {
+                let mut layers = rhs.layers.clone().unwrap_or(self.container.layers);
+                layers.extend(rhs.added_layers.iter().flatten().cloned());
 
-        if rhs
-            .image
-            .as_ref()
-            .is_some_and(|image_ref| image_ref.r#use.contains(ImageUse::Layers))
-        {
-            self.container.layers = vec![];
-        } else {
-            self.container.layers = rhs.layers.clone().unwrap_or(self.container.layers);
-        }
-        self.container
-            .layers
-            .extend(rhs.added_layers.iter().cloned());
+                let mut environment = self.container.environment;
+                if let Some(vars) = &rhs.environment {
+                    environment.push(EnvironmentSpec {
+                        vars: vars.clone(),
+                        extend: false,
+                    });
+                }
+                environment.extend(
+                    rhs.added_environment
+                        .iter()
+                        .cloned()
+                        .map(|vars| EnvironmentSpec { vars, extend: true }),
+                );
 
-        self.container.mounts = rhs.mounts.as_ref().map_or(self.container.mounts, |mounts| {
-            mounts.iter().cloned().map(Into::into).collect()
-        });
-        self.container
-            .mounts
-            .extend(rhs.added_mounts.iter().cloned().map(Into::into));
+                let working_directory = rhs
+                    .working_directory
+                    .clone()
+                    .or(self.container.working_directory);
 
-        if let Some(environment) = &rhs.environment {
-            self.container.environment.push(EnvironmentSpec {
-                vars: environment.clone(),
-                extend: false,
-            });
-        }
-        if !rhs.added_environment.is_empty() {
-            self.container.environment.push(EnvironmentSpec {
-                vars: rhs.added_environment.clone(),
-                extend: true,
-            });
-        }
+                let enable_writable_file_system = rhs
+                    .enable_writable_file_system
+                    .or(self.container.enable_writable_file_system);
 
-        if rhs
-            .image
-            .as_ref()
-            .is_some_and(|image_ref| image_ref.r#use.contains(ImageUse::WorkingDirectory))
-        {
-            self.container.working_directory = None;
-        } else {
-            self.container.working_directory = rhs
-                .working_directory
-                .clone()
-                .or(self.container.working_directory);
-        }
+                let mut mounts = rhs
+                    .mounts
+                    .as_ref()
+                    .map(|mounts| mounts.iter().cloned().map(Into::into).collect())
+                    .unwrap_or(self.container.mounts);
+                mounts.extend(rhs.added_mounts.iter().flatten().cloned().map(Into::into));
 
-        if let Some(image_ref) = &rhs.image {
-            self.container.parent = Some(ContainerParent::Image(image_ref.clone()));
-        }
+                let network = rhs.network.or(self.container.network);
+
+                let user = rhs.user.or(self.container.user);
+
+                let group = rhs.group.or(self.container.group);
+
+                ContainerSpec {
+                    parent: self.container.parent,
+                    layers,
+                    environment,
+                    working_directory,
+                    enable_writable_file_system,
+                    mounts,
+                    network,
+                    user,
+                    group,
+                }
+            }
+        };
 
         self.include_shared_libraries = directive
             .include_shared_libraries
@@ -135,13 +134,28 @@ where
 {
     pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
         for directive in &mut self.directives {
-            if let Some(layers) = &mut directive.layers {
-                for layer in layers {
-                    layer.replace_template_vars(vars)?;
+            match &mut directive.container {
+                DirectiveContainer::Override(ContainerSpec { layers, .. }) => {
+                    for layer in layers {
+                        layer.replace_template_vars(vars)?;
+                    }
                 }
-            }
-            for added_layer in &mut directive.added_layers {
-                added_layer.replace_template_vars(vars)?;
+                DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    layers,
+                    added_layers,
+                    ..
+                }) => {
+                    if let Some(layers) = layers {
+                        for layer in layers {
+                            layer.replace_template_vars(vars)?;
+                        }
+                    }
+                    if let Some(added_layers) = added_layers {
+                        for added_layer in added_layers {
+                            added_layer.replace_template_vars(vars)?;
+                        }
+                    }
+                }
             }
         }
         Ok(())
@@ -170,7 +184,17 @@ where
     pub fn get_all_images(&self) -> Vec<ImageRef> {
         self.directives
             .iter()
-            .filter_map(|directive| directive.image.clone())
+            .filter_map(|directive| {
+                if let DirectiveContainer::Override(ContainerSpec {
+                    parent: Some(ContainerParent::Image(image)),
+                    ..
+                }) = &directive.container
+                {
+                    Some(image.clone())
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 
@@ -988,7 +1012,7 @@ mod tests {
             .unwrap()
             .container
             .environment,
-            vec![dir1_env.clone(), dir3_env.clone()]
+            vec![dir3_env.clone()]
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -1011,7 +1035,7 @@ mod tests {
             .unwrap()
             .container
             .environment,
-            vec![dir1_env.clone()]
+            vec![]
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -1113,12 +1137,7 @@ mod tests {
             .unwrap()
             .container
             .environment,
-            vec![
-                dir1_env.clone(),
-                dir1_added_env.clone(),
-                dir2_added_env.clone(),
-                dir3_added_env.clone()
-            ]
+            vec![dir2_added_env.clone(), dir3_added_env.clone()]
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -1142,8 +1161,6 @@ mod tests {
             .container
             .environment,
             vec![
-                dir1_env.clone(),
-                dir1_added_env.clone(),
                 dir2_added_env.clone(),
                 dir4_env.clone(),
                 dir4_added_env.clone()
@@ -1170,11 +1187,7 @@ mod tests {
             .unwrap()
             .container
             .environment,
-            vec![
-                dir1_env.clone(),
-                dir1_added_env.clone(),
-                dir2_added_env.clone(),
-            ]
+            vec![dir2_added_env.clone(),]
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -1197,7 +1210,7 @@ mod tests {
             .unwrap()
             .container
             .environment,
-            vec![dir1_env.clone(), dir1_added_env.clone(),]
+            vec![dir1_env.clone(), dir1_added_env.clone()],
         );
     }
 
