@@ -1103,17 +1103,6 @@ pub struct ImageConfig {
     pub environment: Option<Vec<String>>,
 }
 
-/// An enum that indicates whether a value is explicitly specified, or implicitly defined to be the
-/// value inherited from an image.
-#[derive(PartialEq, Eq, Debug, Deserialize)]
-pub enum PossiblyImage<T> {
-    /// The value comes from the corresponding value in the image.
-    Image,
-
-    /// The value is explicitly set, and doesn't come from the image.
-    Explicit(T),
-}
-
 /// A convenience struct for extracting parts of an OCI image for use in a
 /// [`maelstrom_base::JobSpec`].
 #[derive(Clone)]

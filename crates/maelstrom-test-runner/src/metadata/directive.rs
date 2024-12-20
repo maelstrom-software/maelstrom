@@ -3,7 +3,7 @@ use anyhow::Result;
 use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{
     ContainerRefWithImplicitOrExplicitUse, ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse,
-    LayerSpec, PossiblyImage,
+    LayerSpec,
 };
 use serde::{de, Deserialize, Deserializer};
 use std::{
@@ -18,18 +18,18 @@ use std::{
 pub struct Directive<FilterT> {
     pub filter: Option<FilterT>,
     // This will be Some if any of the other fields are Some(AllMetadata::Image).
-    pub image: Option<String>,
+    pub image: Option<ImageRef>,
     pub network: Option<JobNetwork>,
     pub enable_writable_file_system: Option<bool>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
-    pub layers: Option<PossiblyImage<Vec<LayerSpec>>>,
+    pub layers: Option<Vec<LayerSpec>>,
     pub added_layers: Vec<LayerSpec>,
     pub mounts: Option<Vec<JobMountForTomlAndJson>>,
     pub added_mounts: Vec<JobMountForTomlAndJson>,
-    pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
+    pub environment: Option<BTreeMap<String, String>>,
     pub added_environment: BTreeMap<String, String>,
-    pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
+    pub working_directory: Option<Utf8PathBuf>,
     pub include_shared_libraries: Option<bool>,
     pub timeout: Option<Option<Timeout>>,
     pub ignore: Option<bool>,
@@ -119,43 +119,25 @@ where
             .map(|image_ref| image_ref.r#use.as_set())
             .unwrap_or_default();
 
-        let layers = if image_use.contains(ImageUse::Layers) {
-            if layers.is_some() {
-                return Err(
-                    "field `image` cannot use `layers` if field `layers` is also set".into(),
-                );
-            }
-            Some(PossiblyImage::Image)
-        } else {
-            layers.map(PossiblyImage::Explicit)
-        };
+        if layers.is_some() && image_use.contains(ImageUse::Layers) {
+            return Err("field `image` cannot use `layers` if field `layers` is also set".into());
+        }
 
-        let environment = if image_use.contains(ImageUse::Environment) {
-            if environment.is_some() {
-                return Err(
-                    "field `image` cannot use `environment` if field `environment` is also set"
-                        .into(),
-                );
-            }
-            Some(PossiblyImage::Image)
-        } else {
-            environment.map(PossiblyImage::Explicit)
-        };
+        if environment.is_some() && image_use.contains(ImageUse::Environment) {
+            return Err(
+                "field `image` cannot use `environment` if field `environment` is also set".into(),
+            );
+        }
 
-        let working_directory = if image_use.contains(ImageUse::WorkingDirectory) {
-            if working_directory.is_some() {
-                return Err(
+        if working_directory.is_some() && image_use.contains(ImageUse::WorkingDirectory) {
+            return Err(
                     "field `image` cannot use `working_directory` if field `working_directory` is also set".into(),
                 );
-            }
-            Some(PossiblyImage::Image)
-        } else {
-            working_directory.map(PossiblyImage::Explicit)
-        };
+        }
 
         Ok(Directive {
             filter,
-            image: image.map(|image_ref| image_ref.name),
+            image: image.map(ImageRef::from),
             network,
             enable_writable_file_system,
             user,
