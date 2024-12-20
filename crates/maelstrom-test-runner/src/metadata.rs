@@ -24,7 +24,7 @@ pub struct AllMetadata<TestFilterT> {
     #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
     directives: Vec<TestDirective<TestFilterT>>,
     #[serde(default)]
-    containers: HashMap<String, TestContainer>,
+    containers: HashMap<String, ContainerSpec>,
 }
 
 fn fold_test_container_into_container_spec(
