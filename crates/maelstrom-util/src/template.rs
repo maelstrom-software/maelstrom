@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{anyhow, Result};
 use regex::Regex;
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -7,19 +7,17 @@ use std::collections::HashMap;
 pub struct Ident(String);
 
 impl Ident {
-    pub fn new(value: &str) -> Result<Self> {
+    pub fn new(value: &str) -> Self {
         let ident_re = Regex::new("^[a-zA-Z-][a-zA-Z0-9-]*$").unwrap();
         if !ident_re.is_match(value) {
-            bail!("invalid identifier {value:?}");
+            panic!("invalid identifier {value:?}");
         }
-        Ok(Self(value.to_owned()))
+        Self(value.to_owned())
     }
 }
 
-impl<'a> TryFrom<&'a str> for Ident {
-    type Error = Error;
-
-    fn try_from(v: &'a str) -> Result<Self> {
+impl<'a> From<&'a str> for Ident {
+    fn from(v: &'a str) -> Self {
         Self::new(v)
     }
 }
@@ -30,22 +28,6 @@ impl Borrow<str> for Ident {
     }
 }
 
-#[test]
-fn ident_valid() {
-    // Dash okay.
-    Ident::new("foo-bar").unwrap();
-    // Mixed case okay. Numbers okay if not at beginning.
-    Ident::new("foo-Bar12").unwrap();
-}
-
-#[test]
-fn ident_invalid() {
-    // No underscore.
-    Ident::new("foo_bar").unwrap_err();
-    // Can't start with number.
-    Ident::new("1foo-bar").unwrap_err();
-}
-
 #[derive(Default)]
 pub struct TemplateVars(HashMap<Ident, String>);
 
@@ -53,13 +35,11 @@ impl TemplateVars {
     pub fn new<I, K, V>(iter: I) -> Result<Self>
     where
         I: IntoIterator<Item = (K, V)>,
-        K: TryInto<Ident, Error =Error>,
+        K: Into<Ident>,
         V: Into<String>,
     {
         Ok(TemplateVars(HashMap::from_iter(
-            iter.into_iter()
-                .map(|(k, v)| k.try_into().map(|k| (k, v.into())))
-                .collect::<Result<Vec<_>, _>>()?,
+            iter.into_iter().map(|(k, v)| (k.into(), v.into())),
         )))
     }
 }
@@ -110,61 +90,86 @@ pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String>
 }
 
 #[cfg(test)]
-fn template_success_test(key: &str, value: &str, template: &str, expected: &str) {
-    let vars = TemplateVars::new([(key, value)]).unwrap();
-    let actual = replace_template_vars(template, &vars).unwrap();
-    assert_eq!(expected, &actual);
-}
+mod tests {
+    use super::*;
 
-#[cfg(test)]
-fn template_failure_test(key: &str, value: &str, template: &str, expected_error: &str) {
-    let vars = TemplateVars::new([(key, value)]).unwrap();
-    let err = replace_template_vars(template, &vars).unwrap_err();
-    assert_eq!(expected_error, err.to_string());
-}
+    #[test]
+    fn ident_valid() {
+        // Dash okay.
+        Ident::new("foo-bar");
+        // Mixed case okay. Numbers okay if not at beginning.
+        Ident::new("foo-Bar12");
+    }
 
-#[test]
-fn template_successful_replacement() {
-    template_success_test("foo", "bar", "<foo>/baz", "bar/baz");
-    template_success_test("foo", "bar", "/hello/<foo>/baz", "/hello/bar/baz");
-    template_success_test("foo", "bar", "/hello/<foo>/<foo>", "/hello/bar/bar");
-}
+    #[test]
+    #[should_panic(expected = r#"invalid identifier "foo_bar""#)]
+    fn ident_invalid_has_underscore() {
+        // No underscore.
+        Ident::new("foo_bar");
+    }
 
-#[test]
-fn template_replace_many() {
-    let vars =
-        TemplateVars::new([("food", "apple pie"), ("drink", "coke"), ("name", "bob")]).unwrap();
-    let template = "echo '<name> ate <food> while drinking <drink>' > message";
-    let actual = replace_template_vars(template, &vars).unwrap();
-    assert_eq!(
-        "echo 'bob ate apple pie while drinking coke' > message",
-        &actual
-    );
-}
+    #[test]
+    #[should_panic(expected = r#"invalid identifier "1foo-bar""#)]
+    fn ident_invalid_starts_with_number() {
+        // Can't start with number.
+        Ident::new("1foo-bar");
+    }
 
-#[test]
-fn template_failure() {
-    template_failure_test(
-        "foo",
-        "bar",
-        "<poo>/baz",
-        "unknown template variable \"poo\"",
-    );
-}
+    fn template_success_test(key: &str, value: &str, template: &str, expected: &str) {
+        let vars = TemplateVars::new([(key, value)]).unwrap();
+        let actual = replace_template_vars(template, &vars).unwrap();
+        assert_eq!(expected, &actual);
+    }
 
-#[test]
-fn template_escaping() {
-    template_success_test("foo", "bar", "/he<<llo>/<foo>/<foo>", "/he<llo>/bar/bar");
-    template_success_test("foo", "bar", "/he<<llo>/<foo>/<foo>", "/he<llo>/bar/bar");
-    template_success_test("foo", "bar", "/he<<<foo>", "/he<bar");
-    template_success_test("foo", "bar", "/he<<<foo>>", "/he<bar>");
-    template_success_test("foo", "bar", "/he<<<<foo>>", "/he<<foo>>");
-    template_success_test("foo", "bar", "/he<<", "/he<<");
-    template_success_test("foo", "bar", "/he<some/thing>", "/he<some/thing>");
-    template_success_test(
-        "foo-dude",
-        "bar",
-        "/he<<llo>/<foo-dude>/<foo-dude>",
-        "/he<llo>/bar/bar",
-    );
+    fn template_failure_test(key: &str, value: &str, template: &str, expected_error: &str) {
+        let vars = TemplateVars::new([(key, value)]).unwrap();
+        let err = replace_template_vars(template, &vars).unwrap_err();
+        assert_eq!(expected_error, err.to_string());
+    }
+
+    #[test]
+    fn template_successful_replacement() {
+        template_success_test("foo", "bar", "<foo>/baz", "bar/baz");
+        template_success_test("foo", "bar", "/hello/<foo>/baz", "/hello/bar/baz");
+        template_success_test("foo", "bar", "/hello/<foo>/<foo>", "/hello/bar/bar");
+    }
+
+    #[test]
+    fn template_replace_many() {
+        let vars =
+            TemplateVars::new([("food", "apple pie"), ("drink", "coke"), ("name", "bob")]).unwrap();
+        let template = "echo '<name> ate <food> while drinking <drink>' > message";
+        let actual = replace_template_vars(template, &vars).unwrap();
+        assert_eq!(
+            "echo 'bob ate apple pie while drinking coke' > message",
+            &actual
+        );
+    }
+
+    #[test]
+    fn template_failure() {
+        template_failure_test(
+            "foo",
+            "bar",
+            "<poo>/baz",
+            "unknown template variable \"poo\"",
+        );
+    }
+
+    #[test]
+    fn template_escaping() {
+        template_success_test("foo", "bar", "/he<<llo>/<foo>/<foo>", "/he<llo>/bar/bar");
+        template_success_test("foo", "bar", "/he<<llo>/<foo>/<foo>", "/he<llo>/bar/bar");
+        template_success_test("foo", "bar", "/he<<<foo>", "/he<bar");
+        template_success_test("foo", "bar", "/he<<<foo>>", "/he<bar>");
+        template_success_test("foo", "bar", "/he<<<<foo>>", "/he<<foo>>");
+        template_success_test("foo", "bar", "/he<<", "/he<<");
+        template_success_test("foo", "bar", "/he<some/thing>", "/he<some/thing>");
+        template_success_test(
+            "foo-dude",
+            "bar",
+            "/he<<llo>/<foo-dude>/<foo-dude>",
+            "/he<llo>/bar/bar",
+        );
+    }
 }
