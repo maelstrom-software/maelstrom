@@ -50,10 +50,6 @@ fn ident_invalid() {
 pub struct TemplateVars(HashMap<Ident, String>);
 
 impl TemplateVars {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn with_var(
         mut self,
         key: impl TryInto<Ident, Error = anyhow::Error>,
@@ -115,14 +111,14 @@ pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String>
 
 #[cfg(test)]
 fn template_success_test(key: &str, value: &str, template: &str, expected: &str) {
-    let vars = TemplateVars::new().with_var(key, value).unwrap();
+    let vars = TemplateVars::default().with_var(key, value).unwrap();
     let actual = replace_template_vars(template, &vars).unwrap();
     assert_eq!(expected, &actual);
 }
 
 #[cfg(test)]
 fn template_failure_test(key: &str, value: &str, template: &str, expected_error: &str) {
-    let vars = TemplateVars::new().with_var(key, value).unwrap();
+    let vars = TemplateVars::default().with_var(key, value).unwrap();
     let err = replace_template_vars(template, &vars).unwrap_err();
     assert_eq!(expected_error, err.to_string());
 }
@@ -136,7 +132,7 @@ fn template_successful_replacement() {
 
 #[test]
 fn template_replace_many() {
-    let vars = TemplateVars::new()
+    let vars = TemplateVars::default()
         .with_var("food", "apple pie")
         .unwrap()
         .with_var("drink", "coke")

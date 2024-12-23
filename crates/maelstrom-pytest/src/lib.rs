@@ -564,7 +564,7 @@ impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
     }
 
     fn get_template_vars(&self, _pytest_options: &PytestConfigValues) -> Result<TemplateVars> {
-        Ok(TemplateVars::new())
+        Ok(TemplateVars::default())
     }
 
     const TEST_METADATA_FILE_NAME: &'static str = TEST_METADATA_FILE_NAME;

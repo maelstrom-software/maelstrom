@@ -687,7 +687,7 @@ impl MainAppDeps for DefaultMainAppDeps<'_> {
     }
 
     fn get_template_vars(&self, _: &GoTestOptions) -> Result<TemplateVars> {
-        Ok(TemplateVars::new())
+        Ok(TemplateVars::default())
     }
 
     const TEST_METADATA_FILE_NAME: &'static str = TEST_METADATA_FILE_NAME;
