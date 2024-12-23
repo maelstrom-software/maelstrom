@@ -103,16 +103,16 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         log: slog::Logger,
     ) -> Result<Self> {
         let project_dir = project_dir.as_ref().to_owned();
-        let mut test_metadata = AllMetadata::load(
+
+        let test_metadata = AllMetadata::load(
             log.clone(),
             &project_dir,
             MainAppDepsT::TEST_METADATA_FILE_NAME,
             MainAppDepsT::DEFAULT_TEST_METADATA_CONTENTS,
+            &abstract_deps.get_template_vars(&collector_options)?,
         )?;
-        let test_db_store = TestDbStore::new(Fs::new(), &state_dir);
 
-        let vars = abstract_deps.get_template_vars(&collector_options)?;
-        test_metadata.replace_template_vars(&vars)?;
+        let test_db_store = TestDbStore::new(Fs::new(), &state_dir);
 
         let filter = super::TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
 

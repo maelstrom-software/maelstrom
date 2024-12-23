@@ -132,7 +132,7 @@ impl<TestFilterT: TestFilter> AllMetadata<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
-    pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
+    fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
         for directive in &mut self.directives {
             match &mut directive.container {
                 DirectiveContainer::Override(ContainerSpec { layers, .. }) => {
@@ -203,23 +203,25 @@ where
         project_dir: impl AsRef<Root<ProjectDir>>,
         test_metadata_file_name: &str,
         default_test_metadata_contents: &str,
+        vars: &TemplateVars,
     ) -> Result<Self> {
         struct MaelstromTestTomlFile;
         let path = project_dir
             .as_ref()
             .join::<MaelstromTestTomlFile>(test_metadata_file_name);
-        if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
-            return Self::from_str(&contents)
-                .with_context(|| format!("parsing {}", path.display()));
-        }
-
-        slog::debug!(
-            log,
-            "no test metadata configuration found, using default";
-            "search_path" => ?path,
-        );
-        Ok(Self::from_str(default_test_metadata_contents)
-            .expect("embedded default test metadata TOML is valid"))
+        let mut result = if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
+            Self::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?
+        } else {
+            slog::debug!(
+                log,
+                "no test metadata configuration found, using default";
+                "search_path" => ?path,
+            );
+            Self::from_str(default_test_metadata_contents)
+                .expect("embedded default test metadata TOML is valid")
+        };
+        result.replace_template_vars(vars)?;
+        Ok(result)
     }
 }
 
@@ -275,6 +277,7 @@ mod tests {
             &project_dir,
             "simple-test.toml",
             "[[directives]]",
+            &TemplateVars::default(),
         )
         .unwrap();
 
