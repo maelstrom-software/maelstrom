@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Error, Result};
 use regex::Regex;
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -17,7 +17,7 @@ impl Ident {
 }
 
 impl<'a> TryFrom<&'a str> for Ident {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(v: &'a str) -> Result<Self> {
         Self::new(v)
@@ -50,17 +50,17 @@ fn ident_invalid() {
 pub struct TemplateVars(HashMap<Ident, String>);
 
 impl TemplateVars {
-    pub fn with_var(
-        mut self,
-        key: impl TryInto<Ident, Error = anyhow::Error>,
-        value: impl Into<String>,
-    ) -> Result<Self> {
-        let key = key.try_into()?;
-        if self.0.contains_key(&key) {
-            bail!("duplicate key {key:?}")
-        }
-        self.0.insert(key, value.into());
-        Ok(self)
+    pub fn new<I, K, V>(iter: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: TryInto<Ident, Error =Error>,
+        V: Into<String>,
+    {
+        Ok(TemplateVars(HashMap::from_iter(
+            iter.into_iter()
+                .map(|(k, v)| k.try_into().map(|k| (k, v.into())))
+                .collect::<Result<Vec<_>, _>>()?,
+        )))
     }
 }
 
@@ -111,14 +111,14 @@ pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String>
 
 #[cfg(test)]
 fn template_success_test(key: &str, value: &str, template: &str, expected: &str) {
-    let vars = TemplateVars::default().with_var(key, value).unwrap();
+    let vars = TemplateVars::new([(key, value)]).unwrap();
     let actual = replace_template_vars(template, &vars).unwrap();
     assert_eq!(expected, &actual);
 }
 
 #[cfg(test)]
 fn template_failure_test(key: &str, value: &str, template: &str, expected_error: &str) {
-    let vars = TemplateVars::default().with_var(key, value).unwrap();
+    let vars = TemplateVars::new([(key, value)]).unwrap();
     let err = replace_template_vars(template, &vars).unwrap_err();
     assert_eq!(expected_error, err.to_string());
 }
@@ -132,13 +132,8 @@ fn template_successful_replacement() {
 
 #[test]
 fn template_replace_many() {
-    let vars = TemplateVars::default()
-        .with_var("food", "apple pie")
-        .unwrap()
-        .with_var("drink", "coke")
-        .unwrap()
-        .with_var("name", "bob")
-        .unwrap();
+    let vars =
+        TemplateVars::new([("food", "apple pie"), ("drink", "coke"), ("name", "bob")]).unwrap();
     let template = "echo '<name> ate <food> while drinking <drink>' > message";
     let actual = replace_template_vars(template, &vars).unwrap();
     assert_eq!(

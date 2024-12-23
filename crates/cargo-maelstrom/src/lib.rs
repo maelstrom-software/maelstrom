@@ -512,9 +512,7 @@ impl MainAppDeps for DefaultMainAppDeps {
         let build_dir = target
             .to_str()
             .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
-        Ok(TemplateVars::default()
-            .with_var("build-dir", build_dir)
-            .unwrap())
+        Ok(TemplateVars::new([("build-dir", build_dir)]).unwrap())
     }
 
     const TEST_METADATA_FILE_NAME: &'static str = TEST_METADATA_FILE_NAME;
