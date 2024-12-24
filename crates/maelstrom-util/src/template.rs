@@ -47,8 +47,10 @@ impl TemplateVars {
 pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String> {
     static TEMPLATE_RE: OnceLock<Regex> = OnceLock::new();
     let template_re = TEMPLATE_RE.get_or_init(|| {
-        // Opening angle braces followed by identifier ending with a single closing angle brace.
-        Regex::new("(?:(?<var><+[a-zA-Z-][a-zA-Z0-9-]*>))").unwrap()
+        // Opening angle brackets followed by identifier ending with a single closing angle
+        // bracket. We capture all of the leading brackets, since we support escaping brackets by
+        // doubling them.
+        Regex::new("(?<var><+[a-zA-Z-][a-zA-Z0-9-]*>)").unwrap()
     });
     let mut last = 0;
     let mut output = String::new();
