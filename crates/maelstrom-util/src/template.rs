@@ -1,14 +1,14 @@
 use anyhow::{anyhow, Result};
 use regex::Regex;
-use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::{borrow::Borrow, collections::HashMap, sync::OnceLock};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Ident(String);
 
 impl Ident {
     pub fn new(value: &str) -> Self {
-        let ident_re = Regex::new("^[a-zA-Z-][a-zA-Z0-9-]*$").unwrap();
+        static IDENT_RE: OnceLock<Regex> = OnceLock::new();
+        let ident_re = IDENT_RE.get_or_init(|| Regex::new("^[a-zA-Z-][a-zA-Z0-9-]*$").unwrap());
         if !ident_re.is_match(value) {
             panic!("invalid identifier {value:?}");
         }
@@ -45,15 +45,17 @@ impl TemplateVars {
 }
 
 pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String> {
-    let template_re = Regex::new(
-        "(?x) # verbose mode
+    static TEMPLATE_RE: OnceLock<Regex> = OnceLock::new();
+    let template_re = TEMPLATE_RE.get_or_init(|| {
+        Regex::new(
+            "(?x) # verbose mode
         (?:
             # opening angle braces followed by identifier ending with a single closing angle brace
             (?<var><+[a-zA-Z-][a-zA-Z0-9-]*>)
+        )",
         )
-    ",
-    )
-    .unwrap();
+        .unwrap()
+    });
     let mut last = 0;
     let mut output = String::new();
     for cap in template_re.captures_iter(input) {
