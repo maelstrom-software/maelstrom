@@ -132,35 +132,6 @@ impl<TestFilterT: TestFilter> AllMetadata<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
-    fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
-        for directive in &mut self.directives {
-            match &mut directive.container {
-                DirectiveContainer::Override(ContainerSpec { layers, .. }) => {
-                    for layer in layers {
-                        layer.replace_template_vars(vars)?;
-                    }
-                }
-                DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    layers,
-                    added_layers,
-                    ..
-                }) => {
-                    if let Some(layers) = layers {
-                        for layer in layers {
-                            layer.replace_template_vars(vars)?;
-                        }
-                    }
-                    if let Some(added_layers) = added_layers {
-                        for added_layer in added_layers {
-                            added_layer.replace_template_vars(vars)?;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub fn get_metadata_for_test(
         &self,
         package: &TestFilterT::Package,
@@ -209,6 +180,7 @@ where
         let path = project_dir
             .as_ref()
             .join::<MaelstromTestTomlFile>(test_metadata_file_name);
+
         let mut result = if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
             Self::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?
         } else {
@@ -220,7 +192,33 @@ where
             Self::from_str(default_test_metadata_contents)
                 .expect("embedded default test metadata TOML is valid")
         };
-        result.replace_template_vars(vars)?;
+
+        for directive in &mut result.directives {
+            match &mut directive.container {
+                DirectiveContainer::Override(ContainerSpec { layers, .. }) => {
+                    for layer in layers {
+                        layer.replace_template_vars(vars)?;
+                    }
+                }
+                DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    layers,
+                    added_layers,
+                    ..
+                }) => {
+                    if let Some(layers) = layers {
+                        for layer in layers {
+                            layer.replace_template_vars(vars)?;
+                        }
+                    }
+                    if let Some(added_layers) = added_layers {
+                        for added_layer in added_layers {
+                            added_layer.replace_template_vars(vars)?;
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(result)
     }
 }
