@@ -14,7 +14,7 @@ use maelstrom_base::{
     CaptureFileSystemChanges, GroupId, JobMount, JobMountForTomlAndJson, JobNetwork, JobTty,
     Timeout, UserId, Utf8PathBuf,
 };
-use maelstrom_util::template::{replace_template_vars, TemplateVars};
+use maelstrom_util::template::TemplateVars;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -1013,27 +1013,27 @@ pub enum LayerSpec {
 impl LayerSpec {
     pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
         match self {
-            Self::Tar { path } => *path = replace_template_vars(path.as_str(), vars)?.into(),
-            Self::Glob { glob, .. } => *glob = replace_template_vars(glob, vars)?,
+            Self::Tar { path } => *path = vars.replace(path)?.into(),
+            Self::Glob { glob, .. } => *glob = vars.replace(glob)?,
             Self::Paths { paths, .. } => {
                 for path in paths {
-                    *path = replace_template_vars(path.as_str(), vars)?.into();
+                    *path = vars.replace(path)?.into();
                 }
             }
             Self::Stubs { stubs, .. } => {
                 for stub in stubs {
-                    *stub = replace_template_vars(stub, vars)?;
+                    *stub = vars.replace(stub)?;
                 }
             }
             Self::Symlinks { symlinks } => {
                 for SymlinkSpec { link, target } in symlinks {
-                    *link = replace_template_vars(link.as_str(), vars)?.into();
-                    *target = replace_template_vars(target.as_str(), vars)?.into();
+                    *link = vars.replace(link)?.into();
+                    *target = vars.replace(target)?.into();
                 }
             }
             Self::SharedLibraryDependencies { binary_paths, .. } => {
                 for path in binary_paths {
-                    *path = replace_template_vars(path.as_str(), vars)?.into();
+                    *path = vars.replace(path)?.into();
                 }
             }
         }

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use regex::Regex;
-use std::{collections::HashMap, sync::OnceLock};
+use std::{collections::HashMap, convert::AsRef, sync::OnceLock};
 
 const IDENT: &str = "[a-zA-Z-][a-zA-Z0-9-]*";
 
@@ -10,6 +10,17 @@ fn validate_ident(ident: &str) {
     if !ident_re.is_match(ident) {
         panic!("invalid identifier {ident:?}");
     }
+}
+
+// Keep this in a function that won't be duplicated for each generic parameter.
+fn template_re() -> &'static Regex {
+    static TEMPLATE_RE: OnceLock<Regex> = OnceLock::new();
+    TEMPLATE_RE.get_or_init(|| {
+        // Opening angle brackets followed by identifier ending with a single closing angle
+        // bracket. We capture all of the leading brackets, since we support escaping brackets by
+        // doubling them.
+        Regex::new(&format!("(?<var><+{IDENT}>)")).unwrap()
+    })
 }
 
 #[derive(Default)]
@@ -28,49 +39,43 @@ impl TemplateVars {
             (k, v.into())
         })))
     }
-}
 
-pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String> {
-    static TEMPLATE_RE: OnceLock<Regex> = OnceLock::new();
-    let template_re = TEMPLATE_RE.get_or_init(|| {
-        // Opening angle brackets followed by identifier ending with a single closing angle
-        // bracket. We capture all of the leading brackets, since we support escaping brackets by
-        // doubling them.
-        Regex::new(&format!("(?<var><+{IDENT}>)")).unwrap()
-    });
-    let mut last = 0;
-    let mut output = String::new();
-    for cap in template_re.captures_iter(input) {
-        let (range, value) = if let Some(m) = cap.name("var") {
-            let m_str = m.as_str();
-            let starting_angle = m_str.chars().take_while(|c| *c == '<').count();
-            if starting_angle % 2 == 1 {
-                let ident = &m_str[starting_angle..(m_str.len() - 1)];
-                let new_angle = "<".repeat((starting_angle - 1) / 2);
-                let value = vars
-                    .0
-                    .get(ident)
-                    .ok_or_else(|| anyhow!("unknown template variable {ident:?}"))?
-                    .as_str();
-                (m.range(), format!("{new_angle}{value}"))
+    pub fn replace(&self, input: &(impl AsRef<str> + ?Sized)) -> Result<String> {
+        let input = input.as_ref();
+        let mut last = 0;
+        let mut output = String::new();
+        for cap in template_re().captures_iter(input) {
+            let (range, value) = if let Some(m) = cap.name("var") {
+                let m_str = m.as_str();
+                let starting_angle = m_str.chars().take_while(|c| *c == '<').count();
+                if starting_angle % 2 == 1 {
+                    let ident = &m_str[starting_angle..(m_str.len() - 1)];
+                    let new_angle = "<".repeat((starting_angle - 1) / 2);
+                    let value = self
+                        .0
+                        .get(ident)
+                        .ok_or_else(|| anyhow!("unknown template variable {ident:?}"))?
+                        .as_str();
+                    (m.range(), format!("{new_angle}{value}"))
+                } else {
+                    let start = m.range().start;
+                    (
+                        start..(start + starting_angle),
+                        "<".repeat(starting_angle / 2).to_string(),
+                    )
+                }
             } else {
-                let start = m.range().start;
-                (
-                    start..(start + starting_angle),
-                    "<".repeat(starting_angle / 2).to_string(),
-                )
-            }
-        } else {
-            unreachable!()
-        };
+                unreachable!()
+            };
 
-        output += &input[last..range.start];
-        output += &value;
-        last = range.end;
+            output += &input[last..range.start];
+            output += &value;
+            last = range.end;
+        }
+        output += &input[last..];
+
+        Ok(output)
     }
-    output += &input[last..];
-
-    Ok(output)
 }
 
 #[cfg(test)]
@@ -107,13 +112,13 @@ mod tests {
 
     fn template_success_test(key: &str, value: &str, template: &str, expected: &str) {
         let vars = TemplateVars::new([(key, value)]);
-        let actual = replace_template_vars(template, &vars).unwrap();
+        let actual = vars.replace(template).unwrap();
         assert_eq!(expected, &actual);
     }
 
     fn template_failure_test(key: &str, value: &str, template: &str, expected_error: &str) {
         let vars = TemplateVars::new([(key, value)]);
-        let err = replace_template_vars(template, &vars).unwrap_err();
+        let err = vars.replace(template).unwrap_err();
         assert_eq!(expected_error, err.to_string());
     }
 
@@ -128,7 +133,7 @@ mod tests {
     fn template_replace_many() {
         let vars = TemplateVars::new([("food", "apple pie"), ("drink", "coke"), ("name", "bob")]);
         let template = "echo '<name> ate <food> while drinking <drink>' > message";
-        let actual = replace_template_vars(template, &vars).unwrap();
+        let actual = vars.replace(template).unwrap();
         assert_eq!(
             "echo 'bob ate apple pie while drinking coke' > message",
             &actual
