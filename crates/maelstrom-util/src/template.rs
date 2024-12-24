@@ -2,13 +2,15 @@ use anyhow::{anyhow, Result};
 use regex::Regex;
 use std::{borrow::Borrow, collections::HashMap, sync::OnceLock};
 
+const IDENT: &str = "[a-zA-Z-][a-zA-Z0-9-]*";
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Ident(String);
 
 impl Ident {
     pub fn new(value: &str) -> Self {
         static IDENT_RE: OnceLock<Regex> = OnceLock::new();
-        let ident_re = IDENT_RE.get_or_init(|| Regex::new("^[a-zA-Z-][a-zA-Z0-9-]*$").unwrap());
+        let ident_re = IDENT_RE.get_or_init(|| Regex::new(&format!("^{IDENT}$")).unwrap());
         if !ident_re.is_match(value) {
             panic!("invalid identifier {value:?}");
         }
@@ -50,7 +52,7 @@ pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String>
         // Opening angle brackets followed by identifier ending with a single closing angle
         // bracket. We capture all of the leading brackets, since we support escaping brackets by
         // doubling them.
-        Regex::new("(?<var><+[a-zA-Z-][a-zA-Z0-9-]*>)").unwrap()
+        Regex::new(&format!("(?<var><+{IDENT}>)")).unwrap()
     });
     let mut last = 0;
     let mut output = String::new();
