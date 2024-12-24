@@ -1,47 +1,33 @@
 use anyhow::{anyhow, Result};
 use regex::Regex;
-use std::{borrow::Borrow, collections::HashMap, sync::OnceLock};
+use std::{collections::HashMap, sync::OnceLock};
 
 const IDENT: &str = "[a-zA-Z-][a-zA-Z0-9-]*";
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Ident(String);
-
-impl Ident {
-    pub fn new(value: &str) -> Self {
-        static IDENT_RE: OnceLock<Regex> = OnceLock::new();
-        let ident_re = IDENT_RE.get_or_init(|| Regex::new(&format!("^{IDENT}$")).unwrap());
-        if !ident_re.is_match(value) {
-            panic!("invalid identifier {value:?}");
-        }
-        Self(value.to_owned())
-    }
-}
-
-impl<'a> From<&'a str> for Ident {
-    fn from(v: &'a str) -> Self {
-        Self::new(v)
-    }
-}
-
-impl Borrow<str> for Ident {
-    fn borrow(&self) -> &str {
-        self.0.as_str()
+fn validate_ident(ident: &str) {
+    static IDENT_RE: OnceLock<Regex> = OnceLock::new();
+    let ident_re = IDENT_RE.get_or_init(|| Regex::new(&format!("^{IDENT}$")).unwrap());
+    if !ident_re.is_match(ident) {
+        panic!("invalid identifier {ident:?}");
     }
 }
 
 #[derive(Default)]
-pub struct TemplateVars(HashMap<Ident, String>);
+pub struct TemplateVars(HashMap<String, String>);
 
 impl TemplateVars {
     pub fn new<I, K, V>(iter: I) -> Result<Self>
     where
         I: IntoIterator<Item = (K, V)>,
-        K: Into<Ident>,
+        K: Into<String>,
         V: Into<String>,
     {
         Ok(TemplateVars(HashMap::from_iter(
-            iter.into_iter().map(|(k, v)| (k.into(), v.into())),
+            iter.into_iter().map(|(k, v)| {
+                let k = k.into();
+                validate_ident(&k);
+                (k, v.into())
+            }),
         )))
     }
 }
@@ -95,24 +81,30 @@ mod tests {
 
     #[test]
     fn ident_valid() {
-        // Dash okay.
-        Ident::new("foo-bar");
-        // Mixed case okay. Numbers okay if not at beginning.
-        Ident::new("foo-Bar12");
+        TemplateVars::new([
+            // Dash okay.
+            ("foo-bar", ""),
+            // Mixed case okay. Numbers okay if not at beginning.
+            ("foo-Bar12", ""),
+        ]).unwrap();
     }
 
     #[test]
     #[should_panic(expected = r#"invalid identifier "foo_bar""#)]
     fn ident_invalid_has_underscore() {
-        // No underscore.
-        Ident::new("foo_bar");
+        TemplateVars::new([
+            // No underscore.
+            ("foo_bar", ""),
+        ]).unwrap();
     }
 
     #[test]
     #[should_panic(expected = r#"invalid identifier "1foo-bar""#)]
     fn ident_invalid_starts_with_number() {
-        // Can't start with number.
-        Ident::new("1foo-bar");
+        TemplateVars::new([
+            // Can't start with number.
+            ("1foo-bar", ""),
+        ]).unwrap();
     }
 
     fn template_success_test(key: &str, value: &str, template: &str, expected: &str) {
