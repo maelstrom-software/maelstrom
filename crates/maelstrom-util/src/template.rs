@@ -16,19 +16,17 @@ fn validate_ident(ident: &str) {
 pub struct TemplateVars(HashMap<String, String>);
 
 impl TemplateVars {
-    pub fn new<I, K, V>(iter: I) -> Result<Self>
+    pub fn new<I, K, V>(iter: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
         K: Into<String>,
         V: Into<String>,
     {
-        Ok(TemplateVars(HashMap::from_iter(
-            iter.into_iter().map(|(k, v)| {
-                let k = k.into();
-                validate_ident(&k);
-                (k, v.into())
-            }),
-        )))
+        TemplateVars(HashMap::from_iter(iter.into_iter().map(|(k, v)| {
+            let k = k.into();
+            validate_ident(&k);
+            (k, v.into())
+        })))
     }
 }
 
@@ -86,7 +84,7 @@ mod tests {
             ("foo-bar", ""),
             // Mixed case okay. Numbers okay if not at beginning.
             ("foo-Bar12", ""),
-        ]).unwrap();
+        ]);
     }
 
     #[test]
@@ -95,7 +93,7 @@ mod tests {
         TemplateVars::new([
             // No underscore.
             ("foo_bar", ""),
-        ]).unwrap();
+        ]);
     }
 
     #[test]
@@ -104,17 +102,17 @@ mod tests {
         TemplateVars::new([
             // Can't start with number.
             ("1foo-bar", ""),
-        ]).unwrap();
+        ]);
     }
 
     fn template_success_test(key: &str, value: &str, template: &str, expected: &str) {
-        let vars = TemplateVars::new([(key, value)]).unwrap();
+        let vars = TemplateVars::new([(key, value)]);
         let actual = replace_template_vars(template, &vars).unwrap();
         assert_eq!(expected, &actual);
     }
 
     fn template_failure_test(key: &str, value: &str, template: &str, expected_error: &str) {
-        let vars = TemplateVars::new([(key, value)]).unwrap();
+        let vars = TemplateVars::new([(key, value)]);
         let err = replace_template_vars(template, &vars).unwrap_err();
         assert_eq!(expected_error, err.to_string());
     }
@@ -128,8 +126,7 @@ mod tests {
 
     #[test]
     fn template_replace_many() {
-        let vars =
-            TemplateVars::new([("food", "apple pie"), ("drink", "coke"), ("name", "bob")]).unwrap();
+        let vars = TemplateVars::new([("food", "apple pie"), ("drink", "coke"), ("name", "bob")]);
         let template = "echo '<name> ate <food> while drinking <drink>' > message";
         let actual = replace_template_vars(template, &vars).unwrap();
         assert_eq!(
