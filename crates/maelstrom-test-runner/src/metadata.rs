@@ -1,7 +1,7 @@
 mod directive;
 pub mod store;
 
-pub use store::MetadataStore;
+pub use store::Store;
 
 use anyhow::Result;
 use directive::{Directive, DirectiveContainer};
@@ -142,14 +142,14 @@ mod tests {
         }
     }
 
-    fn load_test(t: &tempfile::TempDir) -> (MetadataStore<SimpleFilter>, Vec<serde_json::Value>) {
+    fn load_test(t: &tempfile::TempDir) -> (Store<SimpleFilter>, Vec<serde_json::Value>) {
         let project_dir = RootBuf::<ProjectDir>::new(t.path().to_path_buf());
         let log_output = InMemoryLogOutput::default();
         let log = slog::Logger::root(
             Mutex::new(slog_json::Json::default(log_output.clone())).map(slog::Fuse),
             slog::o!(),
         );
-        let res = MetadataStore::<SimpleFilter>::load(
+        let res = Store::<SimpleFilter>::load(
             log,
             &project_dir,
             "simple-test.toml",
@@ -168,7 +168,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let (res, log_lines) = load_test(&t);
 
-        assert_eq!(res, MetadataStore::default().with_default_directive());
+        assert_eq!(res, Store::default().with_default_directive());
         assert_eq!(log_lines.len(), 1, "{log_lines:?}");
         assert_eq!(
             log_lines[0]["msg"],
@@ -186,14 +186,14 @@ mod tests {
 
         let (res, log_lines) = load_test(&t);
 
-        assert_eq!(res, MetadataStore::default().with_default_directive());
+        assert_eq!(res, Store::default().with_default_directive());
         assert_eq!(log_lines.len(), 0, "{log_lines:?}");
     }
 
     #[test]
     fn default() {
         assert_eq!(
-            MetadataStore::<SimpleFilter>::default()
+            Store::<SimpleFilter>::default()
                 .get_metadata_for_test(&"mod".into(), &"mod".into(), ("foo", &NoCaseMetadata))
                 .unwrap(),
             TestMetadata::default(),
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn include_shared_libraries_defaults() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             filter = "and = [ { package = \"package1\" }, { name = \"test1\" } ]"
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn include_shared_libraries() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             include_shared_libraries = false
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn network() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn enable_writable_file_system() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn working_directory() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             include_shared_libraries = false
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn user() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -517,7 +517,7 @@ mod tests {
 
     #[test]
     fn group() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn timeout() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn layers() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             layers = [{ tar = "layer1" }, { tar = "layer2" }]
@@ -752,7 +752,7 @@ mod tests {
 
     #[test]
     fn added_layers() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             added_layers = [{ tar = "added-layer1" }, { tar = "added-layer2" }]
@@ -833,7 +833,7 @@ mod tests {
             },
             extend: false,
         };
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             environment = { FOO = "$env{FOO}", BAR = "bar", BAZ = "$prev{FOO:-no-prev-foo}" }
@@ -961,7 +961,7 @@ mod tests {
             },
             extend: true,
         };
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             environment = { FOO = "foo", BAR = "bar" }
@@ -1072,7 +1072,7 @@ mod tests {
 
     #[test]
     fn mounts() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -1140,7 +1140,7 @@ mod tests {
 
     #[test]
     fn added_mounts() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
@@ -1254,7 +1254,7 @@ mod tests {
 
     #[test]
     fn devices() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -1308,7 +1308,7 @@ mod tests {
 
     #[test]
     fn added_devices() {
-        let all = MetadataStore::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             added_mounts = [ { type = "devices", devices = [ "tty" ] } ]
@@ -1413,7 +1413,7 @@ mod tests {
     #[test]
     fn bad_field_in_all_metadata() {
         assert_toml_error(
-            MetadataStore::<SimpleFilter>::from_str(
+            Store::<SimpleFilter>::from_str(
                 r#"
                 [not_a_field]
                 foo = "three"

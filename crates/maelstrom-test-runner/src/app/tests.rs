@@ -4,7 +4,7 @@ use crate::deps::SimpleFilter;
 use crate::fake_test_framework::{
     FakePackageId, FakeTestArtifact, FakeTestFilter, FakeTestPackage, TestCollector, TestOptions,
 };
-use crate::metadata::MetadataStore;
+use crate::metadata::Store as MetadataStore;
 use crate::test_db::{OnDiskTestDb, TestDb};
 use crate::ui::{
     UiJobEnqueued, UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,

@@ -18,14 +18,14 @@ use std::{
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct MetadataStore<TestFilterT> {
+pub struct Store<TestFilterT> {
     #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
     directives: Vec<Directive<TestFilterT>>,
     #[serde(default)]
     containers: HashMap<String, ContainerSpec>,
 }
 
-impl<TestFilterT> Default for MetadataStore<TestFilterT> {
+impl<TestFilterT> Default for Store<TestFilterT> {
     fn default() -> Self {
         Self {
             directives: Default::default(),
@@ -34,14 +34,14 @@ impl<TestFilterT> Default for MetadataStore<TestFilterT> {
     }
 }
 
-impl<TestFilterT> MetadataStore<TestFilterT> {
+impl<TestFilterT> Store<TestFilterT> {
     pub fn with_default_directive(mut self) -> Self {
         self.directives = [Directive::default()].into_iter().collect();
         self
     }
 }
 
-impl<TestFilterT: TestFilter> FromStr for MetadataStore<TestFilterT>
+impl<TestFilterT: TestFilter> FromStr for Store<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
@@ -52,7 +52,7 @@ where
     }
 }
 
-impl<TestFilterT: TestFilter> MetadataStore<TestFilterT>
+impl<TestFilterT: TestFilter> Store<TestFilterT>
 where
     TestFilterT::Err: Display,
 {

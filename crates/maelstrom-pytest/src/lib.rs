@@ -573,8 +573,8 @@ impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
 
 #[test]
 fn default_test_metadata_parses() {
-    use maelstrom_test_runner::metadata::MetadataStore;
-    MetadataStore::<pattern::Pattern>::from_str(DEFAULT_TEST_METADATA_CONTENTS).unwrap();
+    use maelstrom_test_runner::metadata::Store;
+    Store::<pattern::Pattern>::from_str(DEFAULT_TEST_METADATA_CONTENTS).unwrap();
 }
 
 impl Wait for pytest::WaitHandle {

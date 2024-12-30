@@ -6,7 +6,7 @@ mod watch;
 mod tests;
 
 use crate::config::{Repeat, StopAfter};
-use crate::metadata::MetadataStore;
+use crate::metadata::Store as MetadataStore;
 use crate::test_db::{TestDb, TestDbStore};
 use crate::ui::{Ui, UiJobId as JobId, UiMessage};
 use crate::*;
