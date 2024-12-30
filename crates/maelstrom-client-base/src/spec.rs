@@ -1016,11 +1016,7 @@ macro_rules! symlink_spec {
 )]
 #[serde(untagged, deny_unknown_fields)]
 pub enum LayerSpec {
-    #[proto(proto_buf_type = proto::TarLayer)]
-    Tar {
-        #[serde(rename = "tar")]
-        path: Utf8PathBuf,
-    },
+    Tar(TarLayerSpec),
     #[proto(proto_buf_type = proto::GlobLayer)]
     Glob {
         glob: String,
@@ -1036,9 +1032,13 @@ pub enum LayerSpec {
         prefix_options: PrefixOptions,
     },
     #[proto(proto_buf_type = proto::StubsLayer)]
-    Stubs { stubs: Vec<String> },
+    Stubs {
+        stubs: Vec<String>,
+    },
     #[proto(proto_buf_type = proto::SymlinksLayer)]
-    Symlinks { symlinks: Vec<SymlinkSpec> },
+    Symlinks {
+        symlinks: Vec<SymlinkSpec>,
+    },
     #[proto(proto_buf_type = proto::SharedLibraryDependenciesLayer)]
     SharedLibraryDependencies {
         #[serde(rename = "shared_library_dependencies")]
@@ -1049,10 +1049,30 @@ pub enum LayerSpec {
     },
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    IntoProtoBuf,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    TryFromProtoBuf,
+)]
+#[proto(proto_buf_type = proto::TarLayer)]
+#[serde(deny_unknown_fields)]
+pub struct TarLayerSpec {
+    #[serde(rename = "tar")]
+    pub path: Utf8PathBuf,
+}
+
 #[macro_export]
 macro_rules! tar_layer_spec {
     ($path:expr) => {
-        $crate::spec::LayerSpec::Tar { path: $path.into() }
+        $crate::spec::LayerSpec::Tar($crate::spec::TarLayerSpec { path: $path.into() })
     };
 }
 
@@ -1107,7 +1127,7 @@ macro_rules! shared_library_dependencies_layer_spec {
 impl LayerSpec {
     pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
         match self {
-            Self::Tar { path } => *path = vars.replace(path)?.into(),
+            Self::Tar(TarLayerSpec { path }) => *path = vars.replace(path)?.into(),
             Self::Glob { glob, .. } => *glob = vars.replace(glob)?,
             Self::Paths { paths, .. } => {
                 for path in paths {
@@ -1260,11 +1280,11 @@ impl ConvertedImage {
         self.layers
             .iter()
             .map(|p| {
-                Ok(LayerSpec::Tar {
+                Ok(LayerSpec::Tar(TarLayerSpec {
                     path: Utf8PathBuf::from_path_buf(p.to_owned()).map_err(|_| {
                         format!("image {} has a non-UTF-8 layer path {p:?}", self.name())
                     })?,
-                })
+                }))
             })
             .collect()
     }

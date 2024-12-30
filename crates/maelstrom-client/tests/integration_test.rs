@@ -5,7 +5,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     job_spec,
-    spec::{LayerSpec, PrefixOptions, SymlinkSpec},
+    spec::{LayerSpec, PrefixOptions, SymlinkSpec, TarLayerSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
@@ -193,9 +193,9 @@ fn tar_test(fix: &ClientFixture) {
         .unwrap();
     tar.finish().unwrap();
 
-    let layer = LayerSpec::Tar {
+    let layer = LayerSpec::Tar(TarLayerSpec {
         path: Utf8PathBuf::from_path_buf(tar_path.clone()).unwrap(),
-    };
+    });
     let output = fix.run_job(vec![layer]);
     assert_eq!(output, "hello world\n");
 }

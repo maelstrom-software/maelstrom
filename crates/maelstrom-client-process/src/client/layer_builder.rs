@@ -11,7 +11,7 @@ use maelstrom_base::{
     ArtifactType, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client_base::{
-    spec::{LayerSpec, PrefixOptions, SymlinkSpec},
+    spec::{LayerSpec, PrefixOptions, SymlinkSpec, TarLayerSpec},
     CacheDir, ProjectDir, MANIFEST_DIR, SO_LISTINGS_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_util::{
@@ -249,7 +249,7 @@ impl LayerBuilder {
         mut data_upload: impl DataUpload,
     ) -> Result<(PathBuf, ArtifactType)> {
         Ok(match layer {
-            LayerSpec::Tar { path } => (path.into_std_path_buf(), ArtifactType::Tar),
+            LayerSpec::Tar(TarLayerSpec { path }) => (path.into_std_path_buf(), ArtifactType::Tar),
             LayerSpec::Paths {
                 paths,
                 prefix_options,
