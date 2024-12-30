@@ -10,7 +10,10 @@ use crate::ui::{
 };
 use crate::*;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
-use maelstrom_client::{spec::JobSpec, ContainerSpec, JobStatus};
+use maelstrom_client::{
+    spec::{ContainerSpec, JobSpec},
+    JobStatus,
+};
 use maelstrom_util::{ext::OptionExt as _, process::ExitCode};
 use std::collections::{BTreeMap, HashMap};
 

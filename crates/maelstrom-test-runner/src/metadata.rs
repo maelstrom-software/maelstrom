@@ -106,8 +106,7 @@ mod tests {
     use crate::{NoCaseMetadata, SimpleFilter};
     use anyhow::Error;
     use maelstrom_base::{enum_set, GroupId, JobDevice, JobMount, JobNetwork, UserId};
-    use maelstrom_client::{image_container_parent, ProjectDir};
-    use maelstrom_client_base::tar_layer_spec;
+    use maelstrom_client::{image_container_parent, tar_layer_spec, ProjectDir};
     use maelstrom_test::utf8_path_buf;
     use maelstrom_util::{fs::Fs, root::RootBuf, template::TemplateVars};
     use maplit::btreemap;

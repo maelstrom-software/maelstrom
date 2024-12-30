@@ -74,9 +74,8 @@ mod tests {
     use indoc::indoc;
     use maelstrom_base::JobNetwork;
     use maelstrom_client::{
-        container_container_parent, container_spec, environment_spec, job_spec,
+        container_container_parent, container_spec, environment_spec, job_spec, tar_layer_spec,
     };
-    use maelstrom_client_base::tar_layer_spec;
     use maplit::hashmap;
 
     #[track_caller]

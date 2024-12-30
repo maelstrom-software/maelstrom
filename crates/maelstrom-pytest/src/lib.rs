@@ -10,9 +10,9 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     job_spec,
-    spec::{ImageRef, LayerSpec, PrefixOptions},
+    spec::{ContainerParent, ImageRef, LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, ContainerParent, ProjectDir, StateDir,
+    ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{

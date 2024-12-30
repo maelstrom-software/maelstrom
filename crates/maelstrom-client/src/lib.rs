@@ -1,9 +1,10 @@
 pub use maelstrom_client_base::{
-    container_container_parent, container_spec, environment_spec, image_container_parent, job_spec,
-    spec,
-    spec::{ContainerParent, ContainerSpec, JobSpec},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobRunningStatus,
-    JobStatus, ProjectDir, RemoteProgress, RpcLogMessage, StateDir, MANIFEST_DIR,
+    container_container_parent, container_ref, container_spec, converted_image, environment_spec,
+    glob_layer_spec, image_container_parent, image_ref, job_spec, paths_layer_spec, prefix_options,
+    shared_library_dependencies_layer_spec, spec, stubs_layer_spec, symlink_spec,
+    symlinks_layer_spec, tar_layer_spec, AcceptInvalidRemoteContainerTlsCerts, CacheDir,
+    IntrospectResponse, JobRunningStatus, JobStatus, ProjectDir, RemoteProgress, RpcLogMessage,
+    StateDir, MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
@@ -12,6 +13,7 @@ use futures::stream::StreamExt as _;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
+    spec::{ContainerSpec, JobSpec},
     AddContainerRequest, IntoProtoBuf, StartRequest, TryFromProtoBuf,
 };
 use maelstrom_linux::{self as linux, Pid};

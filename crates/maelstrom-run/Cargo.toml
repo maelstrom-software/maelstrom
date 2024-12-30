@@ -34,5 +34,4 @@ xdg.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 maplit.workspace = true
-maelstrom-client-base.workspace = true
 maelstrom-test.workspace = true

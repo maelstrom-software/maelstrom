@@ -5,8 +5,8 @@ use maelstrom_base::{
     JobOutputResult, JobTerminationStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, JobSpec, JobStatus, ProjectDir, StateDir,
+    spec::JobSpec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, JobStatus, ProjectDir, StateDir,
 };
 use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow};
 use maelstrom_macro::Config;
