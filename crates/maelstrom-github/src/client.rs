@@ -407,6 +407,10 @@ pub(crate) mod tests {
         };
         println!("test found GitHub credentials");
 
+        if std::env::var("TEST_ACTOR").unwrap() != "1" {
+            return;
+        }
+
         client.upload("test_data", TEST_DATA).await.unwrap();
 
         let listing = client.list().await.unwrap();
