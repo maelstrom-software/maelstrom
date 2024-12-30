@@ -3,7 +3,7 @@ use super::{
     ArtifactKeyM, ArtifactM, CaseMetadataM, Deps, MainAppMessage, MainAppMessageM, PackageIdM,
     PackageM, TestDbM, TestingOptionsM,
 };
-use crate::metadata::TestMetadata;
+use crate::metadata::Metadata;
 use crate::test_db::CaseOutcome;
 use crate::ui::{
     UiJobEnqueued, UiJobId as JobId, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,
@@ -202,7 +202,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
     fn enqueue_test(
         &mut self,
-        test_metadata: TestMetadata,
+        test_metadata: Metadata,
         package_name: &str,
         artifact: &ArtifactM<DepsT>,
         case_name: &str,

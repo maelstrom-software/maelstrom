@@ -13,7 +13,7 @@ use maelstrom_client::{
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
-    metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
+    metadata::Metadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
     CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps, NoCaseMetadata,
     TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
@@ -295,7 +295,7 @@ impl TestArtifact for CargoTestArtifact {
         s
     }
 
-    fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec> {
+    fn get_test_layers(&self, metadata: &Metadata) -> Vec<LayerSpec> {
         let mut layers = vec![path_layer_for_binary(self.utf8_path())];
 
         if metadata.include_shared_libraries() {

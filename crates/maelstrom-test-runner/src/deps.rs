@@ -1,4 +1,4 @@
-use crate::{metadata::TestMetadata, ui};
+use crate::{metadata::Metadata, ui};
 use anyhow::Result;
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_client::spec::{ImageRef, LayerSpec};
@@ -155,7 +155,7 @@ pub trait TestArtifact: fmt::Debug + Send + Sync + 'static {
     ) -> String;
 
     /// Get any layers to add to the jobs using this artifact.
-    fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec>;
+    fn get_test_layers(&self, metadata: &Metadata) -> Vec<LayerSpec>;
 }
 
 /// A package is something that contains artifacts.

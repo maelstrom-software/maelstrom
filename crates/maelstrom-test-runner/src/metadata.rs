@@ -9,14 +9,14 @@ use maelstrom_base::Timeout;
 use maelstrom_client::spec::{ContainerSpec, EnvironmentSpec};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TestMetadata {
+pub struct Metadata {
     pub container: ContainerSpec,
     include_shared_libraries: Option<bool>,
     pub timeout: Option<Timeout>,
     pub ignore: bool,
 }
 
-impl TestMetadata {
+impl Metadata {
     /// Return whether to include a layer of shared library dependencies.
     ///
     /// The logic here is that if they explicitly set the value to something, we should return
@@ -196,7 +196,7 @@ mod tests {
             Store::<SimpleFilter>::default()
                 .get_metadata_for_test(&"mod".into(), &"mod".into(), ("foo", &NoCaseMetadata))
                 .unwrap(),
-            TestMetadata::default(),
+            Metadata::default(),
         );
     }
 

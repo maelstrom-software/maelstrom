@@ -16,7 +16,7 @@ use maelstrom_client::{
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
-    metadata::TestMetadata,
+    metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
     BuildDir, CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
@@ -400,7 +400,7 @@ impl TestArtifact for PytestTestArtifact {
         case_metadata.node_id.clone()
     }
 
-    fn get_test_layers(&self, metadata: &TestMetadata) -> Vec<LayerSpec> {
+    fn get_test_layers(&self, metadata: &Metadata) -> Vec<LayerSpec> {
         match &metadata.container.parent {
             Some(ContainerParent::Image(image_spec)) => self
                 .test_layers

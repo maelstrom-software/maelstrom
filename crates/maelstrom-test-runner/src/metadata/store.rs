@@ -1,6 +1,6 @@
 use super::{
     directive::{Directive, DirectiveContainer, DirectiveContainerAccumulate},
-    TestMetadata,
+    Metadata,
 };
 use crate::TestFilter;
 use anyhow::{Context as _, Result};
@@ -61,7 +61,7 @@ where
         package: &TestFilterT::Package,
         artifact: &TestFilterT::ArtifactKey,
         case: (&str, &TestFilterT::CaseMetadata),
-    ) -> Result<TestMetadata> {
+    ) -> Result<Metadata> {
         self.directives
             .iter()
             .filter(|directive| match directive {
@@ -73,7 +73,7 @@ where
                     .expect("should have case"),
                 Directive { filter: None, .. } => true,
             })
-            .try_fold(TestMetadata::default(), |m, d| m.try_fold(d))
+            .try_fold(Metadata::default(), |m, d| m.try_fold(d))
     }
 
     pub fn get_all_images(&self) -> Vec<ImageRef> {

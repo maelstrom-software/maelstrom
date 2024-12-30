@@ -1,5 +1,5 @@
 use crate::{
-    metadata::TestMetadata, ui, BuildDir, CollectTests, NoCaseMetadata, SimpleFilter,
+    metadata::Metadata, ui, BuildDir, CollectTests, NoCaseMetadata, SimpleFilter,
     StringArtifactKey, StringPackage, TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,
     WaitStatus,
 };
@@ -202,7 +202,7 @@ impl TestArtifact for FakeTestArtifact {
         format!("{package_name} {case_name}")
     }
 
-    fn get_test_layers(&self, _metadata: &TestMetadata) -> Vec<LayerSpec> {
+    fn get_test_layers(&self, _metadata: &Metadata) -> Vec<LayerSpec> {
         vec![]
     }
 }
