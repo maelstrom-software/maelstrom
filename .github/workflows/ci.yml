@@ -86,7 +86,7 @@ jobs:
     - name: Expose GitHub Action Runtime
       uses: crazy-max/ghaction-github-runtime@v3
     - name: Test
-      run: nix develop --command cargo test --package maelstrom-github tests::real_github_integration_test -- --nocapture
+      run: nix develop --command cargo test --package maelstrom-github client::tests::real_github_integration_test -- --nocapture
 
   deploy-documentation:
     name: Build and Deploy Documentation
