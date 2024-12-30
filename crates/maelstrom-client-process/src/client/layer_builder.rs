@@ -11,7 +11,7 @@ use maelstrom_base::{
     ArtifactType, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client_base::{
-    spec::{LayerSpec, PrefixOptions, SymlinkSpec, TarLayerSpec},
+    spec::{GlobLayerSpec, LayerSpec, PrefixOptions, SymlinkSpec, TarLayerSpec},
     CacheDir, ProjectDir, MANIFEST_DIR, SO_LISTINGS_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_util::{
@@ -21,9 +21,11 @@ use maelstrom_util::{
 };
 use sha2::{Digest as _, Sha256};
 use shared_libraries::get_shared_library_dependencies;
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::pin::pin;
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    pin::pin,
+};
 use tokio::io::AsyncWriteExt as _;
 
 /// Having some deterministic time-stamp for files we create in manifests is useful for testing and
@@ -263,10 +265,10 @@ impl LayerBuilder {
                     .await?;
                 (manifest_path, ArtifactType::Manifest)
             }
-            LayerSpec::Glob {
+            LayerSpec::Glob(GlobLayerSpec {
                 glob,
                 prefix_options,
-            } => {
+            }) => {
                 let mut glob_builder = globset::GlobSet::builder();
                 glob_builder.add(globset::Glob::new(&glob)?);
                 let fs = async_fs::Fs::new();
@@ -321,8 +323,7 @@ mod tests {
     use maelstrom_test::utf8_path_buf;
     use maelstrom_util::manifest::AsyncManifestReader;
     use maplit::hashmap;
-    use std::collections::HashMap;
-    use std::os::unix::fs::MetadataExt as _;
+    use std::{collections::HashMap, os::unix::fs::MetadataExt as _};
     use tempfile::tempdir;
 
     fn hash_data(data: &[u8]) -> Sha256Digest {
@@ -685,10 +686,10 @@ mod tests {
         }
 
         let manifest = fix
-            .build_layer(LayerSpec::Glob {
+            .build_layer(LayerSpec::Glob(GlobLayerSpec {
                 glob: glob_factory(&fix.artifact_dir),
                 prefix_options: prefix_options_factory(&fix.artifact_dir),
-            })
+            }))
             .await;
         verify_single_entry_manifest(
             &manifest,
@@ -782,10 +783,10 @@ mod tests {
     async fn glob_no_files_relative() {
         let fix = Fixture::new().await;
         let manifest = fix
-            .build_layer(LayerSpec::Glob {
+            .build_layer(LayerSpec::Glob(GlobLayerSpec {
                 glob: "*.txt".into(),
                 prefix_options: Default::default(),
-            })
+            }))
             .await;
         verify_empty_manifest(&manifest).await;
     }

@@ -9,7 +9,7 @@ use maelstrom_base::{
     JobTerminationStatus, Timeout, Utf8PathBuf,
 };
 use maelstrom_client::{
-    job_spec,
+    glob_layer_spec, job_spec,
     spec::{ContainerParent, ImageRef, LayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
@@ -319,12 +319,9 @@ impl PytestTestCollector<'_> {
 
         let packages_path = self.get_pip_packages(image, &ref_, ui)?;
         let packages_path = packages_path.strip_prefix(&self.project_dir).unwrap();
-        Ok(Some(LayerSpec::Glob {
-            glob: format!("{packages_path}/**"),
-            prefix_options: PrefixOptions {
-                strip_prefix: Some(packages_path.into()),
-                ..Default::default()
-            },
+        Ok(Some(glob_layer_spec! {
+            format!("{packages_path}/**"),
+            strip_prefix: packages_path,
         }))
     }
 }

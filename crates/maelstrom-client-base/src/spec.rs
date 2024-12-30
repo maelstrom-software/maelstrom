@@ -1017,13 +1017,7 @@ macro_rules! symlink_spec {
 #[serde(untagged, deny_unknown_fields)]
 pub enum LayerSpec {
     Tar(TarLayerSpec),
-    #[proto(proto_buf_type = proto::GlobLayer)]
-    Glob {
-        glob: String,
-        #[serde(flatten)]
-        #[proto(option)]
-        prefix_options: PrefixOptions,
-    },
+    Glob(GlobLayerSpec),
     #[proto(proto_buf_type = proto::PathsLayer)]
     Paths {
         paths: Vec<Utf8PathBuf>,
@@ -1076,13 +1070,35 @@ macro_rules! tar_layer_spec {
     };
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    IntoProtoBuf,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    TryFromProtoBuf,
+)]
+#[proto(proto_buf_type = proto::GlobLayer)]
+#[serde(deny_unknown_fields)]
+pub struct GlobLayerSpec {
+    pub glob: String,
+    #[serde(flatten)]
+    #[proto(option)]
+    pub prefix_options: PrefixOptions,
+}
+
 #[macro_export]
 macro_rules! glob_layer_spec {
     ($glob:expr $(, $($prefix_option:tt)*)?) => {
-        $crate::spec::LayerSpec::Glob {
+        $crate::spec::LayerSpec::Glob($crate::spec::GlobLayerSpec {
             glob: $glob.into(),
             prefix_options: $crate::prefix_options!($($($prefix_option)*)?),
-        }
+        })
     };
 }
 
@@ -1128,7 +1144,7 @@ impl LayerSpec {
     pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
         match self {
             Self::Tar(TarLayerSpec { path }) => *path = vars.replace(path)?.into(),
-            Self::Glob { glob, .. } => *glob = vars.replace(glob)?,
+            Self::Glob(GlobLayerSpec { glob, .. }) => *glob = vars.replace(glob)?,
             Self::Paths { paths, .. } => {
                 for path in paths {
                     *path = vars.replace(path)?.into();

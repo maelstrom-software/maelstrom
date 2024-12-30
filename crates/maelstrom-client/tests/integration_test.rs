@@ -4,9 +4,9 @@ use maelstrom_base::{
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    job_spec,
-    spec::{LayerSpec, PrefixOptions, SymlinkSpec, TarLayerSpec},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    glob_layer_spec, job_spec,
+    spec::{LayerSpec, PrefixOptions, SymlinkSpec},
+    tar_layer_spec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_util::{
@@ -193,9 +193,7 @@ fn tar_test(fix: &ClientFixture) {
         .unwrap();
     tar.finish().unwrap();
 
-    let layer = LayerSpec::Tar(TarLayerSpec {
-        path: Utf8PathBuf::from_path_buf(tar_path.clone()).unwrap(),
-    });
+    let layer = tar_layer_spec!(Utf8PathBuf::from_path_buf(tar_path.clone()).unwrap());
     let output = fix.run_job(vec![layer]);
     assert_eq!(output, "hello world\n");
 }
@@ -301,10 +299,7 @@ fn glob_test(fix: &ClientFixture) {
     paths_test(
         fix,
         &["project/foo.txt", "project/bar.bin"],
-        LayerSpec::Glob {
-            glob: "*.txt".into(),
-            prefix_options: Default::default(),
-        },
+        glob_layer_spec!("*.txt"),
         &["/foo.txt"],
     )
 }
