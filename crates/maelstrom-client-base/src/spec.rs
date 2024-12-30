@@ -938,6 +938,34 @@ pub struct PrefixOptions {
     pub follow_symlinks: bool,
 }
 
+#[macro_export]
+macro_rules! prefix_options {
+    (@expand [] -> []) => {
+        $crate::spec::PrefixOptions::default()
+    };
+    (@expand [] -> [$($fields:tt)+]) => {
+        $crate::spec::PrefixOptions {
+            $($fields)+,
+            .. $crate::prefix_options!(@expand [] -> [])
+        }
+    };
+    (@expand [strip_prefix: $strip_prefix:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::prefix_options!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? strip_prefix: Some($strip_prefix.into())])
+    };
+    (@expand [prepend_prefix: $prepend_prefix:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::prefix_options!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? prepend_prefix: Some($prepend_prefix.into())])
+    };
+    (@expand [canonicalize: $canonicalize:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::prefix_options!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? canonicalize: $canonicalize.into()])
+    };
+    (@expand [follow_symlinks: $follow_symlinks:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
+        $crate::prefix_options!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? follow_symlinks: $follow_symlinks.into()])
+    };
+    ($($field_in:tt)*) => {
+        $crate::prefix_options!(@expand [$($field_in)*] -> [])
+    };
+}
+
 #[derive(
     IntoProtoBuf,
     TryFromProtoBuf,
@@ -953,9 +981,20 @@ pub struct PrefixOptions {
     Serialize,
 )]
 #[proto(proto_buf_type = "proto::SymlinkSpec")]
+#[serde(deny_unknown_fields)]
 pub struct SymlinkSpec {
     pub link: Utf8PathBuf,
     pub target: Utf8PathBuf,
+}
+
+#[macro_export]
+macro_rules! symlink_spec {
+    ($link:expr => $target:expr) => {
+        SymlinkSpec {
+            link: $link.into(),
+            target: $target.into(),
+        }
+    };
 }
 
 #[derive(
@@ -1008,6 +1047,61 @@ pub enum LayerSpec {
         #[proto(option)]
         prefix_options: PrefixOptions,
     },
+}
+
+#[macro_export]
+macro_rules! tar_layer_spec {
+    ($path:expr) => {
+        $crate::spec::LayerSpec::Tar { path: $path.into() }
+    };
+}
+
+#[macro_export]
+macro_rules! glob_layer_spec {
+    ($glob:expr $(, $($prefix_option:tt)*)?) => {
+        $crate::spec::LayerSpec::Glob {
+            glob: $glob.into(),
+            prefix_options: $crate::prefix_options!($($($prefix_option)*)?),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! paths_layer_spec {
+    ($paths:expr $(, $($prefix_option:tt)*)?) => {
+        $crate::spec::LayerSpec::Paths {
+            paths: $paths.into_iter().map(Into::into).collect(),
+            prefix_options: $crate::prefix_options!($($($prefix_option)*)?),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! stubs_layer_spec {
+    ($stubs:expr) => {
+        $crate::spec::LayerSpec::Stubs {
+            stubs: $stubs.into_iter().map(Into::into).collect(),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! symlinks_layer_spec {
+    ($symlinks:expr) => {
+        $crate::spec::LayerSpec::Symlinks {
+            symlinks: $symlinks.into_iter().map(Into::into).collect(),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! shared_library_dependencies_layer_spec {
+    ($binary_paths:expr $(, $($prefix_option:tt)*)?) => {
+        $crate::spec::LayerSpec::SharedLibraryDependencies {
+            binary_paths: $binary_paths.into_iter().map(Into::into).collect(),
+            prefix_options: $crate::prefix_options!($($($prefix_option)*)?),
+        }
+    };
 }
 
 impl LayerSpec {
@@ -1209,10 +1303,7 @@ mod tests {
     use enumset::enum_set;
     use indoc::indoc;
     use maelstrom_base::{proc_mount, tmp_mount};
-    use maelstrom_test::{
-        glob_layer, path_buf_vec, paths_layer, shared_library_dependencies_layer, string,
-        string_vec, stubs_layer, symlinks_layer, tar_layer, utf8_path_buf,
-    };
+    use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer, utf8_path_buf};
     use maplit::btreemap;
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
@@ -2396,108 +2487,448 @@ mod tests {
     }
 
     #[track_caller]
-    fn layer_spec_parse_test(toml: &str, expected: LayerSpec) {
-        assert_eq!(toml::from_str::<LayerSpec>(toml).unwrap(), expected);
+    fn parse_toml<T: for<'de> Deserialize<'de>>(file: &str) -> T {
+        toml::from_str(file).unwrap()
     }
 
-    #[test]
-    fn tar_layer_spec() {
-        layer_spec_parse_test(
-            r#"
-            tar = "foo.tar"
-            "#,
-            tar_layer!("foo.tar"),
-        );
+    #[track_caller]
+    fn parse_error_toml<T: std::fmt::Debug + for<'de> Deserialize<'de>>(file: &str) -> String {
+        format!("{}", toml::from_str::<T>(file).unwrap_err())
+            .trim_end()
+            .into()
     }
 
-    #[test]
-    fn glob_layer_spec() {
-        layer_spec_parse_test(
-            r#"
-            glob = "foo*.bin"
-            "#,
-            glob_layer!("foo*.bin"),
-        );
+    #[track_caller]
+    fn parse_json<T: for<'de> Deserialize<'de>>(file: &str) -> T {
+        serde_json::from_str(file).unwrap()
     }
 
-    #[test]
-    fn glob_layer_spec_with_prefix_options() {
-        layer_spec_parse_test(
-            r#"
-            glob = "foo*.bin"
-            strip_prefix = "a"
-            prepend_prefix = "b"
-            "#,
-            glob_layer!("foo*.bin", strip_prefix = "a", prepend_prefix = "b"),
-        );
+    #[track_caller]
+    fn parse_error_json<T: std::fmt::Debug + for<'de> Deserialize<'de>>(file: &str) -> String {
+        format!("{}", serde_json::from_str::<T>(file).unwrap_err())
     }
 
-    #[test]
-    fn paths_layer_spec() {
-        layer_spec_parse_test(
-            r#"
-            paths = [ "/foo", "/bar" ]
-            "#,
-            paths_layer!(["/foo", "/bar"]),
-        );
+    mod symlink_spec {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            assert!(parse_error_json::<SymlinkSpec>("{}").contains("missing field `link`"));
+        }
+
+        #[test]
+        fn unknown_field() {
+            assert!(parse_error_toml::<SymlinkSpec>(indoc! {r#"
+                link = "/symlink"
+                target = "/target"
+                foo_bar_baz = 3
+            "#})
+            .contains("unknown field `foo_bar_baz`"));
+        }
+
+        #[test]
+        fn symlink_spec() {
+            assert_eq!(
+                parse_toml::<SymlinkSpec>(indoc! {r#"
+                    link = "/symlink"
+                    target = "/target"
+                "#}),
+                symlink_spec!("/symlink" => "/target")
+            );
+        }
+
+        #[test]
+        fn missing_link() {
+            assert!(parse_error_toml::<SymlinkSpec>(indoc! {r#"
+                target = "/target"
+            "#})
+            .contains("missing field `link`"));
+        }
+
+        #[test]
+        fn missing_target() {
+            assert!(parse_error_toml::<SymlinkSpec>(indoc! {r#"
+                link = "/symlink"
+            "#})
+            .contains("missing field `target`"));
+        }
     }
 
-    #[test]
-    fn paths_layer_spec_with_prefix_options() {
-        layer_spec_parse_test(
-            r#"
-            paths = [ "/foo", "/bar" ]
-            strip_prefix = "a"
-            prepend_prefix = "b"
-            "#,
-            paths_layer!(["/foo", "/bar"], strip_prefix = "a", prepend_prefix = "b"),
-        );
-    }
+    mod layer_spec {
+        use super::*;
 
-    #[test]
-    fn stubs_layer_spec() {
-        layer_spec_parse_test(
-            r#"
-            stubs = [ "/foo", "/{bar,baz}/" ]
-            "#,
-            stubs_layer!(["/foo", "/{bar,baz}/"]),
-        );
-    }
+        #[test]
+        fn empty() {
+            assert!(parse_error_json::<LayerSpec>("{}")
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+        }
 
-    #[test]
-    fn symlinks_layer_spec() {
-        layer_spec_parse_test(
-            r#"
-            symlinks = [ { link = "/symlink", target = "/target" } ]
-            "#,
-            symlinks_layer!(["/symlink" -> "/target"]),
-        );
-    }
+        #[test]
+        fn unknown_field() {
+            assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
+                foo_bar_baz = 3
+            "#})
+            .contains("data did not match any variant of untagged enum LayerSpec"));
+            // .contains("unknown field `foo_bar_baz`"));
+        }
 
-    #[test]
-    fn shared_library_dependencies_layer_spec() {
-        layer_spec_parse_test(
-            r#"
-            shared_library_dependencies = [ "/foo", "/bar" ]
-            "#,
-            shared_library_dependencies_layer!(["/foo", "/bar"]),
-        );
-    }
+        mod tar {
+            use super::*;
 
-    #[test]
-    fn shared_library_dependencies_layer_spec_with_prefix_options() {
-        layer_spec_parse_test(
-            r#"
-            shared_library_dependencies = [ "/foo", "/bar" ]
-            strip_prefix = "a"
-            prepend_prefix = "b"
-            "#,
-            shared_library_dependencies_layer!(
-                ["/foo", "/bar"],
-                strip_prefix = "a",
-                prepend_prefix = "b",
-            ),
-        );
+            #[test]
+            fn path() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        tar = "foo.tar"
+                    "#}),
+                    tar_layer_spec!("foo.tar"),
+                );
+            }
+
+            #[test]
+            fn prefix_options_field() {
+                assert!(parse_error_json::<LayerSpec>(indoc! {r#"{
+                    "tar": "foo.tar",
+                    "strip_prefix": "/foo"
+                }"#})
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+                // .contains("unknown field `strip_prefix`"));
+            }
+
+            #[test]
+            fn unknown_field() {
+                assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
+                    tar = "foo.tar"
+                    foo_bar_baz = 3
+                "#})
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+                // .contains("unknown field `foo_bar_baz`"));
+            }
+        }
+
+        mod glob {
+            use super::*;
+
+            #[test]
+            fn glob() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        glob = "*.tar"
+                    "#}),
+                    glob_layer_spec!("*.tar"),
+                );
+            }
+
+            #[test]
+            fn strip_prefix() {
+                assert_eq!(
+                    parse_json::<LayerSpec>(indoc! {r#"{
+                        "glob": "*.tar",
+                        "strip_prefix": "/foo"
+                    }"#}),
+                    glob_layer_spec! {
+                        "*.tar",
+                        strip_prefix: "/foo",
+                    },
+                );
+            }
+
+            #[test]
+            fn prepend_prefix() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        glob = "*.tar"
+                        prepend_prefix = "/bar"
+                    "#}),
+                    glob_layer_spec! {
+                        "*.tar",
+                        prepend_prefix: "/bar",
+                    },
+                );
+            }
+
+            #[test]
+            fn canonicalize() {
+                assert_eq!(
+                    parse_json::<LayerSpec>(indoc! {r#"{
+                        "glob": "*.tar",
+                        "canonicalize": true
+                    }"#}),
+                    glob_layer_spec! {
+                        "*.tar",
+                        canonicalize: true,
+                    },
+                );
+            }
+
+            #[test]
+            fn follow_symlinks() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        glob = "*.tar"
+                        follow_symlinks = true
+                    "#}),
+                    glob_layer_spec! {
+                        "*.tar",
+                        follow_symlinks: true,
+                    },
+                );
+            }
+
+            #[test]
+            fn unknown_field() {
+                assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
+                    glob = "*.tar"
+                    foo_bar_baz = 3
+                "#})
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+                // .contains("unknown field `foo_bar_baz`"));
+            }
+        }
+
+        mod paths {
+            use super::*;
+
+            #[test]
+            fn paths() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        paths = [ "/foo/bar", "/bar/foo" ]
+                    "#}),
+                    paths_layer_spec!(["/foo/bar", "/bar/foo"]),
+                );
+            }
+
+            #[test]
+            fn strip_prefix() {
+                assert_eq!(
+                    parse_json::<LayerSpec>(indoc! {r#"{
+                        "paths": [ "/foo/bar", "/bar/foo" ],
+                        "strip_prefix": "/foo"
+                    }"#}),
+                    paths_layer_spec! {
+                        ["/foo/bar", "/bar/foo"],
+                        strip_prefix: "/foo",
+                    },
+                );
+            }
+
+            #[test]
+            fn prepend_prefix() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        paths = [ "/foo/bar", "/bar/foo" ]
+                        prepend_prefix = "/bar"
+                    "#}),
+                    paths_layer_spec! {
+                        ["/foo/bar", "/bar/foo"],
+                        prepend_prefix: "/bar",
+                    },
+                );
+            }
+
+            #[test]
+            fn canonicalize() {
+                assert_eq!(
+                    parse_json::<LayerSpec>(indoc! {r#"{
+                        "paths": [ "/foo/bar", "/bar/foo" ],
+                        "canonicalize": true
+                    }"#}),
+                    paths_layer_spec! {
+                        ["/foo/bar", "/bar/foo"],
+                        canonicalize: true,
+                    },
+                );
+            }
+
+            #[test]
+            fn follow_symlinks() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        paths = [ "/foo/bar", "/bar/foo" ]
+                        follow_symlinks = true
+                    "#}),
+                    paths_layer_spec! {
+                        ["/foo/bar", "/bar/foo"],
+                        follow_symlinks: true,
+                    },
+                );
+            }
+
+            #[test]
+            fn unknown_field() {
+                assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
+                    paths = [ "/foo/bar", "/bar/foo" ]
+                    foo_bar_baz = 3
+                "#})
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+                // .contains("unknown field `foo_bar_baz`"));
+            }
+        }
+
+        mod stubs {
+            use super::*;
+
+            #[test]
+            fn stubs() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        stubs = [ "/{proc,tmp}/", "/home" ]
+                    "#}),
+                    stubs_layer_spec!(["/{proc,tmp}/", "/home"]),
+                );
+            }
+
+            #[test]
+            fn prefix_options_field() {
+                assert!(parse_error_json::<LayerSpec>(indoc! {r#"{
+                    "stubs": [ "/{proc,tmp}/", "/home" ],
+                    "strip_prefix": "/foo"
+                }"#})
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+                // .contains("unknown field `strip_prefix`"));
+            }
+
+            #[test]
+            fn unknown_field() {
+                assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
+                    stubs = [ "/{proc,tmp}/", "/home" ]
+                    foo_bar_baz = 3
+                "#})
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+                // .contains("unknown field `foo_bar_baz`"));
+            }
+        }
+
+        mod symlinks {
+            use super::*;
+
+            #[test]
+            fn symlinks() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        symlinks = [
+                            { link = "/symlink", target = "/target" },
+                            { link = "/symlink2", target = "/target2" },
+                        ]
+                    "#}),
+                    symlinks_layer_spec!([
+                        symlink_spec!("/symlink" => "/target"),
+                        symlink_spec!("/symlink2" => "/target2"),
+                    ]),
+                );
+            }
+
+            #[test]
+            fn prefix_options_field() {
+                assert!(parse_error_json::<LayerSpec>(indoc! {r#"{
+                    "symlinks": [ { "link": "/symlink", "target": "/target" } ],
+                    "strip_prefix": "/foo"
+                }"#})
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+                // .contains("unknown field `strip_prefix`"));
+            }
+
+            #[test]
+            fn unknown_field() {
+                assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
+                    symlinks = [
+                        { link = "/symlink", target = "/target" },
+                        { link = "/symlink2", target = "/target2" },
+                    ]
+                    foo_bar_baz = 3
+                "#})
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+                // .contains("unknown field `foo_bar_baz`"));
+            }
+        }
+
+        mod shared_library_dependencies {
+            use super::*;
+
+            #[test]
+            fn shared_library_dependencies() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        shared_library_dependencies = ["/bin/foo", "/bin/bar"]
+                    "#}),
+                    shared_library_dependencies_layer_spec!(["/bin/foo", "/bin/bar"]),
+                );
+            }
+
+            #[test]
+            fn strip_prefix() {
+                assert_eq!(
+                    parse_json::<LayerSpec>(indoc! {r#"{
+                        "shared_library_dependencies": ["/bin/foo", "/bin/bar"],
+                        "strip_prefix": "/foo"
+                    }"#}),
+                    shared_library_dependencies_layer_spec! {
+                        ["/bin/foo", "/bin/bar"],
+                        strip_prefix: "/foo",
+                    },
+                );
+            }
+
+            #[test]
+            fn prepend_prefix() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        shared_library_dependencies = ["/bin/foo", "/bin/bar"]
+                        prepend_prefix = "/bar"
+                    "#}),
+                    shared_library_dependencies_layer_spec! {
+                        ["/bin/foo", "/bin/bar"],
+                        prepend_prefix: "/bar",
+                    },
+                );
+            }
+
+            #[test]
+            fn canonicalize() {
+                assert_eq!(
+                    parse_json::<LayerSpec>(indoc! {r#"{
+                        "shared_library_dependencies": ["/bin/foo", "/bin/bar"],
+                        "canonicalize": true
+                    }"#}),
+                    shared_library_dependencies_layer_spec! {
+                        ["/bin/foo", "/bin/bar"],
+                        canonicalize: true,
+                    },
+                );
+            }
+
+            #[test]
+            fn follow_symlinks() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        shared_library_dependencies = ["/bin/foo", "/bin/bar"]
+                        follow_symlinks = true
+                    "#}),
+                    shared_library_dependencies_layer_spec! {
+                        ["/bin/foo", "/bin/bar"],
+                        follow_symlinks: true,
+                    },
+                );
+            }
+
+            #[test]
+            fn unknown_field() {
+                assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
+                    shared_library_dependencies = ["/bin/foo", "/bin/bar"]
+                    foo_bar_baz = 3
+                "#})
+                .contains("data did not match any variant of untagged enum LayerSpec"));
+                // .contains("unknown field `foo_bar_baz`"));
+            }
+        }
+
+        /*
+        #[test]
+        fn replace_template_vars() {
+            assert!(false);
+        }
+        */
     }
 
     mod container_spec {
