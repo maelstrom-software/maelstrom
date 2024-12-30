@@ -1,29 +1,12 @@
 mod directive;
+pub mod store;
 
-use crate::TestFilter;
-use anyhow::{Context as _, Result};
-use directive::{Directive, DirectiveContainer, DirectiveContainerAccumulate};
+pub use store::MetadataStore;
+
+use anyhow::Result;
+use directive::{Directive, DirectiveContainer};
 use maelstrom_base::Timeout;
-use maelstrom_client::{
-    spec::{ContainerParent, ContainerSpec, EnvironmentSpec, ImageRef},
-    ProjectDir,
-};
-use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
-use serde::Deserialize;
-use std::{
-    collections::HashMap,
-    fmt::Display,
-    str::{self, FromStr},
-};
-
-#[derive(Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct MetadataStore<TestFilterT> {
-    #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
-    directives: Vec<Directive<TestFilterT>>,
-    #[serde(default)]
-    containers: HashMap<String, ContainerSpec>,
-}
+use maelstrom_client::spec::{ContainerSpec, EnvironmentSpec};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TestMetadata {
@@ -117,126 +100,22 @@ impl TestMetadata {
     }
 }
 
-impl<TestFilterT: TestFilter> FromStr for MetadataStore<TestFilterT>
-where
-    TestFilterT::Err: Display,
-{
-    type Err = anyhow::Error;
-
-    fn from_str(contents: &str) -> Result<Self> {
-        Ok(toml::from_str(contents)?)
-    }
-}
-
-impl<TestFilterT: TestFilter> MetadataStore<TestFilterT>
-where
-    TestFilterT::Err: Display,
-{
-    pub fn get_metadata_for_test(
-        &self,
-        package: &TestFilterT::Package,
-        artifact: &TestFilterT::ArtifactKey,
-        case: (&str, &TestFilterT::CaseMetadata),
-    ) -> Result<TestMetadata> {
-        self.directives
-            .iter()
-            .filter(|directive| match directive {
-                Directive {
-                    filter: Some(filter),
-                    ..
-                } => filter
-                    .filter(package, Some(artifact), Some(case))
-                    .expect("should have case"),
-                Directive { filter: None, .. } => true,
-            })
-            .try_fold(TestMetadata::default(), |m, d| m.try_fold(d))
-    }
-
-    pub fn get_all_images(&self) -> Vec<ImageRef> {
-        self.directives
-            .iter()
-            .filter_map(|directive| {
-                if let DirectiveContainer::Override(ContainerSpec {
-                    parent: Some(ContainerParent::Image(image)),
-                    ..
-                }) = &directive.container
-                {
-                    Some(image.clone())
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    pub fn load(
-        log: slog::Logger,
-        project_dir: impl AsRef<Root<ProjectDir>>,
-        test_metadata_file_name: &str,
-        default_test_metadata_contents: &str,
-        vars: &TemplateVars,
-    ) -> Result<Self> {
-        struct MaelstromTestTomlFile;
-        let path = project_dir
-            .as_ref()
-            .join::<MaelstromTestTomlFile>(test_metadata_file_name);
-
-        let mut result = if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
-            Self::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?
-        } else {
-            slog::debug!(
-                log,
-                "no test metadata configuration found, using default";
-                "search_path" => ?path,
-            );
-            Self::from_str(default_test_metadata_contents)
-                .expect("embedded default test metadata TOML is valid")
-        };
-
-        for directive in &mut result.directives {
-            match &mut directive.container {
-                DirectiveContainer::Override(ContainerSpec { layers, .. }) => {
-                    for layer in layers {
-                        layer.replace_template_vars(vars)?;
-                    }
-                }
-                DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    layers,
-                    added_layers,
-                    ..
-                }) => {
-                    if let Some(layers) = layers {
-                        for layer in layers {
-                            layer.replace_template_vars(vars)?;
-                        }
-                    }
-                    if let Some(added_layers) = added_layers {
-                        for added_layer in added_layers {
-                            added_layer.replace_template_vars(vars)?;
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(result)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{NoCaseMetadata, SimpleFilter};
     use anyhow::Error;
     use maelstrom_base::{enum_set, GroupId, JobDevice, JobMount, JobNetwork, UserId};
-    use maelstrom_client::image_container_parent;
+    use maelstrom_client::{image_container_parent, ProjectDir};
     use maelstrom_test::{tar_layer, utf8_path_buf};
-    use maelstrom_util::root::RootBuf;
+    use maelstrom_util::{fs::Fs, root::RootBuf, template::TemplateVars};
     use maplit::btreemap;
-    use maplit::hashmap;
     use slog::Drain as _;
-    use std::io;
-    use std::sync::{Arc, Mutex};
+    use std::{
+        io,
+        str::FromStr as _,
+        sync::{Arc, Mutex},
+    };
     use toml::de::Error as TomlError;
 
     #[derive(Clone, Default)]
@@ -289,13 +168,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let (res, log_lines) = load_test(&t);
 
-        assert_eq!(
-            res,
-            MetadataStore {
-                directives: vec![Directive::default()],
-                containers: hashmap! {},
-            }
-        );
+        assert_eq!(res, MetadataStore::default().with_default_directive());
         assert_eq!(log_lines.len(), 1, "{log_lines:?}");
         assert_eq!(
             log_lines[0]["msg"],
@@ -313,25 +186,16 @@ mod tests {
 
         let (res, log_lines) = load_test(&t);
 
-        assert_eq!(
-            res,
-            MetadataStore {
-                directives: vec![Directive::default()],
-                containers: hashmap! {},
-            }
-        );
+        assert_eq!(res, MetadataStore::default().with_default_directive());
         assert_eq!(log_lines.len(), 0, "{log_lines:?}");
     }
 
     #[test]
     fn default() {
         assert_eq!(
-            MetadataStore::<SimpleFilter> {
-                directives: vec![],
-                containers: hashmap! {},
-            }
-            .get_metadata_for_test(&"mod".into(), &"mod".into(), ("foo", &NoCaseMetadata))
-            .unwrap(),
+            MetadataStore::<SimpleFilter>::default()
+                .get_metadata_for_test(&"mod".into(), &"mod".into(), ("foo", &NoCaseMetadata))
+                .unwrap(),
             TestMetadata::default(),
         );
     }
