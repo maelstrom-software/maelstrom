@@ -69,6 +69,9 @@ jobs:
       run: ./scripts/run-tests-on-maelstrom.sh "${{ env.ACTIONS_RUNTIME_TOKEN }}" "${{ env.ACTIONS_RESULTS_URL }}"
 
   github_api_tests:
+    strategy:
+      matrix:
+        test_actor: [1, 2, 3]
     name: Run GitHub API tests
     runs-on: ubuntu-24.04
     steps:
@@ -86,7 +89,9 @@ jobs:
     - name: Expose GitHub Action Runtime
       uses: crazy-max/ghaction-github-runtime@v3
     - name: Test
-      run: nix develop --command cargo test --package maelstrom-github client::tests::real_github_integration_test -- --nocapture
+      run: nix develop --command cargo test --package maelstrom-github real_github_integration_test -- --nocapture
+        env:
+          TEST_ACTOR: ${{ matrix.test_actor }}
 
   deploy-documentation:
     name: Build and Deploy Documentation

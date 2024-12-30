@@ -3567,6 +3567,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url 2.5.2",
+ "uuid",
 ]
 
 [[package]]

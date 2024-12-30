@@ -357,7 +357,7 @@ impl GitHubClient {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     const TEST_TOKEN: &str = include_str!("test_token.b64");
@@ -393,7 +393,7 @@ mod tests {
 
     const TEST_DATA: &[u8] = include_bytes!("lib.rs");
 
-    fn client_factory() -> Option<GitHubClient> {
+    pub fn client_factory() -> Option<GitHubClient> {
         let token = std::env::var("ACTIONS_RUNTIME_TOKEN").ok()?;
         let base_url = Url::parse(&std::env::var("ACTIONS_RESULTS_URL").ok()?).unwrap();
         Some(GitHubClient::new(&token, base_url).unwrap())

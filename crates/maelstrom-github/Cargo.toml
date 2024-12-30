@@ -22,6 +22,7 @@ serde_with.workspace = true
 tokio-util.workspace = true
 tokio.workspace = true
 url.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
