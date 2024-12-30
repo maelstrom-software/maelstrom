@@ -72,7 +72,7 @@ jobs:
     strategy:
       matrix:
         test_actor: [1, 2, 3]
-    name: Run GitHub API tests
+    name: Run GitHub API Tests
     runs-on: ubuntu-24.04
     steps:
     - name: Get Repository from Git
