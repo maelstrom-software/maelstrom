@@ -405,9 +405,9 @@ mod tests {
     use maelstrom_client::spec;
     use maelstrom_client_base::{
         container_spec, converted_image, environment_spec, image_container_parent,
-        job_spec as client_job_spec,
+        job_spec as client_job_spec, tar_layer_spec,
     };
-    use maelstrom_test::{millis, string, tar_layer};
+    use maelstrom_test::{millis, string};
     use std::{cell::RefCell, ffi::OsStr, rc::Rc, time::Duration};
     use TestMessage::*;
 
@@ -568,12 +568,12 @@ mod tests {
             client_job_spec! {
                 "foo",
                 arguments: ["arg1", "arg2"],
-                layers: [tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("foo.tar")],
             },
         ) => {
-            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
         };
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(42))) => {
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(42))) => {
             JobPrepared(1, Ok(job_spec!("foo", [tar_digest!(42)], arguments: ["arg1", "arg2"]))),
         };
     }
@@ -584,14 +584,14 @@ mod tests {
             1,
             client_job_spec! {
                 "foo",
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("foo.tar")),
-            BuildLayer(tar_layer!("bar.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
+            BuildLayer(tar_layer_spec!("bar.tar")),
         };
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(1))) => {};
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(2))) => {
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(2))) => {
             JobPrepared(1, Ok(job_spec!("foo", [ tar_digest!(2), tar_digest!(1) ]))),
         };
     }
@@ -602,26 +602,26 @@ mod tests {
             1,
             client_job_spec! {
                 "foo",
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("foo.tar")),
-            BuildLayer(tar_layer!("bar.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
+            BuildLayer(tar_layer_spec!("bar.tar")),
         };
         PrepareJob(
             2,
             client_job_spec! {
                 "bar",
-                layers: [ tar_layer!("foo.tar"), tar_layer!("baz.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("baz.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("baz.tar")),
+            BuildLayer(tar_layer_spec!("baz.tar")),
         };
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(1))) => {};
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(2))) => {
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(2))) => {
             JobPrepared(1, Ok(job_spec!("foo", [ tar_digest!(2), tar_digest!(1) ]))),
         };
-        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {
+        GotLayer(tar_layer_spec!("baz.tar"), Ok(tar_digest!(3))) => {
             JobPrepared(2, Ok(job_spec!("bar", [ tar_digest!(2), tar_digest!(3) ]))),
         };
     }
@@ -632,26 +632,26 @@ mod tests {
             1,
             client_job_spec! {
                 "foo",
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("foo.tar")),
-            BuildLayer(tar_layer!("bar.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
+            BuildLayer(tar_layer_spec!("bar.tar")),
         };
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {};
         PrepareJob(
             2,
             client_job_spec! {
                 "bar",
-                layers: [ tar_layer!("foo.tar"), tar_layer!("baz.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("baz.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("baz.tar")),
+            BuildLayer(tar_layer_spec!("baz.tar")),
         };
-        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {
+        GotLayer(tar_layer_spec!("baz.tar"), Ok(tar_digest!(3))) => {
             JobPrepared(2, Ok(job_spec!("bar", [ tar_digest!(1), tar_digest!(3) ]))),
         };
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(2))) => {
             JobPrepared(1, Ok(job_spec!("foo", [ tar_digest!(1), tar_digest!(2) ]))),
         };
     }
@@ -662,21 +662,21 @@ mod tests {
             1,
             client_job_spec! {
                 "foo",
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("foo.tar")),
-            BuildLayer(tar_layer!("bar.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
+            BuildLayer(tar_layer_spec!("bar.tar")),
         };
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(2))) => {
             JobPrepared(1, Ok(job_spec!("foo", [ tar_digest!(1), tar_digest!(2) ]))),
         };
         PrepareJob(
             2,
             client_job_spec! {
                 "bar",
-                layers: [ tar_layer!("bar.tar"), tar_layer!("foo.tar") ],
+                layers: [ tar_layer_spec!("bar.tar"), tar_layer_spec!("foo.tar") ],
             },
         ) => {
             JobPrepared(2, Ok(job_spec!("bar", [ tar_digest!(2), tar_digest!(1) ]))),
@@ -690,35 +690,35 @@ mod tests {
             1,
             client_job_spec! {
                 "one",
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("foo.tar")),
-            BuildLayer(tar_layer!("bar.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
+            BuildLayer(tar_layer_spec!("bar.tar")),
         };
         PrepareJob(
             2,
             client_job_spec! {
                 "two",
-                layers: [ tar_layer!("foo.tar"), tar_layer!("baz.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("baz.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("baz.tar")),
+            BuildLayer(tar_layer_spec!("baz.tar")),
         };
         PrepareJob(
             3,
             client_job_spec! {
                 "three",
-                layers: [ tar_layer!("bar.tar"), tar_layer!("baz.tar") ],
+                layers: [ tar_layer_spec!("bar.tar"), tar_layer_spec!("baz.tar") ],
             },
         ) => {};
 
-        GotLayer(tar_layer!("foo.tar"), Err(string!("foo.tar error"))) => {
+        GotLayer(tar_layer_spec!("foo.tar"), Err(string!("foo.tar error"))) => {
             JobPrepared(1, Err(string!("foo.tar error"))),
             JobPrepared(2, Err(string!("foo.tar error"))),
         };
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {};
-        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(2))) => {};
+        GotLayer(tar_layer_spec!("baz.tar"), Ok(tar_digest!(3))) => {
             JobPrepared(3, Ok(job_spec!("three", [ tar_digest!(2), tar_digest!(3) ]))),
         };
 
@@ -726,7 +726,7 @@ mod tests {
             4,
             client_job_spec! {
                 "four",
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
             JobPrepared(4, Err(string!("foo.tar error"))),
@@ -735,7 +735,7 @@ mod tests {
             5,
             client_job_spec! {
                 "five",
-                layers: [ tar_layer!("bar.tar"), tar_layer!("baz.tar") ],
+                layers: [ tar_layer_spec!("bar.tar"), tar_layer_spec!("baz.tar") ],
             },
         ) => {
             JobPrepared(5, Ok(job_spec!("five", [ tar_digest!(2), tar_digest!(3) ]))),
@@ -750,21 +750,21 @@ mod tests {
             client_job_spec! {
                 "one",
                 parent: image_container_parent!("image1", layers),
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
             GetImage(string!("image1")),
-            BuildLayer(tar_layer!("foo.tar")),
-            BuildLayer(tar_layer!("bar.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
+            BuildLayer(tar_layer_spec!("bar.tar")),
         };
         GotImage(string!("image1"), Ok(converted_image!("image1", layers: [ "image1/1.tar", "image1/2.tar" ]))) => {
-            BuildLayer(tar_layer!("image1/1.tar")),
-            BuildLayer(tar_layer!("image1/2.tar")),
+            BuildLayer(tar_layer_spec!("image1/1.tar")),
+            BuildLayer(tar_layer_spec!("image1/2.tar")),
         };
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(4))) => {};
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(3))) => {};
-        GotLayer(tar_layer!("image1/2.tar"), Ok(tar_digest!(12))) => {};
-        GotLayer(tar_layer!("image1/1.tar"), Ok(tar_digest!(11))) => {
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(4))) => {};
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(3))) => {};
+        GotLayer(tar_layer_spec!("image1/2.tar"), Ok(tar_digest!(12))) => {};
+        GotLayer(tar_layer_spec!("image1/1.tar"), Ok(tar_digest!(11))) => {
             JobPrepared(1, Ok(job_spec!("one", [
                 tar_digest!(11), tar_digest!(12), tar_digest!(3), tar_digest!(4),
             ]))),
@@ -775,7 +775,7 @@ mod tests {
             client_job_spec! {
                 "two",
                 parent: image_container_parent!("image2", layers),
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
             GetImage(string!("image2")),
@@ -785,20 +785,20 @@ mod tests {
             client_job_spec! {
                 "three",
                 parent: image_container_parent!("image1", layers),
-                layers: [ tar_layer!("foo.tar"), tar_layer!("baz.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("baz.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("baz.tar")),
+            BuildLayer(tar_layer_spec!("baz.tar")),
         };
         GotImage(string!("image2"), Ok(converted_image!("image2", layers: [ "image1/1.tar", "image2/2.tar" ]))) => {
-            BuildLayer(tar_layer!("image2/2.tar")),
+            BuildLayer(tar_layer_spec!("image2/2.tar")),
         };
-        GotLayer(tar_layer!("image2/2.tar"), Ok(tar_digest!(22))) => {
+        GotLayer(tar_layer_spec!("image2/2.tar"), Ok(tar_digest!(22))) => {
             JobPrepared(2, Ok(job_spec!("two", [
                 tar_digest!(11), tar_digest!(22), tar_digest!(3), tar_digest!(4),
             ]))),
         };
-        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(5))) => {
+        GotLayer(tar_layer_spec!("baz.tar"), Ok(tar_digest!(5))) => {
             JobPrepared(3, Ok(job_spec!("three", [
                 tar_digest!(11), tar_digest!(12), tar_digest!(3), tar_digest!(5),
             ]))),
@@ -809,7 +809,7 @@ mod tests {
             client_job_spec! {
                 "four",
                 parent: image_container_parent!("image1", layers),
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
             JobPrepared(4, Ok(job_spec!("four", [
@@ -826,14 +826,14 @@ mod tests {
             client_job_spec! {
                 "one",
                 parent: image_container_parent!("image1"),
-                layers: [ tar_layer!("foo.tar"), tar_layer!("bar.tar") ],
+                layers: [ tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar") ],
             },
         ) => {
-            BuildLayer(tar_layer!("foo.tar")),
-            BuildLayer(tar_layer!("bar.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
+            BuildLayer(tar_layer_spec!("bar.tar")),
         };
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(3))) => {};
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(4))) => {
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(3))) => {};
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(4))) => {
             JobPrepared(1, Ok(job_spec!("one", [ tar_digest!(3), tar_digest!(4) ]))),
         };
     }
@@ -855,17 +855,17 @@ mod tests {
             client_job_spec! {
                 "two",
                 parent: image_container_parent!("image", working_directory),
-                layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
+                layers: [tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar")],
             },
         ) => {
-            BuildLayer(tar_layer!("foo.tar")),
-            BuildLayer(tar_layer!("bar.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
+            BuildLayer(tar_layer_spec!("bar.tar")),
         };
         PrepareJob(
             3,
             client_job_spec! {
                 "three",
-                layers: [tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("foo.tar")],
             },
         ) => {};
 
@@ -873,8 +873,8 @@ mod tests {
             JobPrepared(1, Err(string!("image error"))),
             JobPrepared(2, Err(string!("image error"))),
         };
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {};
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(2))) => {};
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {
             JobPrepared(3, Ok(job_spec!("three", [tar_digest!(1)]))),
         };
 
@@ -883,13 +883,13 @@ mod tests {
             client_job_spec! {
                 "four",
                 parent: image_container_parent!("image", layers),
-                layers: [tar_layer!("baz.tar")],
+                layers: [tar_layer_spec!("baz.tar")],
             },
         ) => {
-            BuildLayer(tar_layer!("baz.tar")),
+            BuildLayer(tar_layer_spec!("baz.tar")),
             JobPrepared(4, Err(string!("image error"))),
         };
-        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {};
+        GotLayer(tar_layer_spec!("baz.tar"), Ok(tar_digest!(3))) => {};
     }
 
     script_test! {
@@ -897,7 +897,7 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
+            layers: [tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar")],
             enable_writable_file_system: true,
             environment: [
                 environment_spec!{false, "FOO" => "foo", "BAR" => "bar"},
@@ -921,11 +921,11 @@ mod tests {
                 work: "work".into(),
             },
         }) => {
-            BuildLayer(tar_layer!("foo.tar")),
-            BuildLayer(tar_layer!("bar.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
+            BuildLayer(tar_layer_spec!("bar.tar")),
         };
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(2))) => {
             JobPrepared(1, Ok(job_spec! {
                 "one",
                 [tar_digest!(1), tar_digest!(2)],
@@ -961,12 +961,12 @@ mod tests {
         PrepareJob(1, client_job_spec! {
             "one",
             parent: image_container_parent!("image", environment),
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
         }) => {
             GetImage(string!("image")),
-            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
         };
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {};
         GotImage(string!("image"), Ok(converted_image!("image", layers: ["image1/1.tar"]))) => {
             JobPrepared(1, Ok(job_spec! {
                 "one",
@@ -981,12 +981,12 @@ mod tests {
         PrepareJob(1, client_job_spec! {
             "one",
             parent: image_container_parent!("image", environment),
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
         }) => {
             GetImage(string!("image")),
-            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
         };
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {};
         GotImage(string!("image"), Ok(converted_image! {
             "image",
             layers: ["image1/1.tar"],
@@ -1002,7 +1002,7 @@ mod tests {
         PrepareJob(2, client_job_spec! {
             "two",
             parent: image_container_parent!("image", environment),
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
             environment: [
                 environment_spec!{false, "OLD_FOO" => "old_$prev{FOO}", "BAZ" => "$prev{BAR}"},
                 environment_spec!{true, "FOO" => "food" },
@@ -1022,16 +1022,16 @@ mod tests {
         PrepareJob(1, client_job_spec! {
             "one",
             parent: image_container_parent!("image", environment),
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
             environment: [environment_spec!{true, "BAZ" => "baz" }],
         }) => {
             GetImage(string!("image")),
-            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
         };
 
         PrepareJob(2, client_job_spec! {
             "two",
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
             environment: [environment_spec!{true, "BAZ" => "baz" }],
         }) => {};
 
@@ -1041,7 +1041,7 @@ mod tests {
             environment: ["FOO=foo", "BAR=bar"],
         })) => {};
 
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {
             JobPrepared(1, Ok(job_spec! {
                 "one",
                 [tar_digest!(1)],
@@ -1060,18 +1060,18 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
             environment: [environment_spec!{true, "OLD_FOO" => "old_$prev{FOO}"}],
         }) => {
-            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
         };
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {
             JobPrepared(1, Err(string!(r#"unknown variable "FOO""#))),
         };
 
         PrepareJob(2, client_job_spec! {
             "two",
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
             environment: [environment_spec!{true, "FOO" => "$env{FOO}"}],
         }) => {
             JobPrepared(2, Err(string!(r#"unknown variable "FOO""#))),
@@ -1084,13 +1084,13 @@ mod tests {
         PrepareJob(1, client_job_spec! {
             "one",
             parent: image_container_parent!("image", working_directory),
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
         }) => {
             GetImage(string!("image")),
-            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
         };
 
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {};
 
         GotImage(string!("image"), Ok(converted_image! {
             "image",
@@ -1110,13 +1110,13 @@ mod tests {
         PrepareJob(1, client_job_spec! {
             "one",
             parent: image_container_parent!("image", working_directory),
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
             working_directory: "/root2",
         }) => {
-            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
         };
 
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {
             JobPrepared(1, Ok(job_spec!{
                 "one",
                 [tar_digest!(1)],
@@ -1131,13 +1131,13 @@ mod tests {
         PrepareJob(1, client_job_spec! {
             "one",
             parent: image_container_parent!("image", working_directory),
-            layers: [tar_layer!("foo.tar")],
+            layers: [tar_layer_spec!("foo.tar")],
         }) => {
             GetImage(string!("image")),
-            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
         };
 
-        GotLayer(tar_layer!("foo.tar"), Ok(tar_digest!(1))) => {};
+        GotLayer(tar_layer_spec!("foo.tar"), Ok(tar_digest!(1))) => {};
 
         GotImage(string!("image"), Ok(converted_image!{"image"})) => {
             JobPrepared(1, Ok(job_spec!{"one", [tar_digest!(1)]})),
@@ -1170,45 +1170,45 @@ mod tests {
 
         PrepareJob(1, client_job_spec! {
             "one",
-            layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
+            layers: [tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar")],
         }) => {
-            BuildLayer(tar_layer!("foo.tar")),
+            BuildLayer(tar_layer_spec!("foo.tar")),
         };
 
         PrepareJob(2, client_job_spec! {
             "two",
-            layers: [tar_layer!("foo.tar"), tar_layer!("baz.tar")],
+            layers: [tar_layer_spec!("foo.tar"), tar_layer_spec!("baz.tar")],
         }) => {};
 
-        GotLayer(tar_layer!("foo.tar"), Err(string!("foo.tar error"))) => {
-            BuildLayer(tar_layer!("bar.tar")),
+        GotLayer(tar_layer_spec!("foo.tar"), Err(string!("foo.tar error"))) => {
+            BuildLayer(tar_layer_spec!("bar.tar")),
             JobPrepared(1, Err(string!("foo.tar error"))),
             JobPrepared(2, Err(string!("foo.tar error"))),
         };
 
-        GotLayer(tar_layer!("bar.tar"), Ok(tar_digest!(2))) => {
-            BuildLayer(tar_layer!("baz.tar")),
+        GotLayer(tar_layer_spec!("bar.tar"), Ok(tar_digest!(2))) => {
+            BuildLayer(tar_layer_spec!("baz.tar")),
         };
 
-        GotLayer(tar_layer!("baz.tar"), Ok(tar_digest!(3))) => {};
+        GotLayer(tar_layer_spec!("baz.tar"), Ok(tar_digest!(3))) => {};
 
         PrepareJob(3, client_job_spec! {
             "three",
             layers: [
-                tar_layer!("bar.tar"),
-                tar_layer!("baz.tar"),
-                tar_layer!("qux.tar"),
-                tar_layer!("frob.tar"),
+                tar_layer_spec!("bar.tar"),
+                tar_layer_spec!("baz.tar"),
+                tar_layer_spec!("qux.tar"),
+                tar_layer_spec!("frob.tar"),
             ],
         }) => {
-            BuildLayer(tar_layer!("qux.tar")),
+            BuildLayer(tar_layer_spec!("qux.tar")),
         };
 
-        GotLayer(tar_layer!("qux.tar"), Ok(tar_digest!(4))) => {
-            BuildLayer(tar_layer!("frob.tar")),
+        GotLayer(tar_layer_spec!("qux.tar"), Ok(tar_digest!(4))) => {
+            BuildLayer(tar_layer_spec!("frob.tar")),
         };
 
-        GotLayer(tar_layer!("frob.tar"), Ok(tar_digest!(5))) => {
+        GotLayer(tar_layer_spec!("frob.tar"), Ok(tar_digest!(5))) => {
             JobPrepared(3, Ok(job_spec! {
                 "three",
                 [tar_digest!(2), tar_digest!(3), tar_digest!(4), tar_digest!(5)],

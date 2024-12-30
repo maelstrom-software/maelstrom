@@ -53,6 +53,7 @@ colored-diff.workspace = true
 enum-map.workspace = true
 indoc.workspace = true
 itertools.workspace = true
+maelstrom-client-base.workspace = true
 maelstrom-simex.workspace = true
 maelstrom-test.workspace = true
 maplit.workspace = true

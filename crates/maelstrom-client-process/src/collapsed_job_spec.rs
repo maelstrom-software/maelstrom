@@ -64,8 +64,8 @@ pub struct CollapsedJobSpec {
 ///
 /// ```
 /// assert_eq!(
-///     collapsed_job_spec! { "cat", layers: [tar_layer!("foo.tar")] }.layers,
-///     vec![tar_layer!("foo.tar")]);
+///     collapsed_job_spec! { "cat", layers: [tar_layer_spec!("foo.tar")] }.layers,
+///     vec![tar_layer_spec!("foo.tar")]);
 /// assert_eq!(collapsed_job_spec! { "cat", user: 3 }.user, User::new(3));
 /// ```
 ///
@@ -469,9 +469,9 @@ mod tests {
     use maelstrom_base::{proc_mount, tmp_mount, WindowSize};
     use maelstrom_client_base::{
         container_container_parent, container_spec, converted_image, environment_spec,
-        image_container_parent, image_ref, job_spec,
+        image_container_parent, image_ref, job_spec, tar_layer_spec,
     };
-    use maelstrom_test::{millis, tar_layer};
+    use maelstrom_test::millis;
     use std::collections::HashMap;
 
     #[test]
@@ -551,27 +551,27 @@ mod tests {
                 "p1",
                 container_spec! {
                     parent: image_container_parent!("image", all),
-                    layers: [tar_layer!("p1.tar")],
+                    layers: [tar_layer_spec!("p1.tar")],
                 },
             ),
             (
                 "p2",
                 container_spec! {
                     parent: container_container_parent!("p1", all),
-                    layers: [tar_layer!("p2.tar")],
+                    layers: [tar_layer_spec!("p2.tar")],
                 },
             ),
             (
                 "p3",
                 container_spec! {
                     parent: container_container_parent!("p2", environment),
-                    layers: [tar_layer!("p3.tar")],
+                    layers: [tar_layer_spec!("p3.tar")],
                 },
             ),
             (
                 "p4",
                 container_spec! {
-                    layers: [tar_layer!("p4.tar")],
+                    layers: [tar_layer_spec!("p4.tar")],
                 },
             ),
         ]);
@@ -579,27 +579,27 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    layers: [tar_layer!("foo.tar")],
+                    layers: [tar_layer_spec!("foo.tar")],
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                layers: [tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("foo.tar")],
             }),
         );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    layers: [tar_layer!("foo.tar")],
+                    layers: [tar_layer_spec!("foo.tar")],
                     parent: image_container_parent!("image", layers),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                layers: [tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("foo.tar")],
                 image: image_ref!("image", layers),
             }),
         );
@@ -607,28 +607,28 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    layers: [tar_layer!("foo.tar")],
+                    layers: [tar_layer_spec!("foo.tar")],
                     parent: image_container_parent!("image"),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                layers: [tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("foo.tar")],
             }),
         );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    layers: [tar_layer!("foo.tar")],
+                    layers: [tar_layer_spec!("foo.tar")],
                     parent: container_container_parent!("p1", layers),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                layers: [tar_layer!("p1.tar"), tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("p1.tar"), tar_layer_spec!("foo.tar")],
                 image: image_ref!("image", layers),
             }),
         );
@@ -636,28 +636,28 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    layers: [tar_layer!("foo.tar")],
+                    layers: [tar_layer_spec!("foo.tar")],
                     parent: container_container_parent!("p1"),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                layers: [tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("foo.tar")],
             }),
         );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    layers: [tar_layer!("foo.tar")],
+                    layers: [tar_layer_spec!("foo.tar")],
                     parent: container_container_parent!("p2", layers),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                layers: [tar_layer!("p1.tar"), tar_layer!("p2.tar"), tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("p1.tar"), tar_layer_spec!("p2.tar"), tar_layer_spec!("foo.tar")],
                 image: image_ref!("image", layers),
             }),
         );
@@ -665,14 +665,14 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    layers: [tar_layer!("foo.tar")],
+                    layers: [tar_layer_spec!("foo.tar")],
                     parent: container_container_parent!("p3", all),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                layers: [tar_layer!("p3.tar"), tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("p3.tar"), tar_layer_spec!("foo.tar")],
                 image: image_ref!("image", environment),
             }),
         );
@@ -680,14 +680,14 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    layers: [tar_layer!("foo.tar")],
+                    layers: [tar_layer_spec!("foo.tar")],
                     parent: container_container_parent!("p4", all),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                layers: [tar_layer!("p4.tar"), tar_layer!("foo.tar")],
+                layers: [tar_layer_spec!("p4.tar"), tar_layer_spec!("foo.tar")],
             }),
         );
     }
@@ -1808,7 +1808,7 @@ mod tests {
             job_spec,
             collapsed_job_spec! {
                 "prog",
-                image_layers: [tar_layer!("foo.tar"), tar_layer!("bar.tar")],
+                image_layers: [tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar")],
             }
         );
     }

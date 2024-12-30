@@ -172,10 +172,7 @@ mod tests {
     use indoc::indoc;
     use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
     use maelstrom_client::spec::SymlinkSpec;
-    use maelstrom_test::{
-        glob_layer, non_root_utf8_path_buf, paths_layer, shared_library_dependencies_layer, string,
-        tar_layer, utf8_path_buf,
-    };
+    use maelstrom_test::{non_root_utf8_path_buf, string, utf8_path_buf};
 
     fn parse_test_directive(toml: &str) -> Result<Directive<String>, toml::de::Error> {
         toml::from_str(toml)

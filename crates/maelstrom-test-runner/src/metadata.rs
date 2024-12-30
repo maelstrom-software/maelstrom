@@ -107,7 +107,8 @@ mod tests {
     use anyhow::Error;
     use maelstrom_base::{enum_set, GroupId, JobDevice, JobMount, JobNetwork, UserId};
     use maelstrom_client::{image_container_parent, ProjectDir};
-    use maelstrom_test::{tar_layer, utf8_path_buf};
+    use maelstrom_client_base::tar_layer_spec;
+    use maelstrom_test::utf8_path_buf;
     use maelstrom_util::{fs::Fs, root::RootBuf, template::TemplateVars};
     use maplit::btreemap;
     use slog::Drain as _;
@@ -669,7 +670,7 @@ mod tests {
             .unwrap()
             .container
             .layers,
-            vec![tar_layer!("layer3"), tar_layer!("layer4")],
+            vec![tar_layer_spec!("layer3"), tar_layer_spec!("layer4")],
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -735,7 +736,7 @@ mod tests {
             .unwrap()
             .container
             .layers,
-            vec![tar_layer!("layer1"), tar_layer!("layer2")],
+            vec![tar_layer_spec!("layer1"), tar_layer_spec!("layer2")],
         );
         assert_eq!(
             all.get_metadata_for_test(
@@ -778,12 +779,12 @@ mod tests {
             .container
             .layers,
             vec![
-                tar_layer!("layer1"),
-                tar_layer!("layer2"),
-                tar_layer!("added-layer3"),
-                tar_layer!("added-layer4"),
-                tar_layer!("added-layer5"),
-                tar_layer!("added-layer6"),
+                tar_layer_spec!("layer1"),
+                tar_layer_spec!("layer2"),
+                tar_layer_spec!("added-layer3"),
+                tar_layer_spec!("added-layer4"),
+                tar_layer_spec!("added-layer5"),
+                tar_layer_spec!("added-layer6"),
             ],
         );
         assert_eq!(
@@ -796,10 +797,10 @@ mod tests {
             .container
             .layers,
             vec![
-                tar_layer!("layer1"),
-                tar_layer!("layer2"),
-                tar_layer!("added-layer3"),
-                tar_layer!("added-layer4")
+                tar_layer_spec!("layer1"),
+                tar_layer_spec!("layer2"),
+                tar_layer_spec!("added-layer3"),
+                tar_layer_spec!("added-layer4")
             ],
         );
         assert_eq!(
@@ -811,7 +812,10 @@ mod tests {
             .unwrap()
             .container
             .layers,
-            vec![tar_layer!("added-layer1"), tar_layer!("added-layer2")],
+            vec![
+                tar_layer_spec!("added-layer1"),
+                tar_layer_spec!("added-layer2")
+            ],
         );
     }
 

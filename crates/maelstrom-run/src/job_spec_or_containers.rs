@@ -76,7 +76,7 @@ mod tests {
     use maelstrom_client::{
         container_container_parent, container_spec, environment_spec, job_spec,
     };
-    use maelstrom_test::tar_layer;
+    use maelstrom_client_base::tar_layer_spec;
     use maplit::hashmap;
 
     #[track_caller]
@@ -123,7 +123,7 @@ mod tests {
             }"#}),
             job_spec! {
                 "/bin/sh",
-                layers: [tar_layer!("1"), tar_layer!("2")],
+                layers: [tar_layer_spec!("1"), tar_layer_spec!("2")],
                 environment: environment_spec!(true, "FOO" => "foo"),
                 working_directory: "/root",
                 parent: container_container_parent!("parent", all, -layers, -working_directory),
@@ -148,11 +148,11 @@ mod tests {
             }"#}),
             hashmap! {
                 "container-1".into() => container_spec!{
-                    layers: [tar_layer!("1")],
+                    layers: [tar_layer_spec!("1")],
                     user: 101,
                 },
                 "container-2".into() => container_spec!{
-                    layers: [tar_layer!("2")],
+                    layers: [tar_layer_spec!("2")],
                     network: JobNetwork::Loopback,
                 },
             },

@@ -1303,7 +1303,7 @@ mod tests {
     use enumset::enum_set;
     use indoc::indoc;
     use maelstrom_base::{proc_mount, tmp_mount};
-    use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer, utf8_path_buf};
+    use maelstrom_test::{path_buf_vec, string, string_vec, utf8_path_buf};
     use maplit::btreemap;
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
@@ -1359,7 +1359,7 @@ mod tests {
         assert_eq!(io.name(), "image1");
         assert_eq!(
             Vec::from_iter(io.layers().unwrap()),
-            vec![tar_layer!("42"), tar_layer!("43")],
+            vec![tar_layer_spec!("42"), tar_layer_spec!("43")],
         );
         assert_eq!(
             io.environment().unwrap(),
@@ -3005,7 +3005,7 @@ mod tests {
                         added_layers = [ { tar = "1" } ]
                     "#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: image_container_parent!("image1", all),
                     },
                 );
@@ -3022,7 +3022,7 @@ mod tests {
                         "added_layers": [ { "tar": "1" } ]
                     }"#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: image_container_parent!("image1", layers),
                     },
                 );
@@ -3051,7 +3051,7 @@ mod tests {
                         "added_layers": [ { "tar": "1" } ]
                     }"#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: container_container_parent!("parent", all),
                     },
                 );
@@ -3066,7 +3066,7 @@ mod tests {
                         added_layers = [ { tar = "1" } ]
                     "#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: container_container_parent!("parent", layers),
                     },
                 );
@@ -3177,7 +3177,7 @@ mod tests {
                         layers = [ { tar = "1" } ]
                     "#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: image_container_parent!("image1", all, -layers),
                     },
                 );
@@ -3208,7 +3208,7 @@ mod tests {
                         layers = [ { tar = "1" } ]
                     "#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: image_container_parent!("image1", environment),
                     },
                 );
@@ -3222,7 +3222,7 @@ mod tests {
                         "layers": [ { "tar": "1" } ]
                     }"#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: container_container_parent!("parent", all, -layers),
                     },
                 );
@@ -3254,7 +3254,7 @@ mod tests {
                         "layers": [ { "tar": "1" } ]
                     }"#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: container_container_parent!("parent", environment),
                     },
                 );
@@ -3689,7 +3689,7 @@ mod tests {
                         "working_directory": "/foo/bar"
                     }"#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         working_directory: "/foo/bar",
                     },
                 )
@@ -3718,7 +3718,7 @@ mod tests {
                         }
                     }"#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: image_container_parent!("image1", working_directory),
                     },
                 )
@@ -3766,7 +3766,7 @@ mod tests {
                         image.use = [ "environment" ]
                     "#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         working_directory: "/foo/bar",
                         parent: image_container_parent!("image1", environment),
                     },
@@ -3794,7 +3794,7 @@ mod tests {
                         parent.use = [ "working_directory" ]
                     "#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         parent: container_container_parent!("parent", working_directory),
                     },
                 )
@@ -3842,7 +3842,7 @@ mod tests {
                         }
                     }"#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         working_directory: "/foo/bar",
                         parent: container_container_parent!("parent", environment),
                     },
@@ -3954,7 +3954,7 @@ mod tests {
                         ]
                     "#}),
                     container_spec! {
-                        layers: [tar_layer!("1")],
+                        layers: [tar_layer_spec!("1")],
                         mounts: [
                             JobMount::Tmp { mount_point: utf8_path_buf!("/tmp") },
                             JobMount::Bind {
@@ -4554,7 +4554,7 @@ mod tests {
                 "#}),
                 job_spec! {
                     "/bin/sh",
-                    layers: [tar_layer!("1"), tar_layer!("2")],
+                    layers: [tar_layer_spec!("1"), tar_layer_spec!("2")],
                     environment: environment_spec!(true, "FOO" => "foo"),
                     working_directory: "/root",
                     parent: container_container_parent!("parent", all, -layers, -working_directory),
