@@ -4,8 +4,8 @@ use maelstrom_base::{
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    glob_layer_spec, job_spec,
-    spec::{LayerSpec, PrefixOptions, SymlinkSpec},
+    glob_layer_spec, job_spec, paths_layer_spec,
+    spec::{LayerSpec, SymlinkSpec},
     tar_layer_spec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
@@ -76,23 +76,16 @@ impl ClientFixture {
         let mut layers = vec![];
         let self_path = fs.read_link("/proc/self/exe").unwrap();
         let sos = read_shared_libraries(&self_path).unwrap();
-        layers.push(LayerSpec::Paths {
-            paths: sos
+        layers.push(paths_layer_spec! {
+            sos
                 .into_iter()
-                .map(|p| Utf8PathBuf::from_path_buf(p).unwrap())
-                .collect(),
-            prefix_options: PrefixOptions {
-                strip_prefix: Some("/".into()),
+                .map(|p| Utf8PathBuf::from_path_buf(p).unwrap()),
+                strip_prefix: "/",
                 follow_symlinks: true,
-                ..Default::default()
-            },
         });
 
         let self_path = Utf8PathBuf::from_path_buf(self_path).unwrap();
-        layers.push(LayerSpec::Paths {
-            paths: vec![self_path.clone()],
-            prefix_options: PrefixOptions::default(),
-        });
+        layers.push(paths_layer_spec!([self_path.clone()]));
         Self {
             fs,
             client,
@@ -253,12 +246,9 @@ fn paths_test_strip_prefix(fix: &ClientFixture) {
     paths_test(
         fix,
         &["project/a/foo.bin", "project/a/bar.bin"],
-        LayerSpec::Paths {
-            paths: vec!["a/foo.bin".into(), "a/bar.bin".into()],
-            prefix_options: PrefixOptions {
-                strip_prefix: Some("a".into()),
-                ..Default::default()
-            },
+        paths_layer_spec! {
+            ["a/foo.bin", "a/bar.bin"],
+            strip_prefix: "a",
         },
         &["/bar.bin", "/foo.bin"],
     )
@@ -268,12 +258,9 @@ fn paths_test_prepend_prefix(fix: &ClientFixture) {
     paths_test(
         fix,
         &["project/foo2.bin", "project/bar2.bin"],
-        LayerSpec::Paths {
-            paths: vec!["foo2.bin".into(), "bar2.bin".into()],
-            prefix_options: PrefixOptions {
-                prepend_prefix: Some("/baz".into()),
-                ..Default::default()
-            },
+        paths_layer_spec! {
+            ["foo2.bin", "bar2.bin"],
+            prepend_prefix: "/baz",
         },
         &["/baz/", "/baz/bar2.bin", "/baz/foo2.bin"],
     )
@@ -284,12 +271,9 @@ fn paths_test_absolute(fix: &ClientFixture) {
     paths_test(
         fix,
         &["foo3.bin", "bar3.bin"],
-        LayerSpec::Paths {
-            paths: vec![root.join("foo3.bin"), root.join("bar3.bin")],
-            prefix_options: PrefixOptions {
-                strip_prefix: Some(root),
-                ..Default::default()
-            },
+        paths_layer_spec! {
+            [root.join("foo3.bin"), root.join("bar3.bin")],
+            strip_prefix: root,
         },
         &["/bar3.bin", "/foo3.bin"],
     )

@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 use cargo_metadata::Target as CargoTarget;
 use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
-    spec::{LayerSpec, PrefixOptions},
+    spec::{LayerSpec, PathsLayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
@@ -327,13 +327,13 @@ impl Iterator for CargoTestArtifactStream {
 }
 
 fn path_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
-    LayerSpec::Paths {
+    LayerSpec::Paths(PathsLayerSpec {
         paths: vec![binary_path.to_path_buf()],
         prefix_options: PrefixOptions {
             strip_prefix: Some(binary_path.parent().unwrap().to_path_buf()),
             ..Default::default()
         },
-    }
+    })
 }
 
 fn so_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {

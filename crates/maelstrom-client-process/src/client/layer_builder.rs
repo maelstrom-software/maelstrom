@@ -11,7 +11,7 @@ use maelstrom_base::{
     ArtifactType, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client_base::{
-    spec::{GlobLayerSpec, LayerSpec, PrefixOptions, SymlinkSpec, TarLayerSpec},
+    spec::{GlobLayerSpec, LayerSpec, PathsLayerSpec, PrefixOptions, SymlinkSpec, TarLayerSpec},
     CacheDir, ProjectDir, MANIFEST_DIR, SO_LISTINGS_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_util::{
@@ -252,19 +252,6 @@ impl LayerBuilder {
     ) -> Result<(PathBuf, ArtifactType)> {
         Ok(match layer {
             LayerSpec::Tar(TarLayerSpec { path }) => (path.into_std_path_buf(), ArtifactType::Tar),
-            LayerSpec::Paths {
-                paths,
-                prefix_options,
-            } => {
-                let manifest_path = self
-                    .build_manifest(
-                        futures::stream::iter(paths.iter().map(Ok)),
-                        prefix_options,
-                        data_upload,
-                    )
-                    .await?;
-                (manifest_path, ArtifactType::Manifest)
-            }
             LayerSpec::Glob(GlobLayerSpec {
                 glob,
                 prefix_options,
@@ -278,6 +265,19 @@ impl LayerBuilder {
                         fs.glob_walk(&self.project_dir, &glob_builder.build()?)
                             .as_stream()
                             .map(|p| p.map(|p| p.strip_prefix(&project_dir).unwrap().to_owned())),
+                        prefix_options,
+                        data_upload,
+                    )
+                    .await?;
+                (manifest_path, ArtifactType::Manifest)
+            }
+            LayerSpec::Paths(PathsLayerSpec {
+                paths,
+                prefix_options,
+            }) => {
+                let manifest_path = self
+                    .build_manifest(
+                        futures::stream::iter(paths.iter().map(Ok)),
                         prefix_options,
                         data_upload,
                     )
@@ -495,10 +495,10 @@ mod tests {
         fix.fs.write(&test_artifact, b"hello world").await.unwrap();
 
         let manifest = fix
-            .build_layer(LayerSpec::Paths {
+            .build_layer(LayerSpec::Paths(PathsLayerSpec {
                 paths: vec![test_artifact.try_into().unwrap()],
                 prefix_options: Default::default(),
-            })
+            }))
             .await;
         verify_single_entry_manifest(
             &manifest,
@@ -515,10 +515,10 @@ mod tests {
         fix.fs.write(&test_artifact, b"hi").await.unwrap();
 
         let manifest = fix
-            .build_layer(LayerSpec::Paths {
+            .build_layer(LayerSpec::Paths(PathsLayerSpec {
                 paths: vec![test_artifact.try_into().unwrap()],
                 prefix_options: Default::default(),
-            })
+            }))
             .await;
         verify_single_entry_manifest(
             &manifest,
@@ -546,10 +546,10 @@ mod tests {
         fix.fs.write(&artifact_path, b"hello world").await.unwrap();
 
         let manifest = fix
-            .build_layer(LayerSpec::Paths {
+            .build_layer(LayerSpec::Paths(PathsLayerSpec {
                 paths: vec![input_path.try_into().unwrap()],
                 prefix_options: prefix_options_factory(&fix.artifact_dir),
-            })
+            }))
             .await;
         verify_single_entry_manifest(
             &manifest,

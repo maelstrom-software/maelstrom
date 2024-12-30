@@ -10,7 +10,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     glob_layer_spec, job_spec,
-    spec::{ContainerParent, ImageRef, LayerSpec, PrefixOptions},
+    spec::{ContainerParent, ImageRef, LayerSpec, PathsLayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
@@ -228,14 +228,14 @@ impl PytestTestCollector<'_> {
 
         // Run a local job to install the packages
         let layers = vec![
-            LayerSpec::Paths {
+            LayerSpec::Paths(PathsLayerSpec {
                 paths: vec![source_req_path.clone().try_into()?],
                 prefix_options: Default::default(),
-            },
+            }),
             LayerSpec::Stubs {
                 stubs: vec!["/dev/null".into()],
             },
-            LayerSpec::Paths {
+            LayerSpec::Paths(PathsLayerSpec {
                 paths: vec![resolv_conf.clone().try_into()?],
                 prefix_options: PrefixOptions {
                     strip_prefix: Some(resolv_conf.parent().unwrap().to_owned().try_into()?),
@@ -243,7 +243,7 @@ impl PytestTestCollector<'_> {
                     canonicalize: false,
                     follow_symlinks: false,
                 },
-            },
+            }),
         ];
         let (_, outcome) = self.client.run_job(job_spec! {
             "/bin/sh",
