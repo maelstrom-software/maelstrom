@@ -4,7 +4,7 @@ use crate::deps::SimpleFilter;
 use crate::fake_test_framework::{
     FakePackageId, FakeTestArtifact, FakeTestFilter, FakeTestPackage, TestCollector, TestOptions,
 };
-use crate::metadata::AllMetadata;
+use crate::metadata::MetadataStore;
 use crate::test_db::{OnDiskTestDb, TestDb};
 use crate::ui::{
     UiJobEnqueued, UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,
@@ -270,8 +270,8 @@ const DEFAULT_METADATA_STR: &str = r#"
     ]
 "#;
 
-fn default_metadata() -> AllMetadata<FakeTestFilter> {
-    AllMetadata::from_str(DEFAULT_METADATA_STR).unwrap()
+fn default_metadata() -> MetadataStore<FakeTestFilter> {
+    MetadataStore::from_str(DEFAULT_METADATA_STR).unwrap()
 }
 
 fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
@@ -1750,7 +1750,7 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     ignored_tests_via_directive,
-    @ test_metadata = AllMetadata::from_str(
+    @ test_metadata = MetadataStore::from_str(
         &format!("{DEFAULT_METADATA_STR}{}",
             r#"
                 [[directives]]

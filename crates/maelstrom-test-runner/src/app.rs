@@ -6,7 +6,7 @@ mod watch;
 mod tests;
 
 use crate::config::{Repeat, StopAfter};
-use crate::metadata::AllMetadata;
+use crate::metadata::MetadataStore;
 use crate::test_db::{TestDb, TestDbStore};
 use crate::ui::{Ui, UiJobId as JobId, UiMessage};
 use crate::*;
@@ -54,7 +54,7 @@ trait Deps {
 
 /// Immutable information used to control the testing invocation.
 struct TestingOptions<TestFilterT, CollectOptionsT> {
-    test_metadata: AllMetadata<TestFilterT>,
+    test_metadata: MetadataStore<TestFilterT>,
     filter: TestFilterT,
     collector_options: CollectOptionsT,
     timeout_override: Option<Option<Timeout>>,
@@ -104,7 +104,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
     ) -> Result<Self> {
         let project_dir = project_dir.as_ref().to_owned();
 
-        let test_metadata = AllMetadata::load(
+        let test_metadata = MetadataStore::load(
             log.clone(),
             &project_dir,
             MainAppDepsT::TEST_METADATA_FILE_NAME,

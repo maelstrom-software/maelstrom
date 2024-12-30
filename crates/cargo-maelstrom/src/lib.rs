@@ -521,8 +521,8 @@ impl MainAppDeps for DefaultMainAppDeps {
 
 #[test]
 fn default_test_metadata_parses() {
-    use maelstrom_test_runner::metadata::AllMetadata;
-    AllMetadata::<pattern::Pattern>::from_str(DEFAULT_TEST_METADATA_CONTENTS).unwrap();
+    use maelstrom_test_runner::metadata::MetadataStore;
+    MetadataStore::<pattern::Pattern>::from_str(DEFAULT_TEST_METADATA_CONTENTS).unwrap();
 }
 
 impl Wait for cargo::WaitHandle {
