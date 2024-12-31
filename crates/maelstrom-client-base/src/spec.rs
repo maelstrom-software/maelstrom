@@ -15,7 +15,11 @@ use maelstrom_base::{
     Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_util::template::TemplateVars;
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{Deserializer, Error as _},
+    Deserialize, Serialize,
+    __private::de::{Content, ContentRefDeserializer},
+};
 use std::{
     collections::{BTreeMap, HashMap},
     env::{self, VarError},
@@ -998,17 +1002,7 @@ macro_rules! symlink_spec {
 }
 
 #[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    IntoProtoBuf,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    TryFromProtoBuf,
+    Clone, Debug, Eq, Hash, IntoProtoBuf, Ord, PartialEq, PartialOrd, Serialize, TryFromProtoBuf,
 )]
 #[proto(
     proto_buf_type = "proto::LayerSpec",
@@ -1022,6 +1016,53 @@ pub enum LayerSpec {
     Stubs(StubsLayerSpec),
     Symlinks(SymlinksLayerSpec),
     SharedLibraryDependencies(SharedLibraryDependenciesLayerSpec),
+}
+
+enum LayerSpecType {
+    Tar,
+    Glob,
+    Paths,
+    Stubs,
+    Symlinks,
+    SharedLibraryDependencies,
+}
+
+impl<'de> Deserialize<'de> for LayerSpec {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let content = Content::deserialize(deserializer)?;
+        let Content::Map(fields) = &content else {
+            return Err(D::Error::custom(
+                "expected a map in order to parse a layer specification",
+            ));
+        };
+        let Some(kind) = fields.iter().find_map(|(key, _)| {
+            key.as_str().and_then(|field| match field {
+                "tar" => Some(LayerSpecType::Tar),
+                "glob" => Some(LayerSpecType::Glob),
+                "paths" => Some(LayerSpecType::Paths),
+                "stubs" => Some(LayerSpecType::Stubs),
+                "symlinks" => Some(LayerSpecType::Symlinks),
+                "shared_library_dependencies" => Some(LayerSpecType::SharedLibraryDependencies),
+                _ => None,
+            })
+        }) else {
+            return Err(D::Error::custom("couldn't determine layer type"));
+        };
+        let deserializer = ContentRefDeserializer::<D::Error>::new(&content);
+        match kind {
+            LayerSpecType::Tar => TarLayerSpec::deserialize(deserializer).map(Self::Tar),
+            LayerSpecType::Glob => GlobLayerSpec::deserialize(deserializer).map(Self::Glob),
+            LayerSpecType::Paths => PathsLayerSpec::deserialize(deserializer).map(Self::Paths),
+            LayerSpecType::Stubs => StubsLayerSpec::deserialize(deserializer).map(Self::Stubs),
+            LayerSpecType::Symlinks => {
+                SymlinksLayerSpec::deserialize(deserializer).map(Self::Symlinks)
+            }
+            LayerSpecType::SharedLibraryDependencies => {
+                SharedLibraryDependenciesLayerSpec::deserialize(deserializer)
+                    .map(Self::SharedLibraryDependencies)
+            }
+        }
+    }
 }
 
 #[derive(
@@ -2662,8 +2703,7 @@ mod tests {
 
         #[test]
         fn empty() {
-            assert!(parse_error_json::<LayerSpec>("{}")
-                .contains("data did not match any variant of untagged enum LayerSpec"));
+            assert!(parse_error_json::<LayerSpec>("{}").contains("couldn't determine layer type"));
         }
 
         #[test]
@@ -2671,8 +2711,13 @@ mod tests {
             assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
                 foo_bar_baz = 3
             "#})
-            .contains("data did not match any variant of untagged enum LayerSpec"));
-            // .contains("unknown field `foo_bar_baz`"));
+            .contains("couldn't determine layer type"));
+        }
+
+        #[test]
+        fn not_map() {
+            assert!(parse_error_json::<LayerSpec>("42")
+                .contains("expected a map in order to parse a layer specification"));
         }
 
         mod tar {
@@ -2694,8 +2739,7 @@ mod tests {
                     "tar": "foo.tar",
                     "strip_prefix": "/foo"
                 }"#})
-                .contains("data did not match any variant of untagged enum LayerSpec"));
-                // .contains("unknown field `strip_prefix`"));
+                .contains("unknown field `strip_prefix`"));
             }
 
             #[test]
@@ -2704,8 +2748,7 @@ mod tests {
                     tar = "foo.tar"
                     foo_bar_baz = 3
                 "#})
-                .contains("data did not match any variant of untagged enum LayerSpec"));
-                // .contains("unknown field `foo_bar_baz`"));
+                .contains("unknown field `foo_bar_baz`"));
             }
         }
 
@@ -2784,8 +2827,7 @@ mod tests {
                     glob = "*.tar"
                     foo_bar_baz = 3
                 "#})
-                .contains("data did not match any variant of untagged enum LayerSpec"));
-                // .contains("unknown field `foo_bar_baz`"));
+                .contains("unknown field `foo_bar_baz`"));
             }
         }
 
@@ -2864,8 +2906,7 @@ mod tests {
                     paths = [ "/foo/bar", "/bar/foo" ]
                     foo_bar_baz = 3
                 "#})
-                .contains("data did not match any variant of untagged enum LayerSpec"));
-                // .contains("unknown field `foo_bar_baz`"));
+                .contains("unknown field `foo_bar_baz`"));
             }
         }
 
@@ -2888,8 +2929,7 @@ mod tests {
                     "stubs": [ "/{proc,tmp}/", "/home" ],
                     "strip_prefix": "/foo"
                 }"#})
-                .contains("data did not match any variant of untagged enum LayerSpec"));
-                // .contains("unknown field `strip_prefix`"));
+                .contains("unknown field `strip_prefix`"));
             }
 
             #[test]
@@ -2898,8 +2938,7 @@ mod tests {
                     stubs = [ "/{proc,tmp}/", "/home" ]
                     foo_bar_baz = 3
                 "#})
-                .contains("data did not match any variant of untagged enum LayerSpec"));
-                // .contains("unknown field `foo_bar_baz`"));
+                .contains("unknown field `foo_bar_baz`"));
             }
         }
 
@@ -2928,8 +2967,7 @@ mod tests {
                     "symlinks": [ { "link": "/symlink", "target": "/target" } ],
                     "strip_prefix": "/foo"
                 }"#})
-                .contains("data did not match any variant of untagged enum LayerSpec"));
-                // .contains("unknown field `strip_prefix`"));
+                .contains("unknown field `strip_prefix`"));
             }
 
             #[test]
@@ -2941,8 +2979,7 @@ mod tests {
                     ]
                     foo_bar_baz = 3
                 "#})
-                .contains("data did not match any variant of untagged enum LayerSpec"));
-                // .contains("unknown field `foo_bar_baz`"));
+                .contains("unknown field `foo_bar_baz`"));
             }
         }
 
@@ -3021,8 +3058,7 @@ mod tests {
                     shared_library_dependencies = ["/bin/foo", "/bin/bar"]
                     foo_bar_baz = 3
                 "#})
-                .contains("data did not match any variant of untagged enum LayerSpec"));
-                // .contains("unknown field `foo_bar_baz`"));
+                .contains("unknown field `foo_bar_baz`"));
             }
         }
 
