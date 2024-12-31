@@ -990,7 +990,7 @@ pub struct SymlinkSpec {
 #[macro_export]
 macro_rules! symlink_spec {
     ($link:expr => $target:expr) => {
-        SymlinkSpec {
+        $crate::spec::SymlinkSpec {
             link: $link.into(),
             target: $target.into(),
         }
@@ -1020,10 +1020,7 @@ pub enum LayerSpec {
     Glob(GlobLayerSpec),
     Paths(PathsLayerSpec),
     Stubs(StubsLayerSpec),
-    #[proto(proto_buf_type = proto::SymlinksLayer)]
-    Symlinks {
-        symlinks: Vec<SymlinkSpec>,
-    },
+    Symlinks(SymlinksLayerSpec),
     #[proto(proto_buf_type = proto::SharedLibraryDependenciesLayer)]
     SharedLibraryDependencies {
         #[serde(rename = "shared_library_dependencies")]
@@ -1153,12 +1150,31 @@ macro_rules! stubs_layer_spec {
     };
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    IntoProtoBuf,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    TryFromProtoBuf,
+)]
+#[proto(proto_buf_type = proto::SymlinksLayer)]
+#[serde(deny_unknown_fields)]
+pub struct SymlinksLayerSpec {
+    pub symlinks: Vec<SymlinkSpec>,
+}
+
 #[macro_export]
 macro_rules! symlinks_layer_spec {
     ($symlinks:expr) => {
-        $crate::spec::LayerSpec::Symlinks {
+        $crate::spec::LayerSpec::Symlinks($crate::spec::SymlinksLayerSpec {
             symlinks: $symlinks.into_iter().map(Into::into).collect(),
-        }
+        })
     };
 }
 
@@ -1187,7 +1203,7 @@ impl LayerSpec {
                     *stub = vars.replace(stub)?;
                 }
             }
-            Self::Symlinks { symlinks } => {
+            Self::Symlinks(SymlinksLayerSpec { symlinks }) => {
                 for SymlinkSpec { link, target } in symlinks {
                     *link = vars.replace(link)?.into();
                     *target = vars.replace(target)?.into();

@@ -4,9 +4,8 @@ use maelstrom_base::{
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    glob_layer_spec, job_spec, paths_layer_spec,
-    spec::{LayerSpec, SymlinkSpec},
-    stubs_layer_spec, tar_layer_spec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client,
+    glob_layer_spec, job_spec, paths_layer_spec, spec::LayerSpec, stubs_layer_spec, symlink_spec,
+    symlinks_layer_spec, tar_layer_spec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client,
     ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_util::{
@@ -301,12 +300,7 @@ fn symlinks_test(fix: &ClientFixture) {
     paths_test(
         fix,
         &[],
-        LayerSpec::Symlinks {
-            symlinks: vec![SymlinkSpec {
-                link: "/foo".into(),
-                target: "/bar".into(),
-            }],
-        },
+        symlinks_layer_spec!([symlink_spec!("/foo" => "/bar")]),
         &["/foo => /bar"],
     )
 }

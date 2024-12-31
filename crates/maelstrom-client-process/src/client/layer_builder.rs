@@ -13,7 +13,7 @@ use maelstrom_base::{
 use maelstrom_client_base::{
     spec::{
         GlobLayerSpec, LayerSpec, PathsLayerSpec, PrefixOptions, StubsLayerSpec, SymlinkSpec,
-        TarLayerSpec,
+        SymlinksLayerSpec, TarLayerSpec,
     },
     CacheDir, ProjectDir, MANIFEST_DIR, SO_LISTINGS_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
@@ -291,7 +291,7 @@ impl LayerBuilder {
                 let manifest_path = self.build_stub_manifest(stubs).await?;
                 (manifest_path, ArtifactType::Manifest)
             }
-            LayerSpec::Symlinks { symlinks } => {
+            LayerSpec::Symlinks(SymlinksLayerSpec { symlinks }) => {
                 let manifest_path = self.build_symlink_manifest(symlinks).await?;
                 (manifest_path, ArtifactType::Manifest)
             }
