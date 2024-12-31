@@ -345,6 +345,8 @@ pub async fn github_acceptor_main<TempFileT>(
             return;
         }
     };
+    info!(log, "listening for connections via GitHub");
+
     loop {
         match acceptor.accept_one().await {
             Ok(queue) => {

@@ -112,6 +112,8 @@ where
             id_vendor,
             log.clone(),
         ));
+    } else {
+        info!(log, "not listening for GitHub connections");
     }
 
     join_set.spawn(stats_heartbeat(scheduler_task.scheduler_sender().clone()));
