@@ -153,15 +153,13 @@ impl GitHubWriteQueue {
 
         Ok(())
     }
-}
 
-impl Drop for GitHubWriteQueue {
-    fn drop(&mut self) {
+    pub async fn shut_down(&mut self) -> Result<()> {
         self.keep_alive.abort();
-        let blob = self.blob.clone();
-        tokio::task::spawn(async move {
-            blob.append_block(bincode::serialize(&MessageHeader::Shutdown).unwrap());
-        });
+        self.blob
+            .append_block(bincode::serialize(&MessageHeader::Shutdown).unwrap())
+            .await?;
+        Ok(())
     }
 }
 
@@ -224,6 +222,10 @@ impl GitHubQueue {
 
     pub async fn write_msg(&mut self, data: &[u8]) -> Result<()> {
         self.write.write_msg(data).await
+    }
+
+    pub async fn shut_down(&mut self) -> Result<()> {
+        self.write.shut_down().await
     }
 }
 
@@ -295,6 +297,7 @@ mod tests {
                     let msg = queue.read_msg().await.unwrap().unwrap();
                     assert_eq!(msg, b"pong");
                 }
+                queue.shut_down().await.unwrap();
             }));
         }
 
@@ -305,13 +308,9 @@ mod tests {
 
     async fn connector(client: GitHubClient) {
         let mut sock = GitHubQueue::connect(&client, "foo").await.unwrap();
-        loop {
-            if let Some(msg) = sock.read_msg().await.unwrap() {
-                assert_eq!(msg, b"ping");
-                sock.write_msg(&b"pong"[..]).await.unwrap();
-            } else {
-                break;
-            }
+        while let Some(msg) = sock.read_msg().await.unwrap() {
+            assert_eq!(msg, b"ping");
+            sock.write_msg(&b"pong"[..]).await.unwrap();
         }
     }
 
