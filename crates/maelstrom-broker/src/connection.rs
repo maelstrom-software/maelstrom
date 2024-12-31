@@ -4,8 +4,7 @@ use crate::{
     scheduler_task::{SchedulerMessage, SchedulerSender},
     IdVendor,
 };
-use anyhow::{Error, Result};
-use maelstrom_base::proto;
+use anyhow::Result;
 use maelstrom_base::{
     proto::{ClientToBroker, Hello},
     ClientId, MonitorId, WorkerId,
@@ -269,22 +268,19 @@ pub async fn tcp_listener_main<TempFileFactoryT>(
 }
 
 async fn unassigned_github_connection_main<TempFileT>(
-    mut queue: GitHubQueue,
+    queue: GitHubQueue,
     scheduler_sender: SchedulerSender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
 ) where
     TempFileT: Send + Sync + 'static,
 {
-    match queue.read_msg().await.and_then(|m| {
-        m.map(|m| proto::deserialize(&m).map_err(Error::from))
-            .transpose()
-    }) {
+    let (mut read_queue, mut write_queue) = queue.into_split();
+    match net::read_message_from_github_queue(&mut read_queue, &log).await {
         Ok(Some(Hello::Client)) => {
             warn!(log, "github queue said it was client");
         }
         Ok(Some(Hello::Worker { slots })) => {
-            let (read_stream, write_stream) = queue.into_split();
             let id: WorkerId = id_vendor.vend();
             let log = log.new(o!("wid" => id.to_string(), "slots" => slots));
             info!(log, "worker connected");
@@ -297,7 +293,7 @@ async fn unassigned_github_connection_main<TempFileT>(
                 SchedulerMessage::WorkerDisconnected,
                 |scheduler_sender| async move {
                     let _ = net::github_queue_reader(
-                        read_stream,
+                        read_queue,
                         scheduler_sender,
                         |msg| SchedulerMessage::FromWorker(id, msg),
                         &log_clone,
@@ -305,7 +301,7 @@ async fn unassigned_github_connection_main<TempFileT>(
                     .await;
                 },
                 |scheduler_receiver| async move {
-                    let _ = net::github_queue_writer(scheduler_receiver, write_stream, &log_clone2)
+                    let _ = net::github_queue_writer(scheduler_receiver, write_queue, &log_clone2)
                         .await;
                 },
             )
@@ -331,7 +327,7 @@ async fn unassigned_github_connection_main<TempFileT>(
         }
     }
 
-    let _ = queue.shut_down().await;
+    let _ = write_queue.shut_down().await;
 }
 
 pub async fn github_acceptor_main<TempFileT>(
