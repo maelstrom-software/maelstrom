@@ -1021,14 +1021,7 @@ pub enum LayerSpec {
     Paths(PathsLayerSpec),
     Stubs(StubsLayerSpec),
     Symlinks(SymlinksLayerSpec),
-    #[proto(proto_buf_type = proto::SharedLibraryDependenciesLayer)]
-    SharedLibraryDependencies {
-        #[serde(rename = "shared_library_dependencies")]
-        binary_paths: Vec<Utf8PathBuf>,
-        #[serde(flatten)]
-        #[proto(option)]
-        prefix_options: PrefixOptions,
-    },
+    SharedLibraryDependencies(SharedLibraryDependenciesLayerSpec),
 }
 
 #[derive(
@@ -1178,13 +1171,36 @@ macro_rules! symlinks_layer_spec {
     };
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    IntoProtoBuf,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    TryFromProtoBuf,
+)]
+#[proto(proto_buf_type = proto::SharedLibraryDependenciesLayer)]
+#[serde(deny_unknown_fields)]
+pub struct SharedLibraryDependenciesLayerSpec {
+    #[serde(rename = "shared_library_dependencies")]
+    pub binary_paths: Vec<Utf8PathBuf>,
+    #[serde(flatten)]
+    #[proto(option)]
+    pub prefix_options: PrefixOptions,
+}
+
 #[macro_export]
 macro_rules! shared_library_dependencies_layer_spec {
     ($binary_paths:expr $(, $($prefix_option:tt)*)?) => {
-        $crate::spec::LayerSpec::SharedLibraryDependencies {
+        $crate::spec::LayerSpec::SharedLibraryDependencies($crate::spec::SharedLibraryDependenciesLayerSpec {
             binary_paths: $binary_paths.into_iter().map(Into::into).collect(),
             prefix_options: $crate::prefix_options!($($($prefix_option)*)?),
-        }
+        })
     };
 }
 
@@ -1209,7 +1225,10 @@ impl LayerSpec {
                     *target = vars.replace(target)?.into();
                 }
             }
-            Self::SharedLibraryDependencies { binary_paths, .. } => {
+            Self::SharedLibraryDependencies(SharedLibraryDependenciesLayerSpec {
+                binary_paths,
+                ..
+            }) => {
                 for path in binary_paths {
                     *path = vars.replace(path)?.into();
                 }

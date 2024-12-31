@@ -12,8 +12,9 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{
-        GlobLayerSpec, LayerSpec, PathsLayerSpec, PrefixOptions, StubsLayerSpec, SymlinkSpec,
-        SymlinksLayerSpec, TarLayerSpec,
+        GlobLayerSpec, LayerSpec, PathsLayerSpec, PrefixOptions,
+        SharedLibraryDependenciesLayerSpec, StubsLayerSpec, SymlinkSpec, SymlinksLayerSpec,
+        TarLayerSpec,
     },
     CacheDir, ProjectDir, MANIFEST_DIR, SO_LISTINGS_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
@@ -295,10 +296,10 @@ impl LayerBuilder {
                 let manifest_path = self.build_symlink_manifest(symlinks).await?;
                 (manifest_path, ArtifactType::Manifest)
             }
-            LayerSpec::SharedLibraryDependencies {
+            LayerSpec::SharedLibraryDependencies(SharedLibraryDependenciesLayerSpec {
                 binary_paths,
                 prefix_options,
-            } => {
+            }) => {
                 let paths = get_shared_library_dependencies(
                     &self.project_dir,
                     &(**self.cache_dir).join(SO_LISTINGS_DIR),

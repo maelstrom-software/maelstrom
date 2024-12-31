@@ -8,14 +8,18 @@ use anyhow::{anyhow, Result};
 use cargo_metadata::Target as CargoTarget;
 use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
+    shared_library_dependencies_layer_spec,
     spec::{LayerSpec, PathsLayerSpec, PrefixOptions},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
-    metadata::Metadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
-    CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps, NoCaseMetadata,
-    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    metadata::Metadata,
+    run_app_with_ui_multithreaded,
+    ui::{Ui, UiSender},
+    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
+    NoCaseMetadata, TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait,
+    WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -25,9 +29,7 @@ use maelstrom_util::{
     template::TemplateVars,
 };
 use pattern::ArtifactKind;
-use std::path::Path;
-use std::str::FromStr;
-use std::{fmt, io};
+use std::{fmt, io, path::Path, str::FromStr};
 
 pub use maelstrom_test_runner::Logger;
 
@@ -337,12 +339,9 @@ fn path_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
 }
 
 fn so_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
-    LayerSpec::SharedLibraryDependencies {
-        binary_paths: vec![binary_path.to_owned()],
-        prefix_options: PrefixOptions {
-            follow_symlinks: true,
-            ..Default::default()
-        },
+    shared_library_dependencies_layer_spec! {
+        [binary_path],
+        follow_symlinks: true,
     }
 }
 
