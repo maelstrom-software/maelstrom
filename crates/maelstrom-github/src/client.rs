@@ -18,11 +18,11 @@ pub use azure_core::{
 
 use anyhow::{anyhow, bail, Result};
 use azure_storage_blobs::prelude::BlobClient;
+use chrono::{DateTime, Utc};
 use futures::{stream::TryStreamExt as _, StreamExt as _};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use std::str::FromStr;
-use std::time::SystemTime;
 use tokio::io::AsyncRead;
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 use url::Url;
@@ -115,14 +115,11 @@ impl TwirpClient {
     }
 }
 
-fn rfc3339_encode<S>(v: &Option<SystemTime>, s: S) -> std::result::Result<S::Ok, S::Error>
+fn rfc3339_encode<S>(v: &Option<DateTime<Utc>>, s: S) -> std::result::Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    s.serialize_str(&format!(
-        "{}",
-        chrono::DateTime::<chrono::Utc>::from(v.unwrap()).format("%+")
-    ))
+    s.serialize_str(&format!("{}", v.unwrap().format("%+")))
 }
 
 #[derive(Serialize)]
@@ -135,7 +132,7 @@ struct CreateArtifactRequest {
         skip_serializing_if = "Option::is_none",
         serialize_with = "rfc3339_encode"
     )]
-    expires_at: Option<SystemTime>,
+    expires_at: Option<DateTime<Utc>>,
     version: u32,
 }
 
@@ -225,7 +222,7 @@ impl GitHubClient {
     pub async fn start_upload(
         &self,
         name: &str,
-        expires_at: Option<SystemTime>,
+        expires_at: Option<DateTime<Utc>>,
     ) -> Result<BlobClient> {
         let req = CreateArtifactRequest {
             backend_ids: self.client.backend_ids.clone(),
@@ -272,7 +269,7 @@ impl GitHubClient {
     pub async fn upload(
         &self,
         name: &str,
-        expires_at: Option<SystemTime>,
+        expires_at: Option<DateTime<Utc>>,
         content: impl Into<Body>,
     ) -> Result<()> {
         let blob_client = self.start_upload(name, expires_at).await?;

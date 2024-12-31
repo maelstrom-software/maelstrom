@@ -1,16 +1,17 @@
 use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver, SuccessCb};
 use crate::progress::{ProgressTracker, UploadProgressReader};
 use anyhow::{anyhow, Result};
+use chrono::{DateTime, Utc};
 use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
 use maelstrom_github::{FileStreamBuilder, GitHubClient, SeekableStream};
 use maelstrom_util::async_fs::Fs;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use std::{path::PathBuf, sync::Arc};
 use tokio::task::JoinSet;
 use url::Url;
 
-fn two_hours_from_now() -> SystemTime {
-    SystemTime::now() + Duration::from_secs(60 * 60 * 24 * 2)
+fn two_hours_from_now() -> DateTime<Utc> {
+    Utc::now() + Duration::from_secs(60 * 60 * 24 * 2)
 }
 
 pub async fn push_one_artifact(

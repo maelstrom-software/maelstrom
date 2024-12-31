@@ -4,11 +4,12 @@
 mod client;
 mod queue;
 
-use std::time::{Duration, SystemTime};
+use chrono::{DateTime, Utc};
+use std::time::Duration;
 
 pub use client::*;
 pub use queue::*;
 
-fn two_hours_from_now() -> SystemTime {
-    SystemTime::now() + Duration::from_secs(60 * 60 * 24 * 2)
+fn two_hours_from_now() -> DateTime<Utc> {
+    Utc::now() + Duration::from_secs(60 * 60 * 24 * 2)
 }
