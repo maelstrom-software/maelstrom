@@ -19,6 +19,7 @@ pub use azure_core::{
 use anyhow::{anyhow, bail, Result};
 use azure_storage_blobs::prelude::BlobClient;
 use chrono::{DateTime, Utc};
+use derive_more::From;
 use futures::{stream::TryStreamExt as _, StreamExt as _};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -186,7 +187,7 @@ struct ListArtifactsRequest {
 }
 
 #[serde_as]
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, From, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct DatabaseId(#[serde_as(as = "DisplayFromStr")] i64);
 
