@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// The first message sent by a connector to the broker. It identifies what the connector is, and
 /// provides any relevant information.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum Hello {
     Client,
     Worker { slots: u32 },

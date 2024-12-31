@@ -311,6 +311,8 @@ async fn unassigned_github_connection_main<TempFileT>(
             )
             .await;
             info!(log, "worker disconnected");
+
+            return;
         }
         Ok(Some(Hello::Monitor)) => {
             warn!(log, "github queue said it was monitor");
@@ -328,6 +330,8 @@ async fn unassigned_github_connection_main<TempFileT>(
             warn!(log, "error reading hello message"; "error" => %err);
         }
     }
+
+    let _ = queue.shut_down().await;
 }
 
 pub async fn github_acceptor_main<TempFileT>(

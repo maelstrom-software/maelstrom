@@ -211,5 +211,7 @@ where
     while let Some(msg) = channel.recv().await {
         write_message_to_github_queue(&mut queue, &msg, log).await?;
     }
+    queue.shut_down().await?;
+
     Ok(())
 }
