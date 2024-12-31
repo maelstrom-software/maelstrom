@@ -1,7 +1,7 @@
 //! This module contains a message queue that is backed by GitHub artifacts. It allows for
 //! communication between jobs within the same workflow run.
 
-use crate::{Artifact, BackendIds, GitHubClient};
+use crate::{two_hours_from_now, Artifact, BackendIds, GitHubClient};
 use anyhow::{anyhow, Result};
 use azure_storage_blobs::prelude::BlobClient;
 use futures::stream::StreamExt as _;
@@ -84,7 +84,7 @@ pub struct GitHubWriteQueue {
 
 impl GitHubWriteQueue {
     async fn new(client: &GitHubClient, key: &str) -> Result<Self> {
-        let blob = client.start_upload(key).await?;
+        let blob = client.start_upload(key, Some(two_hours_from_now())).await?;
         blob.put_append_blob().await?;
         client.finish_upload(key, 0).await?;
         Ok(Self { blob })
@@ -168,7 +168,9 @@ impl GitHubQueueAcceptor {
     pub async fn new(client: impl Into<Arc<GitHubClient>>, id: &str) -> Result<Self> {
         let key = format!("{id}-listen");
         let client = client.into();
-        client.upload(&key, &[][..]).await?;
+        client
+            .upload(&key, Some(two_hours_from_now()), &[][..])
+            .await?;
         Ok(Self {
             id: id.into(),
             accepted: HashSet::new(),

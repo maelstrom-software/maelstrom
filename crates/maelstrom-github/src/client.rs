@@ -22,6 +22,7 @@ use futures::{stream::TryStreamExt as _, StreamExt as _};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use std::str::FromStr;
+use std::time::SystemTime;
 use tokio::io::AsyncRead;
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 use url::Url;
@@ -114,12 +115,34 @@ impl TwirpClient {
     }
 }
 
+#[serde_as]
+#[derive(Serialize)]
+struct Timestamp {
+    #[serde_as(as = "DisplayFromStr")]
+    seconds: i64,
+    nanos: i32,
+}
+
+impl TryFrom<SystemTime> for Timestamp {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(t: SystemTime) -> std::result::Result<Self, Self::Error> {
+        let d = t.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        Ok(Self {
+            seconds: d.as_secs().try_into()?,
+            nanos: d.subsec_nanos().try_into()?,
+        })
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateArtifactRequest {
     #[serde(flatten)]
     backend_ids: BackendIds,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at: Option<Timestamp>,
     version: u32,
 }
 
@@ -206,10 +229,15 @@ impl GitHubClient {
     /// finalize the upload.
     ///
     /// The given name needs to be something unique, an error should be returned on collision.
-    pub async fn start_upload(&self, name: &str) -> Result<BlobClient> {
+    pub async fn start_upload(
+        &self,
+        name: &str,
+        expires_at: Option<SystemTime>,
+    ) -> Result<BlobClient> {
         let req = CreateArtifactRequest {
             backend_ids: self.client.backend_ids.clone(),
             name: name.into(),
+            expires_at: expires_at.map(|t| t.try_into().unwrap()),
             version: 4,
         };
         let resp: CreateArtifactResponse = self
@@ -248,8 +276,13 @@ impl GitHubClient {
     /// Upload the given content as an artifact. Once it returns success, the artifact should be
     /// immediately available for download. The given content can be an in-memory buffer or a
     /// [`FileStream`] created using [`FileStreamBuilder`].
-    pub async fn upload(&self, name: &str, content: impl Into<Body>) -> Result<()> {
-        let blob_client = self.start_upload(name).await?;
+    pub async fn upload(
+        &self,
+        name: &str,
+        expires_at: Option<SystemTime>,
+        content: impl Into<Body>,
+    ) -> Result<()> {
+        let blob_client = self.start_upload(name, expires_at).await?;
         let body: Body = content.into();
         let size = body.len();
         blob_client
@@ -359,6 +392,7 @@ impl GitHubClient {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::two_hours_from_now;
 
     const TEST_TOKEN: &str = include_str!("test_token.b64");
 
@@ -411,7 +445,10 @@ pub(crate) mod tests {
             return;
         }
 
-        client.upload("test_data", TEST_DATA).await.unwrap();
+        client
+            .upload("test_data", Some(two_hours_from_now()), TEST_DATA)
+            .await
+            .unwrap();
 
         let listing = client.list().await.unwrap();
         println!("got artifact listing {listing:?}");

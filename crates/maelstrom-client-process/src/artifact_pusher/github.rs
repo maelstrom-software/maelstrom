@@ -4,9 +4,14 @@ use anyhow::{anyhow, Result};
 use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
 use maelstrom_github::{FileStreamBuilder, GitHubClient, SeekableStream};
 use maelstrom_util::async_fs::Fs;
+use std::time::{Duration, SystemTime};
 use std::{path::PathBuf, sync::Arc};
 use tokio::task::JoinSet;
 use url::Url;
+
+fn two_hours_from_now() -> SystemTime {
+    SystemTime::now() + Duration::from_secs(60 * 60 * 24 * 2)
+}
 
 pub async fn push_one_artifact(
     github_client: Arc<GitHubClient>,
@@ -25,7 +30,9 @@ pub async fn push_one_artifact(
     let artifact_name = format!("maelstrom-cache-sha256-{digest}");
     let file_stream = FileStreamBuilder::new(file.into_inner()).build().await?;
     let stream = Box::new(UploadProgressReader::new(prog, file_stream)) as Box<dyn SeekableStream>;
-    github_client.upload(&artifact_name, stream).await?;
+    github_client
+        .upload(&artifact_name, Some(two_hours_from_now()), stream)
+        .await?;
 
     success_callback(ArtifactUploadLocation::Remote);
 
