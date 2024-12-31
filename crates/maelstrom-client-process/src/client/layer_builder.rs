@@ -11,7 +11,10 @@ use maelstrom_base::{
     ArtifactType, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client_base::{
-    spec::{GlobLayerSpec, LayerSpec, PathsLayerSpec, PrefixOptions, SymlinkSpec, TarLayerSpec},
+    spec::{
+        GlobLayerSpec, LayerSpec, PathsLayerSpec, PrefixOptions, StubsLayerSpec, SymlinkSpec,
+        TarLayerSpec,
+    },
     CacheDir, ProjectDir, MANIFEST_DIR, SO_LISTINGS_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_util::{
@@ -284,7 +287,7 @@ impl LayerBuilder {
                     .await?;
                 (manifest_path, ArtifactType::Manifest)
             }
-            LayerSpec::Stubs { stubs } => {
+            LayerSpec::Stubs(StubsLayerSpec { stubs }) => {
                 let manifest_path = self.build_stub_manifest(stubs).await?;
                 (manifest_path, ArtifactType::Manifest)
             }
@@ -320,7 +323,10 @@ impl LayerBuilder {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use maelstrom_test::utf8_path_buf;
+    use maelstrom_client_base::{
+        glob_layer_spec, paths_layer_spec, prefix_options, shared_library_dependencies_layer_spec,
+        stubs_layer_spec, symlink_spec, symlinks_layer_spec,
+    };
     use maelstrom_util::manifest::AsyncManifestReader;
     use maplit::hashmap;
     use std::{collections::HashMap, os::unix::fs::MetadataExt as _};
@@ -495,10 +501,9 @@ mod tests {
         fix.fs.write(&test_artifact, b"hello world").await.unwrap();
 
         let manifest = fix
-            .build_layer(LayerSpec::Paths(PathsLayerSpec {
-                paths: vec![test_artifact.try_into().unwrap()],
-                prefix_options: Default::default(),
-            }))
+            .build_layer(paths_layer_spec!([
+                Utf8PathBuf::try_from(test_artifact).unwrap()
+            ]))
             .await;
         verify_single_entry_manifest(
             &manifest,
@@ -515,10 +520,9 @@ mod tests {
         fix.fs.write(&test_artifact, b"hi").await.unwrap();
 
         let manifest = fix
-            .build_layer(LayerSpec::Paths(PathsLayerSpec {
-                paths: vec![test_artifact.try_into().unwrap()],
-                prefix_options: Default::default(),
-            }))
+            .build_layer(paths_layer_spec!([
+                Utf8PathBuf::try_from(test_artifact).unwrap()
+            ]))
             .await;
         verify_single_entry_manifest(
             &manifest,
@@ -563,10 +567,11 @@ mod tests {
     async fn paths_prefix_strip_and_prepend_absolute() {
         paths_and_prefix_options_test(
             |artifact_dir| artifact_dir.join("test_artifact"),
-            |artifact_dir| PrefixOptions {
-                strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
-                prepend_prefix: Some("foo/".into()),
-                ..Default::default()
+            |artifact_dir| {
+                prefix_options! {
+                    strip_prefix: Utf8PathBuf::try_from(artifact_dir.to_owned()).unwrap(),
+                    prepend_prefix: "foo/",
+                }
             },
             |_| Path::new("foo/test_artifact").to_owned(),
         )
@@ -577,10 +582,11 @@ mod tests {
     async fn paths_prefix_strip_and_prepend_relative() {
         paths_and_prefix_options_test(
             |_| Path::new("bar/test_artifact").to_owned(),
-            |_| PrefixOptions {
-                strip_prefix: Some("bar".into()),
-                prepend_prefix: Some("foo/".into()),
-                ..Default::default()
+            |_| {
+                prefix_options! {
+                    strip_prefix: "bar",
+                    prepend_prefix: "foo/",
+                }
             },
             |_| Path::new("foo/test_artifact").to_owned(),
         )
@@ -591,10 +597,7 @@ mod tests {
     async fn paths_prefix_strip_not_found_absolute() {
         paths_and_prefix_options_test(
             |artifact_dir| artifact_dir.join("test_artifact"),
-            |_| PrefixOptions {
-                strip_prefix: Some("not_there/".into()),
-                ..Default::default()
-            },
+            |_| prefix_options!(strip_prefix: "not_there/"),
             |artifact_dir| artifact_dir.join("test_artifact"),
         )
         .await;
@@ -604,10 +607,7 @@ mod tests {
     async fn paths_prefix_strip_not_found_relative() {
         paths_and_prefix_options_test(
             |_| Path::new("test_artifact").to_owned(),
-            |_| PrefixOptions {
-                strip_prefix: Some("not_there/".into()),
-                ..Default::default()
-            },
+            |_| prefix_options!(strip_prefix: "not_there/"),
             |_| Path::new("test_artifact").to_owned(),
         )
         .await;
@@ -617,10 +617,7 @@ mod tests {
     async fn paths_prefix_prepend_absolute() {
         paths_and_prefix_options_test(
             |artifact_dir| artifact_dir.join("test_artifact"),
-            |_| PrefixOptions {
-                prepend_prefix: Some("foo/bar".into()),
-                ..Default::default()
-            },
+            |_| prefix_options!(prepend_prefix: "foo/bar"),
             |artifact_dir| {
                 Path::new("foo/bar")
                     .join(artifact_dir.strip_prefix("/").unwrap())
@@ -634,10 +631,7 @@ mod tests {
     async fn paths_prefix_prepend_relative() {
         paths_and_prefix_options_test(
             |_| Path::new("test_artifact").to_owned(),
-            |_| PrefixOptions {
-                prepend_prefix: Some("foo/bar".into()),
-                ..Default::default()
-            },
+            |_| prefix_options!(prepend_prefix: "foo/bar"),
             |_| Path::new("foo/bar/test_artifact").to_owned(),
         )
         .await;
@@ -647,10 +641,7 @@ mod tests {
     async fn paths_prefix_canonicalize_relative() {
         paths_and_prefix_options_test(
             |_| Path::new("test_artifact").to_owned(),
-            |_| PrefixOptions {
-                canonicalize: true,
-                ..Default::default()
-            },
+            |_| prefix_options!(canonicalize: true),
             |artifact_dir| artifact_dir.join("test_artifact"),
         )
         .await;
@@ -660,10 +651,7 @@ mod tests {
     async fn paths_prefix_canonicalize_absolute() {
         paths_and_prefix_options_test(
             |artifact_dir| artifact_dir.join("test_artifact"),
-            |_| PrefixOptions {
-                canonicalize: true,
-                ..Default::default()
-            },
+            |_| prefix_options!(canonicalize: true),
             |artifact_dir| artifact_dir.join("test_artifact"),
         )
         .await
@@ -721,10 +709,11 @@ mod tests {
                 "foo.txt" => "hello world",
                 "bar.bin" => "hello world",
             },
-            |artifact_dir| PrefixOptions {
-                strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
-                prepend_prefix: Some("foo/bar".into()),
-                ..Default::default()
+            |artifact_dir| {
+                prefix_options! {
+                    strip_prefix: Utf8PathBuf::try_from(artifact_dir.to_owned()).unwrap(),
+                    prepend_prefix: "foo/bar",
+                }
             },
             Path::new("foo/bar/foo.txt"),
         )
@@ -739,9 +728,10 @@ mod tests {
                 "foo.txt" => "hello world",
                 "bar.bin" => "hello world",
             },
-            |artifact_dir| PrefixOptions {
-                strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
-                ..Default::default()
+            |artifact_dir| {
+                prefix_options! {
+                    strip_prefix: Utf8PathBuf::try_from(artifact_dir.to_owned()).unwrap(),
+                }
             },
             Path::new("foo.txt"),
         )
@@ -756,10 +746,7 @@ mod tests {
                 "foo.txt" => "hello world",
                 "bar.bin" => "hello world",
             },
-            |_| PrefixOptions {
-                prepend_prefix: Some("foo/".into()),
-                ..Default::default()
-            },
+            |_| prefix_options!(prepend_prefix: "foo/"),
             Path::new("foo/foo.txt"),
         )
         .await;
@@ -782,22 +769,13 @@ mod tests {
     #[tokio::test]
     async fn glob_no_files_relative() {
         let fix = Fixture::new().await;
-        let manifest = fix
-            .build_layer(LayerSpec::Glob(GlobLayerSpec {
-                glob: "*.txt".into(),
-                prefix_options: Default::default(),
-            }))
-            .await;
+        let manifest = fix.build_layer(glob_layer_spec!("*.txt")).await;
         verify_empty_manifest(&manifest).await;
     }
 
     async fn stubs_test(path: &str, expected: Vec<ExpectedManifestEntry>) {
         let fix = Fixture::new().await;
-        let manifest = fix
-            .build_layer(LayerSpec::Stubs {
-                stubs: vec![path.to_owned()],
-            })
-            .await;
+        let manifest = fix.build_layer(stubs_layer_spec!([path.to_owned()])).await;
         verify_manifest(&manifest, expected).await;
     }
 
@@ -896,12 +874,7 @@ mod tests {
     async fn symlink_test() {
         let fix = Fixture::new().await;
         let manifest = fix
-            .build_layer(LayerSpec::Symlinks {
-                symlinks: vec![SymlinkSpec {
-                    link: utf8_path_buf!("/foo"),
-                    target: utf8_path_buf!("/bar"),
-                }],
-            })
+            .build_layer(symlinks_layer_spec!([symlink_spec!("/foo" => "/bar")]))
             .await;
         verify_manifest(
             &manifest,
@@ -935,12 +908,9 @@ mod tests {
         let ld_linux_mode = fix.fs.metadata(&ld_linux_path).await.unwrap().mode();
 
         let manifest = fix
-            .build_layer(LayerSpec::SharedLibraryDependencies {
-                binary_paths: vec![test_binary],
-                prefix_options: PrefixOptions {
-                    follow_symlinks: true,
-                    ..Default::default()
-                },
+            .build_layer(shared_library_dependencies_layer_spec! {
+                [test_binary],
+                follow_symlinks: true,
             })
             .await;
         verify_manifest(

@@ -10,7 +10,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     glob_layer_spec, job_spec,
-    spec::{ContainerParent, ImageRef, LayerSpec, PathsLayerSpec, PrefixOptions},
+    spec::{ContainerParent, ImageRef, LayerSpec, PathsLayerSpec, PrefixOptions, StubsLayerSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
@@ -232,9 +232,9 @@ impl PytestTestCollector<'_> {
                 paths: vec![source_req_path.clone().try_into()?],
                 prefix_options: Default::default(),
             }),
-            LayerSpec::Stubs {
+            LayerSpec::Stubs(StubsLayerSpec {
                 stubs: vec!["/dev/null".into()],
-            },
+            }),
             LayerSpec::Paths(PathsLayerSpec {
                 paths: vec![resolv_conf.clone().try_into()?],
                 prefix_options: PrefixOptions {

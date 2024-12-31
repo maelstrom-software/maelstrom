@@ -1,32 +1,34 @@
 use super::{Deps, MainApp, MainAppMessage::*, MainAppMessageM, TestingOptions};
-use crate::config::{Repeat, StopAfter};
-use crate::deps::SimpleFilter;
-use crate::fake_test_framework::{
-    FakePackageId, FakeTestArtifact, FakeTestFilter, FakeTestPackage, TestCollector, TestOptions,
+use crate::{
+    config::{Repeat, StopAfter},
+    deps::SimpleFilter,
+    fake_test_framework::{
+        FakePackageId, FakeTestArtifact, FakeTestFilter, FakeTestPackage, TestCollector,
+        TestOptions,
+    },
+    metadata::Store as MetadataStore,
+    test_db::{OnDiskTestDb, TestDb},
+    ui::{
+        UiJobEnqueued, UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate,
+        UiMessage,
+    },
+    NoCaseMetadata, NotRunEstimate, StringArtifactKey, WaitStatus,
 };
-use crate::metadata::Store as MetadataStore;
-use crate::test_db::{OnDiskTestDb, TestDb};
-use crate::ui::{
-    UiJobEnqueued, UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,
-};
-use crate::{NoCaseMetadata, NotRunEstimate, StringArtifactKey, WaitStatus};
 use anyhow::anyhow;
 use itertools::Itertools as _;
 use maelstrom_base::{
-    nonempty, ClientJobId, JobBrokerStatus, JobCompleted, JobDevice, JobEffects, JobError,
-    JobMount, JobOutcome, JobOutputResult, JobTerminationStatus, JobWorkerStatus, NonEmpty,
+    devices_mount, nonempty, proc_mount, sys_mount, tmp_mount, ClientJobId, JobBrokerStatus,
+    JobCompleted, JobDevice, JobEffects, JobError, JobOutcome, JobOutputResult,
+    JobTerminationStatus, JobWorkerStatus, NonEmpty,
 };
 use maelstrom_client::{
     container_spec,
-    spec::{ContainerSpec, JobSpec, LayerSpec},
-    JobRunningStatus, JobStatus,
+    spec::{ContainerSpec, JobSpec},
+    stubs_layer_spec, JobRunningStatus, JobStatus,
 };
 use maelstrom_simex::SimulationExplorer;
 use maelstrom_util::process::ExitCode;
-use std::cell::RefCell;
-use std::collections::HashSet;
-use std::str::FromStr as _;
-use std::time::Duration;
+use std::{cell::RefCell, collections::HashSet, str::FromStr as _, time::Duration};
 use TestMessage::*;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -430,30 +432,22 @@ fn test_spec(bin: &str, name: &str) -> JobSpec {
 fn default_container() -> ContainerSpec {
     container_spec! {
         layers: [
-            LayerSpec::Stubs {
-                stubs: vec![
-                    "/{proc,sys,tmp}/".into(),
-                    "/dev/{full,null,random,urandom,zero}".into(),
-                ],
-            },
+            stubs_layer_spec! {[
+                "/{proc,sys,tmp}/",
+                "/dev/{full,null,random,urandom,zero}",
+            ]},
         ],
         mounts: [
-            JobMount::Tmp {
-                mount_point: "/tmp".into(),
-            },
-            JobMount::Proc {
-                mount_point: "/proc".into(),
-            },
-            JobMount::Sys {
-                mount_point: "/sys".into(),
-            },
-            JobMount::Devices {
-                devices: JobDevice::Full
-                    | JobDevice::Null
-                    | JobDevice::Random
-                    | JobDevice::Urandom
-                    | JobDevice::Zero,
-            },
+            tmp_mount!("/tmp"),
+            proc_mount!("/proc"),
+            sys_mount!("/sys"),
+            devices_mount!([
+                JobDevice::Full,
+                JobDevice::Null,
+                JobDevice::Random,
+                JobDevice::Urandom,
+                JobDevice::Zero,
+            ]),
         ],
     }
 }

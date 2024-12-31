@@ -1,13 +1,13 @@
 use assert_matches::assert_matches;
 use maelstrom_base::{
-    JobCompleted, JobEffects, JobMount, JobNetwork, JobOutcome, JobOutputResult,
+    sys_mount, JobCompleted, JobEffects, JobMount, JobNetwork, JobOutcome, JobOutputResult,
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
     glob_layer_spec, job_spec, paths_layer_spec,
     spec::{LayerSpec, SymlinkSpec},
-    tar_layer_spec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, ProjectDir, StateDir,
+    stubs_layer_spec, tar_layer_spec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client,
+    ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_util::{
     config::common::ArtifactTransferStrategy, elf::read_shared_libraries, fs::Fs, log::test_logger,
@@ -292,9 +292,7 @@ fn stubs_test(fix: &ClientFixture) {
     paths_test(
         fix,
         &[],
-        LayerSpec::Stubs {
-            stubs: vec!["/foo/{bar,baz}".into(), "/foo/qux/".into()],
-        },
+        stubs_layer_spec!(["/foo/{bar,baz}", "/foo/qux/"]),
         &["/foo/", "/foo/bar", "/foo/baz", "/foo/qux/"],
     )
 }
@@ -315,12 +313,8 @@ fn symlinks_test(fix: &ClientFixture) {
 
 fn sys_local_network_error_test(fix: &ClientFixture) {
     let error = fix.run_job_expecting_error(
-        vec![LayerSpec::Stubs {
-            stubs: vec!["/sys/".into()],
-        }],
-        vec![JobMount::Sys {
-            mount_point: "/sys".into(),
-        }],
+        vec![stubs_layer_spec!(["/sys/"])],
+        vec![sys_mount!("/sys")],
         JobNetwork::Local,
     );
     assert!(error.to_string().contains(

@@ -1019,10 +1019,7 @@ pub enum LayerSpec {
     Tar(TarLayerSpec),
     Glob(GlobLayerSpec),
     Paths(PathsLayerSpec),
-    #[proto(proto_buf_type = proto::StubsLayer)]
-    Stubs {
-        stubs: Vec<String>,
-    },
+    Stubs(StubsLayerSpec),
     #[proto(proto_buf_type = proto::SymlinksLayer)]
     Symlinks {
         symlinks: Vec<SymlinkSpec>,
@@ -1128,12 +1125,31 @@ macro_rules! paths_layer_spec {
     };
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    IntoProtoBuf,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    TryFromProtoBuf,
+)]
+#[proto(proto_buf_type = proto::StubsLayer)]
+#[serde(deny_unknown_fields)]
+pub struct StubsLayerSpec {
+    pub stubs: Vec<String>,
+}
+
 #[macro_export]
 macro_rules! stubs_layer_spec {
     ($stubs:expr) => {
-        $crate::spec::LayerSpec::Stubs {
+        $crate::spec::LayerSpec::Stubs($crate::spec::StubsLayerSpec {
             stubs: $stubs.into_iter().map(Into::into).collect(),
-        }
+        })
     };
 }
 
@@ -1166,7 +1182,7 @@ impl LayerSpec {
                     *path = vars.replace(path)?.into();
                 }
             }
-            Self::Stubs { stubs, .. } => {
+            Self::Stubs(StubsLayerSpec { stubs, .. }) => {
                 for stub in stubs {
                     *stub = vars.replace(stub)?;
                 }

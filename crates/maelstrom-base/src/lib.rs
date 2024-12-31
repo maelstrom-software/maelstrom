@@ -254,6 +254,15 @@ macro_rules! tmp_mount {
     };
 }
 
+#[macro_export]
+macro_rules! devices_mount {
+    ($devices:expr) => {
+        $crate::JobMount::Devices {
+            devices: $devices.into_iter().map($crate::JobDevice::from).collect(),
+        }
+    };
+}
+
 impl From<JobMountForTomlAndJson> for JobMount {
     fn from(job_mount: JobMountForTomlAndJson) -> JobMount {
         match job_mount {
