@@ -7,11 +7,23 @@ use azure_storage_blobs::prelude::BlobClient;
 use futures::stream::StreamExt as _;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use strum::FromRepr;
+
+#[derive(FromRepr)]
+#[repr(u8)]
+enum MessageHeader {
+    KeepAlive,
+    Payload,
+}
+
+const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct GitHubReadQueue {
     blob: BlobClient,
     index: usize,
     etag: Option<azure_core::Etag>,
+    last_message: Instant,
 }
 
 impl GitHubReadQueue {
@@ -21,6 +33,7 @@ impl GitHubReadQueue {
             blob,
             index: 0,
             etag: None,
+            last_message: Instant::now(),
         })
     }
 
@@ -71,27 +84,55 @@ impl GitHubReadQueue {
 
     pub async fn read_msg(&mut self) -> Result<Vec<u8>> {
         loop {
-            if let Some(res) = self.maybe_read_msg().await? {
-                return Ok(res);
+            if let Some(mut res) = self.maybe_read_msg().await? {
+                self.last_message = Instant::now();
+                match MessageHeader::from_repr(res.remove(0))
+                    .ok_or_else(|| anyhow!("malformed header"))?
+                {
+                    MessageHeader::KeepAlive => {}
+                    MessageHeader::Payload => {
+                        return Ok(res);
+                    }
+                }
+            }
+            if self.last_message.elapsed() > READ_TIMEOUT {
+                return Err(anyhow!("GitHub queue read timeout"));
             }
         }
     }
 }
 
+async fn send_keep_alive(blob: Arc<BlobClient>) {
+    loop {
+        tokio::time::sleep(READ_TIMEOUT / 2).await;
+        let _ = blob
+            .append_block(&[MessageHeader::KeepAlive as u8][..])
+            .await;
+    }
+}
+
 pub struct GitHubWriteQueue {
-    blob: BlobClient,
+    blob: Arc<BlobClient>,
+    keep_alive: tokio::task::AbortHandle,
 }
 
 impl GitHubWriteQueue {
     async fn new(client: &GitHubClient, key: &str) -> Result<Self> {
-        let blob = client.start_upload(key, Some(two_hours_from_now())).await?;
+        let blob = Arc::new(client.start_upload(key, Some(two_hours_from_now())).await?);
         blob.put_append_blob().await?;
         client.finish_upload(key, 0).await?;
-        Ok(Self { blob })
+        let keep_alive = tokio::task::spawn(send_keep_alive(blob.clone())).abort_handle();
+        Ok(Self { blob, keep_alive })
     }
 
     pub async fn write_msg(&mut self, data: &[u8]) -> Result<()> {
-        self.blob.append_block(data.to_owned()).await?;
+        let mut to_send = vec![MessageHeader::Payload as u8];
+        to_send.extend(data);
+        self.blob.append_block(to_send).await?;
+
+        self.keep_alive.abort();
+        self.keep_alive = tokio::task::spawn(send_keep_alive(self.blob.clone())).abort_handle();
+
         Ok(())
     }
 }

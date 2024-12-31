@@ -3565,6 +3565,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "strum",
  "tokio",
  "tokio-util",
  "url 2.5.2",
