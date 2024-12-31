@@ -15,6 +15,7 @@ use strum::FromRepr;
 enum MessageHeader {
     KeepAlive,
     Payload,
+    Shutdown,
 }
 
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
@@ -82,7 +83,7 @@ impl GitHubReadQueue {
         }
     }
 
-    pub async fn read_msg(&mut self) -> Result<Vec<u8>> {
+    pub async fn read_msg(&mut self) -> Result<Option<Vec<u8>>> {
         loop {
             if let Some(mut res) = self.maybe_read_msg().await? {
                 self.last_message = Instant::now();
@@ -91,7 +92,10 @@ impl GitHubReadQueue {
                 {
                     MessageHeader::KeepAlive => {}
                     MessageHeader::Payload => {
-                        return Ok(res);
+                        return Ok(Some(res));
+                    }
+                    MessageHeader::Shutdown => {
+                        return Ok(None);
                     }
                 }
             }
@@ -134,6 +138,16 @@ impl GitHubWriteQueue {
         self.keep_alive = tokio::task::spawn(send_keep_alive(self.blob.clone())).abort_handle();
 
         Ok(())
+    }
+}
+
+impl Drop for GitHubWriteQueue {
+    fn drop(&mut self) {
+        self.keep_alive.abort();
+        let blob = self.blob.clone();
+        tokio::task::spawn(async move {
+            blob.append_block(&[MessageHeader::Shutdown as u8][..]);
+        });
     }
 }
 
@@ -190,7 +204,7 @@ impl GitHubQueue {
         }
     }
 
-    pub async fn read_msg(&mut self) -> Result<Vec<u8>> {
+    pub async fn read_msg(&mut self) -> Result<Option<Vec<u8>>> {
         self.read.read_msg().await
     }
 
@@ -264,11 +278,9 @@ mod tests {
             handles.push(tokio::task::spawn(async move {
                 for _ in 0..3 {
                     queue.write_msg(&b"ping"[..]).await.unwrap();
-                    let msg = queue.read_msg().await.unwrap();
-                    assert_eq!(&msg, &b"pong");
+                    let msg = queue.read_msg().await.unwrap().unwrap();
+                    assert_eq!(msg, b"pong");
                 }
-
-                queue.write_msg(&b"done"[..]).await.unwrap();
             }));
         }
 
@@ -280,10 +292,10 @@ mod tests {
     async fn connector(client: GitHubClient) {
         let mut sock = GitHubQueue::connect(&client, "foo").await.unwrap();
         loop {
-            let msg = sock.read_msg().await.unwrap();
-            if msg == b"ping" {
+            if let Some(msg) = sock.read_msg().await.unwrap() {
+                assert_eq!(msg, b"ping");
                 sock.write_msg(&b"pong"[..]).await.unwrap();
-            } else if msg == b"done" {
+            } else {
                 break;
             }
         }
