@@ -285,6 +285,30 @@ impl ValueEnum for ArtifactTransferStrategy {
     }
 }
 
+#[pocket_definition(export)]
+#[derive(Copy, Clone, Debug, EnumString, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+pub enum BrokerConnection {
+    Tcp = 0,
+    #[serde(rename = "github")]
+    #[strum(serialize = "github")]
+    GitHub = 1,
+}
+
+impl ValueEnum for BrokerConnection {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Tcp, Self::GitHub][..]
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        match self {
+            Self::Tcp => Some(clap::builder::PossibleValue::new("tcp")),
+            Self::GitHub => Some(clap::builder::PossibleValue::new("github")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Debug, *};

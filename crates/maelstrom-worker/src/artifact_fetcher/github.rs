@@ -13,7 +13,6 @@ use maelstrom_util::{
 use slog::{debug, o, warn, Logger};
 use std::{num::NonZeroU32, sync::Arc};
 use tokio::task;
-use url::Url;
 
 pub struct GitHubArtifactFetcher {
     github_client: Arc<GitHubClient>,
@@ -21,17 +20,6 @@ pub struct GitHubArtifactFetcher {
     log: Logger,
     pool: Arc<Pool<()>>,
     temp_file_factory: TempFileFactory,
-}
-
-fn env_or_error(key: &str) -> Result<String> {
-    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
-}
-
-pub fn github_client_factory() -> Result<Arc<GitHubClient>> {
-    // XXX remi: I would prefer if we didn't read these from environment variables.
-    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-    let base_url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-    Ok(Arc::new(GitHubClient::new(&token, base_url)?))
 }
 
 impl GitHubArtifactFetcher {

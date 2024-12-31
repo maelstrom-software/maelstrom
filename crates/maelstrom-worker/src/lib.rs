@@ -4,6 +4,7 @@ pub mod config;
 pub mod local_worker;
 
 mod artifact_fetcher;
+mod connection;
 mod dispatcher;
 mod dispatcher_adapter;
 mod executor;
@@ -11,26 +12,25 @@ mod layer_fs;
 mod manifest_digest_cache;
 mod types;
 
-use anyhow::{anyhow, bail, Context as _, Error, Result};
-use artifact_fetcher::{github_client_factory, GitHubArtifactFetcher, TcpArtifactFetcher};
+use anyhow::{anyhow, bail, Error, Result};
+use artifact_fetcher::{GitHubArtifactFetcher, TcpArtifactFetcher};
 use config::Config;
+use connection::{BrokerConnection, BrokerReadConnection as _, BrokerWriteConnection as _};
 use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
 use executor::{MountDir, TmpfsDir};
-use maelstrom_base::proto::Hello;
+use maelstrom_github::{GitHubClient, GitHubQueue};
 use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux};
 use maelstrom_util::{
     cache::{self, fs::std::Fs as StdFs, TempFileFactory},
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, Slots},
-    net::{self, AsRawFdExt as _},
     root::RootBuf,
     signal,
 };
 use slog::{debug, error, info, Logger};
-use std::{future::Future, process};
+use std::{future::Future, process, sync::Arc};
 use tokio::{
-    io::BufReader,
     net::TcpStream,
     sync::mpsc,
     task::{self, JoinHandle},
@@ -39,12 +39,28 @@ use types::{
     BrokerSender, BrokerSocketOutgoingSender, Cache, DispatcherReceiver, DispatcherSender,
 };
 
+fn env_or_error(key: &str) -> Result<String> {
+    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
+}
+
+fn github_client_factory() -> Result<Arc<GitHubClient>> {
+    // XXX remi: I would prefer if we didn't read these from environment variables.
+    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
+    let base_url = url::Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+    Ok(Arc::new(GitHubClient::new(&token, base_url)?))
+}
+
 const MAX_PENDING_LAYERS_BUILDS: usize = 10;
 const MAX_ARTIFACT_FETCHES: usize = 1;
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
+    use maelstrom_util::config::common::BrokerConnection::*;
+
     info!(log, "started"; "config" => ?config, "pid" => process::id());
-    let err = main_inner(config, &log).unwrap_err();
+    let err = match config.broker_connection {
+        Tcp => main_inner::<TcpStream>(config, &log).unwrap_err(),
+        GitHub => main_inner::<GitHubQueue>(config, &log).unwrap_err(),
+    };
     error!(log, "exiting"; "error" => %err);
     Err(err)
 }
@@ -52,27 +68,11 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
 #[tokio::main]
-async fn main_inner(config: Config, log: &Logger) -> Result<()> {
+async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger) -> Result<()> {
     check_open_file_limit(log, config.slots, 0)?;
 
-    let (read_stream, mut write_stream) = TcpStream::connect(config.broker.inner())
-        .await
-        .map_err(|err| {
-            error!(log, "error connecting to broker"; "error" => %err);
-            err
-        })?
-        .set_socket_options()?
-        .into_split();
-    let read_stream = BufReader::new(read_stream);
-
-    net::write_message_to_async_socket(
-        &mut write_stream,
-        Hello::Worker {
-            slots: (*config.slots.inner()).into(),
-        },
-        log,
-    )
-    .await?;
+    let (read_stream, write_stream) =
+        ConnectionT::connect(&config.broker, config.slots, log).await?;
 
     let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =
@@ -81,26 +81,13 @@ async fn main_inner(config: Config, log: &Logger) -> Result<()> {
     let log_clone = log.clone();
     let dispatcher_sender_clone = dispatcher_sender.clone();
     task::spawn(shutdown_on_error(
-        async move {
-            net::async_socket_reader(
-                read_stream,
-                dispatcher_sender_clone,
-                Message::Broker,
-                &log_clone,
-            )
-            .await
-            .context("error communicating with broker")
-        },
+        read_stream.read_messages(dispatcher_sender_clone, log_clone),
         dispatcher_sender.clone(),
     ));
 
     let log_clone = log.clone();
     task::spawn(shutdown_on_error(
-        async move {
-            net::async_socket_writer(broker_socket_outgoing_receiver, write_stream, &log_clone)
-                .await
-                .context("error communicating with broker")
-        },
+        write_stream.write_messages(broker_socket_outgoing_receiver, log_clone),
         dispatcher_sender.clone(),
     ));
 

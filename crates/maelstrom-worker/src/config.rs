@@ -1,7 +1,8 @@
 use maelstrom_macro::Config;
 use maelstrom_util::{
     config::common::{
-        ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots,
+        ArtifactTransferStrategy, BrokerAddr, BrokerConnection, CacheSize, InlineLimit, LogLevel,
+        Slots,
     },
     root::RootBuf,
 };
@@ -51,4 +52,8 @@ pub struct Config {
         hide
     )]
     pub artifact_transfer_strategy: ArtifactTransferStrategy,
+
+    /// Controls how we connect to the broker.
+    #[config(value_name = "BROKER_CONNECTION", default = r#""tcp""#, hide)]
+    pub broker_connection: BrokerConnection,
 }
