@@ -314,6 +314,10 @@ impl<BlobT: QueueBlob> GitHubQueue<BlobT> {
     pub async fn shut_down(&mut self) -> Result<()> {
         self.write.shut_down().await
     }
+
+    pub fn into_split(self) -> (GitHubReadQueue<BlobT>, GitHubWriteQueue<BlobT>) {
+        (self.read, self.write)
+    }
 }
 
 pub struct GitHubQueueAcceptor<ConnT = GitHubClient> {
