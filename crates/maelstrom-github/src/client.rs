@@ -119,7 +119,10 @@ fn rfc3339_encode<S>(v: &Option<DateTime<Utc>>, s: S) -> std::result::Result<S::
 where
     S: serde::Serializer,
 {
-    s.serialize_str(&format!("{}", v.unwrap().format("%+")))
+    s.serialize_str(
+        &v.unwrap()
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    )
 }
 
 #[derive(Serialize)]
@@ -134,6 +137,32 @@ struct CreateArtifactRequest {
     )]
     expires_at: Option<DateTime<Utc>>,
     version: u32,
+}
+
+#[test]
+fn create_artifact_json() {
+    use chrono::TimeZone as _;
+    use serde_json::json;
+
+    let req = CreateArtifactRequest {
+        backend_ids: BackendIds {
+            workflow_run_backend_id: "run_id".into(),
+            workflow_job_run_backend_id: "job_id".into(),
+        },
+        name: "foo".into(),
+        expires_at: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()),
+        version: 4,
+    };
+    assert_eq!(
+        serde_json::to_value(&req).unwrap(),
+        json!({
+            "workflowRunBackendId": "run_id",
+            "workflowJobRunBackendId":"job_id",
+            "name": "foo",
+            "expiresAt": "2020-01-01T00:00:00.000Z",
+            "version": 4
+        })
+    );
 }
 
 #[derive(Serialize)]
