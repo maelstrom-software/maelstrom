@@ -338,7 +338,7 @@ impl<StreamT: AsyncRead + AsyncWrite + AsyncSeek + Unpin> BufferedStream<StreamT
     }
 
     fn fill_cache(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if self.chunks.len() == self.chunks.cap().into() {
+        if self.chunks.len() == usize::from(self.chunks.cap()) {
             ready!(self.flush_lru(cx))?;
         }
 

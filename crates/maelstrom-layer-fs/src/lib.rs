@@ -841,7 +841,7 @@ mod tests {
                 assert_eq!(Mode(attrs.mode() & 0o777), *mode);
             }
             if let Some(mtime) = &self.mtime {
-                assert_eq!(attrs.mtime(), (*mtime).into());
+                assert_eq!(attrs.mtime(), i64::from(*mtime));
             }
             if let Some(ino) = &self.ino {
                 assert_eq!(attrs.ino(), *ino);
