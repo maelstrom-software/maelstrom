@@ -8,10 +8,11 @@ mod connection;
 mod http;
 mod scheduler_task;
 
-use anyhow::{Context as _, Result};
+use anyhow::{anyhow, Context as _, Result};
 use cache::{github::GithubCache, local::TcpUploadLocalCache, BrokerCache, SchedulerCache};
 use config::Config;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
+use maelstrom_github::GitHubClient;
 use maelstrom_util::config::common::ArtifactTransferStrategy;
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, info, Logger};
@@ -58,6 +59,17 @@ async fn stats_heartbeat<TempFileT>(sender: SchedulerSender<TempFileT>) {
     }
 }
 
+fn env_or_error(key: &str) -> Result<String> {
+    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
+}
+
+fn github_client() -> Result<Arc<GitHubClient>> {
+    // XXX remi: I would prefer if we didn't read these from environment variables.
+    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
+    let base_url = url::Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+    Ok(Arc::new(GitHubClient::new(&token, base_url)?))
+}
+
 /// The main function for the broker. It will return when a signal is received, or when the broker
 /// or http listener socket returns an error at accept time.
 async fn main_inner_inner<BrokerCacheT>(
@@ -86,13 +98,22 @@ where
         id_vendor.clone(),
         log.clone(),
     ));
-    join_set.spawn(connection::listener_main(
+    join_set.spawn(connection::tcp_listener_main(
         listener,
         scheduler_task.scheduler_sender().clone(),
-        id_vendor,
+        id_vendor.clone(),
         temp_file_factory,
         log.clone(),
     ));
+    if let Ok(client) = github_client() {
+        join_set.spawn(connection::github_acceptor_main(
+            client,
+            scheduler_task.scheduler_sender().clone(),
+            id_vendor,
+            log.clone(),
+        ));
+    }
+
     join_set.spawn(stats_heartbeat(scheduler_task.scheduler_sender().clone()));
     join_set.spawn(scheduler_task.run());
     join_set.spawn(signal_handler(

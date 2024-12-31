@@ -4,11 +4,13 @@ use crate::{
     scheduler_task::{SchedulerMessage, SchedulerSender},
     IdVendor,
 };
-use anyhow::Result;
+use anyhow::{Error, Result};
+use maelstrom_base::proto;
 use maelstrom_base::{
     proto::{ClientToBroker, Hello},
     ClientId, MonitorId, WorkerId,
 };
+use maelstrom_github::{GitHubClient, GitHubQueue, GitHubQueueAcceptor};
 use maelstrom_util::net::{self, AsRawFdExt};
 use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};
@@ -103,7 +105,7 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
     scheduler_sender.send(disconnected_msg_builder(id)).ok();
 }
 
-async fn unassigned_connection_main<TempFileFactoryT>(
+async fn unassigned_tcp_connection_main<TempFileFactoryT>(
     socket: TcpStream,
     scheduler_sender: SchedulerSender<TempFileFactoryT::TempFile>,
     id_vendor: Arc<IdVendor>,
@@ -235,10 +237,7 @@ async fn unassigned_connection_main<TempFileFactoryT>(
     }
 }
 
-/// Main loop for the listener. This should be run on a task of its own. There should be at least
-/// one of these in a broker process. It will only return when it encounters an error. Until then,
-/// it listens on a socket and spawns new tasks for each client or worker that connects.
-pub async fn listener_main<TempFileFactoryT>(
+pub async fn tcp_listener_main<TempFileFactoryT>(
     listener: TcpListener,
     scheduler_sender: SchedulerSender<TempFileFactoryT::TempFile>,
     id_vendor: Arc<IdVendor>,
@@ -253,11 +252,108 @@ pub async fn listener_main<TempFileFactoryT>(
             Ok((socket, peer_addr)) => {
                 let log = log.new(o!("peer_addr" => peer_addr));
                 debug!(log, "new connection");
-                task::spawn(unassigned_connection_main(
+                task::spawn(unassigned_tcp_connection_main(
                     socket,
                     scheduler_sender.clone(),
                     id_vendor.clone(),
                     temp_file_factory.clone(),
+                    log,
+                ));
+            }
+            Err(err) => {
+                error!(log, "error accepting connection"; "error" => %err);
+                return;
+            }
+        }
+    }
+}
+
+async fn unassigned_github_connection_main<TempFileT>(
+    mut queue: GitHubQueue,
+    scheduler_sender: SchedulerSender<TempFileT>,
+    id_vendor: Arc<IdVendor>,
+    log: Logger,
+) where
+    TempFileT: Send + Sync + 'static,
+{
+    match queue.read_msg().await.and_then(|m| {
+        m.map(|m| proto::deserialize(&m).map_err(Error::from))
+            .transpose()
+    }) {
+        Ok(Some(Hello::Client)) => {
+            warn!(log, "github queue said it was client");
+        }
+        Ok(Some(Hello::Worker { slots })) => {
+            let (read_stream, write_stream) = queue.into_split();
+            let id: WorkerId = id_vendor.vend();
+            let log = log.new(o!("wid" => id.to_string(), "slots" => slots));
+            info!(log, "worker connected");
+            let log_clone = log.clone();
+            let log_clone2 = log.clone();
+            connection_main(
+                scheduler_sender,
+                id,
+                |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
+                SchedulerMessage::WorkerDisconnected,
+                |scheduler_sender| async move {
+                    let _ = net::github_queue_reader(
+                        read_stream,
+                        scheduler_sender,
+                        |msg| SchedulerMessage::FromWorker(id, msg),
+                        &log_clone,
+                    )
+                    .await;
+                },
+                |scheduler_receiver| async move {
+                    let _ = net::github_queue_writer(scheduler_receiver, write_stream, &log_clone2)
+                        .await;
+                },
+            )
+            .await;
+            info!(log, "worker disconnected");
+        }
+        Ok(Some(Hello::Monitor)) => {
+            warn!(log, "github queue said it was monitor");
+        }
+        Ok(Some(Hello::ArtifactFetcher)) => {
+            warn!(log, "github queue said it was artifact fetcher");
+        }
+        Ok(Some(Hello::ArtifactPusher)) => {
+            warn!(log, "github queue said it was artifact pusher");
+        }
+        Ok(None) => {
+            warn!(log, "github queue shutdown");
+        }
+        Err(err) => {
+            warn!(log, "error reading hello message"; "error" => %err);
+        }
+    }
+}
+
+pub async fn github_acceptor_main<TempFileT>(
+    client: Arc<GitHubClient>,
+    scheduler_sender: SchedulerSender<TempFileT>,
+    id_vendor: Arc<IdVendor>,
+    log: Logger,
+) where
+    TempFileT: Send + Sync + 'static,
+{
+    let mut acceptor = match GitHubQueueAcceptor::new(client, "maelstrom-broker").await {
+        Ok(a) => a,
+        Err(err) => {
+            error!(log, "error accepting connection"; "error" => %err);
+            return;
+        }
+    };
+    loop {
+        match acceptor.accept_one().await {
+            Ok(queue) => {
+                let log = log.new(o!("peer_addr" => "github peer"));
+                debug!(log, "new connection");
+                task::spawn(unassigned_github_connection_main(
+                    queue,
+                    scheduler_sender.clone(),
+                    id_vendor.clone(),
                     log,
                 ));
             }

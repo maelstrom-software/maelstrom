@@ -7,23 +7,15 @@ use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::AsyncRead;
-use url::Url;
 
 pub struct GitHubArtifactReader {
     client: Arc<GitHubClient>,
 }
 
-fn env_or_error(key: &str) -> Result<String> {
-    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
-}
-
 impl GitHubArtifactReader {
     fn new() -> Result<Self> {
-        // XXX remi: I would prefer if we didn't read these from environment variables.
-        let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-        let base_url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
         Ok(Self {
-            client: Arc::new(GitHubClient::new(&token, base_url)?),
+            client: crate::github_client()?,
         })
     }
 }
