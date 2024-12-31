@@ -3814,6 +3814,7 @@ dependencies = [
  "lddtree",
  "lru",
  "maelstrom-base",
+ "maelstrom-github",
  "maelstrom-linux",
  "maelstrom-macro",
  "maelstrom-simex",

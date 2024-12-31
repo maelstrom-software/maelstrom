@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use maelstrom_base::proto;
+use maelstrom_github::{GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_linux::{self as linux, Fd};
 use serde::{de::DeserializeOwned, Serialize};
 use slog::{debug, Logger};
@@ -140,4 +141,75 @@ impl<T: AsRawFd> AsRawFdExt for T {
         linux::setsockopt_tcp_keepintvl(&fd, 300)?;
         Ok(self)
     }
+}
+
+pub async fn read_message_from_github_queue<MessageT>(
+    queue: &mut GitHubReadQueue,
+    log: &Logger,
+) -> Result<Option<MessageT>>
+where
+    MessageT: Debug + DeserializeOwned,
+{
+    async {
+        queue
+            .read_msg()
+            .await?
+            .as_ref()
+            .map(|m| proto::deserialize(m))
+            .transpose()
+            .map_err(anyhow::Error::from)
+    }
+    .await
+    .inspect(|msg| {
+        if let Some(msg) = msg {
+            debug!(log, "received message"; "message" => #?msg)
+        }
+    })
+    .inspect_err(|err| debug!(log, "error receiving message"; "error" => %err))
+}
+
+pub async fn github_queue_reader<MessageT, TransformedT>(
+    mut queue: GitHubReadQueue,
+    channel: UnboundedSender<TransformedT>,
+    transform: impl Fn(MessageT) -> TransformedT,
+    log: &Logger,
+) -> Result<()>
+where
+    MessageT: Debug + DeserializeOwned,
+{
+    while let Some(msg) = read_message_from_github_queue(&mut queue, log).await? {
+        if channel.send(transform(msg)).is_err() {
+            break;
+        }
+    }
+    Ok(())
+}
+
+pub async fn write_message_to_github_queue<MessageT>(
+    queue: &mut GitHubWriteQueue,
+    msg: &MessageT,
+    log: &Logger,
+) -> Result<()>
+where
+    MessageT: Debug + Serialize,
+{
+    queue
+        .write_msg(&proto::serialize(msg).unwrap())
+        .await
+        .inspect_err(|err| debug!(log, "error sending message"; "error" => %err))?;
+    Ok(())
+}
+
+pub async fn github_queue_writer<MessageT>(
+    mut channel: UnboundedReceiver<MessageT>,
+    mut queue: GitHubWriteQueue,
+    log: &Logger,
+) -> Result<()>
+where
+    MessageT: Debug + Serialize,
+{
+    while let Some(msg) = channel.recv().await {
+        write_message_to_github_queue(&mut queue, &msg, log).await?;
+    }
+    Ok(())
 }
