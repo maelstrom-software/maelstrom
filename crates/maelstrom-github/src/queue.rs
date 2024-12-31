@@ -104,7 +104,7 @@ enum MessageHeader {
 
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub struct GitHubReadQueue<BlobT> {
+pub struct GitHubReadQueue<BlobT = BlobClient> {
     blob: BlobT,
     index: usize,
     etag: Option<Etag>,
@@ -189,7 +189,7 @@ async fn send_keep_alive(duration: Duration, blob: Arc<impl QueueBlob>) {
     }
 }
 
-pub struct GitHubWriteQueue<BlobT> {
+pub struct GitHubWriteQueue<BlobT = BlobClient> {
     blob: Arc<BlobT>,
     keep_alive: tokio::task::AbortHandle,
     keep_alive_duration: Duration,
@@ -243,7 +243,7 @@ async fn wait_for_artifact(conn: &impl QueueConnection, key: &str) -> Result<()>
     Ok(())
 }
 
-pub struct GitHubQueue<BlobT> {
+pub struct GitHubQueue<BlobT = BlobClient> {
     read: GitHubReadQueue<BlobT>,
     write: GitHubWriteQueue<BlobT>,
 }
@@ -316,7 +316,7 @@ impl<BlobT: QueueBlob> GitHubQueue<BlobT> {
     }
 }
 
-pub struct GitHubQueueAcceptor<ConnT> {
+pub struct GitHubQueueAcceptor<ConnT = GitHubClient> {
     id: String,
     accepted: HashSet<String>,
     conn: Arc<ConnT>,
