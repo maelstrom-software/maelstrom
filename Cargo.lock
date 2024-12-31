@@ -3559,6 +3559,7 @@ dependencies = [
  "azure_core",
  "azure_storage_blobs",
  "base64 0.22.1",
+ "chrono",
  "futures",
  "reqwest",
  "serde",

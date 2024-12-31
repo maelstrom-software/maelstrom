@@ -115,24 +115,14 @@ impl TwirpClient {
     }
 }
 
-#[serde_as]
-#[derive(Serialize)]
-struct Timestamp {
-    #[serde_as(as = "DisplayFromStr")]
-    seconds: i64,
-    nanos: i32,
-}
-
-impl TryFrom<SystemTime> for Timestamp {
-    type Error = std::num::TryFromIntError;
-
-    fn try_from(t: SystemTime) -> std::result::Result<Self, Self::Error> {
-        let d = t.duration_since(SystemTime::UNIX_EPOCH).unwrap();
-        Ok(Self {
-            seconds: d.as_secs().try_into()?,
-            nanos: d.subsec_nanos().try_into()?,
-        })
-    }
+fn rfc3339_encode<S>(v: &Option<SystemTime>, s: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    s.serialize_str(&format!(
+        "{}",
+        chrono::DateTime::<chrono::Utc>::from(v.unwrap()).format("%+")
+    ))
 }
 
 #[derive(Serialize)]
@@ -141,8 +131,11 @@ struct CreateArtifactRequest {
     #[serde(flatten)]
     backend_ids: BackendIds,
     name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expires_at: Option<Timestamp>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "rfc3339_encode"
+    )]
+    expires_at: Option<SystemTime>,
     version: u32,
 }
 
@@ -237,7 +230,7 @@ impl GitHubClient {
         let req = CreateArtifactRequest {
             backend_ids: self.client.backend_ids.clone(),
             name: name.into(),
-            expires_at: expires_at.map(|t| t.try_into().unwrap()),
+            expires_at,
             version: 4,
         };
         let resp: CreateArtifactResponse = self
