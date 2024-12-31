@@ -151,9 +151,9 @@ where
     MessageT: Debug + DeserializeOwned,
 {
     async {
-        queue
-            .read_msg()
-            .await?
+        let raw_msg = queue.read_msg().await?;
+        debug!(log, "received raw message"; "raw_message" => #?raw_msg);
+        raw_msg
             .as_ref()
             .map(|m| proto::deserialize(m))
             .transpose()

@@ -13,7 +13,7 @@ PYTEST_ARGS=""
 if [[ $# -gt 0 ]]; then
     export ACTIONS_RUNTIME_TOKEN=$1
     export ACTIONS_RESULTS_URL=$2
-    BROKER_ARGS="$BROKER_ARGS --artifact-transfer-strategy github"
+    BROKER_ARGS="$BROKER_ARGS --artifact-transfer-strategy github --log-level=debug"
     WORKER_ARGS="$WORKER_ARGS --artifact-transfer-strategy github --broker-connection github"
     CARGO_ARGS="$CARGO_ARGS --artifact-transfer-strategy github"
     PYTEST_ARGS="$PYTEST_ARGS --artifact-transfer-strategy github"
