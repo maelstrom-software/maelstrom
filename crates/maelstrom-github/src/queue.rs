@@ -24,7 +24,6 @@ pub struct GitHubReadQueue {
     blob: BlobClient,
     index: usize,
     etag: Option<azure_core::Etag>,
-    last_message: Instant,
 }
 
 impl GitHubReadQueue {
@@ -34,7 +33,6 @@ impl GitHubReadQueue {
             blob,
             index: 0,
             etag: None,
-            last_message: Instant::now(),
         })
     }
 
@@ -84,13 +82,15 @@ impl GitHubReadQueue {
     }
 
     pub async fn read_msg(&mut self) -> Result<Option<Vec<u8>>> {
+        let mut read_start = Instant::now();
         loop {
             if let Some(mut res) = self.maybe_read_msg().await? {
-                self.last_message = Instant::now();
                 match MessageHeader::from_repr(res.remove(0))
                     .ok_or_else(|| anyhow!("malformed header"))?
                 {
-                    MessageHeader::KeepAlive => {}
+                    MessageHeader::KeepAlive => {
+                        read_start = Instant::now();
+                    }
                     MessageHeader::Payload => {
                         return Ok(Some(res));
                     }
@@ -99,7 +99,7 @@ impl GitHubReadQueue {
                     }
                 }
             }
-            if self.last_message.elapsed() > READ_TIMEOUT {
+            if read_start.elapsed() > READ_TIMEOUT {
                 return Err(anyhow!("GitHub queue read timeout"));
             }
         }
