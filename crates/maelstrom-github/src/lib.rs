@@ -11,5 +11,5 @@ pub use client::*;
 pub use queue::*;
 
 fn two_hours_from_now() -> DateTime<Utc> {
-    Utc::now() + Duration::from_secs(60 * 60 * 24 * 2)
+    Utc::now() + Duration::from_secs(60 * 60 * 2)
 }

@@ -11,7 +11,7 @@ use tokio::task::JoinSet;
 use url::Url;
 
 fn two_hours_from_now() -> DateTime<Utc> {
-    Utc::now() + Duration::from_secs(60 * 60 * 24 * 2)
+    Utc::now() + Duration::from_secs(60 * 60 * 2)
 }
 
 pub async fn push_one_artifact(
