@@ -1027,44 +1027,6 @@ enum LayerSpecType {
     SharedLibraryDependencies,
 }
 
-impl<'de> Deserialize<'de> for LayerSpec {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let content = Content::deserialize(deserializer)?;
-        let Content::Map(fields) = &content else {
-            return Err(D::Error::custom(
-                "expected a map in order to parse a layer specification",
-            ));
-        };
-        let Some(kind) = fields.iter().find_map(|(key, _)| {
-            key.as_str().and_then(|field| match field {
-                "tar" => Some(LayerSpecType::Tar),
-                "glob" => Some(LayerSpecType::Glob),
-                "paths" => Some(LayerSpecType::Paths),
-                "stubs" => Some(LayerSpecType::Stubs),
-                "symlinks" => Some(LayerSpecType::Symlinks),
-                "shared_library_dependencies" => Some(LayerSpecType::SharedLibraryDependencies),
-                _ => None,
-            })
-        }) else {
-            return Err(D::Error::custom("couldn't determine layer type"));
-        };
-        let deserializer = ContentRefDeserializer::<D::Error>::new(&content);
-        match kind {
-            LayerSpecType::Tar => TarLayerSpec::deserialize(deserializer).map(Self::Tar),
-            LayerSpecType::Glob => GlobLayerSpec::deserialize(deserializer).map(Self::Glob),
-            LayerSpecType::Paths => PathsLayerSpec::deserialize(deserializer).map(Self::Paths),
-            LayerSpecType::Stubs => StubsLayerSpec::deserialize(deserializer).map(Self::Stubs),
-            LayerSpecType::Symlinks => {
-                SymlinksLayerSpec::deserialize(deserializer).map(Self::Symlinks)
-            }
-            LayerSpecType::SharedLibraryDependencies => {
-                SharedLibraryDependenciesLayerSpec::deserialize(deserializer)
-                    .map(Self::SharedLibraryDependencies)
-            }
-        }
-    }
-}
-
 #[derive(
     Clone,
     Debug,
@@ -1243,6 +1205,44 @@ macro_rules! shared_library_dependencies_layer_spec {
             prefix_options: $crate::prefix_options!($($($prefix_option)*)?),
         })
     };
+}
+
+impl<'de> Deserialize<'de> for LayerSpec {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let content = Content::deserialize(deserializer)?;
+        let Content::Map(fields) = &content else {
+            return Err(D::Error::custom(
+                "expected a map in order to parse a layer specification",
+            ));
+        };
+        let Some(kind) = fields.iter().find_map(|(key, _)| {
+            key.as_str().and_then(|field| match field {
+                "tar" => Some(LayerSpecType::Tar),
+                "glob" => Some(LayerSpecType::Glob),
+                "paths" => Some(LayerSpecType::Paths),
+                "stubs" => Some(LayerSpecType::Stubs),
+                "symlinks" => Some(LayerSpecType::Symlinks),
+                "shared_library_dependencies" => Some(LayerSpecType::SharedLibraryDependencies),
+                _ => None,
+            })
+        }) else {
+            return Err(D::Error::custom("couldn't determine layer type"));
+        };
+        let deserializer = ContentRefDeserializer::<D::Error>::new(&content);
+        match kind {
+            LayerSpecType::Tar => TarLayerSpec::deserialize(deserializer).map(Self::Tar),
+            LayerSpecType::Glob => GlobLayerSpec::deserialize(deserializer).map(Self::Glob),
+            LayerSpecType::Paths => PathsLayerSpec::deserialize(deserializer).map(Self::Paths),
+            LayerSpecType::Stubs => StubsLayerSpec::deserialize(deserializer).map(Self::Stubs),
+            LayerSpecType::Symlinks => {
+                SymlinksLayerSpec::deserialize(deserializer).map(Self::Symlinks)
+            }
+            LayerSpecType::SharedLibraryDependencies => {
+                SharedLibraryDependenciesLayerSpec::deserialize(deserializer)
+                    .map(Self::SharedLibraryDependencies)
+            }
+        }
+    }
 }
 
 impl LayerSpec {
@@ -3062,12 +3062,85 @@ mod tests {
             }
         }
 
-        /*
-        #[test]
-        fn replace_template_vars() {
-            assert!(false);
+        mod replace_template_vars {
+            use super::*;
+
+            #[track_caller]
+            fn replace_template_vars_test(toml: &str, expected: LayerSpec) {
+                let mut actual: LayerSpec = parse_toml(toml);
+                actual
+                    .replace_template_vars(&TemplateVars::new([
+                        ("foo", "foo-value"),
+                        ("bar", "bar-value"),
+                    ]))
+                    .unwrap();
+                assert_eq!(actual, expected);
+            }
+
+            #[test]
+            fn tar() {
+                replace_template_vars_test(
+                    indoc! {r#"
+                        tar = "<foo>/<bar>/baz.tar"
+                    "#},
+                    tar_layer_spec!("foo-value/bar-value/baz.tar"),
+                );
+            }
+
+            #[test]
+            fn glob() {
+                replace_template_vars_test(
+                    indoc! {r#"
+                        glob = "<foo>/<bar>/*.tar"
+                        strip_prefix = "<foo>/"
+                        prepend_prefix = "<bar>/"
+                    "#},
+                    glob_layer_spec! {
+                        "foo-value/bar-value/*.tar",
+                        strip_prefix: "<foo>/",
+                        prepend_prefix: "<bar>/",
+                    },
+                );
+            }
+
+            #[test]
+            fn paths() {
+                replace_template_vars_test(
+                    indoc! {r#"
+                        paths = ["<foo>/foo.tar", "<bar>/bar.tar"]
+                        strip_prefix = "<foo>/"
+                        prepend_prefix = "<bar>/"
+                    "#},
+                    paths_layer_spec! {
+                        ["foo-value/foo.tar", "bar-value/bar.tar"],
+                        strip_prefix: "<foo>/",
+                        prepend_prefix: "<bar>/",
+                    },
+                );
+            }
+
+            #[test]
+            fn stubs() {
+                replace_template_vars_test(
+                    indoc! {r#"
+                        stubs = ["<foo>/foo/", "<bar>/bar/"]
+                    "#},
+                    stubs_layer_spec!(["foo-value/foo/", "bar-value/bar/"]),
+                );
+            }
+
+            #[test]
+            fn symlinks() {
+                replace_template_vars_test(
+                    indoc! {r#"
+                        symlinks = [ { link = "<foo>/symlink", target = "<bar>/target"} ]
+                    "#},
+                    symlinks_layer_spec!([
+                        symlink_spec!("foo-value/symlink" => "bar-value/target")
+                    ]),
+                );
+            }
         }
-        */
     }
 
     mod container_spec {
