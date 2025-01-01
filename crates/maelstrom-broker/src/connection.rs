@@ -291,6 +291,9 @@ async fn unassigned_github_connection_main<TempFileT>(
             info!(log, "worker connected");
             let log_clone = log.clone();
             let log_clone2 = log.clone();
+
+            let write_queue = Arc::new(tokio::sync::Mutex::new(write_queue));
+            let write_queue_clone = write_queue.clone();
             connection_main(
                 scheduler_sender,
                 id,
@@ -306,6 +309,7 @@ async fn unassigned_github_connection_main<TempFileT>(
                     .await;
                 },
                 |scheduler_receiver| async move {
+                    let mut write_queue = write_queue_clone.lock().await;
                     let _ =
                         net::github_queue_writer(scheduler_receiver, &mut write_queue, &log_clone2)
                             .await;
@@ -313,6 +317,7 @@ async fn unassigned_github_connection_main<TempFileT>(
             )
             .await;
             info!(log, "worker disconnected");
+            let _ = write_queue.lock().await.shut_down().await;
 
             return;
         }
