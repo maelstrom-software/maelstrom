@@ -255,7 +255,8 @@ impl<BlobT: QueueBlob> GitHubWriteQueue<BlobT> {
     pub async fn write_many_msgs(&mut self, messages: &[Vec<u8>]) -> Result<()> {
         let mut to_send = vec![];
         for data in messages {
-            bincode::serialize(&MessageHeader::Payload { size: data.len() }).unwrap();
+            to_send
+                .extend(bincode::serialize(&MessageHeader::Payload { size: data.len() }).unwrap());
             to_send.extend(data);
         }
         self.blob.write(to_send).await?;
@@ -662,6 +663,23 @@ mod tests {
 
         let mut expected = bincode::serialize(&MessageHeader::Payload { size: 5 }).unwrap();
         expected.extend(sent);
+
+        let b = conn.get_blob(b_ids(), "foo").await.unwrap();
+        assert_eq!(b.data(), expected);
+    }
+
+    #[tokio::test]
+    async fn write_many_msgs() {
+        let conn = FakeConnection::default();
+        let mut queue = GitHubWriteQueue::new(&conn, FOREVER, "foo").await.unwrap();
+        let sent = vec![1, 2, 3, 4, 5];
+        queue.write_many_msgs(&vec![sent.clone(); 3]).await.unwrap();
+
+        let mut expected = vec![];
+        for _ in 0..3 {
+            expected.extend(bincode::serialize(&MessageHeader::Payload { size: 5 }).unwrap());
+            expected.extend(sent.clone());
+        }
 
         let b = conn.get_blob(b_ids(), "foo").await.unwrap();
         assert_eq!(b.data(), expected);
