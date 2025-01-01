@@ -1,7 +1,6 @@
 use crate::dispatcher::Message;
 use crate::types::{BrokerSocketOutgoingReceiver, DispatcherSender};
 use anyhow::{Context as _, Result};
-use maelstrom_base::proto;
 use maelstrom_base::proto::Hello;
 use maelstrom_github::{GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_util::{
@@ -110,10 +109,9 @@ impl BrokerConnection for GitHubQueue {
 
         net::write_message_to_github_queue(
             &mut write,
-            &proto::serialize(&Hello::Worker {
+            &Hello::Worker {
                 slots: slots.into_inner().into(),
-            })
-            .unwrap(),
+            },
             log,
         )
         .await?;
