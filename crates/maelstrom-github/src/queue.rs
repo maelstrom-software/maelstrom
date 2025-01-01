@@ -102,7 +102,7 @@ enum MessageHeader {
     Shutdown,
 }
 
-const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct GitHubReadQueue<BlobT = BlobClient> {
     blob: BlobT,
@@ -260,7 +260,7 @@ impl<BlobT: QueueBlob> GitHubQueue<BlobT> {
         ConnT: QueueConnection<Blob = BlobT>,
     {
         Ok(Self {
-            write: GitHubWriteQueue::new(conn, read_timeout / 2, write_key).await?,
+            write: GitHubWriteQueue::new(conn, read_timeout / 4, write_key).await?,
             read: GitHubReadQueue::new(conn, read_timeout, read_backend_ids, read_key).await?,
         })
     }
@@ -278,7 +278,7 @@ impl<BlobT: QueueBlob> GitHubQueue<BlobT> {
             let self_id = uuid::Uuid::new_v4().to_string();
 
             let write_key = format!("{self_id}-{key}-up");
-            let write = GitHubWriteQueue::new(conn, DEFAULT_READ_TIMEOUT / 2, &write_key).await?;
+            let write = GitHubWriteQueue::new(conn, DEFAULT_READ_TIMEOUT / 4, &write_key).await?;
 
             let read_key = format!("{self_id}-{key}-down");
             wait_for_artifact(conn, &read_key).await?;
