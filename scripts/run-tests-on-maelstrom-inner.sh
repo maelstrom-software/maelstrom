@@ -41,7 +41,7 @@ CARGO_MAELSTROM_STATUS=$?
 cargo run --release --bin maelstrom-pytest -- --broker=localhost:$PORT $PYTEST_ARGS
 MAELSTROM_PYTEST_STATUS=$?
 
-kill -9 $BROKER_PID
+kill --signal SIGTERM $BROKER_PID
 rm "$TEMPFILE"
 set -e
 
