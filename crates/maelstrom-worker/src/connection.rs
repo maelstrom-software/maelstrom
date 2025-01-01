@@ -121,8 +121,12 @@ impl BrokerConnection for GitHubQueue {
 }
 
 impl BrokerReadConnection for GitHubReadQueue {
-    async fn read_messages(self, dispatcher_sender: DispatcherSender, log: Logger) -> Result<()> {
-        net::github_queue_reader(self, dispatcher_sender, Message::Broker, &log)
+    async fn read_messages(
+        mut self,
+        dispatcher_sender: DispatcherSender,
+        log: Logger,
+    ) -> Result<()> {
+        net::github_queue_reader(&mut self, dispatcher_sender, Message::Broker, &log)
             .await
             .context("error communicating with broker")
     }
@@ -130,11 +134,11 @@ impl BrokerReadConnection for GitHubReadQueue {
 
 impl BrokerWriteConnection for GitHubWriteQueue {
     async fn write_messages(
-        self,
+        mut self,
         broker_socket_outgoing_receiver: BrokerSocketOutgoingReceiver,
         log: Logger,
     ) -> Result<()> {
-        net::github_queue_writer(broker_socket_outgoing_receiver, self, &log)
+        net::github_queue_writer(broker_socket_outgoing_receiver, &mut self, &log)
             .await
             .context("error communicating with broker")
     }

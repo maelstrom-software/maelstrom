@@ -298,7 +298,7 @@ async fn unassigned_github_connection_main<TempFileT>(
                 SchedulerMessage::WorkerDisconnected,
                 |scheduler_sender| async move {
                     let _ = net::github_queue_reader(
-                        read_queue,
+                        &mut read_queue,
                         scheduler_sender,
                         |msg| SchedulerMessage::FromWorker(id, msg),
                         &log_clone,
@@ -306,8 +306,9 @@ async fn unassigned_github_connection_main<TempFileT>(
                     .await;
                 },
                 |scheduler_receiver| async move {
-                    let _ = net::github_queue_writer(scheduler_receiver, write_queue, &log_clone2)
-                        .await;
+                    let _ =
+                        net::github_queue_writer(scheduler_receiver, &mut write_queue, &log_clone2)
+                            .await;
                 },
             )
             .await;

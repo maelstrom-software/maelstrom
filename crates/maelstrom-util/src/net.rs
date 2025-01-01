@@ -171,7 +171,7 @@ where
 }
 
 pub async fn github_queue_reader<MessageT, TransformedT>(
-    mut queue: GitHubReadQueue,
+    queue: &mut GitHubReadQueue,
     channel: UnboundedSender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
     log: &Logger,
@@ -179,7 +179,7 @@ pub async fn github_queue_reader<MessageT, TransformedT>(
 where
     MessageT: Debug + DeserializeOwned,
 {
-    while let Some(msg) = read_message_from_github_queue(&mut queue, log).await? {
+    while let Some(msg) = read_message_from_github_queue(queue, log).await? {
         if channel.send(transform(msg)).is_err() {
             break;
         }
@@ -221,7 +221,7 @@ where
 
 pub async fn github_queue_writer<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
-    mut queue: GitHubWriteQueue,
+    queue: &mut GitHubWriteQueue,
     log: &Logger,
 ) -> Result<()>
 where
@@ -233,7 +233,7 @@ where
         match tokio::time::timeout_at(next, channel.recv()).await {
             Err(_) => {
                 if !to_send.is_empty() {
-                    write_many_messages_to_github_queue(&mut queue, &to_send, log).await?;
+                    write_many_messages_to_github_queue(queue, &to_send, log).await?;
                     to_send.clear();
                 }
                 next = Instant::now() + Duration::from_millis(10);
