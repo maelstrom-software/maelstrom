@@ -71,7 +71,7 @@ jobs:
   run_worker:
     strategy:
       matrix:
-        worker_number: [1, 2, 3, 4, 5, 6]
+        worker_number: [1, 2, 3]
     name: Run Worker
     runs-on: ubuntu-24.04
     steps:
