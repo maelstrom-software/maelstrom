@@ -14,7 +14,7 @@ if [[ $# -gt 0 ]]; then
     export ACTIONS_RUNTIME_TOKEN=$1
     export ACTIONS_RESULTS_URL=$2
     BROKER_ARGS="$BROKER_ARGS --artifact-transfer-strategy github"
-    WORKER_ARGS="$WORKER_ARGS --artifact-transfer-strategy github --broker-connection github"
+    WORKER_ARGS="$WORKER_ARGS --artifact-transfer-strategy github"
     CARGO_ARGS="$CARGO_ARGS --artifact-transfer-strategy github"
     PYTEST_ARGS="$PYTEST_ARGS --artifact-transfer-strategy github"
     echo "using github for artifact transfer"
