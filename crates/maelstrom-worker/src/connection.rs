@@ -99,7 +99,7 @@ impl BrokerConnection for GitHubQueue {
         log: &Logger,
     ) -> Result<(Self::Read, Self::Write)> {
         let client = crate::github_client_factory()?;
-        let (read, mut write) = GitHubQueue::connect(&*client, "maelstrom-broker")
+        let (read, mut write) = GitHubQueue::connect(client, "maelstrom-broker")
             .await
             .map_err(|err| {
                 error!(log, "error connecting to broker"; "error" => %err);
