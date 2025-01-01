@@ -252,6 +252,22 @@ impl<BlobT: QueueBlob> GitHubWriteQueue<BlobT> {
         Ok(())
     }
 
+    pub async fn write_many_msgs(&mut self, messages: &[Vec<u8>]) -> Result<()> {
+        let mut to_send = vec![];
+        for data in messages {
+            bincode::serialize(&MessageHeader::Payload { size: data.len() }).unwrap();
+            to_send.extend(data);
+        }
+        self.blob.write(to_send).await?;
+
+        self.keep_alive.abort();
+        self.keep_alive =
+            tokio::task::spawn(send_keep_alive(self.keep_alive_duration, self.blob.clone()))
+                .abort_handle();
+
+        Ok(())
+    }
+
     pub async fn shut_down(&mut self) -> Result<()> {
         self.keep_alive.abort();
         self.blob

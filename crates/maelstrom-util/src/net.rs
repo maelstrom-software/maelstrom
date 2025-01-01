@@ -200,6 +200,23 @@ where
     Ok(())
 }
 
+pub async fn write_many_messages_to_github_queue<MessageT>(
+    queue: &mut GitHubWriteQueue,
+    msgs: &[MessageT],
+    log: &Logger,
+) -> Result<()>
+where
+    MessageT: Debug + Serialize,
+{
+    queue
+        .write_many_msgs(&Vec::from_iter(
+            msgs.iter().map(|msg| proto::serialize(msg).unwrap()),
+        ))
+        .await
+        .inspect_err(|err| debug!(log, "error sending message"; "error" => %err))?;
+    Ok(())
+}
+
 pub async fn github_queue_writer<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
     mut queue: GitHubWriteQueue,
@@ -208,8 +225,21 @@ pub async fn github_queue_writer<MessageT>(
 where
     MessageT: Debug + Serialize,
 {
-    while let Some(msg) = channel.recv().await {
-        write_message_to_github_queue(&mut queue, &msg, log).await?;
+    let mut to_send = vec![];
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
+                write_many_messages_to_github_queue(&mut queue, &to_send, log).await?;
+                to_send.clear();
+            },
+            msg = channel.recv() => {
+                if let Some(msg) = msg {
+                    to_send.push(msg);
+                } else {
+                    break;
+                }
+            }
+        }
     }
     queue.shut_down().await?;
 
