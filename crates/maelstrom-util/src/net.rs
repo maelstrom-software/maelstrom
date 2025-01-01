@@ -229,8 +229,10 @@ where
     loop {
         tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
-                write_many_messages_to_github_queue(&mut queue, &to_send, log).await?;
-                to_send.clear();
+                if !to_send.is_empty() {
+                    write_many_messages_to_github_queue(&mut queue, &to_send, log).await?;
+                    to_send.clear();
+                }
             },
             msg = channel.recv() => {
                 if let Some(msg) = msg {
