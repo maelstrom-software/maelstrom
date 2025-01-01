@@ -5,6 +5,7 @@ use crate::{
     IdVendor,
 };
 use anyhow::Result;
+use futures::FutureExt as _;
 use maelstrom_base::{
     proto::{ClientToBroker, Hello},
     ClientId, MonitorId, WorkerId,
@@ -13,7 +14,11 @@ use maelstrom_github::{GitHubClient, GitHubQueue, GitHubQueueAcceptor};
 use maelstrom_util::net::{self, AsRawFdExt};
 use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};
-use std::{future::Future, sync::Arc, thread};
+use std::{
+    future::Future,
+    sync::{Arc, Mutex},
+    thread,
+};
 use tokio::{
     io::BufReader,
     net::{TcpListener, TcpStream},
@@ -335,6 +340,7 @@ pub async fn github_acceptor_main<TempFileT>(
     scheduler_sender: SchedulerSender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
+    tasks: Arc<Mutex<JoinSet<()>>>,
 ) where
     TempFileT: Send + Sync + 'static,
 {
@@ -352,7 +358,15 @@ pub async fn github_acceptor_main<TempFileT>(
             Ok(queue) => {
                 let log = log.new(o!("peer_addr" => "github peer"));
                 debug!(log, "new connection");
-                task::spawn(unassigned_github_connection_main(
+
+                let mut tasks = tasks.lock().unwrap();
+
+                // Remove any completed tasks from the set
+                while let Some(Some(_)) =
+                    tokio::task::unconstrained(tasks.join_next()).now_or_never()
+                {}
+
+                tasks.spawn(unassigned_github_connection_main(
                     queue,
                     scheduler_sender.clone(),
                     id_vendor.clone(),

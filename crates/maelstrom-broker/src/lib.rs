@@ -21,7 +21,7 @@ use std::{
     process,
     sync::{
         atomic::{AtomicU32, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 use tokio::{
@@ -90,6 +90,7 @@ where
         id: AtomicU32::new(0),
     });
 
+    let github_connection_tasks = Arc::new(Mutex::new(JoinSet::new()));
     let mut join_set = JoinSet::new();
 
     join_set.spawn(http::listener_main(
@@ -111,6 +112,7 @@ where
             scheduler_task.scheduler_sender().clone(),
             id_vendor,
             log.clone(),
+            github_connection_tasks.clone(),
         ));
     } else {
         info!(log, "not listening for GitHub connections");
@@ -130,6 +132,13 @@ where
     ));
 
     join_set.join_next().await;
+
+    drop(join_set);
+    let github_connection_tasks = Arc::into_inner(github_connection_tasks)
+        .unwrap()
+        .into_inner()
+        .unwrap();
+    github_connection_tasks.join_all().await;
 
     Ok(())
 }
