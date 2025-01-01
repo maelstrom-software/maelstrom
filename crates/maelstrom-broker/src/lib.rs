@@ -133,7 +133,9 @@ where
 
     join_set.join_next().await;
 
+    join_set.shutdown().await;
     drop(join_set);
+
     let github_connection_tasks = Arc::into_inner(github_connection_tasks)
         .unwrap()
         .into_inner()
