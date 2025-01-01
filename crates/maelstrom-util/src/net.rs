@@ -1,6 +1,6 @@
 //! Functions that are useful for reading/writing messages from/to sockets.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use maelstrom_base::proto;
 use maelstrom_github::{GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_linux::{self as linux, Fd};
@@ -181,10 +181,10 @@ where
 {
     while let Some(msg) = read_message_from_github_queue(queue, log).await? {
         if channel.send(transform(msg)).is_err() {
-            break;
+            return Ok(());
         }
     }
-    Ok(())
+    Err(anyhow!("queue closed"))
 }
 
 pub async fn write_message_to_github_queue<MessageT>(
