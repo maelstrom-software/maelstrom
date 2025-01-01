@@ -68,6 +68,44 @@ jobs:
     - name: Test
       run: ./scripts/run-tests-on-maelstrom.sh "${{ env.ACTIONS_RUNTIME_TOKEN }}" "${{ env.ACTIONS_RESULTS_URL }}"
 
+  run_worker:
+    strategy:
+      matrix:
+        worker_number: [1, 2, 3, 4, 5, 6]
+    name: Run Worker
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Get Repository from Git
+      uses: actions/checkout@v4
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@main
+    - name: Set up Nix Cache
+      uses: DeterminateSystems/magic-nix-cache-action@main
+    # For some reason, GitHub provides Rust for us. The problem is that, when
+    # executing the recursive cargo invocation, the cargo in ~/.cargo/bin ends
+    # up prepended to PATH, which then causes problems.
+    - name: Remove Rust provided by GitHub.
+      run: rm -rf ~/.cargo/bin ~/.rustup
+    - name: Disable apparmor container restrictions
+      run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+    - name: Install Nix Flake
+      run: nix develop --command echo done
+    - name: Get Rust version
+      run: echo "RUST_VERSION=$(nix develop --command rustc --version | cut -d' ' -f2)" >> $GITHUB_ENV
+    - name: Set up Rust Cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: maelstrom-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ env.RUST_VERSION }}
+    - name: Expose GitHub Action Runtime
+      uses: crazy-max/ghaction-github-runtime@v3
+    - name: Run Worker
+      run: ./scripts/run-worker.sh "${{ env.ACTIONS_RUNTIME_TOKEN }}" "${{ env.ACTIONS_RESULTS_URL }}"
+
   github_api_tests:
     strategy:
       matrix:

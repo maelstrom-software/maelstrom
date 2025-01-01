@@ -9,12 +9,13 @@ BROKER_ARGS=""
 WORKER_ARGS=""
 CARGO_ARGS="--profile=release"
 PYTEST_ARGS=""
+START_WORKER=1
 
 if [[ $# -gt 0 ]]; then
     export ACTIONS_RUNTIME_TOKEN=$1
     export ACTIONS_RESULTS_URL=$2
     BROKER_ARGS="$BROKER_ARGS --artifact-transfer-strategy github"
-    WORKER_ARGS="$WORKER_ARGS --artifact-transfer-strategy github --broker-connection github"
+    START_WORKER=0
     CARGO_ARGS="$CARGO_ARGS --artifact-transfer-strategy github"
     PYTEST_ARGS="$PYTEST_ARGS --artifact-transfer-strategy github"
     echo "using github for artifact transfer"
@@ -30,7 +31,9 @@ PORT=$( \
 	| awk '/\<addr: / { print $0; exit}' \
 	| sed -Ee 's/^.*\baddr: [^,]*:([0-9]+),.*$/\1/' \
 )
-cargo run --release --bin maelstrom-worker -- --broker=localhost:$PORT $WORKER_ARGS &
+if [[ $START_WORKER -gt 0 ]]; then
+    cargo run --release --bin maelstrom-worker -- --broker=localhost:$PORT $WORKER_ARGS &
+fi
 
 cargo run --release --bin cargo-maelstrom -- --broker=localhost:$PORT $CARGO_ARGS
 CARGO_MAELSTROM_STATUS=$?
