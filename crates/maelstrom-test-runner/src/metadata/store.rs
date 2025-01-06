@@ -17,6 +17,7 @@ use std::{
 #[serde(deny_unknown_fields)]
 struct FileContents<TestFilterT> {
     #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
+    #[serde(default = "Vec::default")]
     directives: Vec<Directive<TestFilterT>>,
     #[serde(default)]
     containers: HashMap<String, ContainerSpec>,
@@ -57,6 +58,13 @@ where
                         }
                     }
                 }
+            }
+        }
+
+        for container in contents.containers.values_mut() {
+            let ContainerSpec { layers, .. } = container;
+            for layer in layers {
+                layer.replace_template_vars(vars)?;
             }
         }
 
@@ -112,27 +120,216 @@ where
 mod tests {
     use super::*;
     use crate::SimpleFilter;
-    use anyhow::Error;
-    use toml::de::Error as TomlError;
+    use indoc::indoc;
+    use maelstrom_base::JobNetwork;
+    use maelstrom_client::{container_spec, image_container_parent, tar_layer_spec};
+    use maplit::hashmap;
 
-    fn assert_toml_error(err: Error, expected: &str) {
-        let err = err.downcast_ref::<TomlError>().unwrap();
-        let message = err.message();
-        assert!(message.starts_with(expected), "message: {message}");
+    mod parse {
+        use super::*;
+
+        #[track_caller]
+        fn parse_toml(file: &str) -> FileContents<SimpleFilter> {
+            toml::from_str(file).unwrap()
+        }
+
+        #[track_caller]
+        fn parse_error_toml(file: &str) -> String {
+            format!(
+                "{}",
+                toml::from_str::<FileContents<SimpleFilter>>(file).unwrap_err()
+            )
+            .trim_end()
+            .into()
+        }
+
+        #[test]
+        fn empty_file() {
+            assert_eq!(
+                parse_toml(""),
+                FileContents {
+                    directives: Default::default(),
+                    containers: Default::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn unknown_field() {
+            assert!(parse_error_toml(indoc! {r#"
+                [not_a_field]
+                foo = "three"
+            "#})
+            .contains("unknown field `not_a_field`"));
+        }
+
+        #[test]
+        fn only_directives() {
+            assert_eq!(
+                parse_toml(indoc! {r#"
+                    [[directives]]
+                    filter = "package = \"package1\""
+                    image = "image1"
+                    network = "disabled"
+
+                    [[directives]]
+                    network = "loopback"
+                "#}),
+                FileContents {
+                    directives: vec![
+                        Directive {
+                            filter: Some(SimpleFilter::Package("package1".into())),
+                            container: DirectiveContainer::Override(container_spec! {
+                                parent: image_container_parent!("image1", all),
+                                network: JobNetwork::Disabled,
+                            }),
+                            ..Default::default()
+                        },
+                        Directive {
+                            container: DirectiveContainer::Accumulate(
+                                DirectiveContainerAccumulate {
+                                    network: Some(JobNetwork::Loopback),
+                                    ..Default::default()
+                                }
+                            ),
+                            ..Default::default()
+                        },
+                    ],
+                    containers: Default::default(),
+                },
+            );
+        }
+
+        #[test]
+        fn only_containers() {
+            assert_eq!(
+                parse_toml(indoc! {r#"
+                    [containers.container1]
+                    image = "image1"
+                    network = "disabled"
+
+                    [containers."foo.bar.baz"]
+                    network = "loopback"
+                "#}),
+                FileContents {
+                    directives: Default::default(),
+                    containers: hashmap! {
+                        "container1".into() => container_spec! {
+                            parent: image_container_parent!("image1", all),
+                            network: JobNetwork::Disabled,
+                        },
+                        "foo.bar.baz".into() => container_spec! {
+                            network: JobNetwork::Loopback,
+                        },
+                    },
+                },
+            );
+        }
+
+        #[test]
+        fn directives_and_containers() {
+            assert_eq!(
+                parse_toml(indoc! {r#"
+                    [[directives]]
+                    filter = "package = \"package1\""
+                    image = "image1"
+                    network = "disabled"
+
+                    [containers.container1]
+                    image = "image1"
+                    network = "disabled"
+
+                    [[directives]]
+                    network = "loopback"
+
+                    [containers."foo.bar.baz"]
+                    network = "loopback"
+                "#}),
+                FileContents {
+                    directives: vec![
+                        Directive {
+                            filter: Some(SimpleFilter::Package("package1".into())),
+                            container: DirectiveContainer::Override(container_spec! {
+                                parent: image_container_parent!("image1", all),
+                                network: JobNetwork::Disabled,
+                            }),
+                            ..Default::default()
+                        },
+                        Directive {
+                            container: DirectiveContainer::Accumulate(
+                                DirectiveContainerAccumulate {
+                                    network: Some(JobNetwork::Loopback),
+                                    ..Default::default()
+                                }
+                            ),
+                            ..Default::default()
+                        },
+                    ],
+                    containers: hashmap! {
+                        "container1".into() => container_spec! {
+                            parent: image_container_parent!("image1", all),
+                            network: JobNetwork::Disabled,
+                        },
+                        "foo.bar.baz".into() => container_spec! {
+                            network: JobNetwork::Loopback,
+                        },
+                    },
+                },
+            );
+        }
     }
 
     #[test]
-    fn bad_field_in_all_metadata() {
-        assert_toml_error(
-            toml::from_str::<FileContents<SimpleFilter>>(
-                r#"
-                [not_a_field]
-                foo = "three"
-                "#,
-            )
-            .map_err(Error::from)
-            .unwrap_err(),
-            "unknown field `not_a_field`, expected `directives`",
+    fn template_vars() {
+        let store = Store::<SimpleFilter>::load(
+            indoc! {r#"
+                [[directives]]
+                filter = "package = \"package1\""
+                image = "image1"
+                network = "disabled"
+                added_layers = [ { tar = "<foo>.tar" } ]
+
+                [[directives]]
+                network = "loopback"
+                added_layers = [ { tar = "<foo>.tar" } ]
+
+                [containers.container1]
+                image = "image1"
+                added_layers = [ { tar = "<foo>.tar" } ]
+            "#},
+            &TemplateVars::new([("foo", "bar")]),
+        )
+        .unwrap();
+        assert_eq!(
+            store.directives,
+            vec![
+                Directive {
+                    filter: Some(SimpleFilter::Package("package1".into())),
+                    container: DirectiveContainer::Override(container_spec! {
+                        parent: image_container_parent!("image1", all),
+                        layers: [tar_layer_spec!("bar.tar")],
+                        network: JobNetwork::Disabled,
+                    }),
+                    ..Default::default()
+                },
+                Directive {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        network: Some(JobNetwork::Loopback),
+                        added_layers: Some(vec![tar_layer_spec!("bar.tar")]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            ],
+        );
+        assert_eq!(
+            store.containers,
+            hashmap! {
+                "container1".into() => container_spec! {
+                    parent: image_container_parent!("image1", all),
+                    layers: [tar_layer_spec!("bar.tar")],
+                },
+            },
         );
     }
 }
