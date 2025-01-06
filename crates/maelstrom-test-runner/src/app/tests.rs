@@ -28,7 +28,7 @@ use maelstrom_client::{
 };
 use maelstrom_simex::SimulationExplorer;
 use maelstrom_util::process::ExitCode;
-use std::{cell::RefCell, collections::HashSet, str::FromStr as _, time::Duration};
+use std::{cell::RefCell, collections::HashSet, time::Duration};
 use TestMessage::*;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -273,7 +273,7 @@ const DEFAULT_METADATA_STR: &str = r#"
 "#;
 
 fn default_metadata() -> MetadataStore<FakeTestFilter> {
-    MetadataStore::from_str(DEFAULT_METADATA_STR).unwrap()
+    MetadataStore::load(DEFAULT_METADATA_STR, &Default::default()).unwrap()
 }
 
 fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
@@ -1744,14 +1744,15 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     ignored_tests_via_directive,
-    @ test_metadata = MetadataStore::from_str(
+    @ test_metadata = MetadataStore::load(
         &format!("{DEFAULT_METADATA_STR}{}",
             r#"
                 [[directives]]
                 filter = "name = \"test_b\""
                 ignore = true
             "#
-        )
+        ),
+        &Default::default(),
     ).unwrap(),
     expected_test_db_out = [
         TestDbEntry::success("foo_pkg", "foo_test", "test_a", nonempty![Duration::from_secs(1)]),

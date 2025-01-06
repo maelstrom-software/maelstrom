@@ -15,22 +15,16 @@ use std::{
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct Store<TestFilterT> {
+struct FileContents<TestFilterT> {
     #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
     directives: Vec<Directive<TestFilterT>>,
     #[serde(default)]
     containers: HashMap<String, ContainerSpec>,
 }
 
-impl<TestFilterT: TestFilter> FromStr for Store<TestFilterT>
-where
-    TestFilterT::Err: Display,
-{
-    type Err = anyhow::Error;
-
-    fn from_str(contents: &str) -> Result<Self> {
-        Ok(toml::from_str(contents)?)
-    }
+pub struct Store<TestFilterT> {
+    directives: Vec<Directive<TestFilterT>>,
+    containers: HashMap<String, ContainerSpec>,
 }
 
 impl<TestFilterT: TestFilter> Store<TestFilterT>
@@ -38,9 +32,9 @@ where
     TestFilterT::Err: Display,
 {
     pub fn load(contents: &str, vars: &TemplateVars) -> Result<Self> {
-        let mut result = Self::from_str(contents)?;
+        let mut contents: FileContents<TestFilterT> = toml::from_str(contents)?;
 
-        for directive in &mut result.directives {
+        for directive in &mut contents.directives {
             match &mut directive.container {
                 DirectiveContainer::Override(ContainerSpec { layers, .. }) => {
                     for layer in layers {
@@ -66,7 +60,10 @@ where
             }
         }
 
-        Ok(result)
+        Ok(Self {
+            directives: contents.directives,
+            containers: contents.containers,
+        })
     }
 
     pub fn get_metadata_for_test(
@@ -114,93 +111,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NoCaseMetadata, SimpleFilter};
+    use crate::SimpleFilter;
     use anyhow::Error;
     use toml::de::Error as TomlError;
-
-    #[test]
-    fn include_shared_libraries_defaults() {
-        let all = Store::<SimpleFilter>::from_str(
-            r#"
-            [[directives]]
-            filter = "and = [ { package = \"package1\" }, { name = \"test1\" } ]"
-            layers = [{ tar = "layer1" }]
-
-            [[directives]]
-            filter = "and = [ { package = \"package1\" }, { name = \"test2\" } ]"
-            image = "foo"
-            "#,
-        )
-        .unwrap();
-        assert!(all
-            .get_metadata_for_test(
-                &"package1".into(),
-                &"package1".into(),
-                ("test1", &NoCaseMetadata)
-            )
-            .unwrap()
-            .include_shared_libraries());
-        assert!(!all
-            .get_metadata_for_test(
-                &"package1".into(),
-                &"package1".into(),
-                ("test2", &NoCaseMetadata)
-            )
-            .unwrap()
-            .include_shared_libraries());
-        assert!(all
-            .get_metadata_for_test(
-                &"package2".into(),
-                &"package2".into(),
-                ("test1", &NoCaseMetadata)
-            )
-            .unwrap()
-            .include_shared_libraries());
-    }
-
-    #[test]
-    fn include_shared_libraries() {
-        let all = Store::<SimpleFilter>::from_str(
-            r#"
-            [[directives]]
-            include_shared_libraries = false
-
-            [[directives]]
-            filter = "package = \"package1\""
-            include_shared_libraries = true
-            layers = [{ tar = "layer1" }]
-
-            [[directives]]
-            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
-            layers = []
-            "#,
-        )
-        .unwrap();
-        assert!(all
-            .get_metadata_for_test(
-                &"package1".into(),
-                &"package1".into(),
-                ("test1", &NoCaseMetadata)
-            )
-            .unwrap()
-            .include_shared_libraries());
-        assert!(all
-            .get_metadata_for_test(
-                &"package1".into(),
-                &"package1".into(),
-                ("test2", &NoCaseMetadata)
-            )
-            .unwrap()
-            .include_shared_libraries());
-        assert!(!all
-            .get_metadata_for_test(
-                &"package2".into(),
-                &"package2".into(),
-                ("test1", &NoCaseMetadata)
-            )
-            .unwrap()
-            .include_shared_libraries());
-    }
 
     fn assert_toml_error(err: Error, expected: &str) {
         let err = err.downcast_ref::<TomlError>().unwrap();
@@ -211,12 +124,13 @@ mod tests {
     #[test]
     fn bad_field_in_all_metadata() {
         assert_toml_error(
-            Store::<SimpleFilter>::from_str(
+            toml::from_str::<FileContents<SimpleFilter>>(
                 r#"
                 [not_a_field]
                 foo = "three"
                 "#,
             )
+            .map_err(Error::from)
             .unwrap_err(),
             "unknown field `not_a_field`, expected `directives`",
         );

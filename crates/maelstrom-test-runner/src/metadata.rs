@@ -108,11 +108,10 @@ mod tests {
     use maelstrom_client::{image_container_parent, tar_layer_spec};
     use maelstrom_test::utf8_path_buf;
     use maplit::btreemap;
-    use std::str::FromStr as _;
 
     #[test]
     fn network() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -126,6 +125,7 @@ mod tests {
             filter = "and = [{ package = \"package1\" }, { name = \"test2\" }]"
             network = "local"
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn enable_writable_file_system() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -186,6 +186,7 @@ mod tests {
             filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             enable_writable_file_system = false
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -225,7 +226,7 @@ mod tests {
 
     #[test]
     fn working_directory() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             include_shared_libraries = false
@@ -244,6 +245,7 @@ mod tests {
             image.name = "no-working-directory"
             image.use = ["working_directory"]
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -294,7 +296,7 @@ mod tests {
 
     #[test]
     fn user() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -304,6 +306,7 @@ mod tests {
             filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             user = 202
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -343,7 +346,7 @@ mod tests {
 
     #[test]
     fn group() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -353,6 +356,7 @@ mod tests {
             filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             group = 202
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -392,7 +396,7 @@ mod tests {
 
     #[test]
     fn timeout() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -402,6 +406,7 @@ mod tests {
             filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             timeout = 0
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -438,7 +443,7 @@ mod tests {
 
     #[test]
     fn layers() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             layers = [{ tar = "layer1" }, { tar = "layer2" }]
@@ -462,6 +467,7 @@ mod tests {
             image.name = "image3"
             image.use = [ "layers" ]
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -578,7 +584,7 @@ mod tests {
 
     #[test]
     fn added_layers() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             added_layers = [{ tar = "added-layer1" }, { tar = "added-layer2" }]
@@ -592,6 +598,7 @@ mod tests {
             filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             added_layers = [{tar = "added-layer5" }, { tar = "added-layer6" }]
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -662,7 +669,7 @@ mod tests {
             },
             extend: false,
         };
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             environment = { FOO = "$env{FOO}", BAR = "bar", BAZ = "$prev{FOO:-no-prev-foo}" }
@@ -686,6 +693,7 @@ mod tests {
             image.name = "bad-environment"
             image.use = ["environment"]
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -790,7 +798,7 @@ mod tests {
             },
             extend: true,
         };
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             environment = { FOO = "foo", BAR = "bar" }
@@ -811,6 +819,7 @@ mod tests {
             environment = { FOO = "prev-$prev{FOO}" }
             added_environment = { FOO = "prev-$prev{FOO}", BAR = "$env{BAR}" }
             "#,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(
@@ -901,7 +910,7 @@ mod tests {
 
     #[test]
     fn mounts() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -915,6 +924,7 @@ mod tests {
                 { type = "bind", mount_point = "/foo", local_path = "/local", read_only = true },
             ]
             "#,
+            &Default::default(),
         )
         .unwrap();
 
@@ -969,7 +979,7 @@ mod tests {
 
     #[test]
     fn added_mounts() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
@@ -1003,6 +1013,7 @@ mod tests {
                 { type = "tmp", mount_point = "/tmp" },
             ]
             "#,
+            &Default::default(),
         )
         .unwrap();
 
@@ -1083,7 +1094,7 @@ mod tests {
 
     #[test]
     fn devices() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             filter = "package = \"package1\""
@@ -1093,6 +1104,7 @@ mod tests {
             filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             mounts = [ { type = "devices", devices = [ "zero", "tty" ] } ]
             "#,
+            &Default::default(),
         )
         .unwrap();
 
@@ -1137,7 +1149,7 @@ mod tests {
 
     #[test]
     fn added_devices() {
-        let all = Store::<SimpleFilter>::from_str(
+        let all = Store::<SimpleFilter>::load(
             r#"
             [[directives]]
             added_mounts = [ { type = "devices", devices = [ "tty" ] } ]
@@ -1160,6 +1172,7 @@ mod tests {
             mounts = []
             added_mounts = [ { type = "devices", devices = [ "zero" ] } ]
             "#,
+            &Default::default(),
         )
         .unwrap();
 
