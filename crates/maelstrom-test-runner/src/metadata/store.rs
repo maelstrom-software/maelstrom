@@ -3,12 +3,9 @@ use super::{
     Metadata,
 };
 use crate::TestFilter;
-use anyhow::{Context as _, Result};
-use maelstrom_client::{
-    spec::{ContainerParent, ContainerSpec, ImageRef},
-    ProjectDir,
-};
-use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
+use anyhow::Result;
+use maelstrom_client::spec::{ContainerParent, ContainerSpec, ImageRef};
+use maelstrom_util::template::TemplateVars;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -23,16 +20,6 @@ pub struct Store<TestFilterT> {
     directives: Vec<Directive<TestFilterT>>,
     #[serde(default)]
     containers: HashMap<String, ContainerSpec>,
-}
-
-#[cfg(test)]
-impl<TestFilterT> Default for Store<TestFilterT> {
-    fn default() -> Self {
-        Self {
-            directives: Default::default(),
-            containers: Default::default(),
-        }
-    }
 }
 
 impl<TestFilterT: TestFilter> FromStr for Store<TestFilterT>
@@ -50,29 +37,8 @@ impl<TestFilterT: TestFilter> Store<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
-    pub fn load(
-        log: slog::Logger,
-        project_dir: impl AsRef<Root<ProjectDir>>,
-        test_metadata_file_name: &str,
-        default_test_metadata_contents: &str,
-        vars: &TemplateVars,
-    ) -> Result<Self> {
-        struct MaelstromTestTomlFile;
-        let path = project_dir
-            .as_ref()
-            .join::<MaelstromTestTomlFile>(test_metadata_file_name);
-
-        let mut result = if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
-            Self::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?
-        } else {
-            slog::debug!(
-                log,
-                "no test metadata configuration found, using default";
-                "search_path" => ?path,
-            );
-            Self::from_str(default_test_metadata_contents)
-                .expect("embedded default test metadata TOML is valid")
-        };
+    pub fn load(contents: &str, vars: &TemplateVars) -> Result<Self> {
+        let mut result = Self::from_str(contents)?;
 
         for directive in &mut result.directives {
             match &mut directive.container {
@@ -101,14 +67,6 @@ where
         }
 
         Ok(result)
-    }
-
-    #[cfg(test)]
-    fn with_default_directive() -> Self {
-        Self {
-            directives: vec![Directive::default()],
-            containers: Default::default(),
-        }
     }
 
     pub fn get_metadata_for_test(
@@ -158,96 +116,7 @@ mod tests {
     use super::*;
     use crate::{NoCaseMetadata, SimpleFilter};
     use anyhow::Error;
-    use maelstrom_client::ProjectDir;
-    use maelstrom_util::{fs::Fs, root::RootBuf, template::TemplateVars};
-    use slog::Drain as _;
-    use std::{
-        io,
-        sync::{Arc, Mutex},
-    };
     use toml::de::Error as TomlError;
-
-    #[derive(Clone, Default)]
-    struct InMemoryLogOutput(Arc<Mutex<Vec<u8>>>);
-
-    impl InMemoryLogOutput {
-        fn lines(&self) -> Vec<serde_json::Value> {
-            String::from_utf8(self.0.lock().unwrap().clone())
-                .unwrap()
-                .split('\n')
-                .filter(|l| !l.trim().is_empty())
-                .map(|l| serde_json::from_str(l).unwrap())
-                .collect()
-        }
-    }
-
-    impl io::Write for InMemoryLogOutput {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.0.lock().unwrap().write(buf)
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn load_test(t: &tempfile::TempDir) -> (Store<SimpleFilter>, Vec<serde_json::Value>) {
-        let project_dir = RootBuf::<ProjectDir>::new(t.path().to_path_buf());
-        let log_output = InMemoryLogOutput::default();
-        let log = slog::Logger::root(
-            Mutex::new(slog_json::Json::default(log_output.clone())).map(slog::Fuse),
-            slog::o!(),
-        );
-        let res = Store::<SimpleFilter>::load(
-            log,
-            &project_dir,
-            "simple-test.toml",
-            "[[directives]]",
-            &TemplateVars::default(),
-        )
-        .unwrap();
-
-        let log_lines = log_output.lines();
-
-        (res, log_lines)
-    }
-
-    #[test]
-    fn load_no_file_found() {
-        let t = tempfile::tempdir().unwrap();
-        let (res, log_lines) = load_test(&t);
-
-        assert_eq!(res, Store::with_default_directive());
-        assert_eq!(log_lines.len(), 1, "{log_lines:?}");
-        assert_eq!(
-            log_lines[0]["msg"],
-            "no test metadata configuration found, using default"
-        );
-        assert_eq!(log_lines[0]["level"], "DEBG");
-    }
-
-    #[test]
-    fn load_expected_file() {
-        let fs = Fs::new();
-        let t = tempfile::tempdir().unwrap();
-        fs.write(t.path().join("simple-test.toml"), "[[directives]]")
-            .unwrap();
-
-        let (res, log_lines) = load_test(&t);
-
-        assert_eq!(res, Store::with_default_directive());
-        assert_eq!(log_lines.len(), 0, "{log_lines:?}");
-    }
-
-    #[test]
-    fn default() {
-        assert_eq!(
-            Store::<SimpleFilter>::default()
-                .get_metadata_for_test(&"mod".into(), &"mod".into(), ("foo", &NoCaseMetadata))
-                .unwrap(),
-            Metadata::default(),
-        );
-    }
 
     #[test]
     fn include_shared_libraries_defaults() {

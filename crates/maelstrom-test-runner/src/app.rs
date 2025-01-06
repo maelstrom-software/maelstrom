@@ -5,11 +5,14 @@ mod watch;
 #[cfg(test)]
 mod tests;
 
-use crate::config::{Repeat, StopAfter};
-use crate::metadata::Store as MetadataStore;
-use crate::test_db::{TestDb, TestDbStore};
-use crate::ui::{Ui, UiJobId as JobId, UiMessage};
-use crate::*;
+use crate::{
+    config::{Repeat, StopAfter},
+    metadata::Store as MetadataStore,
+    test_db::{TestDb, TestDbStore},
+    ui::{Ui, UiJobId as JobId, UiMessage},
+    *,
+};
+use anyhow::Context as _;
 use maelstrom_base::Timeout;
 use maelstrom_client::{spec::JobSpec, JobStatus, ProjectDir, StateDir};
 use maelstrom_util::{
@@ -19,10 +22,12 @@ use maelstrom_util::{
     sync::Event,
 };
 use main_app::MainApp;
-use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::{
+    path::PathBuf,
+    sync::mpsc::{Receiver, Sender},
+    sync::Mutex,
+    time::Duration,
+};
 use std_semaphore::Semaphore;
 use watch::Watcher;
 
@@ -102,15 +107,22 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         collector_options: super::CollectOptionsM<MainAppDepsT>,
         log: slog::Logger,
     ) -> Result<Self> {
+        let fs = Fs::new();
+
         let project_dir = project_dir.as_ref().to_owned();
 
-        let metadata_store = MetadataStore::load(
-            log.clone(),
-            &project_dir,
-            MainAppDepsT::TEST_METADATA_FILE_NAME,
-            MainAppDepsT::DEFAULT_TEST_METADATA_CONTENTS,
-            &abstract_deps.get_template_vars(&collector_options)?,
-        )?;
+        let metadata_template_vars = abstract_deps.get_template_vars(&collector_options)?;
+        let metadata_path = project_dir.join::<()>(MainAppDepsT::TEST_METADATA_FILE_NAME);
+        let metadata_store = if let Some(contents) = fs.read_to_string_if_exists(&metadata_path)? {
+            MetadataStore::load(&contents, &metadata_template_vars)
+                .with_context(|| format!("parsing metadata file {}", metadata_path.display()))?
+        } else {
+            MetadataStore::load(
+                MainAppDepsT::DEFAULT_TEST_METADATA_CONTENTS,
+                &metadata_template_vars,
+            )
+            .expect("embedded default test metadata TOML to be valid")
+        };
 
         // TODO: There are a few things wrong with this from an efficiency point of view.
         //
@@ -134,7 +146,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
                 .add_container(name.clone(), spec.clone())?;
         }
 
-        let test_db_store = TestDbStore::new(Fs::new(), &state_dir);
+        let test_db_store = TestDbStore::new(fs, &state_dir);
 
         let filter = super::TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
 
