@@ -104,13 +104,35 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
     ) -> Result<Self> {
         let project_dir = project_dir.as_ref().to_owned();
 
-        let test_metadata = MetadataStore::load(
+        let metadata_store = MetadataStore::load(
             log.clone(),
             &project_dir,
             MainAppDepsT::TEST_METADATA_FILE_NAME,
             MainAppDepsT::DEFAULT_TEST_METADATA_CONTENTS,
             &abstract_deps.get_template_vars(&collector_options)?,
         )?;
+
+        // TODO: There are a few things wrong with this from an efficiency point of view.
+        //
+        // First, we're doing everything serially with synchronous RPCs. We could fix that by
+        // sending all of the RPCs in parallel and then waiting for them all to complete.
+        //
+        // Second, we're blocking the rest of startup by doing this here. We could fix that by
+        // pushing this logic into the main app and have it not enqueue any jobs until all of the
+        // containers have been registered.
+        //
+        // Third, we're unnecessarily registering all containers that we find in in the
+        // configuration file. We could fix that by only registering containers when we need them.
+        // We'd block sending jobs to the client until all of the required containers were
+        // registered. The downside of this "fix" is that it's probably overkill, and it could hurt
+        // performance. If we implemented the fix above in the second point, we'd be registering
+        // all of the containers while we were doing other startup. In all likelihood, the number
+        // of containers would be small and we'd be done long before we started submitting jobs.
+        for (name, spec) in metadata_store.containers() {
+            abstract_deps
+                .client()
+                .add_container(name.clone(), spec.clone())?;
+        }
 
         let test_db_store = TestDbStore::new(Fs::new(), &state_dir);
 
@@ -129,7 +151,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
             test_db_store,
             project_dir,
             options: TestingOptions {
-                test_metadata,
+                test_metadata: metadata_store,
                 filter,
                 collector_options,
                 timeout_override: None,

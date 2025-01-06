@@ -145,4 +145,8 @@ where
 
         Ok(result)
     }
+
+    pub fn containers(&self) -> impl Iterator<Item = (&String, &ContainerSpec)> {
+        self.containers.iter()
+    }
 }
