@@ -8,7 +8,7 @@ use maelstrom_client::spec::{ContainerParent, ContainerSpec, ImageRef};
 use maelstrom_util::template::TemplateVars;
 use serde::Deserialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Display,
     str::{self, FromStr},
 };
@@ -94,7 +94,7 @@ where
             .try_fold(Metadata::default(), |m, d| m.try_fold(d))
     }
 
-    pub fn get_all_images(&self) -> Vec<ImageRef> {
+    pub fn get_all_images(&self) -> HashSet<ImageRef> {
         self.directives
             .iter()
             .filter_map(|directive| {

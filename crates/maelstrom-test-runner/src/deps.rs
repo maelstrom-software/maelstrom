@@ -5,6 +5,7 @@ use maelstrom_client::spec::{ImageRef, LayerSpec};
 use maelstrom_util::{process::ExitCode, template::TemplateVars};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     fmt,
     hash::Hash,
     path::Path,
@@ -246,7 +247,7 @@ pub trait CollectTests {
     fn get_packages(&self, ui: &ui::UiSender) -> Result<Vec<Self::Package>>;
 
     /// Build any test layers that might want to be used later. This function is allowed to block.
-    fn build_test_layers(&self, _images: Vec<ImageRef>, _ui: &ui::UiSender) -> Result<()> {
+    fn build_test_layers(&self, _images: HashSet<ImageRef>, _ui: &ui::UiSender) -> Result<()> {
         Ok(())
     }
 }

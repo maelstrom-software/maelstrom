@@ -32,12 +32,17 @@ use maelstrom_util::{
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::{hash_map::Entry, HashMap};
-use std::os::unix::fs::PermissionsExt as _;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::sync::Mutex;
-use std::{fmt, io};
+use std::{
+    collections::{
+        HashSet,
+        {hash_map::Entry, HashMap},
+    },
+    fmt, io,
+    os::unix::fs::PermissionsExt as _,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Mutex,
+};
 
 pub use config::{Config, PytestConfigValues};
 pub use maelstrom_test_runner::Logger;
@@ -465,7 +470,7 @@ impl CollectTests for PytestTestCollector<'_> {
         Ok((handle, stream))
     }
 
-    fn build_test_layers(&self, images: Vec<ImageRef>, ui: &UiSender) -> Result<()> {
+    fn build_test_layers(&self, images: HashSet<ImageRef>, ui: &UiSender) -> Result<()> {
         let mut test_layers = self.test_layers.lock().unwrap();
         for image in images {
             if let Entry::Vacant(e) = test_layers.entry(image.clone()) {
