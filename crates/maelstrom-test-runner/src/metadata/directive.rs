@@ -279,7 +279,7 @@ mod tests {
     use crate::SimpleFilter;
     use anyhow::Error;
     use indoc::indoc;
-    use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
+    use maelstrom_base::{enum_set, proc_mount, tmp_mount, JobDeviceForTomlAndJson};
     use maelstrom_client::{container_spec, spec::SymlinkSpec, tar_layer_spec};
     use maelstrom_test::{non_root_utf8_path_buf, string, utf8_path_buf};
     use maplit::btreemap;
@@ -685,6 +685,34 @@ mod tests {
             Directive::<String> {
                 container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
                     enable_writable_file_system: Some(false),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_mounts() {
+        assert_eq!(
+            accumulate_directive!(mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    mounts: Some(vec![proc_mount!("/proc"), tmp_mount!("/tmp")]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_added_mounts() {
+        assert_eq!(
+            accumulate_directive!(added_mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    added_mounts: Some(vec![proc_mount!("/proc"), tmp_mount!("/tmp")]),
                     ..Default::default()
                 }),
                 ..Default::default()
