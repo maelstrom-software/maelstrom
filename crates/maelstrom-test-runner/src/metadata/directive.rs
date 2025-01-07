@@ -141,7 +141,7 @@ impl<FilterT> Default for Directive<FilterT> {
     fn default() -> Self {
         Self {
             filter: Default::default(),
-            container: Default::default(),
+            container: DirectiveContainer::Accumulate(Default::default()),
             include_shared_libraries: Default::default(),
             timeout: Default::default(),
             ignore: Default::default(),
@@ -153,12 +153,6 @@ impl<FilterT> Default for Directive<FilterT> {
 pub enum DirectiveContainer {
     Override(ContainerSpec),
     Accumulate(DirectiveContainerAccumulate),
-}
-
-impl Default for DirectiveContainer {
-    fn default() -> Self {
-        Self::Accumulate(Default::default())
-    }
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -311,7 +305,7 @@ mod tests {
 
     #[test]
     fn empty() {
-        directive_parse_test("", Directive::default());
+        directive_parse_test("", accumulate_directive!());
     }
 
     #[test]
