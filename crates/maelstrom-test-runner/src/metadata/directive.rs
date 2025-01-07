@@ -24,6 +24,75 @@ pub struct Directive<FilterT> {
 }
 
 #[cfg(test)]
+macro_rules! accumulate_directive {
+    (@expand [] -> [$($($fields:tt)+)?] [$($($container_fields:tt)+)?]) => {
+        Directive {
+            $($($fields)+,)?
+            .. Directive {
+                filter: Default::default(),
+                container: DirectiveContainer::Accumulate(
+                    DirectiveContainerAccumulate {
+                        $($($container_fields)+,)?
+                        .. Default::default()
+                    }
+                ),
+                include_shared_libraries: Default::default(),
+                timeout: Default::default(),
+                ignore: Default::default(),
+            }
+        }
+    };
+    (@expand [filter: $filter:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? filter: Some(FromStr::from_str($filter).unwrap())] [$($container_field)*])
+    };
+    (@expand [include_shared_libraries: $include_shared_libraries:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? include_shared_libraries: Some($include_shared_libraries.into())] [$($container_field)*])
+    };
+    (@expand [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? timeout: Some(Timeout::new($timeout))] [$($container_field)*])
+    };
+    (@expand [ignore: $ignore:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? ignore: Some($ignore.into())] [$($container_field)*])
+    };
+    (@expand [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? layers: Some($layers.into_iter().map(Into::into).collect())])
+    };
+    (@expand [added_layers: $added_layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_layers: Some($added_layers.into_iter().map(Into::into).collect())])
+    };
+    (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? environment: Some($environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
+    };
+    (@expand [added_environment: $added_environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_environment: Some($added_environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
+    };
+    (@expand [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? working_directory: Some($working_directory.into())])
+    };
+    (@expand [enable_writable_file_system: $enable_writable_file_system:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? enable_writable_file_system: Some($enable_writable_file_system.into())])
+    };
+    (@expand [mounts: $mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? mounts: Some($mounts.into_iter().map(Into::into).collect())])
+    };
+    (@expand [added_mounts: $added_mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_mounts: Some($added_mounts.into_iter().map(Into::into).collect())])
+    };
+    (@expand [network: $network:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? network: Some($network.into())])
+    };
+    (@expand [user: $user:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? user: Some($user.into())])
+    };
+    (@expand [group: $group:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? group: Some($group.into())])
+    };
+    ($($field_in:tt)*) => {
+        accumulate_directive!(@expand [$($field_in)*] -> [] [])
+    };
+}
+
+#[cfg(test)]
 macro_rules! override_directive {
     (@expand [] -> [$($($fields:tt)+)?] [$($container_fields:tt)*]) => {
         Directive {
@@ -208,8 +277,9 @@ mod tests {
     use anyhow::Error;
     use indoc::indoc;
     use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
-    use maelstrom_client::{container_spec, spec::SymlinkSpec};
+    use maelstrom_client::{container_spec, spec::SymlinkSpec, tar_layer_spec};
     use maelstrom_test::{non_root_utf8_path_buf, string, utf8_path_buf};
+    use maplit::btreemap;
 
     fn parse_test_directive(toml: &str) -> Result<Directive<String>, toml::de::Error> {
         toml::from_str(toml)
@@ -442,6 +512,247 @@ mod tests {
                     user: 101,
                     group: 202,
                 }),
+                include_shared_libraries: Some(true),
+                timeout: Some(Timeout::new(1)),
+                ignore: Some(false),
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_empty() {
+        assert_eq!(accumulate_directive!(), Directive::<String>::default(),);
+    }
+
+    #[test]
+    fn accumulate_directive_filter() {
+        assert_eq!(
+            accumulate_directive!(filter: "package = \"package1\""),
+            Directive {
+                filter: Some(SimpleFilter::Package("package1".into())),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_include_shared_libraries() {
+        assert_eq!(
+            accumulate_directive!(include_shared_libraries: true),
+            Directive::<String> {
+                include_shared_libraries: Some(true),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            accumulate_directive!(include_shared_libraries: false),
+            Directive::<String> {
+                include_shared_libraries: Some(false),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_timeout() {
+        assert_eq!(
+            accumulate_directive!(timeout: 0),
+            Directive::<String> {
+                timeout: Some(None),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            accumulate_directive!(timeout: 1),
+            Directive::<String> {
+                timeout: Some(Timeout::new(1)),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_ignore() {
+        assert_eq!(
+            accumulate_directive!(ignore: true),
+            Directive::<String> {
+                ignore: Some(true),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            accumulate_directive!(ignore: false),
+            Directive::<String> {
+                ignore: Some(false),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_layers() {
+        assert_eq!(
+            accumulate_directive!(layers: [tar_layer_spec!("foo.tar")]),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_added_layers() {
+        assert_eq!(
+            accumulate_directive!(added_layers: [tar_layer_spec!("foo.tar")]),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_environment() {
+        assert_eq!(
+            accumulate_directive!(environment: [("foo", "bar"), ("frob", "baz")]),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    environment: Some(btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_added_environment() {
+        assert_eq!(
+            accumulate_directive!(added_environment: [("foo", "bar"), ("frob", "baz")]),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    added_environment: Some(btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_working_directory() {
+        assert_eq!(
+            accumulate_directive!(working_directory: "/foo"),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    working_directory: Some("/foo".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_enable_writable_file_system() {
+        assert_eq!(
+            accumulate_directive!(enable_writable_file_system: true),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    enable_writable_file_system: Some(true),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            accumulate_directive!(enable_writable_file_system: false),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    enable_writable_file_system: Some(false),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_network() {
+        assert_eq!(
+            accumulate_directive!(network: JobNetwork::Loopback),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    network: Some(JobNetwork::Loopback),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            accumulate_directive!(network: JobNetwork::Disabled),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    network: Some(JobNetwork::Disabled),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_user() {
+        assert_eq!(
+            accumulate_directive!(user: 101),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    user: Some(UserId::new(101)),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulate_directive_group() {
+        assert_eq!(
+            accumulate_directive!(group: 101),
+            Directive::<String> {
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    group: Some(GroupId::new(101)),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn accumulata_directive_multiple() {
+        assert_eq!(
+            accumulate_directive! {
+                filter: "package = \"package1\"",
+                include_shared_libraries: true,
+                timeout: 1,
+                ignore: false,
+            },
+            Directive {
+                filter: Some(SimpleFilter::Package("package1".into())),
+                container: DirectiveContainer::Accumulate(Default::default()),
                 include_shared_libraries: Some(true),
                 timeout: Some(Timeout::new(1)),
                 ignore: Some(false),
