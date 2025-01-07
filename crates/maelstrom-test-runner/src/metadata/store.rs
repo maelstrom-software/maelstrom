@@ -127,7 +127,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SimpleFilter;
+    use crate::{NoCaseMetadata, SimpleFilter};
     use indoc::indoc;
     use maelstrom_base::JobNetwork;
     use maelstrom_client::{container_spec, image_container_parent, image_ref, tar_layer_spec};
@@ -371,6 +371,127 @@ mod tests {
                 image_ref!("image1", all),
                 image_ref!("image1", layers),
                 image_ref!("image2", all),
+            },
+        );
+    }
+
+    #[test]
+    fn get_metadata_for_test_all_have_filters() {
+        let store = Store::<SimpleFilter>::load(
+            indoc! {r#"
+                [[directives]]
+                filter = "package = \"package1\""
+                network = "loopback"
+
+                [[directives]]
+                filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
+                user = 101
+            "#},
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package0".into(),
+                    &"package0".into(),
+                    ("test1", &NoCaseMetadata)
+                )
+                .unwrap()
+                .container,
+            container_spec! {},
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package1".into(),
+                    &"package1".into(),
+                    ("test0", &NoCaseMetadata)
+                )
+                .unwrap()
+                .container,
+            container_spec! { network: JobNetwork::Loopback },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package1".into(),
+                    &"package1".into(),
+                    ("test1", &NoCaseMetadata)
+                )
+                .unwrap()
+                .container,
+            container_spec! {
+                network: JobNetwork::Loopback,
+                user: 101,
+            },
+        );
+    }
+
+    #[test]
+    fn get_metadata_for_test_not_all_have_filters() {
+        let store = Store::<SimpleFilter>::load(
+            indoc! {r#"
+                [[directives]]
+                group = 202
+
+                [[directives]]
+                filter = "package = \"package1\""
+                network = "loopback"
+
+                [[directives]]
+                enable_writable_file_system = true
+
+                [[directives]]
+                filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
+                user = 101
+            "#},
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package0".into(),
+                    &"package0".into(),
+                    ("test1", &NoCaseMetadata)
+                )
+                .unwrap()
+                .container,
+            container_spec! {
+                group: 202,
+                enable_writable_file_system: true,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package1".into(),
+                    &"package1".into(),
+                    ("test0", &NoCaseMetadata)
+                )
+                .unwrap()
+                .container,
+            container_spec! {
+                group: 202,
+                enable_writable_file_system: true,
+                network: JobNetwork::Loopback,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package1".into(),
+                    &"package1".into(),
+                    ("test1", &NoCaseMetadata)
+                )
+                .unwrap()
+                .container,
+            container_spec! {
+                group: 202,
+                enable_writable_file_system: true,
+                network: JobNetwork::Loopback,
+                user: 101,
             },
         );
     }
