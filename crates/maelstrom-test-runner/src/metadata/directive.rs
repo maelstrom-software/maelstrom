@@ -59,34 +59,34 @@ macro_rules! accumulate_directive {
     (@expand [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? layers: Some($layers.into_iter().map(Into::into).collect())])
     };
-    (@expand [added_layers: $added_layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [added_layers: $added_layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_layers: Some($added_layers.into_iter().map(Into::into).collect())])
     };
-    (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? environment: Some($environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
     };
-    (@expand [added_environment: $added_environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [added_environment: $added_environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_environment: Some($added_environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
     };
-    (@expand [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? working_directory: Some($working_directory.into())])
     };
     (@expand [enable_writable_file_system: $enable_writable_file_system:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? enable_writable_file_system: Some($enable_writable_file_system.into())])
     };
-    (@expand [mounts: $mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [mounts: $mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? mounts: Some($mounts.into_iter().map(Into::into).collect())])
     };
-    (@expand [added_mounts: $added_mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [added_mounts: $added_mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_mounts: Some($added_mounts.into_iter().map(Into::into).collect())])
     };
-    (@expand [network: $network:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [network: $network:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? network: Some($network.into())])
     };
-    (@expand [user: $user:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [user: $user:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? user: Some($user.into())])
     };
-    (@expand [group: $group:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [group: $group:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? group: Some($group.into())])
     };
     ($($field_in:tt)*) => {
@@ -773,17 +773,37 @@ mod tests {
     }
 
     #[test]
-    fn accumulata_directive_multiple() {
+    fn accumulate_directive_multiple() {
         assert_eq!(
             accumulate_directive! {
                 filter: "package = \"package1\"",
                 include_shared_libraries: true,
                 timeout: 1,
                 ignore: false,
+                layers: [tar_layer_spec!("foo.tar")],
+                added_layers: [tar_layer_spec!("foo.tar")],
+                environment: [("foo", "bar"), ("frob", "baz")],
+                added_environment: [("foo", "bar"), ("frob", "baz")],
+                working_directory: "/foo",
+                network: JobNetwork::Loopback,
             },
             Directive {
                 filter: Some(SimpleFilter::Package("package1".into())),
-                container: DirectiveContainer::Accumulate(Default::default()),
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                    added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                    environment: Some(btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    }),
+                    added_environment: Some(btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    }),
+                    working_directory: Some("/foo".into()),
+                    network: Some(JobNetwork::Loopback),
+                    ..Default::default()
+                }),
                 include_shared_libraries: Some(true),
                 timeout: Some(Timeout::new(1)),
                 ignore: Some(false),
