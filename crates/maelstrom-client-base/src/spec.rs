@@ -442,13 +442,10 @@ pub struct ContainerSpec {
 
 #[macro_export]
 macro_rules! container_spec {
-    (@expand [] -> []) => {
-        $crate::spec::ContainerSpec::default()
-    };
-    (@expand [] -> [$($fields:tt)+]) => {
+    (@expand [] -> [$($($fields:tt)+)?]) => {
         $crate::spec::ContainerSpec {
-            $($fields)+,
-            .. $crate::container_spec!(@expand [] -> [])
+            $($($fields)+,)?
+            .. $crate::spec::ContainerSpec::default()
         }
     };
     (@expand [parent: $parent:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
@@ -829,22 +826,19 @@ pub struct JobSpec {
 
 #[macro_export]
 macro_rules! job_spec {
-    (@expand [$program:expr] [] -> [] [$($container_field:tt)*]) => {
+    (@expand [$program:expr] [] -> [$($($field:tt)+)?] [$($container_field:tt)*]) => {
         $crate::spec::JobSpec {
-            container: $crate::container_spec!{$($container_field)*},
-            program: $program.into(),
-            arguments: Default::default(),
-            timeout: Default::default(),
-            estimated_duration: Default::default(),
-            allocate_tty: Default::default(),
-            priority: Default::default(),
-            capture_file_system_changes: Default::default(),
-        }
-    };
-    (@expand [$program:expr] [] -> [$($field:tt)+] [$($container_field:tt)*]) => {
-        $crate::spec::JobSpec {
-            $($field)+,
-            .. $crate::job_spec!(@expand [$program] [] -> [] [$($container_field)*])
+            $($($field)+,)?
+            .. $crate::spec::JobSpec {
+                container: $crate::container_spec!{$($container_field)*},
+                program: $program.into(),
+                arguments: Default::default(),
+                timeout: Default::default(),
+                estimated_duration: Default::default(),
+                allocate_tty: Default::default(),
+                priority: Default::default(),
+                capture_file_system_changes: Default::default(),
+            }
         }
     };
 
@@ -944,13 +938,10 @@ pub struct PrefixOptions {
 
 #[macro_export]
 macro_rules! prefix_options {
-    (@expand [] -> []) => {
-        $crate::spec::PrefixOptions::default()
-    };
-    (@expand [] -> [$($fields:tt)+]) => {
+    (@expand [] -> [$($($fields:tt)+)?]) => {
         $crate::spec::PrefixOptions {
-            $($fields)+,
-            .. $crate::prefix_options!(@expand [] -> [])
+            $($($fields)+,)?
+            .. $crate::spec::PrefixOptions::default()
         }
     };
     (@expand [strip_prefix: $strip_prefix:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
@@ -1353,12 +1344,9 @@ pub struct ConvertedImage {
 
 #[macro_export]
 macro_rules! converted_image {
-    (@expand [$name:expr] [] -> []) => {
-        $crate::spec::ConvertedImage::new($name.into(), $crate::spec::ImageConfig::default())
-    };
-    (@expand [$name:expr] [] -> [$($field_out:tt)+]) => {
+    (@expand [$name:expr] [] -> [$($($field_out:tt)+)?]) => {
         $crate::spec::ConvertedImage::new($name.into(), $crate::spec::ImageConfig {
-            $($field_out)+,
+            $($($field_out)+,)?
             .. $crate::spec::ImageConfig::default()
         })
     };

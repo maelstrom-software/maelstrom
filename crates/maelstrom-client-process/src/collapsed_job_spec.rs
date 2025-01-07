@@ -71,32 +71,29 @@ pub struct CollapsedJobSpec {
 ///
 #[cfg(test)]
 macro_rules! collapsed_job_spec {
-    (@expand [$program:expr] [] -> []) => {
+    (@expand [$program:expr] [] -> [$($($field:tt)+)?]) => {
         $crate::collapsed_job_spec::CollapsedJobSpec {
-            layers: Default::default(),
-            enable_writable_file_system: Default::default(),
-            environment: Default::default(),
-            working_directory: Default::default(),
-            mounts: Default::default(),
-            network: Default::default(),
-            user: Default::default(),
-            group: Default::default(),
-            image: Default::default(),
-            initial_environment: Default::default(),
-            image_layers: Default::default(),
-            program: $program.into(),
-            arguments: Default::default(),
-            timeout: Default::default(),
-            estimated_duration: Default::default(),
-            allocate_tty: Default::default(),
-            priority: Default::default(),
-            capture_file_system_changes: Default::default(),
-        }
-    };
-    (@expand [$program:expr] [] -> [$($field:tt)+]) => {
-        $crate::collapsed_job_spec::CollapsedJobSpec {
-            $($field)+,
-            .. collapsed_job_spec!(@expand [$program] [] -> [])
+            $($($field)+,)?
+            .. $crate::collapsed_job_spec::CollapsedJobSpec {
+                layers: Default::default(),
+                enable_writable_file_system: Default::default(),
+                environment: Default::default(),
+                working_directory: Default::default(),
+                mounts: Default::default(),
+                network: Default::default(),
+                user: Default::default(),
+                group: Default::default(),
+                image: Default::default(),
+                initial_environment: Default::default(),
+                image_layers: Default::default(),
+                program: $program.into(),
+                arguments: Default::default(),
+                timeout: Default::default(),
+                estimated_duration: Default::default(),
+                allocate_tty: Default::default(),
+                priority: Default::default(),
+                capture_file_system_changes: Default::default(),
+            }
         }
     };
     (@expand [$program:expr] [image: $image:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {

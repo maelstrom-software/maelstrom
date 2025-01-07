@@ -471,28 +471,25 @@ impl JobSpec {
 
 #[macro_export]
 macro_rules! job_spec {
-    (@expand [$program:expr, [$($layer:expr),+ $(,)?]] [] -> []) => {
+    (@expand [$program:expr, [$($layer:expr),+ $(,)?]] [] -> [$($($fields:tt)+)?]) => {
         $crate::JobSpec {
-            program: $program.into(),
-            arguments: Default::default(),
-            environment: Default::default(),
-            layers: $crate::nonempty![$($layer),+],
-            mounts: Default::default(),
-            network: Default::default(),
-            root_overlay: Default::default(),
-            working_directory: "/".into(),
-            user: 0.into(),
-            group: 0.into(),
-            timeout: Default::default(),
-            estimated_duration: Default::default(),
-            allocate_tty: Default::default(),
-            priority: Default::default(),
-        }
-    };
-    (@expand [$($required:tt)+] [] -> [$($fields:tt)+]) => {
-        $crate::JobSpec {
-            $($fields)+,
-            .. $crate::job_spec!(@expand [$($required)+] [] -> [])
+            $($($fields)+,)?
+            .. $crate::JobSpec {
+                program: $program.into(),
+                arguments: Default::default(),
+                environment: Default::default(),
+                layers: $crate::nonempty![$($layer),+],
+                mounts: Default::default(),
+                network: Default::default(),
+                root_overlay: Default::default(),
+                working_directory: "/".into(),
+                user: 0.into(),
+                group: 0.into(),
+                timeout: Default::default(),
+                estimated_duration: Default::default(),
+                allocate_tty: Default::default(),
+                priority: Default::default(),
+            }
         }
     };
     (@expand [$($required:tt)+] [arguments: [$($($argument:expr),+ $(,)?)?] $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
