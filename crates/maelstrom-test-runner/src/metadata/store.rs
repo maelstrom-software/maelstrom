@@ -98,10 +98,18 @@ where
         self.directives
             .iter()
             .filter_map(|directive| {
-                if let DirectiveContainer::Override(ContainerSpec {
+                if let DirectiveContainer::Override(container) = &directive.container {
+                    Some(container)
+                } else {
+                    None
+                }
+            })
+            .chain(self.containers.values())
+            .filter_map(|container| {
+                if let ContainerSpec {
                     parent: Some(ContainerParent::Image(image)),
                     ..
-                }) = &directive.container
+                } = container
                 {
                     Some(image.clone())
                 } else {
@@ -122,8 +130,8 @@ mod tests {
     use crate::SimpleFilter;
     use indoc::indoc;
     use maelstrom_base::JobNetwork;
-    use maelstrom_client::{container_spec, image_container_parent, tar_layer_spec};
-    use maplit::hashmap;
+    use maelstrom_client::{container_spec, image_container_parent, image_ref, tar_layer_spec};
+    use maplit::{hashmap, hashset};
 
     mod parse {
         use super::*;
@@ -329,6 +337,40 @@ mod tests {
                     parent: image_container_parent!("image1", all),
                     layers: [tar_layer_spec!("bar.tar")],
                 },
+            },
+        );
+    }
+
+    #[test]
+    fn get_all_images() {
+        let store = Store::<SimpleFilter>::load(
+            indoc! {r#"
+                [[directives]]
+                network = "loopback"
+
+                [[directives]]
+                filter = "package = \"package1\""
+                image.name = "image1"
+                image.use = ["layers"]
+                network = "disabled"
+
+                [containers.container1]
+                image = "image1"
+                network = "loopback"
+
+                [containers.container2]
+                image = "image2"
+                network = "loopback"
+            "#},
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            store.get_all_images(),
+            hashset! {
+                image_ref!("image1", all),
+                image_ref!("image1", layers),
+                image_ref!("image2", all),
             },
         );
     }
