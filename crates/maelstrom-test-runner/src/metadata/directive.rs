@@ -1,6 +1,8 @@
 #![allow(unused_imports)]
 use anyhow::Result;
-use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
+use maelstrom_base::{
+    GroupId, JobMount, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf,
+};
 use maelstrom_client::spec::{
     ContainerRefWithImplicitOrExplicitUse, ContainerSpec, ContainerSpecForTomlAndJson, EnvSelector,
     ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse, LayerSpec,
@@ -161,8 +163,8 @@ pub struct DirectiveContainerAccumulate {
     pub added_environment: Option<BTreeMap<String, String>>,
     pub working_directory: Option<Utf8PathBuf>,
     pub enable_writable_file_system: Option<bool>,
-    pub mounts: Option<Vec<JobMountForTomlAndJson>>,
-    pub added_mounts: Option<Vec<JobMountForTomlAndJson>>,
+    pub mounts: Option<Vec<JobMount>>,
+    pub added_mounts: Option<Vec<JobMount>>,
     pub network: Option<JobNetwork>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
@@ -251,8 +253,9 @@ where
                     added_environment,
                     working_directory,
                     enable_writable_file_system,
-                    mounts,
-                    added_mounts,
+                    mounts: mounts.map(|mounts| mounts.into_iter().map(Into::into).collect()),
+                    added_mounts: added_mounts
+                        .map(|mounts| mounts.into_iter().map(Into::into).collect()),
                     network,
                     user,
                     group,

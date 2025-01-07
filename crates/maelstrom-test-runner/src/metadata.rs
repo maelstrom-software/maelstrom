@@ -63,12 +63,8 @@ impl Metadata {
                     .enable_writable_file_system
                     .or(self.container.enable_writable_file_system);
 
-                let mut mounts = rhs
-                    .mounts
-                    .as_ref()
-                    .map(|mounts| mounts.iter().cloned().map(Into::into).collect())
-                    .unwrap_or(self.container.mounts);
-                mounts.extend(rhs.added_mounts.iter().flatten().cloned().map(Into::into));
+                let mut mounts = rhs.mounts.clone().unwrap_or(self.container.mounts);
+                mounts.extend(rhs.added_mounts.iter().flatten().cloned());
 
                 let network = rhs.network.or(self.container.network);
 
