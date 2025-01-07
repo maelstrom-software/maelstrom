@@ -95,6 +95,9 @@ macro_rules! accumulate_directive {
 }
 
 #[cfg(test)]
+pub(crate) use accumulate_directive;
+
+#[cfg(test)]
 macro_rules! override_directive {
     (@expand [] -> [$($($fields:tt)+)?] [$($container_fields:tt)*]) => {
         Directive {
@@ -129,6 +132,9 @@ macro_rules! override_directive {
         override_directive!(@expand [$($field_in)*] -> [] [])
     };
 }
+
+#[cfg(test)]
+pub(crate) use override_directive;
 
 // The derived Default will put a FilterT: Default bound on the implementation
 impl<FilterT> Default for Directive<FilterT> {

@@ -127,7 +127,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NoCaseMetadata, SimpleFilter};
+    use crate::{
+        metadata::directive::{accumulate_directive, override_directive},
+        NoCaseMetadata, SimpleFilter,
+    };
     use indoc::indoc;
     use maelstrom_base::JobNetwork;
     use maelstrom_client::{container_spec, image_container_parent, image_ref, tar_layer_spec};
@@ -185,22 +188,13 @@ mod tests {
                 "#}),
                 FileContents {
                     directives: vec![
-                        Directive {
-                            filter: Some(SimpleFilter::Package("package1".into())),
-                            container: DirectiveContainer::Override(container_spec! {
-                                parent: image_container_parent!("image1", all),
-                                network: JobNetwork::Disabled,
-                            }),
-                            ..Default::default()
+                        override_directive! {
+                            filter: "package = \"package1\"",
+                            parent: image_container_parent!("image1", all),
+                            network: JobNetwork::Disabled,
                         },
-                        Directive {
-                            container: DirectiveContainer::Accumulate(
-                                DirectiveContainerAccumulate {
-                                    network: Some(JobNetwork::Loopback),
-                                    ..Default::default()
-                                }
-                            ),
-                            ..Default::default()
+                        accumulate_directive! {
+                            network: JobNetwork::Loopback,
                         },
                     ],
                     containers: Default::default(),
@@ -255,22 +249,13 @@ mod tests {
                 "#}),
                 FileContents {
                     directives: vec![
-                        Directive {
-                            filter: Some(SimpleFilter::Package("package1".into())),
-                            container: DirectiveContainer::Override(container_spec! {
-                                parent: image_container_parent!("image1", all),
-                                network: JobNetwork::Disabled,
-                            }),
-                            ..Default::default()
+                        override_directive! {
+                            filter: "package = \"package1\"",
+                            parent: image_container_parent!("image1", all),
+                            network: JobNetwork::Disabled,
                         },
-                        Directive {
-                            container: DirectiveContainer::Accumulate(
-                                DirectiveContainerAccumulate {
-                                    network: Some(JobNetwork::Loopback),
-                                    ..Default::default()
-                                }
-                            ),
-                            ..Default::default()
+                        accumulate_directive! {
+                            network: JobNetwork::Loopback,
                         },
                     ],
                     containers: hashmap! {
@@ -311,22 +296,15 @@ mod tests {
         assert_eq!(
             store.directives,
             vec![
-                Directive {
-                    filter: Some(SimpleFilter::Package("package1".into())),
-                    container: DirectiveContainer::Override(container_spec! {
-                        parent: image_container_parent!("image1", all),
-                        layers: [tar_layer_spec!("bar.tar")],
-                        network: JobNetwork::Disabled,
-                    }),
-                    ..Default::default()
+                override_directive! {
+                    filter: "package = \"package1\"",
+                    parent: image_container_parent!("image1", all),
+                    layers: [tar_layer_spec!("bar.tar")],
+                    network: JobNetwork::Disabled,
                 },
-                Directive {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                        network: Some(JobNetwork::Loopback),
-                        added_layers: Some(vec![tar_layer_spec!("bar.tar")]),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
+                accumulate_directive! {
+                    network: JobNetwork::Loopback,
+                    added_layers: [tar_layer_spec!("bar.tar")],
                 },
             ],
         );
