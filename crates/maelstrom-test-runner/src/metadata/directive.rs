@@ -23,6 +23,42 @@ pub struct Directive<FilterT> {
     pub ignore: Option<bool>,
 }
 
+#[cfg(test)]
+macro_rules! override_directive {
+    (@expand [] -> [$($($fields:tt)+)?] [$($container_fields:tt)*]) => {
+        Directive {
+            $($($fields)+,)?
+            .. Directive {
+                filter: Default::default(),
+                container: DirectiveContainer::Override(
+                    maelstrom_client::container_spec!($($container_fields)*)
+                ),
+                include_shared_libraries: Default::default(),
+                timeout: Default::default(),
+                ignore: Default::default(),
+            }
+        }
+    };
+    (@expand [filter: $filter:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        override_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? filter: Some(FromStr::from_str($filter).unwrap())] [$($container_field)*])
+    };
+    (@expand [include_shared_libraries: $include_shared_libraries:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        override_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? include_shared_libraries: Some($include_shared_libraries.into())] [$($container_field)*])
+    };
+    (@expand [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        override_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? timeout: Some(Timeout::new($timeout))] [$($container_field)*])
+    };
+    (@expand [ignore: $ignore:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        override_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? ignore: Some($ignore.into())] [$($container_field)*])
+    };
+    (@expand [$container_field_name:ident: $container_field_value:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        override_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? $container_field_name: $container_field_value])
+    };
+    ($($field_in:tt)*) => {
+        override_directive!(@expand [$($field_in)*] -> [] [])
+    };
+}
+
 // The derived Default will put a FilterT: Default bound on the implementation
 impl<FilterT> Default for Directive<FilterT> {
     fn default() -> Self {
@@ -168,10 +204,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SimpleFilter;
     use anyhow::Error;
     use indoc::indoc;
     use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
-    use maelstrom_client::spec::SymlinkSpec;
+    use maelstrom_client::{container_spec, spec::SymlinkSpec};
     use maelstrom_test::{non_root_utf8_path_buf, string, utf8_path_buf};
 
     fn parse_test_directive(toml: &str) -> Result<Directive<String>, toml::de::Error> {
@@ -283,6 +320,131 @@ mod tests {
                 ),
                 timeout: Some(None),
                 ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn override_directive_empty() {
+        assert_eq!(
+            override_directive!(),
+            Directive::<String> {
+                container: DirectiveContainer::Override(Default::default()),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn override_directive_filter() {
+        assert_eq!(
+            override_directive!(filter: "package = \"package1\""),
+            Directive {
+                filter: Some(SimpleFilter::Package("package1".into())),
+                container: DirectiveContainer::Override(Default::default()),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn override_directive_container_field() {
+        assert_eq!(
+            override_directive!(user: 101),
+            Directive::<String> {
+                container: DirectiveContainer::Override(container_spec!(user: 101)),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            override_directive!(group: 202),
+            Directive::<String> {
+                container: DirectiveContainer::Override(container_spec!(group: 202)),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn override_directive_include_shared_libraries() {
+        assert_eq!(
+            override_directive!(include_shared_libraries: true),
+            Directive::<String> {
+                include_shared_libraries: Some(true),
+                container: DirectiveContainer::Override(Default::default()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            override_directive!(include_shared_libraries: false),
+            Directive::<String> {
+                include_shared_libraries: Some(false),
+                container: DirectiveContainer::Override(Default::default()),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn override_directive_timeout() {
+        assert_eq!(
+            override_directive!(timeout: 0),
+            Directive::<String> {
+                timeout: Some(None),
+                container: DirectiveContainer::Override(Default::default()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            override_directive!(timeout: 1),
+            Directive::<String> {
+                timeout: Some(Timeout::new(1)),
+                container: DirectiveContainer::Override(Default::default()),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn override_directive_ignore() {
+        assert_eq!(
+            override_directive!(ignore: true),
+            Directive::<String> {
+                ignore: Some(true),
+                container: DirectiveContainer::Override(Default::default()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            override_directive!(ignore: false),
+            Directive::<String> {
+                ignore: Some(false),
+                container: DirectiveContainer::Override(Default::default()),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn override_directive_multiple() {
+        assert_eq!(
+            override_directive! {
+                filter: "package = \"package1\"",
+                user: 101,
+                group: 202,
+                include_shared_libraries: true,
+                timeout: 1,
+                ignore: false,
+            },
+            Directive {
+                filter: Some(SimpleFilter::Package("package1".into())),
+                container: DirectiveContainer::Override(container_spec! {
+                    user: 101,
+                    group: 202,
+                }),
+                include_shared_libraries: Some(true),
+                timeout: Some(Timeout::new(1)),
+                ignore: Some(false),
             },
         );
     }
