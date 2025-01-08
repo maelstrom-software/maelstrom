@@ -7,12 +7,17 @@ mod tests;
 
 use crate::{
     config::{Repeat, StopAfter},
+    deps::{
+        CollectTests, KillOnDrop, MainAppDeps, TestArtifact as _, TestFilter as _, Wait as _,
+        WaitStatus,
+    },
     metadata::Store as MetadataStore,
     test_db::{TestDb, TestDbStore},
+    ui::UiSender,
     ui::{Ui, UiJobId as JobId, UiMessage},
-    *,
+    ListAction, LoggingOutput,
 };
-use anyhow::Context as _;
+use anyhow::{Context as _, Result};
 use maelstrom_base::Timeout;
 use maelstrom_client::{spec::JobSpec, JobStatus, ProjectDir, StateDir};
 use maelstrom_util::{
@@ -24,8 +29,10 @@ use maelstrom_util::{
 use main_app::MainApp;
 use std::{
     path::PathBuf,
-    sync::mpsc::{Receiver, Sender},
-    sync::Mutex,
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use std_semaphore::Semaphore;
