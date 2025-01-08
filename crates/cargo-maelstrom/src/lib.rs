@@ -300,7 +300,7 @@ impl TestArtifact for CargoTestArtifact {
     fn get_test_layers(&self, metadata: &Metadata) -> Vec<LayerSpec> {
         let mut layers = vec![path_layer_for_binary(self.utf8_path())];
 
-        if metadata.include_shared_libraries() {
+        if metadata.include_shared_libraries {
             layers.push(so_layer_for_binary(self.utf8_path()));
         }
 

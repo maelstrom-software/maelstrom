@@ -1,6 +1,6 @@
 use super::{
     directive::{Directive, DirectiveContainer, DirectiveContainerAccumulate},
-    Metadata,
+    Metadata, MetadataInternal,
 };
 use crate::TestFilter;
 use anyhow::{anyhow, Result};
@@ -82,22 +82,21 @@ where
         artifact: &TestFilterT::ArtifactKey,
         case: (&str, &TestFilterT::CaseMetadata),
     ) -> Result<Metadata> {
-        let mut metadata = self
+        let metadata = self
             .directives
             .iter()
             .filter(|directive| match directive {
+                Directive { filter: None, .. } => true,
                 Directive {
                     filter: Some(filter),
                     ..
                 } => filter
                     .filter(package, Some(artifact), Some(case))
                     .expect("should have case"),
-                Directive { filter: None, .. } => true,
             })
-            .try_fold(Metadata::default(), |m, d| m.try_fold(d))?;
-        metadata.uses_image_layers =
-            Some(self.parent_uses_image_layers(&metadata.container.parent)?);
-        Ok(metadata)
+            .try_fold(MetadataInternal::default(), |m, d| m.try_fold(d))?;
+        let uses_image_layers = self.parent_uses_image_layers(&metadata.container.parent)?;
+        Ok(Metadata::new(metadata, uses_image_layers))
     }
 
     pub fn get_all_images(&self) -> HashSet<ImageRef> {

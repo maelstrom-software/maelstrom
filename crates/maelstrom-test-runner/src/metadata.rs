@@ -8,30 +8,45 @@ use directive::{Directive, DirectiveContainer};
 use maelstrom_base::Timeout;
 use maelstrom_client::spec::{ContainerSpec, EnvironmentSpec};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct Metadata {
     pub container: ContainerSpec,
-    include_shared_libraries: Option<bool>,
-    uses_image_layers: Option<bool>,
+    pub include_shared_libraries: bool,
     pub timeout: Option<Timeout>,
     pub ignore: bool,
 }
 
 impl Metadata {
-    /// Return whether to include a layer of shared library dependencies.
-    ///
     /// The logic here is that if they explicitly set the value to something, we should return
     /// that. Otherwise, we should see if they are using layers from an image. If they are, we can
     /// assume that the image has shared libraries, and we shouldn't push shared libraries on top
     /// of it. Otherwise, they probably don't want to have to explicitly provide a layer with
     /// shared libraries in it, so we should include shared libraries for them.
-    pub fn include_shared_libraries(&self) -> bool {
-        match self.include_shared_libraries {
-            Some(val) => val,
-            None => !self.uses_image_layers.unwrap(),
+    fn new(metadata: MetadataInternal, uses_image_layers: bool) -> Self {
+        let MetadataInternal {
+            container,
+            include_shared_libraries,
+            timeout,
+            ignore,
+        } = metadata;
+        Self {
+            container,
+            include_shared_libraries: include_shared_libraries.unwrap_or(!uses_image_layers),
+            timeout,
+            ignore,
         }
     }
+}
 
+#[derive(Default)]
+struct MetadataInternal {
+    container: ContainerSpec,
+    include_shared_libraries: Option<bool>,
+    timeout: Option<Timeout>,
+    ignore: bool,
+}
+
+impl MetadataInternal {
     fn try_fold<TestFilterT>(mut self, directive: &Directive<TestFilterT>) -> Result<Self> {
         let rhs = directive;
 

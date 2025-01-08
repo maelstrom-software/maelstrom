@@ -280,7 +280,7 @@ impl TestArtifact for GoTestArtifact {
     fn get_test_layers(&self, metadata: &Metadata) -> Vec<LayerSpec> {
         let mut layers = vec![path_layer_for_binary(&self.path)];
 
-        if metadata.include_shared_libraries() {
+        if metadata.include_shared_libraries {
             // Go binaries usually are statically linked, but on the off-chance they use some OS
             // library or something, doesn't hurt to check.
             layers.push(so_layer_for_binary(&self.path));
