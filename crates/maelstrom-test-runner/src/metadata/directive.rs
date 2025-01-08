@@ -26,14 +26,14 @@ pub struct Directive<FilterT> {
 }
 
 #[cfg(test)]
-macro_rules! accumulate_directive {
+macro_rules! augment_directive {
     (@expand [] -> [$($($fields:tt)+)?] [$($($container_fields:tt)+)?]) => {
         Directive {
             $($($fields)+,)?
             .. Directive {
                 filter: Default::default(),
-                container: DirectiveContainer::Accumulate(
-                    DirectiveContainerAccumulate {
+                container: DirectiveContainer::Augment(
+                    DirectiveContainerAugment {
                         $($($container_fields)+,)?
                         .. Default::default()
                     }
@@ -45,57 +45,57 @@ macro_rules! accumulate_directive {
         }
     };
     (@expand [filter: $filter:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? filter: Some(FromStr::from_str($filter).unwrap())] [$($container_field)*])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? filter: Some(FromStr::from_str($filter).unwrap())] [$($container_field)*])
     };
     (@expand [include_shared_libraries: $include_shared_libraries:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? include_shared_libraries: Some($include_shared_libraries.into())] [$($container_field)*])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? include_shared_libraries: Some($include_shared_libraries.into())] [$($container_field)*])
     };
     (@expand [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? timeout: Some(Timeout::new($timeout))] [$($container_field)*])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? timeout: Some(Timeout::new($timeout))] [$($container_field)*])
     };
     (@expand [ignore: $ignore:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? ignore: Some($ignore.into())] [$($container_field)*])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? ignore: Some($ignore.into())] [$($container_field)*])
     };
     (@expand [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? layers: Some($layers.into_iter().map(Into::into).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? layers: Some($layers.into_iter().map(Into::into).collect())])
     };
     (@expand [added_layers: $added_layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_layers: Some($added_layers.into_iter().map(Into::into).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_layers: Some($added_layers.into_iter().map(Into::into).collect())])
     };
     (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? environment: Some($environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? environment: Some($environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
     };
     (@expand [added_environment: $added_environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_environment: Some($added_environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_environment: Some($added_environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
     };
     (@expand [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? working_directory: Some($working_directory.into())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? working_directory: Some($working_directory.into())])
     };
     (@expand [enable_writable_file_system: $enable_writable_file_system:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? enable_writable_file_system: Some($enable_writable_file_system.into())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? enable_writable_file_system: Some($enable_writable_file_system.into())])
     };
     (@expand [mounts: $mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? mounts: Some($mounts.into_iter().map(Into::into).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? mounts: Some($mounts.into_iter().map(Into::into).collect())])
     };
     (@expand [added_mounts: $added_mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_mounts: Some($added_mounts.into_iter().map(Into::into).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_mounts: Some($added_mounts.into_iter().map(Into::into).collect())])
     };
     (@expand [network: $network:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? network: Some($network.into())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? network: Some($network.into())])
     };
     (@expand [user: $user:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? user: Some($user.into())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? user: Some($user.into())])
     };
     (@expand [group: $group:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? group: Some($group.into())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? group: Some($group.into())])
     };
     ($($field_in:tt)*) => {
-        accumulate_directive!(@expand [$($field_in)*] -> [] [])
+        augment_directive!(@expand [$($field_in)*] -> [] [])
     };
 }
 
 #[cfg(test)]
-pub(crate) use accumulate_directive;
+pub(crate) use augment_directive;
 
 #[cfg(test)]
 macro_rules! override_directive {
@@ -141,7 +141,7 @@ impl<FilterT> Default for Directive<FilterT> {
     fn default() -> Self {
         Self {
             filter: Default::default(),
-            container: DirectiveContainer::Accumulate(Default::default()),
+            container: DirectiveContainer::Augment(Default::default()),
             include_shared_libraries: Default::default(),
             timeout: Default::default(),
             ignore: Default::default(),
@@ -152,11 +152,11 @@ impl<FilterT> Default for Directive<FilterT> {
 #[derive(Debug, PartialEq)]
 pub enum DirectiveContainer {
     Override(ContainerSpec),
-    Accumulate(DirectiveContainerAccumulate),
+    Augment(DirectiveContainerAugment),
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub struct DirectiveContainerAccumulate {
+pub struct DirectiveContainerAugment {
     pub layers: Option<Vec<LayerSpec>>,
     pub added_layers: Option<Vec<LayerSpec>>,
     pub environment: Option<BTreeMap<String, String>>,
@@ -234,7 +234,7 @@ where
                 ignore,
             } => Ok(Directive {
                 filter,
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                container: DirectiveContainer::Augment(DirectiveContainerAugment {
                     layers,
                     added_layers,
                     environment,
@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn no_fields() {
-        directive_parse_test("", accumulate_directive!());
+        directive_parse_test("", augment_directive!());
     }
 
     #[test]
@@ -356,15 +356,15 @@ mod tests {
     }
 
     #[test]
-    fn accumulate_container_filter() {
+    fn augment_container_filter() {
         directive_parse_test(
             r#"filter = "foo && bar""#,
-            accumulate_directive!(filter: "foo && bar"),
+            augment_directive!(filter: "foo && bar"),
         );
     }
 
     #[test]
-    fn accumulate_container_container_fields() {
+    fn augment_container_container_fields() {
         directive_parse_test(
             indoc! {r#"
                 layers = [{ tar = "foo.tar" }]
@@ -379,7 +379,7 @@ mod tests {
                 user = 101
                 group = 202
             "#},
-            accumulate_directive! {
+            augment_directive! {
                 layers: [tar_layer_spec!("foo.tar")],
                 added_layers: [tar_layer_spec!("bar.tar")],
                 environment: [("foo", "bar")],
@@ -396,27 +396,27 @@ mod tests {
     }
 
     #[test]
-    fn accumulate_container_include_shared_libraries() {
+    fn augment_container_include_shared_libraries() {
         directive_parse_test(
             r#"include_shared_libraries = true"#,
-            accumulate_directive!(include_shared_libraries: true),
+            augment_directive!(include_shared_libraries: true),
         );
         directive_parse_test(
             r#"include_shared_libraries = false"#,
-            accumulate_directive!(include_shared_libraries: false),
+            augment_directive!(include_shared_libraries: false),
         );
     }
 
     #[test]
-    fn accumulate_container_timeout() {
-        directive_parse_test(r#"timeout = 0"#, accumulate_directive!(timeout: 0));
-        directive_parse_test(r#"timeout = 1"#, accumulate_directive!(timeout: 1));
+    fn augment_container_timeout() {
+        directive_parse_test(r#"timeout = 0"#, augment_directive!(timeout: 0));
+        directive_parse_test(r#"timeout = 1"#, augment_directive!(timeout: 1));
     }
 
     #[test]
-    fn accumulate_container_ignore() {
-        directive_parse_test(r#"ignore = true"#, accumulate_directive!(ignore: true));
-        directive_parse_test(r#"ignore = false"#, accumulate_directive!(ignore: false));
+    fn augment_container_ignore() {
+        directive_parse_test(r#"ignore = true"#, augment_directive!(ignore: true));
+        directive_parse_test(r#"ignore = false"#, augment_directive!(ignore: false));
     }
 
     #[test]
@@ -554,18 +554,18 @@ mod tests {
         );
     }
 
-    mod accumulate_directive_macro {
+    mod augment_directive_macro {
         use super::*;
 
         #[test]
         fn empty() {
-            assert_eq!(accumulate_directive!(), Directive::<String>::default());
+            assert_eq!(augment_directive!(), Directive::<String>::default());
         }
 
         #[test]
         fn filter() {
             assert_eq!(
-                accumulate_directive!(filter: "package = \"package1\""),
+                augment_directive!(filter: "package = \"package1\""),
                 Directive {
                     filter: Some(SimpleFilter::Package("package1".into())),
                     ..Default::default()
@@ -576,14 +576,14 @@ mod tests {
         #[test]
         fn include_shared_libraries() {
             assert_eq!(
-                accumulate_directive!(include_shared_libraries: true),
+                augment_directive!(include_shared_libraries: true),
                 Directive::<String> {
                     include_shared_libraries: Some(true),
                     ..Default::default()
                 },
             );
             assert_eq!(
-                accumulate_directive!(include_shared_libraries: false),
+                augment_directive!(include_shared_libraries: false),
                 Directive::<String> {
                     include_shared_libraries: Some(false),
                     ..Default::default()
@@ -594,14 +594,14 @@ mod tests {
         #[test]
         fn timeout() {
             assert_eq!(
-                accumulate_directive!(timeout: 0),
+                augment_directive!(timeout: 0),
                 Directive::<String> {
                     timeout: Some(None),
                     ..Default::default()
                 },
             );
             assert_eq!(
-                accumulate_directive!(timeout: 1),
+                augment_directive!(timeout: 1),
                 Directive::<String> {
                     timeout: Some(Timeout::new(1)),
                     ..Default::default()
@@ -612,14 +612,14 @@ mod tests {
         #[test]
         fn ignore() {
             assert_eq!(
-                accumulate_directive!(ignore: true),
+                augment_directive!(ignore: true),
                 Directive::<String> {
                     ignore: Some(true),
                     ..Default::default()
                 },
             );
             assert_eq!(
-                accumulate_directive!(ignore: false),
+                augment_directive!(ignore: false),
                 Directive::<String> {
                     ignore: Some(false),
                     ..Default::default()
@@ -630,9 +630,9 @@ mod tests {
         #[test]
         fn layers() {
             assert_eq!(
-                accumulate_directive!(layers: [tar_layer_spec!("foo.tar")]),
+                augment_directive!(layers: [tar_layer_spec!("foo.tar")]),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         layers: Some(vec![tar_layer_spec!("foo.tar")]),
                         ..Default::default()
                     }),
@@ -644,9 +644,9 @@ mod tests {
         #[test]
         fn added_layers() {
             assert_eq!(
-                accumulate_directive!(added_layers: [tar_layer_spec!("foo.tar")]),
+                augment_directive!(added_layers: [tar_layer_spec!("foo.tar")]),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
                         ..Default::default()
                     }),
@@ -658,9 +658,9 @@ mod tests {
         #[test]
         fn environment() {
             assert_eq!(
-                accumulate_directive!(environment: [("foo", "bar"), ("frob", "baz")]),
+                augment_directive!(environment: [("foo", "bar"), ("frob", "baz")]),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         environment: Some(btreemap! {
                             "foo".into() => "bar".into(),
                             "frob".into() => "baz".into(),
@@ -675,9 +675,9 @@ mod tests {
         #[test]
         fn added_environment() {
             assert_eq!(
-                accumulate_directive!(added_environment: [("foo", "bar"), ("frob", "baz")]),
+                augment_directive!(added_environment: [("foo", "bar"), ("frob", "baz")]),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         added_environment: Some(btreemap! {
                             "foo".into() => "bar".into(),
                             "frob".into() => "baz".into(),
@@ -692,9 +692,9 @@ mod tests {
         #[test]
         fn working_directory() {
             assert_eq!(
-                accumulate_directive!(working_directory: "/foo"),
+                augment_directive!(working_directory: "/foo"),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         working_directory: Some("/foo".into()),
                         ..Default::default()
                     }),
@@ -706,9 +706,9 @@ mod tests {
         #[test]
         fn enable_writable_file_system() {
             assert_eq!(
-                accumulate_directive!(enable_writable_file_system: true),
+                augment_directive!(enable_writable_file_system: true),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         enable_writable_file_system: Some(true),
                         ..Default::default()
                     }),
@@ -716,9 +716,9 @@ mod tests {
                 },
             );
             assert_eq!(
-                accumulate_directive!(enable_writable_file_system: false),
+                augment_directive!(enable_writable_file_system: false),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         enable_writable_file_system: Some(false),
                         ..Default::default()
                     }),
@@ -730,9 +730,9 @@ mod tests {
         #[test]
         fn mounts() {
             assert_eq!(
-                accumulate_directive!(mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
+                augment_directive!(mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         mounts: Some(vec![proc_mount!("/proc"), tmp_mount!("/tmp")]),
                         ..Default::default()
                     }),
@@ -744,9 +744,9 @@ mod tests {
         #[test]
         fn added_mounts() {
             assert_eq!(
-                accumulate_directive!(added_mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
+                augment_directive!(added_mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         added_mounts: Some(vec![proc_mount!("/proc"), tmp_mount!("/tmp")]),
                         ..Default::default()
                     }),
@@ -758,9 +758,9 @@ mod tests {
         #[test]
         fn network() {
             assert_eq!(
-                accumulate_directive!(network: JobNetwork::Loopback),
+                augment_directive!(network: JobNetwork::Loopback),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         network: Some(JobNetwork::Loopback),
                         ..Default::default()
                     }),
@@ -768,9 +768,9 @@ mod tests {
                 },
             );
             assert_eq!(
-                accumulate_directive!(network: JobNetwork::Disabled),
+                augment_directive!(network: JobNetwork::Disabled),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         network: Some(JobNetwork::Disabled),
                         ..Default::default()
                     }),
@@ -782,9 +782,9 @@ mod tests {
         #[test]
         fn user() {
             assert_eq!(
-                accumulate_directive!(user: 101),
+                augment_directive!(user: 101),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         user: Some(UserId::new(101)),
                         ..Default::default()
                     }),
@@ -796,9 +796,9 @@ mod tests {
         #[test]
         fn group() {
             assert_eq!(
-                accumulate_directive!(group: 101),
+                augment_directive!(group: 101),
                 Directive::<String> {
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         group: Some(GroupId::new(101)),
                         ..Default::default()
                     }),
@@ -810,7 +810,7 @@ mod tests {
         #[test]
         fn multiple() {
             assert_eq!(
-                accumulate_directive! {
+                augment_directive! {
                     filter: "package = \"package1\"",
                     include_shared_libraries: true,
                     timeout: 1,
@@ -824,7 +824,7 @@ mod tests {
                 },
                 Directive {
                     filter: Some(SimpleFilter::Package("package1".into())),
-                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         layers: Some(vec![tar_layer_spec!("foo.tar")]),
                         added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
                         environment: Some(btreemap! {

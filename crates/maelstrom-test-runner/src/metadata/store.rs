@@ -1,5 +1,5 @@
 use super::{
-    directive::{Directive, DirectiveContainer, DirectiveContainerAccumulate},
+    directive::{Directive, DirectiveContainer, DirectiveContainerAugment},
     Metadata, MetadataInternal,
 };
 use crate::TestFilter;
@@ -44,7 +44,7 @@ where
                         layer.replace_template_vars(vars)?;
                     }
                 }
-                DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                DirectiveContainer::Augment(DirectiveContainerAugment {
                     layers,
                     added_layers,
                     ..
@@ -168,7 +168,7 @@ where
 mod tests {
     use super::*;
     use crate::{
-        metadata::directive::{accumulate_directive, override_directive},
+        metadata::directive::{augment_directive, override_directive},
         NoCaseMetadata, SimpleFilter,
     };
     use indoc::indoc;
@@ -236,7 +236,7 @@ mod tests {
                             parent: image_container_parent!("image1", all),
                             network: JobNetwork::Disabled,
                         },
-                        accumulate_directive! {
+                        augment_directive! {
                             network: JobNetwork::Loopback,
                         },
                     ],
@@ -297,7 +297,7 @@ mod tests {
                             parent: image_container_parent!("image1", all),
                             network: JobNetwork::Disabled,
                         },
-                        accumulate_directive! {
+                        augment_directive! {
                             network: JobNetwork::Loopback,
                         },
                     ],
@@ -345,7 +345,7 @@ mod tests {
                     layers: [tar_layer_spec!("bar.tar")],
                     network: JobNetwork::Disabled,
                 },
-                accumulate_directive! {
+                augment_directive! {
                     network: JobNetwork::Loopback,
                     added_layers: [tar_layer_spec!("bar.tar")],
                 },

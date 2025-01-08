@@ -52,7 +52,7 @@ impl MetadataInternal {
 
         self.container = match &rhs.container {
             DirectiveContainer::Override(container) => container.clone(),
-            DirectiveContainer::Accumulate(rhs) => {
+            DirectiveContainer::Augment(rhs) => {
                 let mut layers = rhs.layers.clone().unwrap_or(self.container.layers);
                 layers.extend(rhs.added_layers.iter().flatten().cloned());
 
