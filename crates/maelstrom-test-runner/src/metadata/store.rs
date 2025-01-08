@@ -3,8 +3,10 @@ use super::{
     Metadata,
 };
 use crate::TestFilter;
-use anyhow::Result;
-use maelstrom_client::spec::{ContainerParent, ContainerSpec, ImageRef};
+use anyhow::{anyhow, Result};
+use maelstrom_client::spec::{
+    ContainerParent, ContainerRef, ContainerSpec, ContainerUse, ImageRef, ImageUse,
+};
 use maelstrom_util::template::TemplateVars;
 use serde::Deserialize;
 use std::{
@@ -119,6 +121,41 @@ where
             .collect()
     }
 
+    pub fn parent_uses_image_layers(&self, parent: &Option<ContainerParent>) -> Result<bool> {
+        self.parent_uses_image_layers_internal(parent, vec![])
+    }
+
+    fn parent_uses_image_layers_internal<'a>(
+        &'a self,
+        parent: &'a Option<ContainerParent>,
+        mut ancestors: Vec<&'a str>,
+    ) -> Result<bool> {
+        match parent {
+            None => Ok(false),
+            Some(ContainerParent::Image(image_ref)) => {
+                Ok(image_ref.r#use.contains(ImageUse::Layers))
+            }
+            Some(ContainerParent::Container(container_ref))
+                if !container_ref.r#use.contains(ContainerUse::Layers) =>
+            {
+                Ok(false)
+            }
+            Some(ContainerParent::Container(ContainerRef { name, .. })) => {
+                if ancestors.iter().any(|ancestor| ancestor == name) {
+                    ancestors.push(name);
+                    Err(anyhow!("ancestor loop: {}", ancestors.join(" -> ")))
+                } else {
+                    ancestors.push(name);
+                    if let Some(grandparent) = self.containers.get(name) {
+                        self.parent_uses_image_layers_internal(&grandparent.parent, ancestors)
+                    } else {
+                        Err(anyhow!("could not find container parent: {name}"))
+                    }
+                }
+            }
+        }
+    }
+
     pub fn containers(&self) -> impl Iterator<Item = (&String, &ContainerSpec)> {
         self.containers.iter()
     }
@@ -133,7 +170,10 @@ mod tests {
     };
     use indoc::indoc;
     use maelstrom_base::JobNetwork;
-    use maelstrom_client::{container_spec, image_container_parent, image_ref, tar_layer_spec};
+    use maelstrom_client::{
+        container_container_parent, container_spec, image_container_parent, image_ref,
+        tar_layer_spec,
+    };
     use maplit::{hashmap, hashset};
 
     mod parse {
@@ -472,5 +512,152 @@ mod tests {
                 user: 101,
             },
         );
+    }
+
+    mod parent_uses_image_layers {
+        use super::*;
+
+        #[test]
+        fn none() {
+            let store = Store::<SimpleFilter>::load("", &Default::default()).unwrap();
+            assert!(!store.parent_uses_image_layers(&None).unwrap());
+        }
+
+        #[test]
+        fn image_parent_without_use_of_layers() {
+            let store = Store::<SimpleFilter>::load("", &Default::default()).unwrap();
+            assert!(!store
+                .parent_uses_image_layers(&Some(image_container_parent!("foo", all, -layers)))
+                .unwrap());
+        }
+
+        #[test]
+        fn image_parent() {
+            let store = Store::<SimpleFilter>::load("", &Default::default()).unwrap();
+            assert!(store
+                .parent_uses_image_layers(&Some(image_container_parent!("foo", all)))
+                .unwrap());
+        }
+
+        #[test]
+        fn container_parent_without_use_of_layers() {
+            let store = Store::<SimpleFilter>::load("", &Default::default()).unwrap();
+            assert!(!store
+                .parent_uses_image_layers(&Some(container_container_parent!("foo", all, -layers)))
+                .unwrap());
+        }
+
+        #[test]
+        fn container_parent_no_grandparent() {
+            let store = Store::<SimpleFilter>::load(
+                indoc! {r#"
+                    [containers.parent]
+                "#},
+                &Default::default(),
+            )
+            .unwrap();
+            assert!(!store
+                .parent_uses_image_layers(&Some(container_container_parent!("parent", all)))
+                .unwrap());
+        }
+
+        #[test]
+        fn container_parent_image_grandparent() {
+            let store = Store::<SimpleFilter>::load(
+                indoc! {r#"
+                    [containers.parent]
+                    image = "grandparent"
+                "#},
+                &Default::default(),
+            )
+            .unwrap();
+            assert!(store
+                .parent_uses_image_layers(&Some(container_container_parent!("parent", all)))
+                .unwrap());
+        }
+
+        #[test]
+        fn container_parent_image_grandparent_without_use_of_layers() {
+            let store = Store::<SimpleFilter>::load(
+                indoc! {r#"
+                    [containers.parent]
+                    image.name = "grandparent"
+                    image.use = ["environment"]
+                "#},
+                &Default::default(),
+            )
+            .unwrap();
+            assert!(!store
+                .parent_uses_image_layers(&Some(container_container_parent!("parent", all)))
+                .unwrap());
+        }
+
+        #[test]
+        fn unknown_container_parent() {
+            let store = Store::<SimpleFilter>::load("", &Default::default()).unwrap();
+            assert!(store
+                .parent_uses_image_layers(&Some(container_container_parent!("parent", all)))
+                .unwrap_err()
+                .to_string()
+                .contains("could not find container parent: parent"));
+        }
+
+        #[test]
+        fn container_parent_cycle() {
+            let store = Store::<SimpleFilter>::load(
+                indoc! {r#"
+                    [containers.parent1]
+                    parent = "parent2"
+                    [containers.parent2]
+                    parent = "parent1"
+                "#},
+                &Default::default(),
+            )
+            .unwrap();
+            assert!(store
+                .parent_uses_image_layers(&Some(container_container_parent!("parent1", all)))
+                .unwrap_err()
+                .to_string()
+                .contains("ancestor loop: parent1 -> parent2 -> parent1"));
+        }
+
+        #[test]
+        fn container_parent_deep_with_image_use() {
+            let store = Store::<SimpleFilter>::load(
+                indoc! {r#"
+                    [containers.ancestor1]
+                    parent = "ancestor2"
+                    [containers.ancestor2]
+                    parent = "ancestor3"
+                    [containers.ancestor3]
+                    image = "image"
+                "#},
+                &Default::default(),
+            )
+            .unwrap();
+            assert!(store
+                .parent_uses_image_layers(&Some(container_container_parent!("ancestor1", all)))
+                .unwrap());
+        }
+
+        #[test]
+        fn container_parent_deep_without_image_use() {
+            let store = Store::<SimpleFilter>::load(
+                indoc! {r#"
+                    [containers.ancestor1]
+                    parent = "ancestor2"
+                    [containers.ancestor2]
+                    parent.name = "ancestor3"
+                    parent.use = ["environment"]
+                    [containers.ancestor3]
+                    image = "image"
+                "#},
+                &Default::default(),
+            )
+            .unwrap();
+            assert!(!store
+                .parent_uses_image_layers(&Some(container_container_parent!("ancestor1", all)))
+                .unwrap());
+        }
     }
 }
