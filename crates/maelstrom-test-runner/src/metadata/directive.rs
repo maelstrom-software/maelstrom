@@ -174,9 +174,8 @@ pub struct DirectiveContainerAccumulate {
 #[serde(deny_unknown_fields)]
 struct DirectiveForTomlAndJson {
     filter: Option<String>,
-
-    // This will be Some if any of the other fields are Some(AllMetadata::Image).
     image: Option<ImageRefWithImplicitOrExplicitUse>,
+    parent: Option<ContainerRefWithImplicitOrExplicitUse>,
     layers: Option<Vec<LayerSpec>>,
     added_layers: Option<Vec<LayerSpec>>,
     environment: Option<BTreeMap<String, String>>,
@@ -188,7 +187,6 @@ struct DirectiveForTomlAndJson {
     network: Option<JobNetwork>,
     user: Option<UserId>,
     group: Option<GroupId>,
-
     include_shared_libraries: Option<bool>,
     timeout: Option<u32>,
     ignore: Option<bool>,
@@ -201,36 +199,75 @@ where
 {
     type Error = String;
     fn try_from(directive: DirectiveForTomlAndJson) -> Result<Self, Self::Error> {
-        let DirectiveForTomlAndJson {
-            filter,
-            image,
-            layers,
-            added_layers,
-            environment,
-            added_environment,
-            working_directory,
-            enable_writable_file_system,
-            mounts,
-            added_mounts,
-            network,
-            user,
-            group,
-            include_shared_libraries,
-            timeout,
-            ignore,
-        } = directive;
-
-        let filter = filter
+        let filter = directive
+            .filter
             .map(|filter| filter.parse::<FilterT>())
             .transpose()
             .map_err(|err| err.to_string())?;
 
-        let container = {
-            if image.is_some() {
-                DirectiveContainer::Override(
+        match directive {
+            DirectiveForTomlAndJson {
+                filter: _,
+                image: None,
+                parent: None,
+                layers,
+                added_layers,
+                environment,
+                added_environment,
+                working_directory,
+                enable_writable_file_system,
+                mounts,
+                added_mounts,
+                network,
+                user,
+                group,
+                include_shared_libraries,
+                timeout,
+                ignore,
+            } => Ok(Directive {
+                filter,
+                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                    layers,
+                    added_layers,
+                    environment,
+                    added_environment,
+                    working_directory,
+                    enable_writable_file_system,
+                    mounts: mounts.map(|mounts| mounts.into_iter().map(Into::into).collect()),
+                    added_mounts: added_mounts
+                        .map(|mounts| mounts.into_iter().map(Into::into).collect()),
+                    network,
+                    user,
+                    group,
+                }),
+                include_shared_libraries,
+                timeout: timeout.map(Timeout::new),
+                ignore,
+            }),
+            DirectiveForTomlAndJson {
+                filter: _,
+                image,
+                parent,
+                layers,
+                added_layers,
+                environment,
+                added_environment,
+                working_directory,
+                enable_writable_file_system,
+                mounts,
+                added_mounts,
+                network,
+                user,
+                group,
+                include_shared_libraries,
+                timeout,
+                ignore,
+            } => Ok(Directive {
+                filter,
+                container: DirectiveContainer::Override(
                     ContainerSpecForTomlAndJson {
                         image,
-                        parent: None,
+                        parent,
                         layers,
                         added_layers,
                         environment: environment.map(EnvSelector::Implicit),
@@ -244,32 +281,12 @@ where
                         group,
                     }
                     .try_into()?,
-                )
-            } else {
-                DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    layers,
-                    added_layers,
-                    environment,
-                    added_environment,
-                    working_directory,
-                    enable_writable_file_system,
-                    mounts: mounts.map(|mounts| mounts.into_iter().map(Into::into).collect()),
-                    added_mounts: added_mounts
-                        .map(|mounts| mounts.into_iter().map(Into::into).collect()),
-                    network,
-                    user,
-                    group,
-                })
-            }
-        };
-
-        Ok(Directive {
-            filter,
-            container,
-            include_shared_libraries,
-            timeout: timeout.map(Timeout::new),
-            ignore,
-        })
+                ),
+                include_shared_libraries,
+                timeout: timeout.map(Timeout::new),
+                ignore,
+            }),
+        }
     }
 }
 
