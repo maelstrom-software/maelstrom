@@ -7,13 +7,46 @@ use directive::{Directive, DirectiveContainer, DirectiveContainerAugment};
 use maelstrom_base::Timeout;
 use maelstrom_client::spec::{ContainerSpec, IntoEnvironment};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Metadata {
     pub container: ContainerSpec,
     pub include_shared_libraries: bool,
     pub timeout: Option<Timeout>,
     pub ignore: bool,
 }
+
+#[cfg(test)]
+macro_rules! metadata {
+    (@expand [] -> [$($($fields:tt)+)?] [$($container_fields:tt)*]) => {
+        Metadata {
+            $($($fields)+,)?
+            .. Metadata {
+                container: maelstrom_client::container_spec!($($container_fields)*),
+                include_shared_libraries: Default::default(),
+                timeout: Default::default(),
+                ignore: Default::default(),
+            }
+        }
+    };
+    (@expand [include_shared_libraries: $include_shared_libraries:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        metadata!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? include_shared_libraries: $include_shared_libraries.into()] [$($container_field)*])
+    };
+    (@expand [timeout: $timeout:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        metadata!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? timeout: Timeout::new($timeout)] [$($container_field)*])
+    };
+    (@expand [ignore: $ignore:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
+        metadata!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? ignore: $ignore.into()] [$($container_field)*])
+    };
+    (@expand [$container_field_name:ident: $container_field_value:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
+        metadata!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? $container_field_name: $container_field_value])
+    };
+    ($($field_in:tt)*) => {
+        metadata!(@expand [$($field_in)*] -> [] [])
+    };
+}
+
+#[cfg(test)]
+pub(crate) use metadata;
 
 impl Metadata {
     /// The logic here is that if they explicitly set the value to something, we should return

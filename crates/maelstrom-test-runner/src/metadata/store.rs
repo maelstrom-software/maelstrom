@@ -168,7 +168,10 @@ where
 mod tests {
     use super::*;
     use crate::{
-        metadata::directive::{augment_directive, override_directive},
+        metadata::{
+            directive::{augment_directive, override_directive},
+            metadata,
+        },
         NoCaseMetadata, SimpleFilter,
     };
     use indoc::indoc;
@@ -418,9 +421,10 @@ mod tests {
                     &"package0".into(),
                     ("test1", &NoCaseMetadata)
                 )
-                .unwrap()
-                .container,
-            container_spec! {},
+                .unwrap(),
+            metadata! {
+                include_shared_libraries: true,
+            },
         );
         assert_eq!(
             store
@@ -429,9 +433,11 @@ mod tests {
                     &"package1".into(),
                     ("test0", &NoCaseMetadata)
                 )
-                .unwrap()
-                .container,
-            container_spec! { network: JobNetwork::Loopback },
+                .unwrap(),
+            metadata! {
+                network: JobNetwork::Loopback,
+                include_shared_libraries: true,
+            },
         );
         assert_eq!(
             store
@@ -440,11 +446,11 @@ mod tests {
                     &"package1".into(),
                     ("test1", &NoCaseMetadata)
                 )
-                .unwrap()
-                .container,
-            container_spec! {
+                .unwrap(),
+            metadata! {
                 network: JobNetwork::Loopback,
                 user: 101,
+                include_shared_libraries: true,
             },
         );
     }
@@ -477,11 +483,11 @@ mod tests {
                     &"package0".into(),
                     ("test1", &NoCaseMetadata)
                 )
-                .unwrap()
-                .container,
-            container_spec! {
+                .unwrap(),
+            metadata! {
                 group: 202,
                 enable_writable_file_system: true,
+                include_shared_libraries: true,
             },
         );
         assert_eq!(
@@ -491,12 +497,12 @@ mod tests {
                     &"package1".into(),
                     ("test0", &NoCaseMetadata)
                 )
-                .unwrap()
-                .container,
-            container_spec! {
+                .unwrap(),
+            metadata! {
                 group: 202,
                 enable_writable_file_system: true,
                 network: JobNetwork::Loopback,
+                include_shared_libraries: true,
             },
         );
         assert_eq!(
@@ -506,13 +512,157 @@ mod tests {
                     &"package1".into(),
                     ("test1", &NoCaseMetadata)
                 )
-                .unwrap()
-                .container,
-            container_spec! {
+                .unwrap(),
+            metadata! {
                 group: 202,
                 enable_writable_file_system: true,
                 network: JobNetwork::Loopback,
                 user: 101,
+                include_shared_libraries: true,
+            },
+        );
+    }
+
+    #[test]
+    fn get_metadata_for_test_include_shared_libraries() {
+        let store = Store::<SimpleFilter>::load(
+            indoc! {r#"
+                [containers.parent1]
+                image = "image"
+
+                [containers.parent2]
+
+                [[directives]]
+                filter = "package = \"package1\""
+                parent = "parent1"
+
+                [[directives]]
+                filter = "package = \"package2\""
+                parent = "parent2"
+
+                [[directives]]
+                filter = "name = \"test2\""
+                include_shared_libraries = false
+
+                [[directives]]
+                filter = "name = \"test3\""
+                include_shared_libraries = true
+            "#},
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package1".into(),
+                    &"package1".into(),
+                    ("test1", &NoCaseMetadata)
+                )
+                .unwrap(),
+            metadata! {
+                parent: container_container_parent!("parent1", all),
+                include_shared_libraries: false,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package1".into(),
+                    &"package1".into(),
+                    ("test2", &NoCaseMetadata)
+                )
+                .unwrap(),
+            metadata! {
+                parent: container_container_parent!("parent1", all),
+                include_shared_libraries: false,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package1".into(),
+                    &"package1".into(),
+                    ("test3", &NoCaseMetadata)
+                )
+                .unwrap(),
+            metadata! {
+                parent: container_container_parent!("parent1", all),
+                include_shared_libraries: true,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package2".into(),
+                    &"package2".into(),
+                    ("test1", &NoCaseMetadata)
+                )
+                .unwrap(),
+            metadata! {
+                parent: container_container_parent!("parent2", all),
+                include_shared_libraries: true,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package2".into(),
+                    &"package2".into(),
+                    ("test2", &NoCaseMetadata)
+                )
+                .unwrap(),
+            metadata! {
+                parent: container_container_parent!("parent2", all),
+                include_shared_libraries: false,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package2".into(),
+                    &"package2".into(),
+                    ("test3", &NoCaseMetadata)
+                )
+                .unwrap(),
+            metadata! {
+                parent: container_container_parent!("parent2", all),
+                include_shared_libraries: true,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package3".into(),
+                    &"package3".into(),
+                    ("test1", &NoCaseMetadata)
+                )
+                .unwrap(),
+            metadata! {
+                include_shared_libraries: true,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package3".into(),
+                    &"package3".into(),
+                    ("test2", &NoCaseMetadata)
+                )
+                .unwrap(),
+            metadata! {
+                include_shared_libraries: false,
+            },
+        );
+        assert_eq!(
+            store
+                .get_metadata_for_test(
+                    &"package3".into(),
+                    &"package3".into(),
+                    ("test3", &NoCaseMetadata)
+                )
+                .unwrap(),
+            metadata! {
+                include_shared_libraries: true,
             },
         );
     }
