@@ -414,135 +414,6 @@ mod tests {
         );
     }
 
-    mod override_directive_macro {
-        use super::*;
-
-        #[test]
-        fn empty() {
-            assert_eq!(
-                override_directive!(),
-                Directive::<String> {
-                    container: DirectiveContainer::Override(Default::default()),
-                    ..Default::default()
-                },
-            );
-        }
-
-        #[test]
-        fn filter() {
-            assert_eq!(
-                override_directive!(filter: "package = \"package1\""),
-                Directive {
-                    filter: Some(SimpleFilter::Package("package1".into())),
-                    container: DirectiveContainer::Override(Default::default()),
-                    ..Default::default()
-                },
-            );
-        }
-
-        #[test]
-        fn container_field() {
-            assert_eq!(
-                override_directive!(user: 101),
-                Directive::<String> {
-                    container: DirectiveContainer::Override(container_spec!(user: 101)),
-                    ..Default::default()
-                },
-            );
-            assert_eq!(
-                override_directive!(group: 202),
-                Directive::<String> {
-                    container: DirectiveContainer::Override(container_spec!(group: 202)),
-                    ..Default::default()
-                },
-            );
-        }
-
-        #[test]
-        fn include_shared_libraries() {
-            assert_eq!(
-                override_directive!(include_shared_libraries: true),
-                Directive::<String> {
-                    include_shared_libraries: Some(true),
-                    container: DirectiveContainer::Override(Default::default()),
-                    ..Default::default()
-                },
-            );
-            assert_eq!(
-                override_directive!(include_shared_libraries: false),
-                Directive::<String> {
-                    include_shared_libraries: Some(false),
-                    container: DirectiveContainer::Override(Default::default()),
-                    ..Default::default()
-                },
-            );
-        }
-
-        #[test]
-        fn timeout() {
-            assert_eq!(
-                override_directive!(timeout: 0),
-                Directive::<String> {
-                    timeout: Some(None),
-                    container: DirectiveContainer::Override(Default::default()),
-                    ..Default::default()
-                },
-            );
-            assert_eq!(
-                override_directive!(timeout: 1),
-                Directive::<String> {
-                    timeout: Some(Timeout::new(1)),
-                    container: DirectiveContainer::Override(Default::default()),
-                    ..Default::default()
-                },
-            );
-        }
-
-        #[test]
-        fn ignore() {
-            assert_eq!(
-                override_directive!(ignore: true),
-                Directive::<String> {
-                    ignore: Some(true),
-                    container: DirectiveContainer::Override(Default::default()),
-                    ..Default::default()
-                },
-            );
-            assert_eq!(
-                override_directive!(ignore: false),
-                Directive::<String> {
-                    ignore: Some(false),
-                    container: DirectiveContainer::Override(Default::default()),
-                    ..Default::default()
-                },
-            );
-        }
-
-        #[test]
-        fn multiple() {
-            assert_eq!(
-                override_directive! {
-                    filter: "package = \"package1\"",
-                    user: 101,
-                    group: 202,
-                    include_shared_libraries: true,
-                    timeout: 1,
-                    ignore: false,
-                },
-                Directive {
-                    filter: Some(SimpleFilter::Package("package1".into())),
-                    container: DirectiveContainer::Override(container_spec! {
-                        user: 101,
-                        group: 202,
-                    }),
-                    include_shared_libraries: Some(true),
-                    timeout: Some(Timeout::new(1)),
-                    ignore: Some(false),
-                },
-            );
-        }
-    }
-
     mod accumulate_directive_macro {
         use super::*;
 
@@ -827,6 +698,135 @@ mod tests {
                         working_directory: Some("/foo".into()),
                         network: Some(JobNetwork::Loopback),
                         ..Default::default()
+                    }),
+                    include_shared_libraries: Some(true),
+                    timeout: Some(Timeout::new(1)),
+                    ignore: Some(false),
+                },
+            );
+        }
+    }
+
+    mod override_directive_macro {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            assert_eq!(
+                override_directive!(),
+                Directive::<String> {
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn filter() {
+            assert_eq!(
+                override_directive!(filter: "package = \"package1\""),
+                Directive {
+                    filter: Some(SimpleFilter::Package("package1".into())),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn container_field() {
+            assert_eq!(
+                override_directive!(user: 101),
+                Directive::<String> {
+                    container: DirectiveContainer::Override(container_spec!(user: 101)),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                override_directive!(group: 202),
+                Directive::<String> {
+                    container: DirectiveContainer::Override(container_spec!(group: 202)),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn include_shared_libraries() {
+            assert_eq!(
+                override_directive!(include_shared_libraries: true),
+                Directive::<String> {
+                    include_shared_libraries: Some(true),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                override_directive!(include_shared_libraries: false),
+                Directive::<String> {
+                    include_shared_libraries: Some(false),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn timeout() {
+            assert_eq!(
+                override_directive!(timeout: 0),
+                Directive::<String> {
+                    timeout: Some(None),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                override_directive!(timeout: 1),
+                Directive::<String> {
+                    timeout: Some(Timeout::new(1)),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn ignore() {
+            assert_eq!(
+                override_directive!(ignore: true),
+                Directive::<String> {
+                    ignore: Some(true),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                override_directive!(ignore: false),
+                Directive::<String> {
+                    ignore: Some(false),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn multiple() {
+            assert_eq!(
+                override_directive! {
+                    filter: "package = \"package1\"",
+                    user: 101,
+                    group: 202,
+                    include_shared_libraries: true,
+                    timeout: 1,
+                    ignore: false,
+                },
+                Directive {
+                    filter: Some(SimpleFilter::Package("package1".into())),
+                    container: DirectiveContainer::Override(container_spec! {
+                        user: 101,
+                        group: 202,
                     }),
                     include_shared_libraries: Some(true),
                     timeout: Some(Timeout::new(1)),
