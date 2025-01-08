@@ -12,6 +12,7 @@ use maelstrom_client::spec::{ContainerSpec, EnvironmentSpec};
 pub struct Metadata {
     pub container: ContainerSpec,
     include_shared_libraries: Option<bool>,
+    uses_image_layers: Option<bool>,
     pub timeout: Option<Timeout>,
     pub ignore: bool,
 }
@@ -20,14 +21,14 @@ impl Metadata {
     /// Return whether to include a layer of shared library dependencies.
     ///
     /// The logic here is that if they explicitly set the value to something, we should return
-    /// that. Otherwise, we should see if they specified an image. If they specified an image, we
-    /// can assume that the image has shared libraries, and we shouldn't push shared libraries on
-    /// top of it. Otherwise, if they didn't provide an image, then they probably don't want to
-    /// have to provide a layer with shared libraries in it.
+    /// that. Otherwise, we should see if they are using layers from an image. If they are, we can
+    /// assume that the image has shared libraries, and we shouldn't push shared libraries on top
+    /// of it. Otherwise, they probably don't want to have to explicitly provide a layer with
+    /// shared libraries in it, so we should include shared libraries for them.
     pub fn include_shared_libraries(&self) -> bool {
         match self.include_shared_libraries {
             Some(val) => val,
-            None => self.container.parent.is_none(),
+            None => !self.uses_image_layers.unwrap(),
         }
     }
 

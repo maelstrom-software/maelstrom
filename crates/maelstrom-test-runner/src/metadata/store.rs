@@ -82,7 +82,8 @@ where
         artifact: &TestFilterT::ArtifactKey,
         case: (&str, &TestFilterT::CaseMetadata),
     ) -> Result<Metadata> {
-        self.directives
+        let mut metadata = self
+            .directives
             .iter()
             .filter(|directive| match directive {
                 Directive {
@@ -93,7 +94,10 @@ where
                     .expect("should have case"),
                 Directive { filter: None, .. } => true,
             })
-            .try_fold(Metadata::default(), |m, d| m.try_fold(d))
+            .try_fold(Metadata::default(), |m, d| m.try_fold(d))?;
+        metadata.uses_image_layers =
+            Some(self.parent_uses_image_layers(&metadata.container.parent)?);
+        Ok(metadata)
     }
 
     pub fn get_all_images(&self) -> HashSet<ImageRef> {
@@ -121,7 +125,7 @@ where
             .collect()
     }
 
-    pub fn parent_uses_image_layers(&self, parent: &Option<ContainerParent>) -> Result<bool> {
+    fn parent_uses_image_layers(&self, parent: &Option<ContainerParent>) -> Result<bool> {
         self.parent_uses_image_layers_internal(parent, vec![])
     }
 
