@@ -305,7 +305,10 @@ mod tests {
     use anyhow::Error;
     use indoc::indoc;
     use maelstrom_base::{enum_set, proc_mount, tmp_mount, JobDeviceForTomlAndJson};
-    use maelstrom_client::{container_spec, spec::SymlinkSpec, tar_layer_spec, image_container_parent, container_container_parent};
+    use maelstrom_client::{
+        container_container_parent, container_spec, image_container_parent, spec::SymlinkSpec,
+        tar_layer_spec,
+    };
     use maelstrom_test::{non_root_utf8_path_buf, string, utf8_path_buf};
     use maplit::btreemap;
 
@@ -406,26 +409,14 @@ mod tests {
 
     #[test]
     fn accumulate_container_timeout() {
-        directive_parse_test(
-            r#"timeout = 0"#,
-            accumulate_directive!(timeout: 0),
-        );
-        directive_parse_test(
-            r#"timeout = 1"#,
-            accumulate_directive!(timeout: 1),
-        );
+        directive_parse_test(r#"timeout = 0"#, accumulate_directive!(timeout: 0));
+        directive_parse_test(r#"timeout = 1"#, accumulate_directive!(timeout: 1));
     }
 
     #[test]
     fn accumulate_container_ignore() {
-        directive_parse_test(
-            r#"ignore = true"#,
-            accumulate_directive!(ignore: true),
-        );
-        directive_parse_test(
-            r#"ignore = false"#,
-            accumulate_directive!(ignore: false),
-        );
+        directive_parse_test(r#"ignore = true"#, accumulate_directive!(ignore: true));
+        directive_parse_test(r#"ignore = false"#, accumulate_directive!(ignore: false));
     }
 
     #[test]
