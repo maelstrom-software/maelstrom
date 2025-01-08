@@ -56,7 +56,7 @@ macro_rules! accumulate_directive {
     (@expand [ignore: $ignore:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?] [$($container_field:tt)*]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? ignore: Some($ignore.into())] [$($container_field)*])
     };
-    (@expand [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [layers: $layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? layers: Some($layers.into_iter().map(Into::into).collect())])
     };
     (@expand [added_layers: $added_layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
@@ -71,7 +71,7 @@ macro_rules! accumulate_directive {
     (@expand [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? working_directory: Some($working_directory.into())])
     };
-    (@expand [enable_writable_file_system: $enable_writable_file_system:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($container_field:tt)*]) => {
+    (@expand [enable_writable_file_system: $enable_writable_file_system:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         accumulate_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? enable_writable_file_system: Some($enable_writable_file_system.into())])
     };
     (@expand [mounts: $mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
@@ -198,13 +198,21 @@ where
     FilterT::Err: Display,
 {
     type Error = String;
+
+    /// There are basically two types of directives: those that augment the current container, and
+    /// those that override the whole container. We detect the latter by looking for an `image` or
+    /// `parent` field. If we find one, we shove the rest of the fields into the struct used for
+    /// parsing ContainerSpecs and then try to convert from that. Otherwise, we treat it as an
+    /// augmented container.
+    ///
+    /// The way the function is written guarantees that we get a compilation error if we're missing
+    /// a field somewhere.
     fn try_from(directive: DirectiveForTomlAndJson) -> Result<Self, Self::Error> {
         let filter = directive
             .filter
             .map(|filter| filter.parse::<FilterT>())
             .transpose()
             .map_err(|err| err.to_string())?;
-
         match directive {
             DirectiveForTomlAndJson {
                 filter: _,
@@ -297,7 +305,7 @@ mod tests {
     use anyhow::Error;
     use indoc::indoc;
     use maelstrom_base::{enum_set, proc_mount, tmp_mount, JobDeviceForTomlAndJson};
-    use maelstrom_client::{container_spec, spec::SymlinkSpec, tar_layer_spec};
+    use maelstrom_client::{container_spec, spec::SymlinkSpec, tar_layer_spec, image_container_parent, container_container_parent};
     use maelstrom_test::{non_root_utf8_path_buf, string, utf8_path_buf};
     use maplit::btreemap;
 
@@ -321,16 +329,14 @@ mod tests {
     }
 
     #[test]
-    fn empty() {
+    fn no_fields() {
         directive_parse_test("", accumulate_directive!());
     }
 
     #[test]
     fn unknown_field() {
         directive_parse_error_test(
-            r#"
-            unknown = "foo"
-            "#,
+            r#"unknown = "foo""#,
             "unknown field `unknown`, expected one of",
         );
     }
@@ -338,78 +344,221 @@ mod tests {
     #[test]
     fn duplicate_field() {
         directive_parse_error_test(
-            r#"
-            filter = "all"
-            filter = "any"
-            "#,
+            indoc! {r#"
+                filter = "all"
+                filter = "any"
+            "#},
             "duplicate key `filter`",
         );
     }
 
     #[test]
-    fn simple_fields() {
+    fn accumulate_container_filter() {
         directive_parse_test(
-            r#"
-            filter = "package.equals(package1) && test.equals(test1)"
-            include_shared_libraries = true
-            network = "loopback"
-            enable_writable_file_system = true
-            user = 101
-            group = 202
-            "#,
-            Directive {
-                filter: Some(
-                    "package.equals(package1) && test.equals(test1)"
-                        .parse()
-                        .unwrap(),
-                ),
-                include_shared_libraries: Some(true),
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    network: Some(JobNetwork::Loopback),
-                    enable_writable_file_system: Some(true),
-                    user: Some(UserId::from(101)),
-                    group: Some(GroupId::from(202)),
-                    ..Default::default()
-                }),
-                ..Default::default()
+            r#"filter = "foo && bar""#,
+            accumulate_directive!(filter: "foo && bar"),
+        );
+    }
+
+    #[test]
+    fn accumulate_container_container_fields() {
+        directive_parse_test(
+            indoc! {r#"
+                layers = [{ tar = "foo.tar" }]
+                added_layers = [{ tar = "bar.tar" }]
+                environment = { foo = "bar" }
+                added_environment = { frob = "baz" }
+                working_directory = "/root"
+                enable_writable_file_system = false
+                mounts = [{ type = "tmp", mount_point = "/tmp" }]
+                added_mounts = [{ type = "proc", mount_point = "/proc" }]
+                network = "loopback"
+                user = 101
+                group = 202
+            "#},
+            accumulate_directive! {
+                layers: [tar_layer_spec!("foo.tar")],
+                added_layers: [tar_layer_spec!("bar.tar")],
+                environment: [("foo", "bar")],
+                added_environment: [("frob", "baz")],
+                working_directory: "/root",
+                enable_writable_file_system: false,
+                mounts: [tmp_mount!("/tmp")],
+                added_mounts: [proc_mount!("/proc")],
+                network: JobNetwork::Loopback,
+                user: 101,
+                group: 202,
             },
         );
     }
 
     #[test]
-    fn nonzero_timeout() {
+    fn accumulate_container_include_shared_libraries() {
         directive_parse_test(
-            r#"
-            filter = "package.equals(package1) && test.equals(test1)"
-            timeout = 1
-            "#,
-            Directive {
-                filter: Some(
-                    "package.equals(package1) && test.equals(test1)"
-                        .parse()
-                        .unwrap(),
-                ),
-                timeout: Some(Timeout::new(1)),
-                ..Default::default()
+            r#"include_shared_libraries = true"#,
+            accumulate_directive!(include_shared_libraries: true),
+        );
+        directive_parse_test(
+            r#"include_shared_libraries = false"#,
+            accumulate_directive!(include_shared_libraries: false),
+        );
+    }
+
+    #[test]
+    fn accumulate_container_timeout() {
+        directive_parse_test(
+            r#"timeout = 0"#,
+            accumulate_directive!(timeout: 0),
+        );
+        directive_parse_test(
+            r#"timeout = 1"#,
+            accumulate_directive!(timeout: 1),
+        );
+    }
+
+    #[test]
+    fn accumulate_container_ignore() {
+        directive_parse_test(
+            r#"ignore = true"#,
+            accumulate_directive!(ignore: true),
+        );
+        directive_parse_test(
+            r#"ignore = false"#,
+            accumulate_directive!(ignore: false),
+        );
+    }
+
+    #[test]
+    fn override_container_image() {
+        directive_parse_test(
+            indoc! {r#"
+                image.name = "foo"
+                image.use = ["layers"]
+            "#},
+            override_directive!(parent: image_container_parent!("foo", layers)),
+        );
+    }
+
+    #[test]
+    fn override_container_parent() {
+        directive_parse_test(
+            indoc! {r#"
+                parent.name = "foo"
+                parent.use = ["layers"]
+            "#},
+            override_directive!(parent: container_container_parent!("foo", layers)),
+        );
+    }
+
+    #[test]
+    fn override_container_image_and_parent() {
+        directive_parse_error_test(
+            indoc! {r#"
+                image = "image1"
+                parent = "parent"
+            "#},
+            "both `image` and `parent` cannot be specified",
+        );
+    }
+
+    #[test]
+    fn override_container_fields() {
+        directive_parse_test(
+            indoc! {r#"
+                parent = "parent"
+                layers = [ { tar = "foo.tar" } ]
+                user = 123
+            "#},
+            override_directive! {
+                parent: container_container_parent!("parent", all, -layers, -user),
+                layers: [tar_layer_spec!("foo.tar")],
+                user: 123,
             },
         );
     }
 
     #[test]
-    fn zero_timeout() {
+    fn override_container_filter() {
         directive_parse_test(
-            r#"
-            filter = "package.equals(package1) && test.equals(test1)"
-            timeout = 0
-            "#,
-            Directive {
-                filter: Some(
-                    "package.equals(package1) && test.equals(test1)"
-                        .parse()
-                        .unwrap(),
-                ),
-                timeout: Some(None),
-                ..Default::default()
+            indoc! {r#"
+                filter = "foo && bar"
+                parent = "parent"
+            "#},
+            override_directive! {
+                filter: "foo && bar",
+                parent: container_container_parent!("parent", all),
+            },
+        );
+    }
+
+    #[test]
+    fn override_container_include_shared_libraries() {
+        directive_parse_test(
+            indoc! {r#"
+                parent = "parent"
+                include_shared_libraries = true
+            "#},
+            override_directive! {
+                parent: container_container_parent!("parent", all),
+                include_shared_libraries: true,
+            },
+        );
+        directive_parse_test(
+            indoc! {r#"
+                parent = "parent"
+                include_shared_libraries = false
+            "#},
+            override_directive! {
+                parent: container_container_parent!("parent", all),
+                include_shared_libraries: false,
+            },
+        );
+    }
+
+    #[test]
+    fn override_container_timeout() {
+        directive_parse_test(
+            indoc! {r#"
+                parent = "parent"
+                timeout = 0
+            "#},
+            override_directive! {
+                parent: container_container_parent!("parent", all),
+                timeout: 0,
+            },
+        );
+        directive_parse_test(
+            indoc! {r#"
+                parent = "parent"
+                timeout = 1
+            "#},
+            override_directive! {
+                parent: container_container_parent!("parent", all),
+                timeout: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn override_container_ignore() {
+        directive_parse_test(
+            indoc! {r#"
+                parent = "parent"
+                ignore = true
+            "#},
+            override_directive! {
+                parent: container_container_parent!("parent", all),
+                ignore: true,
+            },
+        );
+        directive_parse_test(
+            indoc! {r#"
+                parent = "parent"
+                ignore = false
+            "#},
+            override_directive! {
+                parent: container_container_parent!("parent", all),
+                ignore: false,
             },
         );
     }
