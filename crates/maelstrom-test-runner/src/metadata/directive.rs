@@ -397,417 +397,425 @@ mod tests {
         );
     }
 
-    #[test]
-    fn override_directive_empty() {
-        assert_eq!(
-            override_directive!(),
-            Directive::<String> {
-                container: DirectiveContainer::Override(Default::default()),
-                ..Default::default()
-            },
-        );
-    }
+    mod override_directive_macro {
+        use super::*;
 
-    #[test]
-    fn override_directive_filter() {
-        assert_eq!(
-            override_directive!(filter: "package = \"package1\""),
-            Directive {
-                filter: Some(SimpleFilter::Package("package1".into())),
-                container: DirectiveContainer::Override(Default::default()),
-                ..Default::default()
-            },
-        );
-    }
+        #[test]
+        fn empty() {
+            assert_eq!(
+                override_directive!(),
+                Directive::<String> {
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
 
-    #[test]
-    fn override_directive_container_field() {
-        assert_eq!(
-            override_directive!(user: 101),
-            Directive::<String> {
-                container: DirectiveContainer::Override(container_spec!(user: 101)),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            override_directive!(group: 202),
-            Directive::<String> {
-                container: DirectiveContainer::Override(container_spec!(group: 202)),
-                ..Default::default()
-            },
-        );
-    }
+        #[test]
+        fn filter() {
+            assert_eq!(
+                override_directive!(filter: "package = \"package1\""),
+                Directive {
+                    filter: Some(SimpleFilter::Package("package1".into())),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
 
-    #[test]
-    fn override_directive_include_shared_libraries() {
-        assert_eq!(
-            override_directive!(include_shared_libraries: true),
-            Directive::<String> {
-                include_shared_libraries: Some(true),
-                container: DirectiveContainer::Override(Default::default()),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            override_directive!(include_shared_libraries: false),
-            Directive::<String> {
-                include_shared_libraries: Some(false),
-                container: DirectiveContainer::Override(Default::default()),
-                ..Default::default()
-            },
-        );
-    }
+        #[test]
+        fn container_field() {
+            assert_eq!(
+                override_directive!(user: 101),
+                Directive::<String> {
+                    container: DirectiveContainer::Override(container_spec!(user: 101)),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                override_directive!(group: 202),
+                Directive::<String> {
+                    container: DirectiveContainer::Override(container_spec!(group: 202)),
+                    ..Default::default()
+                },
+            );
+        }
 
-    #[test]
-    fn override_directive_timeout() {
-        assert_eq!(
-            override_directive!(timeout: 0),
-            Directive::<String> {
-                timeout: Some(None),
-                container: DirectiveContainer::Override(Default::default()),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            override_directive!(timeout: 1),
-            Directive::<String> {
-                timeout: Some(Timeout::new(1)),
-                container: DirectiveContainer::Override(Default::default()),
-                ..Default::default()
-            },
-        );
-    }
+        #[test]
+        fn include_shared_libraries() {
+            assert_eq!(
+                override_directive!(include_shared_libraries: true),
+                Directive::<String> {
+                    include_shared_libraries: Some(true),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                override_directive!(include_shared_libraries: false),
+                Directive::<String> {
+                    include_shared_libraries: Some(false),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
 
-    #[test]
-    fn override_directive_ignore() {
-        assert_eq!(
-            override_directive!(ignore: true),
-            Directive::<String> {
-                ignore: Some(true),
-                container: DirectiveContainer::Override(Default::default()),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            override_directive!(ignore: false),
-            Directive::<String> {
-                ignore: Some(false),
-                container: DirectiveContainer::Override(Default::default()),
-                ..Default::default()
-            },
-        );
-    }
+        #[test]
+        fn timeout() {
+            assert_eq!(
+                override_directive!(timeout: 0),
+                Directive::<String> {
+                    timeout: Some(None),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                override_directive!(timeout: 1),
+                Directive::<String> {
+                    timeout: Some(Timeout::new(1)),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
 
-    #[test]
-    fn override_directive_multiple() {
-        assert_eq!(
-            override_directive! {
-                filter: "package = \"package1\"",
-                user: 101,
-                group: 202,
-                include_shared_libraries: true,
-                timeout: 1,
-                ignore: false,
-            },
-            Directive {
-                filter: Some(SimpleFilter::Package("package1".into())),
-                container: DirectiveContainer::Override(container_spec! {
+        #[test]
+        fn ignore() {
+            assert_eq!(
+                override_directive!(ignore: true),
+                Directive::<String> {
+                    ignore: Some(true),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                override_directive!(ignore: false),
+                Directive::<String> {
+                    ignore: Some(false),
+                    container: DirectiveContainer::Override(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn multiple() {
+            assert_eq!(
+                override_directive! {
+                    filter: "package = \"package1\"",
                     user: 101,
                     group: 202,
-                }),
-                include_shared_libraries: Some(true),
-                timeout: Some(Timeout::new(1)),
-                ignore: Some(false),
-            },
-        );
+                    include_shared_libraries: true,
+                    timeout: 1,
+                    ignore: false,
+                },
+                Directive {
+                    filter: Some(SimpleFilter::Package("package1".into())),
+                    container: DirectiveContainer::Override(container_spec! {
+                        user: 101,
+                        group: 202,
+                    }),
+                    include_shared_libraries: Some(true),
+                    timeout: Some(Timeout::new(1)),
+                    ignore: Some(false),
+                },
+            );
+        }
     }
 
-    #[test]
-    fn accumulate_directive_empty() {
-        assert_eq!(accumulate_directive!(), Directive::<String>::default(),);
-    }
+    mod accumulate_directive_macro {
+        use super::*;
 
-    #[test]
-    fn accumulate_directive_filter() {
-        assert_eq!(
-            accumulate_directive!(filter: "package = \"package1\""),
-            Directive {
-                filter: Some(SimpleFilter::Package("package1".into())),
-                ..Default::default()
-            },
-        );
-    }
+        #[test]
+        fn empty() {
+            assert_eq!(accumulate_directive!(), Directive::<String>::default());
+        }
 
-    #[test]
-    fn accumulate_directive_include_shared_libraries() {
-        assert_eq!(
-            accumulate_directive!(include_shared_libraries: true),
-            Directive::<String> {
-                include_shared_libraries: Some(true),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            accumulate_directive!(include_shared_libraries: false),
-            Directive::<String> {
-                include_shared_libraries: Some(false),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_timeout() {
-        assert_eq!(
-            accumulate_directive!(timeout: 0),
-            Directive::<String> {
-                timeout: Some(None),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            accumulate_directive!(timeout: 1),
-            Directive::<String> {
-                timeout: Some(Timeout::new(1)),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_ignore() {
-        assert_eq!(
-            accumulate_directive!(ignore: true),
-            Directive::<String> {
-                ignore: Some(true),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            accumulate_directive!(ignore: false),
-            Directive::<String> {
-                ignore: Some(false),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_layers() {
-        assert_eq!(
-            accumulate_directive!(layers: [tar_layer_spec!("foo.tar")]),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    layers: Some(vec![tar_layer_spec!("foo.tar")]),
+        #[test]
+        fn filter() {
+            assert_eq!(
+                accumulate_directive!(filter: "package = \"package1\""),
+                Directive {
+                    filter: Some(SimpleFilter::Package("package1".into())),
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
+                },
+            );
+        }
 
-    #[test]
-    fn accumulate_directive_added_layers() {
-        assert_eq!(
-            accumulate_directive!(added_layers: [tar_layer_spec!("foo.tar")]),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
+        #[test]
+        fn include_shared_libraries() {
+            assert_eq!(
+                accumulate_directive!(include_shared_libraries: true),
+                Directive::<String> {
+                    include_shared_libraries: Some(true),
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
+                },
+            );
+            assert_eq!(
+                accumulate_directive!(include_shared_libraries: false),
+                Directive::<String> {
+                    include_shared_libraries: Some(false),
+                    ..Default::default()
+                },
+            );
+        }
 
-    #[test]
-    fn accumulate_directive_environment() {
-        assert_eq!(
-            accumulate_directive!(environment: [("foo", "bar"), ("frob", "baz")]),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    environment: Some(btreemap! {
-                        "foo".into() => "bar".into(),
-                        "frob".into() => "baz".into(),
+        #[test]
+        fn timeout() {
+            assert_eq!(
+                accumulate_directive!(timeout: 0),
+                Directive::<String> {
+                    timeout: Some(None),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                accumulate_directive!(timeout: 1),
+                Directive::<String> {
+                    timeout: Some(Timeout::new(1)),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn ignore() {
+            assert_eq!(
+                accumulate_directive!(ignore: true),
+                Directive::<String> {
+                    ignore: Some(true),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                accumulate_directive!(ignore: false),
+                Directive::<String> {
+                    ignore: Some(false),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn layers() {
+            assert_eq!(
+                accumulate_directive!(layers: [tar_layer_spec!("foo.tar")]),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                        ..Default::default()
                     }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
+                },
+            );
+        }
 
-    #[test]
-    fn accumulate_directive_added_environment() {
-        assert_eq!(
-            accumulate_directive!(added_environment: [("foo", "bar"), ("frob", "baz")]),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    added_environment: Some(btreemap! {
-                        "foo".into() => "bar".into(),
-                        "frob".into() => "baz".into(),
+        #[test]
+        fn added_layers() {
+            assert_eq!(
+                accumulate_directive!(added_layers: [tar_layer_spec!("foo.tar")]),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                        ..Default::default()
                     }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
+                },
+            );
+        }
 
-    #[test]
-    fn accumulate_directive_working_directory() {
-        assert_eq!(
-            accumulate_directive!(working_directory: "/foo"),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    working_directory: Some("/foo".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_enable_writable_file_system() {
-        assert_eq!(
-            accumulate_directive!(enable_writable_file_system: true),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    enable_writable_file_system: Some(true),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            accumulate_directive!(enable_writable_file_system: false),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    enable_writable_file_system: Some(false),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_mounts() {
-        assert_eq!(
-            accumulate_directive!(mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    mounts: Some(vec![proc_mount!("/proc"), tmp_mount!("/tmp")]),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_added_mounts() {
-        assert_eq!(
-            accumulate_directive!(added_mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    added_mounts: Some(vec![proc_mount!("/proc"), tmp_mount!("/tmp")]),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_network() {
-        assert_eq!(
-            accumulate_directive!(network: JobNetwork::Loopback),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    network: Some(JobNetwork::Loopback),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            accumulate_directive!(network: JobNetwork::Disabled),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    network: Some(JobNetwork::Disabled),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_user() {
-        assert_eq!(
-            accumulate_directive!(user: 101),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    user: Some(UserId::new(101)),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_group() {
-        assert_eq!(
-            accumulate_directive!(group: 101),
-            Directive::<String> {
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    group: Some(GroupId::new(101)),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        );
-    }
-
-    #[test]
-    fn accumulate_directive_multiple() {
-        assert_eq!(
-            accumulate_directive! {
-                filter: "package = \"package1\"",
-                include_shared_libraries: true,
-                timeout: 1,
-                ignore: false,
-                layers: [tar_layer_spec!("foo.tar")],
-                added_layers: [tar_layer_spec!("foo.tar")],
-                environment: [("foo", "bar"), ("frob", "baz")],
-                added_environment: [("foo", "bar"), ("frob", "baz")],
-                working_directory: "/foo",
-                network: JobNetwork::Loopback,
-            },
-            Directive {
-                filter: Some(SimpleFilter::Package("package1".into())),
-                container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
-                    layers: Some(vec![tar_layer_spec!("foo.tar")]),
-                    added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
-                    environment: Some(btreemap! {
-                        "foo".into() => "bar".into(),
-                        "frob".into() => "baz".into(),
+        #[test]
+        fn environment() {
+            assert_eq!(
+                accumulate_directive!(environment: [("foo", "bar"), ("frob", "baz")]),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        environment: Some(btreemap! {
+                            "foo".into() => "bar".into(),
+                            "frob".into() => "baz".into(),
+                        }),
+                        ..Default::default()
                     }),
-                    added_environment: Some(btreemap! {
-                        "foo".into() => "bar".into(),
-                        "frob".into() => "baz".into(),
-                    }),
-                    working_directory: Some("/foo".into()),
-                    network: Some(JobNetwork::Loopback),
                     ..Default::default()
-                }),
-                include_shared_libraries: Some(true),
-                timeout: Some(Timeout::new(1)),
-                ignore: Some(false),
-            },
-        );
+                },
+            );
+        }
+
+        #[test]
+        fn added_environment() {
+            assert_eq!(
+                accumulate_directive!(added_environment: [("foo", "bar"), ("frob", "baz")]),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        added_environment: Some(btreemap! {
+                            "foo".into() => "bar".into(),
+                            "frob".into() => "baz".into(),
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn working_directory() {
+            assert_eq!(
+                accumulate_directive!(working_directory: "/foo"),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        working_directory: Some("/foo".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn enable_writable_file_system() {
+            assert_eq!(
+                accumulate_directive!(enable_writable_file_system: true),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        enable_writable_file_system: Some(true),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                accumulate_directive!(enable_writable_file_system: false),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        enable_writable_file_system: Some(false),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn mounts() {
+            assert_eq!(
+                accumulate_directive!(mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        mounts: Some(vec![proc_mount!("/proc"), tmp_mount!("/tmp")]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn added_mounts() {
+            assert_eq!(
+                accumulate_directive!(added_mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        added_mounts: Some(vec![proc_mount!("/proc"), tmp_mount!("/tmp")]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn network() {
+            assert_eq!(
+                accumulate_directive!(network: JobNetwork::Loopback),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        network: Some(JobNetwork::Loopback),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                accumulate_directive!(network: JobNetwork::Disabled),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        network: Some(JobNetwork::Disabled),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn user() {
+            assert_eq!(
+                accumulate_directive!(user: 101),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        user: Some(UserId::new(101)),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn group() {
+            assert_eq!(
+                accumulate_directive!(group: 101),
+                Directive::<String> {
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        group: Some(GroupId::new(101)),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
+        #[test]
+        fn multiple() {
+            assert_eq!(
+                accumulate_directive! {
+                    filter: "package = \"package1\"",
+                    include_shared_libraries: true,
+                    timeout: 1,
+                    ignore: false,
+                    layers: [tar_layer_spec!("foo.tar")],
+                    added_layers: [tar_layer_spec!("foo.tar")],
+                    environment: [("foo", "bar"), ("frob", "baz")],
+                    added_environment: [("foo", "bar"), ("frob", "baz")],
+                    working_directory: "/foo",
+                    network: JobNetwork::Loopback,
+                },
+                Directive {
+                    filter: Some(SimpleFilter::Package("package1".into())),
+                    container: DirectiveContainer::Accumulate(DirectiveContainerAccumulate {
+                        layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                        added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                        environment: Some(btreemap! {
+                            "foo".into() => "bar".into(),
+                            "frob".into() => "baz".into(),
+                        }),
+                        added_environment: Some(btreemap! {
+                            "foo".into() => "bar".into(),
+                            "frob".into() => "baz".into(),
+                        }),
+                        working_directory: Some("/foo".into()),
+                        network: Some(JobNetwork::Loopback),
+                        ..Default::default()
+                    }),
+                    include_shared_libraries: Some(true),
+                    timeout: Some(Timeout::new(1)),
+                    ignore: Some(false),
+                },
+            );
+        }
     }
 }
