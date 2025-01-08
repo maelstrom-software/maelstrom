@@ -347,7 +347,7 @@ where
                 .into_iter()
                 .map(|(k, v)| (k.into(), v.into()))
                 .collect(),
-            extend: false,
+            extend: true,
         }]
     }
 }
