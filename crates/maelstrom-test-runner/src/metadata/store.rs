@@ -94,7 +94,7 @@ where
                     .filter(package, Some(artifact), Some(case))
                     .expect("should have case"),
             })
-            .try_fold(MetadataInternal::default(), |m, d| m.try_fold(d))?;
+            .fold(MetadataInternal::default(), MetadataInternal::fold);
         let uses_image_layers = self.parent_uses_image_layers(&metadata.container.parent)?;
         Ok(Metadata::new(metadata, uses_image_layers))
     }

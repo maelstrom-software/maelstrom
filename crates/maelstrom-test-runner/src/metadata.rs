@@ -3,7 +3,6 @@ pub mod store;
 
 pub use store::Store;
 
-use anyhow::Result;
 use directive::{Directive, DirectiveContainer, DirectiveContainerAugment};
 use maelstrom_base::Timeout;
 use maelstrom_client::spec::{ContainerSpec, EnvironmentSpec};
@@ -47,7 +46,7 @@ struct MetadataInternal {
 }
 
 impl MetadataInternal {
-    fn try_fold<TestFilterT>(self, directive: &Directive<TestFilterT>) -> Result<Self> {
+    fn fold<TestFilterT>(self, directive: &Directive<TestFilterT>) -> Self {
         let Self {
             mut container,
             mut include_shared_libraries,
@@ -160,11 +159,11 @@ impl MetadataInternal {
             ignore = *new_ignore;
         }
 
-        Ok(Self {
+        Self {
             container,
             include_shared_libraries,
             timeout,
             ignore,
-        })
+        }
     }
 }
