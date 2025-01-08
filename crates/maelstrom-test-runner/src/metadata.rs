@@ -4,7 +4,7 @@ pub mod store;
 pub use store::Store;
 
 use anyhow::Result;
-use directive::{Directive, DirectiveContainer};
+use directive::{Directive, DirectiveContainer, DirectiveContainerAugment};
 use maelstrom_base::Timeout;
 use maelstrom_client::spec::{ContainerSpec, EnvironmentSpec};
 
@@ -47,49 +47,95 @@ struct MetadataInternal {
 }
 
 impl MetadataInternal {
-    fn try_fold<TestFilterT>(mut self, directive: &Directive<TestFilterT>) -> Result<Self> {
-        let rhs = directive;
+    fn try_fold<TestFilterT>(self, directive: &Directive<TestFilterT>) -> Result<Self> {
+        let Self {
+            mut container,
+            mut include_shared_libraries,
+            mut timeout,
+            mut ignore,
+        } = self;
 
-        self.container = match &rhs.container {
-            DirectiveContainer::Override(container) => container.clone(),
-            DirectiveContainer::Augment(rhs) => {
-                let mut layers = rhs.layers.clone().unwrap_or(self.container.layers);
-                layers.extend(rhs.added_layers.iter().flatten().cloned());
+        let Directive {
+            filter: _,
+            container: new_container,
+            include_shared_libraries: new_include_shared_libraries,
+            timeout: new_timeout,
+            ignore: new_ignore,
+        } = directive;
 
-                let mut environment = self.container.environment;
-                if let Some(vars) = &rhs.environment {
+        container = match new_container {
+            DirectiveContainer::Override(new_container) => new_container.clone(),
+
+            DirectiveContainer::Augment(DirectiveContainerAugment {
+                layers: new_layers,
+                added_layers,
+                environment: new_environment,
+                added_environment,
+                working_directory: new_working_directory,
+                enable_writable_file_system: new_enable_writable_file_system,
+                mounts: new_mounts,
+                added_mounts,
+                network: new_network,
+                user: new_user,
+                group: new_group,
+            }) => {
+                let ContainerSpec {
+                    parent,
+                    mut layers,
+                    mut environment,
+                    mut working_directory,
+                    mut enable_writable_file_system,
+                    mut mounts,
+                    mut network,
+                    mut user,
+                    mut group,
+                } = container;
+
+                if let Some(new_layers) = new_layers {
+                    layers = new_layers.clone();
+                }
+                layers.extend(added_layers.iter().flatten().cloned());
+
+                if let Some(new_environment) = new_environment {
                     environment.push(EnvironmentSpec {
-                        vars: vars.clone(),
+                        vars: new_environment.clone(),
                         extend: false,
                     });
                 }
                 environment.extend(
-                    rhs.added_environment
+                    added_environment
                         .iter()
                         .cloned()
                         .map(|vars| EnvironmentSpec { vars, extend: true }),
                 );
 
-                let working_directory = rhs
-                    .working_directory
-                    .clone()
-                    .or(self.container.working_directory);
+                if new_working_directory.is_some() {
+                    working_directory = new_working_directory.clone();
+                }
 
-                let enable_writable_file_system = rhs
-                    .enable_writable_file_system
-                    .or(self.container.enable_writable_file_system);
+                if new_enable_writable_file_system.is_some() {
+                    enable_writable_file_system = *new_enable_writable_file_system;
+                }
 
-                let mut mounts = rhs.mounts.clone().unwrap_or(self.container.mounts);
-                mounts.extend(rhs.added_mounts.iter().flatten().cloned());
+                if let Some(new_mounts) = new_mounts {
+                    mounts = new_mounts.clone();
+                }
+                mounts.extend(added_mounts.iter().flatten().cloned());
 
-                let network = rhs.network.or(self.container.network);
+                if new_network.is_some() {
+                    network = *new_network;
+                }
 
-                let user = rhs.user.or(self.container.user);
+                if new_user.is_some() {
+                    user = *new_user;
+                }
 
-                let group = rhs.group.or(self.container.group);
+                if new_group.is_some() {
+                    group = *new_group;
+                }
 
                 ContainerSpec {
-                    parent: self.container.parent,
+                    parent,
                     layers,
                     environment,
                     working_directory,
@@ -102,12 +148,23 @@ impl MetadataInternal {
             }
         };
 
-        self.include_shared_libraries = directive
-            .include_shared_libraries
-            .or(self.include_shared_libraries);
-        self.timeout = directive.timeout.unwrap_or(self.timeout);
-        self.ignore = directive.ignore.unwrap_or(self.ignore);
+        if new_include_shared_libraries.is_some() {
+            include_shared_libraries = *new_include_shared_libraries;
+        }
 
-        Ok(self)
+        if let Some(new_timeout) = new_timeout {
+            timeout = *new_timeout;
+        }
+
+        if let Some(new_ignore) = new_ignore {
+            ignore = *new_ignore;
+        }
+
+        Ok(Self {
+            container,
+            include_shared_libraries,
+            timeout,
+            ignore,
+        })
     }
 }
