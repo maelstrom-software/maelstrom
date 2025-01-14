@@ -309,7 +309,7 @@ mod tests {
         container_container_parent, container_spec, image_container_parent, spec::SymlinkSpec,
         tar_layer_spec,
     };
-    use maelstrom_test::{non_root_utf8_path_buf, string, utf8_path_buf};
+    use maelstrom_test::{string, utf8_path_buf};
     use maplit::btreemap;
 
     fn parse_test_directive(toml: &str) -> Result<Directive<String>, toml::de::Error> {

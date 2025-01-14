@@ -1435,7 +1435,7 @@ mod tests {
     use enumset::enum_set;
     use indoc::indoc;
     use maelstrom_base::{proc_mount, tmp_mount};
-    use maelstrom_test::{path_buf_vec, string, string_vec, utf8_path_buf};
+    use maelstrom_test::{path_buf, string, string_vec, utf8_path_buf};
     use maplit::btreemap;
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
@@ -1468,7 +1468,7 @@ mod tests {
     fn images(name: &str) -> ImageConfig {
         match name {
             "image1" => ImageConfig {
-                layers: path_buf_vec!["42", "43"],
+                layers: vec![path_buf!("42"), path_buf!("43")],
                 working_directory: Some("/foo".into()),
                 environment: Some(string_vec!["FOO=image-foo", "BAZ=image-baz",]),
             },

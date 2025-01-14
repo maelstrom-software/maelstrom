@@ -126,13 +126,6 @@ macro_rules! outcome {
 }
 
 #[macro_export]
-macro_rules! digest_hash_set {
-    [$($e:expr),*] => {
-        ::std::collections::HashSet::from_iter([$(maelstrom_base::digest!($e)),*])
-    };
-}
-
-#[macro_export]
 macro_rules! path_buf {
     ($e:expr) => {
         std::path::Path::new($e).to_path_buf()
@@ -140,57 +133,9 @@ macro_rules! path_buf {
 }
 
 #[macro_export]
-macro_rules! path_buf_vec {
-    [$($e:expr),*] => {
-        vec![$($crate::path_buf!($e)),*]
-    };
-}
-
-#[macro_export]
-macro_rules! path_buf_nonempty {
-    [$($e:expr),*] => {
-        nonempty![$($crate::path_buf!($e)),*]
-    };
-}
-
-#[macro_export]
 macro_rules! utf8_path_buf {
     ($e:expr) => {
         maelstrom_base::Utf8PathBuf::from($e)
-    };
-}
-
-#[macro_export]
-macro_rules! non_root_utf8_path_buf {
-    ($e:expr) => {
-        maelstrom_base::NonRootUtf8PathBuf::try_from(maelstrom_base::Utf8PathBuf::from($e)).unwrap()
-    };
-}
-
-#[macro_export]
-macro_rules! utf8_path_buf_vec {
-    [$($e:expr),*] => {
-        vec![$($crate::utf8_path_buf!($e)),*]
-    };
-}
-
-#[macro_export]
-macro_rules! long_path {
-    ($prefix:expr, $n:expr) => {
-        format!("{}/{:0>64x}", $prefix, $n).into()
-    };
-    ($prefix:expr, $n:expr, $s:expr) => {
-        format!("{}/{:0>64x}.{}", $prefix, $n, $s).into()
-    };
-}
-
-#[macro_export]
-macro_rules! short_path {
-    ($prefix:expr, $n:expr) => {
-        format!("{}/{:0>16x}", $prefix, $n).into()
-    };
-    ($prefix:expr, $n:expr, $s:expr) => {
-        format!("{}/{:0>16x}.{}", $prefix, $n, $s).into()
     };
 }
 
@@ -215,23 +160,6 @@ macro_rules! string_vec {
     };
     [$($e:expr),*,] => {
         vec![$($e.to_string()),*]
-    };
-}
-
-#[macro_export]
-macro_rules! string_nonempty {
-    [$($e:expr),*] => {
-        nonempty![$($e.to_string()),*]
-    };
-    [$($e:expr),*,] => {
-        nonempty![$($e.to_string()),*]
-    };
-}
-
-#[macro_export]
-macro_rules! timeout {
-    ($n:literal) => {
-        maelstrom_base::Timeout::new($n)
     };
 }
 

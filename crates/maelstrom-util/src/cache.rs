@@ -1939,10 +1939,9 @@ mod tests {
     #[test]
     fn cache_path() {
         let fixture = Fixture::new(10, fs! {});
-        let cache_path: PathBuf = long_path!("/z/sha256/apple", 42);
         assert_eq!(
             fixture.cache.cache_path(&apple!(42)).into_path_buf(),
-            cache_path
+            PathBuf::from(format!("/z/sha256/apple/{:0>64x}", 42)),
         );
     }
 
