@@ -1,18 +1,34 @@
 use anyhow::Result;
 use maelstrom_client::ProjectDir;
 use maelstrom_util::{root::Root, sync::Event as SyncEvent};
-use notify::{event::Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher as _};
+use notify::{
+    event::{Event as NotifyEvent, EventKind},
+    RecommendedWatcher, RecursiveMode, Watcher as _,
+};
 use slog::{debug, Logger};
 use std::{collections::BTreeSet, path::PathBuf, sync::mpsc, thread::Scope, time::Duration};
 use std_semaphore::Semaphore;
 
 fn process_watch_events(
-    events: Vec<NotifyEvent>,
-    watch_exclude_paths: &[PathBuf],
+    events: impl IntoIterator<Item = NotifyEvent>,
+    exclude_prefixes: &[PathBuf],
 ) -> BTreeSet<PathBuf> {
-    let path_excluded = |p: &PathBuf| watch_exclude_paths.iter().any(|pre| p.starts_with(pre));
-    let event_paths = events.into_iter().flat_map(|e| e.paths.into_iter());
-    event_paths.filter(|p| !path_excluded(p)).collect()
+    events
+        .into_iter()
+        .filter_map(|event| {
+            if matches!(event.kind, EventKind::Access(_)) {
+                None
+            } else {
+                Some(event.paths)
+            }
+        })
+        .flatten()
+        .filter(|path| {
+            !exclude_prefixes
+                .iter()
+                .any(|exclude| path.starts_with(exclude))
+        })
+        .collect()
 }
 
 pub struct Watcher<'deps, 'scope> {
@@ -93,7 +109,7 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notify::event::{EventAttributes, EventKind, ModifyKind};
+    use notify::event::{AccessKind, EventAttributes, EventKind, ModifyKind};
     use std::path::PathBuf;
 
     fn process_watch_events_test(
@@ -197,6 +213,26 @@ mod tests {
                 },
                 NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
+                    paths: vec!["target/foo_bin".into()],
+                    attrs: EventAttributes::new(),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn watch_multiple_file_access_both_paths_ignored() {
+        process_watch_events_test(
+            false, /* counts_as_change */
+            vec!["target".into()],
+            vec![
+                NotifyEvent {
+                    kind: EventKind::Access(AccessKind::Any),
+                    paths: vec!["src/foo.rs".into()],
+                    attrs: EventAttributes::new(),
+                },
+                NotifyEvent {
+                    kind: EventKind::Access(AccessKind::Any),
                     paths: vec!["target/foo_bin".into()],
                     attrs: EventAttributes::new(),
                 },
