@@ -87,12 +87,10 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
                         events.push(event);
                     }
                 }
-                if !events.is_empty() {
-                    let changed_paths = process_watch_events(events, watch_exclude_paths);
-                    if !changed_paths.is_empty() {
-                        debug!(log, "reacting to file changes"; "paths" => ?changed_paths);
-                        files_changed.set();
-                    }
+                let changed_paths = process_watch_events(events, watch_exclude_paths);
+                if !changed_paths.is_empty() {
+                    debug!(log, "reacting to file changes"; "paths" => ?changed_paths);
+                    files_changed.set();
                 }
             }
 
@@ -109,7 +107,7 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notify::event::{AccessKind, EventAttributes, EventKind, ModifyKind};
+    use notify::event::{AccessKind, CreateKind, EventKind, ModifyKind, RemoveKind};
 
     #[track_caller]
     fn process_watch_events_test<'a>(
@@ -127,121 +125,143 @@ mod tests {
     }
 
     #[test]
-    fn process_watch_events_file_modify() {
+    fn files_any_processed() {
         process_watch_events_test(
-            vec![NotifyEvent {
-                kind: EventKind::Modify(ModifyKind::Any),
-                paths: vec!["src/foo.rs".into()],
-                attrs: EventAttributes::new(),
-            }],
-            [],
-            ["src/foo.rs"],
-        )
-    }
-
-    #[test]
-    fn process_watch_events_multiple_files_modified() {
-        process_watch_events_test(
-            vec![
-                NotifyEvent {
-                    kind: EventKind::Modify(ModifyKind::Any),
-                    paths: vec!["src/foo.rs".into()],
-                    attrs: EventAttributes::new(),
-                },
-                NotifyEvent {
-                    kind: EventKind::Modify(ModifyKind::Any),
-                    paths: vec!["src/bar.rs".into()],
-                    attrs: EventAttributes::new(),
-                },
+            [
+                NotifyEvent::new(EventKind::Any)
+                    .add_path("foo.rs".into())
+                    .add_path("bar.rs".into()),
+                NotifyEvent::new(EventKind::Any).add_path("foo.rs".into()),
+                NotifyEvent::new(EventKind::Any).add_path("baz.rs".into()),
+                NotifyEvent::new(EventKind::Any).add_path("frob.rs".into()),
+                NotifyEvent::new(EventKind::Any),
             ],
             [],
-            ["src/foo.rs", "src/bar.rs"],
+            ["foo.rs", "bar.rs", "baz.rs", "frob.rs"],
         )
     }
 
     #[test]
-    fn process_watch_events_single_file_modify_ignored() {
+    fn files_access_ignored() {
         process_watch_events_test(
-            vec![NotifyEvent {
-                kind: EventKind::Modify(ModifyKind::Any),
-                paths: vec!["target/foo_bin".into()],
-                attrs: EventAttributes::new(),
-            }],
+            [
+                NotifyEvent::new(EventKind::Access(AccessKind::Any))
+                    .add_path("foo.rs".into())
+                    .add_path("bar.rs".into()),
+                NotifyEvent::new(EventKind::Access(AccessKind::Any)).add_path("foo.rs".into()),
+                NotifyEvent::new(EventKind::Access(AccessKind::Any)).add_path("baz.rs".into()),
+                NotifyEvent::new(EventKind::Access(AccessKind::Any)).add_path("frob.rs".into()),
+                NotifyEvent::new(EventKind::Access(AccessKind::Any)),
+            ],
+            [],
+            [],
+        )
+    }
+
+    #[test]
+    fn files_created_processed() {
+        process_watch_events_test(
+            [
+                NotifyEvent::new(EventKind::Create(CreateKind::Any))
+                    .add_path("foo.rs".into())
+                    .add_path("bar.rs".into()),
+                NotifyEvent::new(EventKind::Create(CreateKind::Any)).add_path("foo.rs".into()),
+                NotifyEvent::new(EventKind::Create(CreateKind::Any)).add_path("baz.rs".into()),
+                NotifyEvent::new(EventKind::Create(CreateKind::Any)).add_path("frob.rs".into()),
+                NotifyEvent::new(EventKind::Create(CreateKind::Any)),
+            ],
+            [],
+            ["foo.rs", "bar.rs", "baz.rs", "frob.rs"],
+        )
+    }
+
+    #[test]
+    fn files_modified_processed() {
+        process_watch_events_test(
+            [
+                NotifyEvent::new(EventKind::Modify(ModifyKind::Any))
+                    .add_path("foo.rs".into())
+                    .add_path("bar.rs".into()),
+                NotifyEvent::new(EventKind::Modify(ModifyKind::Any)).add_path("foo.rs".into()),
+                NotifyEvent::new(EventKind::Modify(ModifyKind::Any)).add_path("baz.rs".into()),
+                NotifyEvent::new(EventKind::Modify(ModifyKind::Any)).add_path("frob.rs".into()),
+                NotifyEvent::new(EventKind::Modify(ModifyKind::Any)),
+            ],
+            [],
+            ["foo.rs", "bar.rs", "baz.rs", "frob.rs"],
+        )
+    }
+
+    #[test]
+    fn files_removed_processed() {
+        process_watch_events_test(
+            [
+                NotifyEvent::new(EventKind::Remove(RemoveKind::Any))
+                    .add_path("foo.rs".into())
+                    .add_path("bar.rs".into()),
+                NotifyEvent::new(EventKind::Remove(RemoveKind::Any)).add_path("foo.rs".into()),
+                NotifyEvent::new(EventKind::Remove(RemoveKind::Any)).add_path("baz.rs".into()),
+                NotifyEvent::new(EventKind::Remove(RemoveKind::Any)).add_path("frob.rs".into()),
+                NotifyEvent::new(EventKind::Remove(RemoveKind::Any)),
+            ],
+            [],
+            ["foo.rs", "bar.rs", "baz.rs", "frob.rs"],
+        )
+    }
+
+    #[test]
+    fn files_other_processed() {
+        process_watch_events_test(
+            [
+                NotifyEvent::new(EventKind::Other)
+                    .add_path("foo.rs".into())
+                    .add_path("bar.rs".into()),
+                NotifyEvent::new(EventKind::Other).add_path("foo.rs".into()),
+                NotifyEvent::new(EventKind::Other).add_path("baz.rs".into()),
+                NotifyEvent::new(EventKind::Other).add_path("frob.rs".into()),
+                NotifyEvent::new(EventKind::Other),
+            ],
+            [],
+            ["foo.rs", "bar.rs", "baz.rs", "frob.rs"],
+        )
+    }
+
+    #[test]
+    fn files_filtered_by_exclude_directories() {
+        process_watch_events_test(
+            [
+                NotifyEvent::new(EventKind::Any)
+                    .add_path("target/foo.rs".into())
+                    .add_path("target/bar.rs".into()),
+                NotifyEvent::new(EventKind::Any).add_path("target/foo.rs".into()),
+                NotifyEvent::new(EventKind::Any).add_path("target/baz.rs".into()),
+                NotifyEvent::new(EventKind::Any).add_path("target/frob.rs".into()),
+                NotifyEvent::new(EventKind::Any),
+            ],
             ["target"],
             [],
         )
     }
 
     #[test]
-    fn process_watch_events_multiple_files_modified_ignored() {
+    fn kitchen_sink() {
         process_watch_events_test(
-            vec![
-                NotifyEvent {
-                    kind: EventKind::Modify(ModifyKind::Any),
-                    paths: vec!["target/foo_bin".into()],
-                    attrs: EventAttributes::new(),
-                },
-                NotifyEvent {
-                    kind: EventKind::Modify(ModifyKind::Any),
-                    paths: vec!["target/bar_bin".into()],
-                    attrs: EventAttributes::new(),
-                },
+            [
+                NotifyEvent::new(EventKind::Any)
+                    .add_path("dir/subdir1/foo.rs".into())
+                    .add_path("dir/subdir2/bar.rs".into())
+                    .add_path("dir/subdir3/baz.rs".into()),
+                NotifyEvent::new(EventKind::Access(AccessKind::Any))
+                    .add_path("dir/subdir1/frob.rs".into())
+                    .add_path("dir/subdir2/fitz.rs".into())
+                    .add_path("dir/subdir3/quux.rs".into()),
+                NotifyEvent::new(EventKind::Modify(ModifyKind::Any))
+                    .add_path("dir/subdir3/quid.rs".into()),
+                NotifyEvent::new(EventKind::Modify(ModifyKind::Any))
+                    .add_path("dir/subdir2/bar.rs".into()),
             ],
-            ["target"],
-            [],
-        )
-    }
-
-    #[test]
-    fn process_watch_events_single_modify_one_path_ignored() {
-        process_watch_events_test(
-            vec![NotifyEvent {
-                kind: EventKind::Modify(ModifyKind::Any),
-                paths: vec!["src/foo.rs".into(), "target/foo_bin".into()],
-                attrs: EventAttributes::new(),
-            }],
-            ["target"],
-            ["src/foo.rs"],
-        )
-    }
-
-    #[test]
-    fn watch_multiple_file_modify_one_path_ignored() {
-        process_watch_events_test(
-            vec![
-                NotifyEvent {
-                    kind: EventKind::Modify(ModifyKind::Any),
-                    paths: vec!["src/foo.rs".into()],
-                    attrs: EventAttributes::new(),
-                },
-                NotifyEvent {
-                    kind: EventKind::Modify(ModifyKind::Any),
-                    paths: vec!["target/foo_bin".into()],
-                    attrs: EventAttributes::new(),
-                },
-            ],
-            ["target"],
-            ["src/foo.rs"],
-        )
-    }
-
-    #[test]
-    fn watch_multiple_file_access_both_paths_ignored() {
-        process_watch_events_test(
-            vec![
-                NotifyEvent {
-                    kind: EventKind::Access(AccessKind::Any),
-                    paths: vec!["src/foo.rs".into()],
-                    attrs: EventAttributes::new(),
-                },
-                NotifyEvent {
-                    kind: EventKind::Access(AccessKind::Any),
-                    paths: vec!["target/foo_bin".into()],
-                    attrs: EventAttributes::new(),
-                },
-            ],
-            [],
-            [],
+            ["dir/subdir1", "dir/subdir2"],
+            ["dir/subdir3/baz.rs", "dir/subdir3/quid.rs"],
         )
     }
 }
