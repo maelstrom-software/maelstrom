@@ -8,14 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Test runners (`cargo-maelstrom`, `maelstrom-go-test`, and `maelstrom-pytest`)
+  now have a "watch mode" that is enabled with the `--watch` command-line
+  option. In watch mode, the test runner will first run all of the specified
+  tests, then loop waiting for changes in the project directory. Anytime there
+  is a change, the tests will be re-run.
+- Preliminary support has been added for running Maelstrom clusters in GitHub.
+  Artifacts are shared between processes using the GitHub artifact API.
+  Communication between processes uses a message-queue that is also built on
+  top of the GitHub artifact API.
+- The concept of named containers has been added to all clients (tests runners
+  and `maelstrom-run`). Named containers can inherit configuration from other
+  named containers or container images. Jobs can then inherit configuration
+  from named containers. This simplifies configuration, but it also sets the
+  stage for "command layers" which we hope to introduce in the next release.
 - Test runners send SIGKILL to their build processes when exiting early due to `stop-after`.
   \[[414](https://github.com/maelstrom-software/maelstrom/issues/414)\]
-- cargo-maelstrom passes `--no-deps` to `cargo metadata` command.
-- cargo-maelstrom now displays warnings after the test summary.
+- `cargo-maelstrom` now passes `--no-deps` to `cargo metadata` command.
+- `cargo-maelstrom` now displays warnings after the test summary.
 - The cache code for the worker and broker has been combined and improved. Some
   notable improvements:
-  - The worker and broker now share the same code.
-    \[[234](https://github.com/maelstrom-software/maelstrom/issues/234)\]
   - The worker now reuses the cache every time it is invoked. Since this
     includes the local worker, this means that startup times should be much
     better for local-only mode.
@@ -29,9 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A lock file has been added to the cache directory to ensure that only one
     worker or broker uses a cache directory at a time.
     \[[215](https://github.com/maelstrom-software/maelstrom/issues/215)\]
-- Pushed a change to [Ratatui](https://github.com/ratatui/ratatui), our TUI
-  library, to minimize flickering for the CLIs. We've updated our dependencies
-  to use the new version of Ratatui with the change.
+  - The worker and broker now share the same code.
+    \[[234](https://github.com/maelstrom-software/maelstrom/issues/234)\]
+- Pushed a change to [Ratatui](https://github.com/ratatui/ratatui), the TUI
+  library that we use, to minimize flickering for the CLIs. We've updated our
+  dependencies to use the new version of Ratatui with the change.
   \[[1342](https://github.com/ratatui/ratatui/pull/1341)\]
 - Change socket code to use keepalive and nodelay options. This should make
   communication faster and also cause broker and worker to detect connections
