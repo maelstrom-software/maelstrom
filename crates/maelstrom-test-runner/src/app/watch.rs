@@ -110,35 +110,38 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
 mod tests {
     use super::*;
     use notify::event::{AccessKind, EventAttributes, EventKind, ModifyKind};
-    use std::path::PathBuf;
 
-    fn process_watch_events_test(
-        counts_as_change: bool,
-        watch_exclude_paths: Vec<PathBuf>,
-        events: Vec<NotifyEvent>,
+    #[track_caller]
+    fn process_watch_events_test<'a>(
+        events: impl IntoIterator<Item = NotifyEvent>,
+        watch_exclude_paths: impl IntoIterator<Item = &'a str>,
+        expected: impl IntoIterator<Item = &'a str>,
     ) {
+        let watch_exclude_paths = watch_exclude_paths
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>();
         let changed_paths = process_watch_events(events, &watch_exclude_paths);
-        assert_eq!(!changed_paths.is_empty(), counts_as_change);
+        let expected_paths = expected.into_iter().map(Into::into).collect();
+        assert_eq!(changed_paths, expected_paths);
     }
 
     #[test]
     fn process_watch_events_file_modify() {
         process_watch_events_test(
-            true, /* counts_as_change */
-            vec![],
             vec![NotifyEvent {
                 kind: EventKind::Modify(ModifyKind::Any),
                 paths: vec!["src/foo.rs".into()],
                 attrs: EventAttributes::new(),
             }],
+            [],
+            ["src/foo.rs"],
         )
     }
 
     #[test]
     fn process_watch_events_multiple_files_modified() {
         process_watch_events_test(
-            true, /* counts_as_change */
-            vec![],
             vec![
                 NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
@@ -151,27 +154,27 @@ mod tests {
                     attrs: EventAttributes::new(),
                 },
             ],
+            [],
+            ["src/foo.rs", "src/bar.rs"],
         )
     }
 
     #[test]
     fn process_watch_events_single_file_modify_ignored() {
         process_watch_events_test(
-            false, /* counts_as_change */
-            vec!["target".into()],
             vec![NotifyEvent {
                 kind: EventKind::Modify(ModifyKind::Any),
                 paths: vec!["target/foo_bin".into()],
                 attrs: EventAttributes::new(),
             }],
+            ["target"],
+            [],
         )
     }
 
     #[test]
     fn process_watch_events_multiple_files_modified_ignored() {
         process_watch_events_test(
-            false, /* counts_as_change */
-            vec!["target".into()],
             vec![
                 NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
@@ -184,27 +187,27 @@ mod tests {
                     attrs: EventAttributes::new(),
                 },
             ],
+            ["target"],
+            [],
         )
     }
 
     #[test]
     fn process_watch_events_single_modify_one_path_ignored() {
         process_watch_events_test(
-            true, /* counts_as_change */
-            vec!["target".into()],
             vec![NotifyEvent {
                 kind: EventKind::Modify(ModifyKind::Any),
                 paths: vec!["src/foo.rs".into(), "target/foo_bin".into()],
                 attrs: EventAttributes::new(),
             }],
+            ["target"],
+            ["src/foo.rs"],
         )
     }
 
     #[test]
     fn watch_multiple_file_modify_one_path_ignored() {
         process_watch_events_test(
-            true, /* counts_as_change */
-            vec!["target".into()],
             vec![
                 NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
@@ -217,14 +220,14 @@ mod tests {
                     attrs: EventAttributes::new(),
                 },
             ],
+            ["target"],
+            ["src/foo.rs"],
         )
     }
 
     #[test]
     fn watch_multiple_file_access_both_paths_ignored() {
         process_watch_events_test(
-            false, /* counts_as_change */
-            vec!["target".into()],
             vec![
                 NotifyEvent {
                     kind: EventKind::Access(AccessKind::Any),
@@ -237,6 +240,8 @@ mod tests {
                     attrs: EventAttributes::new(),
                 },
             ],
+            [],
+            [],
         )
     }
 }
