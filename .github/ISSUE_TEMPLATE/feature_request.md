@@ -20,7 +20,7 @@ Please described your proposed solution, if any. It's alright if you don't have
 one, or only have a sketch of one.
 
 **Other Projects**
-If there are other projects that you konw about that solve this problem, please
+If there are other projects that you know about that solve this problem, please
 point us in the direction of their solutions. Please describe what you like or
 dislike about their solutions.
 
