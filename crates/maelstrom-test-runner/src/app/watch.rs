@@ -1,17 +1,16 @@
 use anyhow::Result;
 use maelstrom_client::ProjectDir;
-use maelstrom_util::{root::Root, sync::Event};
-use notify::Watcher as _;
-use std::collections::BTreeSet;
-use std::path::PathBuf;
-use std::time::Duration;
+use maelstrom_util::{root::Root, sync::Event as SyncEvent};
+use notify::{event::Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher as _};
+use slog::{debug, Logger};
+use std::{collections::BTreeSet, path::PathBuf, sync::mpsc, thread::Scope, time::Duration};
 use std_semaphore::Semaphore;
 
 fn process_watch_events(
-    log: &slog::Logger,
-    events: Vec<notify::event::Event>,
+    log: &Logger,
+    events: Vec<NotifyEvent>,
     watch_exclude_paths: &[PathBuf],
-    files_changed: &Event,
+    files_changed: &SyncEvent,
 ) {
     let path_excluded = |p: &PathBuf| watch_exclude_paths.iter().any(|pre| p.starts_with(pre));
     let event_paths = events.into_iter().flat_map(|e| e.paths.into_iter());
@@ -19,30 +18,30 @@ fn process_watch_events(
         event_paths.filter(|p| !path_excluded(p)).collect();
 
     if !included_event_paths.is_empty() {
-        slog::debug!(log, "reacting to file changes"; "paths" => ?included_event_paths);
+        debug!(log, "reacting to file changes"; "paths" => ?included_event_paths);
         files_changed.set();
     }
 }
 
 pub struct Watcher<'deps, 'scope> {
-    scope: &'scope std::thread::Scope<'scope, 'deps>,
-    log: slog::Logger,
+    scope: &'scope Scope<'scope, 'deps>,
+    log: Logger,
     project_dir: &'deps Root<ProjectDir>,
     watch_exclude_paths: &'deps Vec<PathBuf>,
     semaphore: &'deps Semaphore,
-    done: &'deps Event,
-    files_changed: &'deps Event,
+    done: &'deps SyncEvent,
+    files_changed: &'deps SyncEvent,
 }
 
 impl<'deps, 'scope> Watcher<'deps, 'scope> {
     pub fn new(
-        scope: &'scope std::thread::Scope<'scope, 'deps>,
-        log: slog::Logger,
+        scope: &'scope Scope<'scope, 'deps>,
+        log: Logger,
         project_dir: &'deps Root<ProjectDir>,
         watch_exclude_paths: &'deps Vec<PathBuf>,
         semaphore: &'deps Semaphore,
-        done: &'deps Event,
-        files_changed: &'deps Event,
+        done: &'deps SyncEvent,
+        files_changed: &'deps SyncEvent,
     ) -> Self {
         Self {
             scope,
@@ -63,9 +62,9 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
         let watch_exclude_paths = self.watch_exclude_paths;
         let log = self.log.clone();
 
-        let (event_tx, event_rx) = std::sync::mpsc::channel();
-        let mut watcher = notify::RecommendedWatcher::new(event_tx, notify::Config::default())?;
-        watcher.watch(project_dir.as_ref(), notify::RecursiveMode::Recursive)?;
+        let (event_tx, event_rx) = mpsc::channel();
+        let mut watcher = RecommendedWatcher::new(event_tx, Default::default())?;
+        watcher.watch(project_dir.as_ref(), RecursiveMode::Recursive)?;
 
         self.scope.spawn(move || {
             let _guard = sem.access();
@@ -97,17 +96,19 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
 
 #[cfg(test)]
 mod tests {
-    use notify::event::{Event, EventAttributes, EventKind, ModifyKind};
+    use super::*;
+    use maelstrom_util::log;
+    use notify::event::{EventAttributes, EventKind, ModifyKind};
     use std::path::PathBuf;
 
     fn process_watch_events_test(
         counts_as_change: bool,
         watch_exclude_paths: Vec<PathBuf>,
-        events: Vec<Event>,
+        events: Vec<NotifyEvent>,
     ) {
-        let log = maelstrom_util::log::test_logger();
-        let changed = maelstrom_util::sync::Event::new();
-        super::process_watch_events(&log, events, &watch_exclude_paths, &changed);
+        let log = log::test_logger();
+        let changed = SyncEvent::new();
+        process_watch_events(&log, events, &watch_exclude_paths, &changed);
         assert_eq!(changed.is_set(), counts_as_change);
     }
 
@@ -116,7 +117,7 @@ mod tests {
         process_watch_events_test(
             true, /* counts_as_change */
             vec![],
-            vec![Event {
+            vec![NotifyEvent {
                 kind: EventKind::Modify(ModifyKind::Any),
                 paths: vec!["src/foo.rs".into()],
                 attrs: EventAttributes::new(),
@@ -130,12 +131,12 @@ mod tests {
             true, /* counts_as_change */
             vec![],
             vec![
-                Event {
+                NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
                     paths: vec!["src/foo.rs".into()],
                     attrs: EventAttributes::new(),
                 },
-                Event {
+                NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
                     paths: vec!["src/bar.rs".into()],
                     attrs: EventAttributes::new(),
@@ -149,7 +150,7 @@ mod tests {
         process_watch_events_test(
             false, /* counts_as_change */
             vec!["target".into()],
-            vec![Event {
+            vec![NotifyEvent {
                 kind: EventKind::Modify(ModifyKind::Any),
                 paths: vec!["target/foo_bin".into()],
                 attrs: EventAttributes::new(),
@@ -163,12 +164,12 @@ mod tests {
             false, /* counts_as_change */
             vec!["target".into()],
             vec![
-                Event {
+                NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
                     paths: vec!["target/foo_bin".into()],
                     attrs: EventAttributes::new(),
                 },
-                Event {
+                NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
                     paths: vec!["target/bar_bin".into()],
                     attrs: EventAttributes::new(),
@@ -182,7 +183,7 @@ mod tests {
         process_watch_events_test(
             true, /* counts_as_change */
             vec!["target".into()],
-            vec![Event {
+            vec![NotifyEvent {
                 kind: EventKind::Modify(ModifyKind::Any),
                 paths: vec!["src/foo.rs".into(), "target/foo_bin".into()],
                 attrs: EventAttributes::new(),
@@ -196,12 +197,12 @@ mod tests {
             true, /* counts_as_change */
             vec!["target".into()],
             vec![
-                Event {
+                NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
                     paths: vec!["src/foo.rs".into()],
                     attrs: EventAttributes::new(),
                 },
-                Event {
+                NotifyEvent {
                     kind: EventKind::Modify(ModifyKind::Any),
                     paths: vec!["target/foo_bin".into()],
                     attrs: EventAttributes::new(),
