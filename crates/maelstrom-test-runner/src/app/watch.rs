@@ -7,20 +7,12 @@ use std::{collections::BTreeSet, path::PathBuf, sync::mpsc, thread::Scope, time:
 use std_semaphore::Semaphore;
 
 fn process_watch_events(
-    log: &Logger,
     events: Vec<NotifyEvent>,
     watch_exclude_paths: &[PathBuf],
-    files_changed: &SyncEvent,
-) {
+) -> BTreeSet<PathBuf> {
     let path_excluded = |p: &PathBuf| watch_exclude_paths.iter().any(|pre| p.starts_with(pre));
     let event_paths = events.into_iter().flat_map(|e| e.paths.into_iter());
-    let included_event_paths: BTreeSet<PathBuf> =
-        event_paths.filter(|p| !path_excluded(p)).collect();
-
-    if !included_event_paths.is_empty() {
-        debug!(log, "reacting to file changes"; "paths" => ?included_event_paths);
-        files_changed.set();
-    }
+    event_paths.filter(|p| !path_excluded(p)).collect()
 }
 
 pub struct Watcher<'deps, 'scope> {
@@ -80,7 +72,11 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
                     }
                 }
                 if !events.is_empty() {
-                    process_watch_events(&log, events, watch_exclude_paths, files_changed);
+                    let changed_paths = process_watch_events(events, watch_exclude_paths);
+                    if !changed_paths.is_empty() {
+                        debug!(log, "reacting to file changes"; "paths" => ?changed_paths);
+                        files_changed.set();
+                    }
                 }
             }
 
@@ -97,7 +93,6 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_util::log;
     use notify::event::{EventAttributes, EventKind, ModifyKind};
     use std::path::PathBuf;
 
@@ -106,10 +101,8 @@ mod tests {
         watch_exclude_paths: Vec<PathBuf>,
         events: Vec<NotifyEvent>,
     ) {
-        let log = log::test_logger();
-        let changed = SyncEvent::new();
-        process_watch_events(&log, events, &watch_exclude_paths, &changed);
-        assert_eq!(changed.is_set(), counts_as_change);
+        let changed_paths = process_watch_events(events, &watch_exclude_paths);
+        assert_eq!(!changed_paths.is_empty(), counts_as_change);
     }
 
     #[test]
