@@ -123,7 +123,7 @@ mod tests {
             job_spec! {
                 "/bin/sh",
                 layers: [tar_layer_spec!("1"), tar_layer_spec!("2")],
-                environment: environment_spec!(true, "FOO" => "foo"),
+                environment: [environment_spec!(true, "FOO" => "foo")],
                 working_directory: "/root",
                 parent: container_container_parent!("parent", all, -layers, -working_directory),
             },

@@ -5,7 +5,7 @@ pub use store::Store;
 
 use directive::{Directive, DirectiveContainer, DirectiveContainerAugment};
 use maelstrom_base::Timeout;
-use maelstrom_client::spec::{ContainerSpec, IntoEnvironment};
+use maelstrom_client::spec::ContainerSpec;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Metadata {
@@ -159,9 +159,9 @@ impl MetadataInternal {
                 layers.extend(added_layers.clone());
 
                 if let Some(new_environment) = new_environment {
-                    environment = new_environment.clone().into_environment();
+                    environment = new_environment.clone();
                 }
-                environment.extend(added_environment.clone().into_environment());
+                environment.extend(added_environment.clone());
 
                 if new_working_directory.is_some() {
                     working_directory = new_working_directory.clone();
@@ -323,18 +323,18 @@ mod tests {
     fn environment() {
         fold_test(
             metadata_internal!(),
-            augment_directive!(environment: [("foo", "bar")]),
-            metadata_internal!(environment: [("foo", "bar")]),
+            augment_directive!(environment: [environment_spec!(true, "foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
         );
         fold_test(
-            metadata_internal!(environment: [("frob", "baz")]),
+            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
             augment_directive!(),
-            metadata_internal!(environment: [("frob", "baz")]),
+            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
         );
         fold_test(
-            metadata_internal!(environment: [("frob", "baz")]),
-            augment_directive!(environment: [("foo", "bar")]),
-            metadata_internal!(environment: [("foo", "bar")]),
+            metadata_internal!(environment: [environment_spec!(true, "frob" => "baz")]),
+            augment_directive!(environment: [environment_spec!(true, "foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
         );
     }
 
@@ -342,12 +342,12 @@ mod tests {
     fn added_environment() {
         fold_test(
             metadata_internal!(),
-            augment_directive!(added_environment: [("foo", "bar")]),
-            metadata_internal!(environment: [("foo", "bar")]),
+            augment_directive!(added_environment: [environment_spec!(true, "foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
         );
         fold_test(
-            metadata_internal!(environment: [("frob", "baz")]),
-            augment_directive!(added_environment: [("foo", "bar")]),
+            metadata_internal!(environment: [environment_spec!(true, "frob" => "baz")]),
+            augment_directive!(added_environment: [environment_spec!(true, "foo" => "bar")]),
             metadata_internal! {
                 environment: [
                     environment_spec!(true, "frob" => "baz"),
@@ -358,25 +358,25 @@ mod tests {
         fold_test(
             metadata_internal!(),
             augment_directive! {
-                environment: [("qux", "quux")],
-                added_environment: [("foo", "bar")],
+                environment: [environment_spec!(true, "qux" => "quxx")],
+                added_environment: [environment_spec!(true, "foo" => "bar")],
             },
             metadata_internal! {
                 environment: [
-                    environment_spec!(true, "qux" => "quux"),
+                    environment_spec!(true, "qux" => "quxx"),
                     environment_spec!(true, "foo" => "bar"),
                 ],
             },
         );
         fold_test(
-            metadata_internal!(environment: [("frob", "baz")]),
+            metadata_internal!(environment: [environment_spec!(true, "frob" => "baz")]),
             augment_directive! {
-                environment: [("qux", "quux")],
-                added_environment: [("foo", "bar")],
+                environment: [environment_spec!(true, "qux" => "quxx")],
+                added_environment: [environment_spec!(true, "foo" => "bar")],
             },
             metadata_internal! {
                 environment: [
-                    environment_spec!(true, "qux" => "quux"),
+                    environment_spec!(true, "qux" => "quxx"),
                     environment_spec!(true, "foo" => "bar"),
                 ],
             },

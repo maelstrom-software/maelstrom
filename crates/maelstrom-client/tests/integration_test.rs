@@ -4,9 +4,10 @@ use maelstrom_base::{
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    glob_layer_spec, job_spec, paths_layer_spec, spec::LayerSpec, stubs_layer_spec, symlink_spec,
-    symlinks_layer_spec, tar_layer_spec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client,
-    ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
+    environment_spec, glob_layer_spec, job_spec, paths_layer_spec, spec::LayerSpec,
+    stubs_layer_spec, symlink_spec, symlinks_layer_spec, tar_layer_spec,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_util::{
     config::common::ArtifactTransferStrategy, elf::read_shared_libraries, fs::Fs, log::test_logger,
@@ -103,8 +104,11 @@ impl ClientFixture {
             layers: layers,
             arguments: ["--exact", "single_test", "--nocapture"],
             environment: [
-                ("INSIDE_JOB", "yes"),
-                ("TEST_LINE", &self.test_line.to_string()),
+                environment_spec! {
+                    true,
+                    "INSIDE_JOB" => "yes".to_string(),
+                    "TEST_LINE" => self.test_line.to_string(),
+                },
             ],
         };
         let (_, outcome) = self.client.run_job(spec).unwrap();
@@ -138,8 +142,11 @@ impl ClientFixture {
             network: network,
             arguments: ["--exact", "single_test", "--nocapture"],
             environment: [
-                ("INSIDE_JOB", "yes"),
-                ("TEST_LINE", &self.test_line.to_string()),
+                environment_spec! {
+                    true,
+                    "INSIDE_JOB" => "yes".to_string(),
+                    "TEST_LINE" => self.test_line.to_string(),
+                }
             ],
         };
         self.client.run_job(spec).unwrap_err()

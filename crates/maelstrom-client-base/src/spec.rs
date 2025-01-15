@@ -21,7 +21,7 @@ use serde::{
     __private::de::{Content, ContentRefDeserializer},
 };
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     env::{self, VarError},
     path::PathBuf,
     time::Duration,
@@ -314,68 +314,6 @@ macro_rules! environment_spec {
     }
 }
 
-pub trait IntoEnvironment {
-    fn into_environment(self) -> Vec<EnvironmentSpec>;
-}
-
-impl IntoEnvironment for Vec<EnvironmentSpec> {
-    fn into_environment(self) -> Self {
-        self
-    }
-}
-
-impl<const N: usize> IntoEnvironment for [EnvironmentSpec; N] {
-    fn into_environment(self) -> Vec<EnvironmentSpec> {
-        self.into_iter().collect()
-    }
-}
-
-impl IntoEnvironment for EnvironmentSpec {
-    fn into_environment(self) -> Vec<Self> {
-        vec![self]
-    }
-}
-
-impl<KeyT, ValueT, const N: usize> IntoEnvironment for [(KeyT, ValueT); N]
-where
-    KeyT: Into<String>,
-    ValueT: Into<String>,
-{
-    fn into_environment(self) -> Vec<EnvironmentSpec> {
-        vec![EnvironmentSpec {
-            vars: self
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-            extend: true,
-        }]
-    }
-}
-
-macro_rules! into_env_container {
-    ($container:ty) => {
-        impl<KeyT, ValueT> IntoEnvironment for $container
-        where
-            KeyT: Into<String>,
-            ValueT: Into<String>,
-        {
-            fn into_environment(self) -> Vec<EnvironmentSpec> {
-                vec![EnvironmentSpec {
-                    vars: self
-                        .into_iter()
-                        .map(|(k, v)| (k.into(), v.into()))
-                        .collect(),
-                    extend: true,
-                }]
-            }
-        }
-    };
-}
-
-into_env_container!(Vec<(KeyT, ValueT)>);
-into_env_container!(BTreeMap<KeyT, ValueT>);
-into_env_container!(HashMap<KeyT, ValueT>);
-
 pub fn environment_eval(
     inital_env: BTreeMap<String, String>,
     env: Vec<EnvironmentSpec>,
@@ -455,7 +393,7 @@ macro_rules! container_spec {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? layers: $layers.into()])
     };
     (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
-        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: $crate::spec::IntoEnvironment::into_environment($environment)])
+        $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? environment: $environment.into_iter().collect()])
     };
     (@expand [working_directory: $dir:expr $(,$($field_in:tt)*)?] -> [$($($field_out:tt)+)?]) => {
         $crate::container_spec!(@expand [$($($field_in)*)?] -> [$($($field_out)+,)? working_directory: Some($dir.into())])
@@ -610,7 +548,7 @@ impl TryFrom<ContainerSpecForTomlAndJson> for ContainerSpec {
                     )
                     .into());
                 }
-                added_environment.into_environment()
+                added_environment.into_environment_specs()
             }
             (None, Some(added_environment), None, Some(parent)) => {
                 if !parent.r#use.as_set().contains(ContainerUse::Environment) {
@@ -620,9 +558,9 @@ impl TryFrom<ContainerSpecForTomlAndJson> for ContainerSpec {
                     )
                     .into());
                 }
-                added_environment.into_environment()
+                added_environment.into_environment_specs()
             }
-            (Some(environment), None, None, None) => environment.into_environment(),
+            (Some(environment), None, None, None) => environment.into_environment_specs(),
             (Some(environment), None, Some(image), None) => {
                 if image.r#use.explicit().contains(ImageUse::Environment) {
                     return Err(concat!(
@@ -632,7 +570,7 @@ impl TryFrom<ContainerSpecForTomlAndJson> for ContainerSpec {
                     .into());
                 }
                 to_remove_from_image_use.insert(ImageUse::Environment);
-                environment.into_environment()
+                environment.into_environment_specs()
             }
             (Some(environment), None, None, Some(parent)) => {
                 if parent.r#use.explicit().contains(ContainerUse::Environment) {
@@ -643,7 +581,7 @@ impl TryFrom<ContainerSpecForTomlAndJson> for ContainerSpec {
                     .into());
                 }
                 to_remove_from_parent_use.insert(ContainerUse::Environment);
-                environment.into_environment()
+                environment.into_environment_specs()
             }
         };
 
@@ -800,11 +738,13 @@ pub enum EnvSelector {
     Explicit(Vec<EnvironmentSpec>),
 }
 
-impl IntoEnvironment for EnvSelector {
-    fn into_environment(self) -> Vec<EnvironmentSpec> {
+impl EnvSelector {
+    pub fn into_environment_specs(self) -> Vec<EnvironmentSpec> {
         match self {
-            Self::Implicit(v) => v.into_environment(),
-            Self::Explicit(v) => v,
+            Self::Explicit(environment_specs) => environment_specs,
+            Self::Implicit(vars) => {
+                vec![EnvironmentSpec { extend: true, vars }]
+            }
         }
     }
 }
@@ -3521,7 +3461,7 @@ mod tests {
                         added_environment = { FROB = "frob" }
                     "#}),
                     container_spec! {
-                        environment: environment_spec!(true, "FROB" => "frob"),
+                        environment: [environment_spec!(true, "FROB" => "frob")],
                         parent: image_container_parent!("image1", all),
                     },
                 );
@@ -3538,7 +3478,7 @@ mod tests {
                         "added_environment": { "FROB": "frob" }
                     }"#}),
                     container_spec! {
-                        environment: environment_spec!(true, "FROB" => "frob"),
+                        environment: [environment_spec!(true, "FROB" => "frob")],
                         parent: image_container_parent!("image1", environment),
                     },
                 );
@@ -3722,7 +3662,7 @@ mod tests {
                         environment = { FROB = "frob" }
                     "#}),
                     container_spec! {
-                        environment: environment_spec!(true, "FROB" => "frob"),
+                        environment: [environment_spec!(true, "FROB" => "frob")],
                         parent: image_container_parent!("image1", all, -environment),
                     },
                 );
@@ -3754,7 +3694,7 @@ mod tests {
                         environment = { FROB = "frob" }
                     "#}),
                     container_spec! {
-                        environment: environment_spec!(true, "FROB" => "frob"),
+                        environment: [environment_spec!(true, "FROB" => "frob")],
                         parent: image_container_parent!("image1", layers),
                     },
                 );
@@ -4755,7 +4695,7 @@ mod tests {
                 job_spec! {
                     "/bin/sh",
                     layers: [tar_layer_spec!("1"), tar_layer_spec!("2")],
-                    environment: environment_spec!(true, "FOO" => "foo"),
+                    environment: [environment_spec!(true, "FOO" => "foo")],
                     working_directory: "/root",
                     parent: container_container_parent!("parent", all, -layers, -working_directory),
                 },
