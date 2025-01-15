@@ -44,7 +44,7 @@ pub fn start_task(
         dispatcher_sender,
         inline_limit: config.inline_limit,
         log: log.clone(),
-        log_initial_cache_message_at_info: true,
+        log_initial_cache_message_at_info: false,
         slots: config.slots,
     };
 
