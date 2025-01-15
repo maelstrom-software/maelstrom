@@ -5,7 +5,8 @@ use maelstrom_base::{
 };
 use maelstrom_client::spec::{
     ContainerRefWithImplicitOrExplicitUse, ContainerSpec, ContainerSpecForTomlAndJson, EnvSelector,
-    ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse, LayerSpec,
+    EnvironmentSpec, ImageRef, ImageRefWithImplicitOrExplicitUse, ImageUse, IntoEnvironment as _,
+    LayerSpec,
 };
 use serde::{de, Deserialize, Deserializer};
 use std::{
@@ -63,10 +64,10 @@ macro_rules! augment_directive {
         augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_layers: $added_layers.into_iter().map(Into::into).collect()])
     };
     (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? environment: Some($environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? environment: Some(::maelstrom_client::spec::IntoEnvironment::into_environment($environment))])
     };
     (@expand [added_environment: $added_environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_environment: $added_environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect()])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_environment: ::maelstrom_client::spec::IntoEnvironment::into_environment($added_environment)])
     };
     (@expand [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? working_directory: Some($working_directory.into())])
@@ -159,8 +160,8 @@ pub enum DirectiveContainer {
 pub struct DirectiveContainerAugment {
     pub layers: Option<Vec<LayerSpec>>,
     pub added_layers: Vec<LayerSpec>,
-    pub environment: Option<BTreeMap<String, String>>,
-    pub added_environment: BTreeMap<String, String>,
+    pub environment: Option<Vec<EnvironmentSpec>>,
+    pub added_environment: Vec<EnvironmentSpec>,
     pub working_directory: Option<Utf8PathBuf>,
     pub enable_writable_file_system: Option<bool>,
     pub mounts: Option<Vec<JobMount>>,
@@ -178,8 +179,8 @@ struct DirectiveForTomlAndJson {
     parent: Option<ContainerRefWithImplicitOrExplicitUse>,
     layers: Option<Vec<LayerSpec>>,
     added_layers: Option<Vec<LayerSpec>>,
-    environment: Option<BTreeMap<String, String>>,
-    added_environment: Option<BTreeMap<String, String>>,
+    environment: Option<EnvSelector>,
+    added_environment: Option<EnvSelector>,
     working_directory: Option<Utf8PathBuf>,
     enable_writable_file_system: Option<bool>,
     mounts: Option<Vec<JobMountForTomlAndJson>>,
@@ -237,8 +238,10 @@ where
                 container: DirectiveContainer::Augment(DirectiveContainerAugment {
                     layers,
                     added_layers: added_layers.unwrap_or_default(),
-                    environment,
-                    added_environment: added_environment.unwrap_or_default(),
+                    environment: environment.map(EnvSelector::into_environment),
+                    added_environment: added_environment
+                        .map(EnvSelector::into_environment)
+                        .unwrap_or_default(),
                     working_directory,
                     enable_writable_file_system,
                     mounts: mounts.map(|mounts| mounts.into_iter().map(Into::into).collect()),
@@ -277,8 +280,8 @@ where
                         parent,
                         layers,
                         added_layers,
-                        environment: environment.map(EnvSelector::Implicit),
-                        added_environment: added_environment.map(EnvSelector::Implicit),
+                        environment,
+                        added_environment,
                         working_directory,
                         enable_writable_file_system,
                         mounts,
@@ -305,8 +308,8 @@ mod tests {
     use indoc::indoc;
     use maelstrom_base::{enum_set, proc_mount, tmp_mount, JobDeviceForTomlAndJson};
     use maelstrom_client::{
-        container_container_parent, container_spec, image_container_parent, spec::SymlinkSpec,
-        tar_layer_spec,
+        container_container_parent, container_spec, environment_spec, image_container_parent,
+        spec::SymlinkSpec, tar_layer_spec,
     };
     use maelstrom_test::{string, utf8_path_buf};
     use maplit::btreemap;
@@ -369,7 +372,7 @@ mod tests {
                 layers = [{ tar = "foo.tar" }]
                 added_layers = [{ tar = "bar.tar" }]
                 environment = { foo = "bar" }
-                added_environment = { frob = "baz" }
+                added_environment = [{ vars = { frob = "baz" }, extend = false }]
                 working_directory = "/root"
                 enable_writable_file_system = false
                 mounts = [{ type = "tmp", mount_point = "/tmp" }]
@@ -382,7 +385,7 @@ mod tests {
                 layers: [tar_layer_spec!("foo.tar")],
                 added_layers: [tar_layer_spec!("bar.tar")],
                 environment: [("foo", "bar")],
-                added_environment: [("frob", "baz")],
+                added_environment: environment_spec!(false, "frob" => "baz"),
                 working_directory: "/root",
                 enable_writable_file_system: false,
                 mounts: [tmp_mount!("/tmp")],
@@ -660,10 +663,13 @@ mod tests {
                 augment_directive!(environment: [("foo", "bar"), ("frob", "baz")]),
                 Directive::<String> {
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
-                        environment: Some(btreemap! {
-                            "foo".into() => "bar".into(),
-                            "frob".into() => "baz".into(),
-                        }),
+                        environment: Some(
+                            btreemap! {
+                                "foo" => "bar",
+                                "frob" => "baz",
+                            }
+                            .into_environment()
+                        ),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -678,9 +684,10 @@ mod tests {
                 Directive::<String> {
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         added_environment: btreemap! {
-                            "foo".into() => "bar".into(),
-                            "frob".into() => "baz".into(),
-                        },
+                            "foo" => "bar",
+                            "frob" => "baz",
+                        }
+                        .into_environment(),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -826,14 +833,18 @@ mod tests {
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         layers: Some(vec![tar_layer_spec!("foo.tar")]),
                         added_layers: vec![tar_layer_spec!("foo.tar")],
-                        environment: Some(btreemap! {
-                            "foo".into() => "bar".into(),
-                            "frob".into() => "baz".into(),
-                        }),
+                        environment: Some(
+                            btreemap! {
+                                "foo" => "bar",
+                                "frob" => "baz",
+                            }
+                            .into_environment()
+                        ),
                         added_environment: btreemap! {
-                            "foo".into() => "bar".into(),
-                            "frob".into() => "baz".into(),
-                        },
+                            "foo" => "bar",
+                            "frob" => "baz",
+                        }
+                        .into_environment(),
                         working_directory: Some("/foo".into()),
                         network: Some(JobNetwork::Loopback),
                         ..Default::default()
