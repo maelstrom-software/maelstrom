@@ -900,8 +900,8 @@ mod tests {
             layers: [tar_layer_spec!("foo.tar"), tar_layer_spec!("bar.tar")],
             enable_writable_file_system: true,
             environment: [
-                environment_spec!{false, "FOO" => "foo", "BAR" => "bar"},
-                environment_spec!{true, "FOO" => "frob", "BAZ" => "baz"},
+                environment_spec!(extend: false, "FOO" => "foo", "BAR" => "bar"),
+                environment_spec!("FOO" => "frob", "BAZ" => "baz"),
             ],
             working_directory: "/root",
             mounts: [
@@ -1004,8 +1004,8 @@ mod tests {
             parent: image_container_parent!("image", environment),
             layers: [tar_layer_spec!("foo.tar")],
             environment: [
-                environment_spec!{false, "OLD_FOO" => "old_$prev{FOO}", "BAZ" => "$prev{BAR}"},
-                environment_spec!{true, "FOO" => "food" },
+                environment_spec!(extend: false, "OLD_FOO" => "old_$prev{FOO}", "BAZ" => "$prev{BAR}"),
+                environment_spec!(extend: true, "FOO" => "food"),
             ],
         }) => {
             JobPrepared(2, Ok(job_spec! {
@@ -1023,7 +1023,7 @@ mod tests {
             "one",
             parent: image_container_parent!("image", environment),
             layers: [tar_layer_spec!("foo.tar")],
-            environment: [environment_spec!{true, "BAZ" => "baz" }],
+            environment: [environment_spec!("BAZ" => "baz")],
         }) => {
             GetImage(string!("image")),
             BuildLayer(tar_layer_spec!("foo.tar")),
@@ -1032,7 +1032,7 @@ mod tests {
         PrepareJob(2, client_job_spec! {
             "two",
             layers: [tar_layer_spec!("foo.tar")],
-            environment: [environment_spec!{true, "BAZ" => "baz" }],
+            environment: [environment_spec!("BAZ" => "baz")],
         }) => {};
 
         GotImage(string!("image"), Ok(converted_image! {
@@ -1061,7 +1061,7 @@ mod tests {
         PrepareJob(1, client_job_spec! {
             "one",
             layers: [tar_layer_spec!("foo.tar")],
-            environment: [environment_spec!{true, "OLD_FOO" => "old_$prev{FOO}"}],
+            environment: [environment_spec!("OLD_FOO" => "old_$prev{FOO}")],
         }) => {
             BuildLayer(tar_layer_spec!("foo.tar")),
         };
@@ -1072,7 +1072,7 @@ mod tests {
         PrepareJob(2, client_job_spec! {
             "two",
             layers: [tar_layer_spec!("foo.tar")],
-            environment: [environment_spec!{true, "FOO" => "$env{FOO}"}],
+            environment: [environment_spec!("FOO" => "$env{FOO}")],
         }) => {
             JobPrepared(2, Err(string!(r#"unknown variable "FOO""#))),
         };

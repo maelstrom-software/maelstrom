@@ -383,8 +383,8 @@ mod tests {
             augment_directive! {
                 layers: [tar_layer_spec!("foo.tar")],
                 added_layers: [tar_layer_spec!("bar.tar")],
-                environment: [environment_spec!(true, "foo" => "bar")],
-                added_environment: [environment_spec!(false, "frob" => "baz")],
+                environment: [environment_spec!("foo" => "bar")],
+                added_environment: [environment_spec!(extend: false, "frob" => "baz")],
                 working_directory: "/root",
                 enable_writable_file_system: false,
                 mounts: [tmp_mount!("/tmp")],
@@ -659,11 +659,11 @@ mod tests {
         #[test]
         fn environment() {
             assert_eq!(
-                augment_directive!(environment: [environment_spec!(false, "foo" => "bar", "frob" => "baz")]),
+                augment_directive!(environment: [environment_spec!(extend: false, "foo" => "bar", "frob" => "baz")]),
                 Directive::<String> {
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         environment: Some(vec![
-                            environment_spec!(false, "foo" => "bar", "frob" => "baz")
+                            environment_spec!(extend: false, "foo" => "bar", "frob" => "baz")
                         ]),
                         ..Default::default()
                     }),
@@ -675,12 +675,10 @@ mod tests {
         #[test]
         fn added_environment() {
             assert_eq!(
-                augment_directive!(added_environment: [environment_spec!(true, "foo" => "bar", "frob" => "baz")]),
+                augment_directive!(added_environment: [environment_spec!("foo" => "bar", "frob" => "baz")]),
                 Directive::<String> {
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
-                        added_environment: vec![
-                            environment_spec!(true, "foo" => "bar", "frob" => "baz")
-                        ],
+                        added_environment: vec![environment_spec!("foo" => "bar", "frob" => "baz")],
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -816,8 +814,8 @@ mod tests {
                     ignore: false,
                     layers: [tar_layer_spec!("foo.tar")],
                     added_layers: [tar_layer_spec!("foo.tar")],
-                    environment: [environment_spec!(true, "foo" => "bar", "frob" => "baz")],
-                    added_environment: [environment_spec!(true, "foo" => "bar", "frob" => "baz")],
+                    environment: [environment_spec!("foo" => "bar", "frob" => "baz")],
+                    added_environment: [environment_spec!("foo" => "bar", "frob" => "baz")],
                     working_directory: "/foo",
                     network: JobNetwork::Loopback,
                 },
@@ -826,12 +824,8 @@ mod tests {
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         layers: Some(vec![tar_layer_spec!("foo.tar")]),
                         added_layers: vec![tar_layer_spec!("foo.tar")],
-                        environment: Some(vec![
-                            environment_spec!(true, "foo" => "bar", "frob" => "baz")
-                        ]),
-                        added_environment: vec![
-                            environment_spec!(true, "foo" => "bar", "frob" => "baz")
-                        ],
+                        environment: Some(vec![environment_spec!("foo" => "bar", "frob" => "baz")]),
+                        added_environment: vec![environment_spec!("foo" => "bar", "frob" => "baz")],
                         working_directory: Some("/foo".into()),
                         network: Some(JobNetwork::Loopback),
                         ..Default::default()

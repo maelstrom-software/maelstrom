@@ -830,27 +830,27 @@ mod tests {
                 "p1",
                 container_spec! {
                     parent: image_container_parent!("image", all),
-                    environment: [environment_spec!{true, "FOO" => "foo1"}],
+                    environment: [environment_spec!("FOO" => "foo1")],
                 },
             ),
             (
                 "p2",
                 container_spec! {
                     parent: container_container_parent!("p1", all),
-                    environment: [environment_spec!{true, "FOO" => "foo2"}],
+                    environment: [environment_spec!("FOO" => "foo2")],
                 },
             ),
             (
                 "p3",
                 container_spec! {
                     parent: container_container_parent!("p2", layers),
-                    environment: [environment_spec!{true, "FOO" => "foo3"}],
+                    environment: [environment_spec!("FOO" => "foo3")],
                 },
             ),
             (
                 "p4",
                 container_spec! {
-                    environment: [environment_spec!{true, "FOO" => "foo4"}],
+                    environment: [environment_spec!("FOO" => "foo4")],
                 },
             ),
         ]);
@@ -858,27 +858,27 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    environment: [environment_spec!("FOO" => "foo")],
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                environment: [environment_spec!{true, "FOO" => "foo"}],
+                environment: [environment_spec!("FOO" => "foo")],
             }),
         );
         assert_eq!(
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    environment: [environment_spec!("FOO" => "foo")],
                     parent: image_container_parent!("image", environment),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                environment: [environment_spec!{true, "FOO" => "foo"}],
+                environment: [environment_spec!("FOO" => "foo")],
                 image: image_ref!("image", environment),
             }),
         );
@@ -886,14 +886,14 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    environment: [environment_spec!("FOO" => "foo")],
                     parent: image_container_parent!("image", layers),
                 },
                 &|c| containers.get(c)
             ),
             Ok(collapsed_job_spec! {
                 "prog",
-                environment: [environment_spec!{true, "FOO" => "foo"}],
+                environment: [environment_spec!("FOO" => "foo")],
                 image: image_ref!("image", layers),
             }),
         );
@@ -901,7 +901,7 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    environment: [environment_spec!("FOO" => "foo")],
                     parent: container_container_parent!("p1", environment),
                 },
                 &|c| containers.get(c)
@@ -909,8 +909,8 @@ mod tests {
             Ok(collapsed_job_spec! {
                 "prog",
                 environment: [
-                    environment_spec!{true, "FOO" => "foo1"},
-                    environment_spec!{true, "FOO" => "foo"},
+                    environment_spec!("FOO" => "foo1"),
+                    environment_spec!("FOO" => "foo"),
                 ],
                 image: image_ref!("image", environment),
             }),
@@ -919,7 +919,7 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    environment: [environment_spec!("FOO" => "foo")],
                     parent: container_container_parent!("p2", environment),
                 },
                 &|c| containers.get(c)
@@ -927,9 +927,9 @@ mod tests {
             Ok(collapsed_job_spec! {
                 "prog",
                 environment: [
-                    environment_spec!{true, "FOO" => "foo1"},
-                    environment_spec!{true, "FOO" => "foo2"},
-                    environment_spec!{true, "FOO" => "foo"},
+                    environment_spec!("FOO" => "foo1"),
+                    environment_spec!("FOO" => "foo2"),
+                    environment_spec!("FOO" => "foo"),
                 ],
                 image: image_ref!("image", environment),
             }),
@@ -938,7 +938,7 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    environment: [environment_spec!("FOO" => "foo")],
                     parent: container_container_parent!("p3", environment),
                 },
                 &|c| containers.get(c)
@@ -946,8 +946,8 @@ mod tests {
             Ok(collapsed_job_spec! {
                 "prog",
                 environment: [
-                    environment_spec!{true, "FOO" => "foo3"},
-                    environment_spec!{true, "FOO" => "foo"},
+                    environment_spec!("FOO" => "foo3"),
+                    environment_spec!("FOO" => "foo"),
                 ],
             }),
         );
@@ -955,7 +955,7 @@ mod tests {
             CollapsedJobSpec::new(
                 job_spec! {
                     "prog",
-                    environment: [environment_spec!{true, "FOO" => "foo"}],
+                    environment: [environment_spec!("FOO" => "foo")],
                     parent: container_container_parent!("p4", environment),
                 },
                 &|c| containers.get(c)
@@ -963,8 +963,8 @@ mod tests {
             Ok(collapsed_job_spec! {
                 "prog",
                 environment: [
-                    environment_spec!{true, "FOO" => "foo4"},
-                    environment_spec!{true, "FOO" => "foo"},
+                    environment_spec!("FOO" => "foo4"),
+                    environment_spec!("FOO" => "foo"),
                 ],
             }),
         );

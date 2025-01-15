@@ -105,7 +105,6 @@ impl ClientFixture {
             arguments: ["--exact", "single_test", "--nocapture"],
             environment: [
                 environment_spec! {
-                    true,
                     "INSIDE_JOB" => "yes".to_string(),
                     "TEST_LINE" => self.test_line.to_string(),
                 },
@@ -143,7 +142,6 @@ impl ClientFixture {
             arguments: ["--exact", "single_test", "--nocapture"],
             environment: [
                 environment_spec! {
-                    true,
                     "INSIDE_JOB" => "yes".to_string(),
                     "TEST_LINE" => self.test_line.to_string(),
                 }

@@ -323,18 +323,18 @@ mod tests {
     fn environment() {
         fold_test(
             metadata_internal!(),
-            augment_directive!(environment: [environment_spec!(true, "foo" => "bar")]),
-            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
+            augment_directive!(environment: [environment_spec!("foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!("foo" => "bar")]),
         );
         fold_test(
-            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!("foo" => "bar")]),
             augment_directive!(),
-            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!("foo" => "bar")]),
         );
         fold_test(
-            metadata_internal!(environment: [environment_spec!(true, "frob" => "baz")]),
-            augment_directive!(environment: [environment_spec!(true, "foo" => "bar")]),
-            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!("frob" => "baz")]),
+            augment_directive!(environment: [environment_spec!("foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!("foo" => "bar")]),
         );
     }
 
@@ -342,42 +342,42 @@ mod tests {
     fn added_environment() {
         fold_test(
             metadata_internal!(),
-            augment_directive!(added_environment: [environment_spec!(true, "foo" => "bar")]),
-            metadata_internal!(environment: [environment_spec!(true, "foo" => "bar")]),
+            augment_directive!(added_environment: [environment_spec!("foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!("foo" => "bar")]),
         );
         fold_test(
-            metadata_internal!(environment: [environment_spec!(true, "frob" => "baz")]),
-            augment_directive!(added_environment: [environment_spec!(true, "foo" => "bar")]),
+            metadata_internal!(environment: [environment_spec!("frob" => "baz")]),
+            augment_directive!(added_environment: [environment_spec!("foo" => "bar")]),
             metadata_internal! {
                 environment: [
-                    environment_spec!(true, "frob" => "baz"),
-                    environment_spec!(true, "foo" => "bar"),
+                    environment_spec!("frob" => "baz"),
+                    environment_spec!("foo" => "bar"),
                 ],
             },
         );
         fold_test(
             metadata_internal!(),
             augment_directive! {
-                environment: [environment_spec!(true, "qux" => "quxx")],
-                added_environment: [environment_spec!(true, "foo" => "bar")],
+                environment: [environment_spec!("qux" => "quxx")],
+                added_environment: [environment_spec!("foo" => "bar")],
             },
             metadata_internal! {
                 environment: [
-                    environment_spec!(true, "qux" => "quxx"),
-                    environment_spec!(true, "foo" => "bar"),
+                    environment_spec!("qux" => "quxx"),
+                    environment_spec!("foo" => "bar"),
                 ],
             },
         );
         fold_test(
-            metadata_internal!(environment: [environment_spec!(true, "frob" => "baz")]),
+            metadata_internal!(environment: [environment_spec!("frob" => "baz")]),
             augment_directive! {
-                environment: [environment_spec!(true, "qux" => "quxx")],
-                added_environment: [environment_spec!(true, "foo" => "bar")],
+                environment: [environment_spec!("qux" => "quxx")],
+                added_environment: [environment_spec!("foo" => "bar")],
             },
             metadata_internal! {
                 environment: [
-                    environment_spec!(true, "qux" => "quxx"),
-                    environment_spec!(true, "foo" => "bar"),
+                    environment_spec!("qux" => "quxx"),
+                    environment_spec!("foo" => "bar"),
                 ],
             },
         );

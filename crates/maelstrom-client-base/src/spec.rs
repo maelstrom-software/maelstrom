@@ -306,12 +306,21 @@ pub struct EnvironmentSpec {
 
 #[macro_export]
 macro_rules! environment_spec {
-    ($extend:expr $(, $($($key:expr => $value:expr),+ $(,)?)?)?) => {
+    (@expand [] -> [$extend:expr] $vars:expr) => {
         $crate::spec::EnvironmentSpec {
-            extend: $extend.into(),
-            vars: ::std::collections::BTreeMap::from([$($($(($key.into(), $value.into())),+)?)?]),
+            extend: $extend,
+            vars: ::std::collections::BTreeMap::from($vars),
         }
-    }
+    };
+    (@expand [extend: $extend:expr $(, $($rest:tt)*)?] -> [$old_extend:expr] [$($vars:tt)*]) => {
+        $crate::environment_spec!(@expand [$($($rest)*)?] -> [$extend.into()] [$($vars)*])
+    };
+    (@expand [$key:expr => $value:expr $(, $($rest:tt)*)?] -> [$extend:expr] [$($($vars:tt)+)?]) => {
+        $crate::environment_spec!(@expand [$($($rest)*)?] -> [$extend] [$($($vars)+ ,)? ($key.into(), $value.into())])
+    };
+    ($($args:tt)*) => {
+        $crate::environment_spec!(@expand [$($args)*] -> [true] [])
+    };
 }
 
 pub fn environment_eval(
@@ -2558,6 +2567,179 @@ mod tests {
         );
     }
 
+    mod environment_spec {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            assert_eq!(
+                environment_spec!(),
+                EnvironmentSpec {
+                    vars: Default::default(),
+                    extend: true,
+                },
+            );
+        }
+
+        #[test]
+        fn only_extend() {
+            assert_eq!(
+                environment_spec!(extend: true),
+                EnvironmentSpec {
+                    vars: Default::default(),
+                    extend: true,
+                },
+            );
+            assert_eq!(
+                environment_spec!(extend: false),
+                EnvironmentSpec {
+                    vars: Default::default(),
+                    extend: false,
+                },
+            );
+            assert_eq!(
+                environment_spec!(extend: true,),
+                EnvironmentSpec {
+                    vars: Default::default(),
+                    extend: true,
+                },
+            );
+            assert_eq!(
+                environment_spec!(extend: false,),
+                EnvironmentSpec {
+                    vars: Default::default(),
+                    extend: false,
+                },
+            );
+        }
+
+        #[test]
+        fn one_pair() {
+            assert_eq!(
+                environment_spec!("foo" => "bar"),
+                EnvironmentSpec {
+                    vars: btreemap! { "foo".into() => "bar".into() },
+                    extend: true,
+                },
+            );
+            assert_eq!(
+                environment_spec!("foo" => "bar",),
+                EnvironmentSpec {
+                    vars: btreemap! { "foo".into() => "bar".into() },
+                    extend: true,
+                },
+            );
+        }
+
+        #[test]
+        fn one_pair_with_extend_before() {
+            assert_eq!(
+                environment_spec!(extend: false, "foo" => "bar"),
+                EnvironmentSpec {
+                    vars: btreemap! { "foo".into() => "bar".into() },
+                    extend: false,
+                },
+            );
+            assert_eq!(
+                environment_spec!(extend: false, "foo" => "bar",),
+                EnvironmentSpec {
+                    vars: btreemap! { "foo".into() => "bar".into() },
+                    extend: false,
+                },
+            );
+        }
+
+        #[test]
+        fn one_pair_with_extend_after() {
+            assert_eq!(
+                environment_spec!("foo" => "bar", extend: false),
+                EnvironmentSpec {
+                    vars: btreemap! { "foo".into() => "bar".into() },
+                    extend: false,
+                },
+            );
+            assert_eq!(
+                environment_spec!("foo" => "bar", extend: false,),
+                EnvironmentSpec {
+                    vars: btreemap! { "foo".into() => "bar".into() },
+                    extend: false,
+                },
+            );
+        }
+
+        #[test]
+        fn two_pairs_with_extend_before() {
+            assert_eq!(
+                environment_spec!(extend: false, "foo" => "bar", "frob" => "baz"),
+                EnvironmentSpec {
+                    vars: btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    },
+                    extend: false,
+                },
+            );
+            assert_eq!(
+                environment_spec!(extend: false, "foo" => "bar", "frob" => "baz",),
+                EnvironmentSpec {
+                    vars: btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    },
+                    extend: false,
+                },
+            );
+        }
+
+        #[test]
+        fn two_pairs_with_extend_in_between() {
+            assert_eq!(
+                environment_spec!("foo" => "bar", extend: false, "frob" => "baz"),
+                EnvironmentSpec {
+                    vars: btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    },
+                    extend: false,
+                },
+            );
+            assert_eq!(
+                environment_spec!("foo" => "bar", extend: false, "frob" => "baz",),
+                EnvironmentSpec {
+                    vars: btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    },
+                    extend: false,
+                },
+            );
+        }
+
+        #[test]
+        fn two_pairs_with_extend_after() {
+            assert_eq!(
+                environment_spec!("foo" => "bar", "frob" => "baz", extend: false),
+                EnvironmentSpec {
+                    vars: btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    },
+                    extend: false,
+                },
+            );
+            assert_eq!(
+                environment_spec!("foo" => "bar", "frob" => "baz", extend: false,),
+                EnvironmentSpec {
+                    vars: btreemap! {
+                        "foo".into() => "bar".into(),
+                        "frob".into() => "baz".into(),
+                    },
+                    extend: false,
+                },
+            );
+        }
+    }
+
     #[track_caller]
     fn parse_toml<T: for<'de> Deserialize<'de>>(file: &str) -> T {
         toml::from_str(file).unwrap()
@@ -3461,7 +3643,7 @@ mod tests {
                         added_environment = { FROB = "frob" }
                     "#}),
                     container_spec! {
-                        environment: [environment_spec!(true, "FROB" => "frob")],
+                        environment: [environment_spec!("FROB" => "frob")],
                         parent: image_container_parent!("image1", all),
                     },
                 );
@@ -3478,7 +3660,7 @@ mod tests {
                         "added_environment": { "FROB": "frob" }
                     }"#}),
                     container_spec! {
-                        environment: [environment_spec!(true, "FROB" => "frob")],
+                        environment: [environment_spec!("FROB" => "frob")],
                         parent: image_container_parent!("image1", environment),
                     },
                 );
@@ -3517,8 +3699,8 @@ mod tests {
                     }"#}),
                     container_spec! {
                         environment: [
-                            environment_spec!(false, "FROB" => "frob"),
-                            environment_spec!(true, "BAZ" => "baz"),
+                            environment_spec!(extend: false, "FROB" => "frob"),
+                            environment_spec!(extend: true, "BAZ" => "baz"),
                         ],
                         parent: container_container_parent!("parent", all),
                     },
@@ -3540,8 +3722,8 @@ mod tests {
                     "#}),
                     container_spec! {
                         environment: [
-                            environment_spec!(false, "FROB" => "frob"),
-                            environment_spec!(true, "BAZ" => "baz"),
+                            environment_spec!(extend: false, "FROB" => "frob"),
+                            environment_spec!(extend: true, "BAZ" => "baz"),
                         ],
                         parent: container_container_parent!("parent", environment),
                     },
@@ -3662,7 +3844,7 @@ mod tests {
                         environment = { FROB = "frob" }
                     "#}),
                     container_spec! {
-                        environment: [environment_spec!(true, "FROB" => "frob")],
+                        environment: [environment_spec!("FROB" => "frob")],
                         parent: image_container_parent!("image1", all, -environment),
                     },
                 );
@@ -3694,7 +3876,7 @@ mod tests {
                         environment = { FROB = "frob" }
                     "#}),
                     container_spec! {
-                        environment: [environment_spec!(true, "FROB" => "frob")],
+                        environment: [environment_spec!("FROB" => "frob")],
                         parent: image_container_parent!("image1", layers),
                     },
                 );
@@ -3718,8 +3900,8 @@ mod tests {
                     }"#}),
                     container_spec! {
                         environment: [
-                            environment_spec!(false, "FROB" => "frob"),
-                            environment_spec!(true, "BAZ" => "baz"),
+                            environment_spec!(extend: false, "FROB" => "frob"),
+                            environment_spec!(extend: true, "BAZ" => "baz"),
                         ],
                         parent: container_container_parent!("parent", all, -environment),
                     },
@@ -3770,8 +3952,8 @@ mod tests {
                     }"#}),
                     container_spec! {
                         environment: [
-                            environment_spec!(false, "FROB" => "frob"),
-                            environment_spec!(true, "BAZ" => "baz"),
+                            environment_spec!(extend: false, "FROB" => "frob"),
+                            environment_spec!(extend: true, "BAZ" => "baz"),
                         ],
                         parent: container_container_parent!("parent", layers),
                     },
@@ -4695,7 +4877,7 @@ mod tests {
                 job_spec! {
                     "/bin/sh",
                     layers: [tar_layer_spec!("1"), tar_layer_spec!("2")],
-                    environment: [environment_spec!(true, "FOO" => "foo")],
+                    environment: [environment_spec!("FOO" => "foo")],
                     working_directory: "/root",
                     parent: container_container_parent!("parent", all, -layers, -working_directory),
                 },
