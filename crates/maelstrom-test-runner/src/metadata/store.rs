@@ -54,10 +54,8 @@ where
                             layer.replace_template_vars(vars)?;
                         }
                     }
-                    if let Some(added_layers) = added_layers {
-                        for added_layer in added_layers {
-                            added_layer.replace_template_vars(vars)?;
-                        }
+                    for added_layer in added_layers {
+                        added_layer.replace_template_vars(vars)?;
                     }
                 }
             }

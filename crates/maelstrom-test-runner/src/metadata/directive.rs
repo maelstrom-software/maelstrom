@@ -60,13 +60,13 @@ macro_rules! augment_directive {
         augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? layers: Some($layers.into_iter().map(Into::into).collect())])
     };
     (@expand [added_layers: $added_layers:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_layers: Some($added_layers.into_iter().map(Into::into).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_layers: $added_layers.into_iter().map(Into::into).collect()])
     };
     (@expand [environment: $environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? environment: Some($environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
     };
     (@expand [added_environment: $added_environment:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_environment: Some($added_environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_environment: $added_environment.into_iter().map(|(k, v)| (k.into(), v.into())).collect()])
     };
     (@expand [working_directory: $working_directory:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? working_directory: Some($working_directory.into())])
@@ -78,7 +78,7 @@ macro_rules! augment_directive {
         augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? mounts: Some($mounts.into_iter().map(Into::into).collect())])
     };
     (@expand [added_mounts: $added_mounts:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
-        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_mounts: Some($added_mounts.into_iter().map(Into::into).collect())])
+        augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? added_mounts: $added_mounts.into_iter().map(Into::into).collect()])
     };
     (@expand [network: $network:expr $(,$($field_in:tt)*)?] -> [$($field_out:tt)*] [$($($container_field:tt)+)?]) => {
         augment_directive!(@expand [$($($field_in)*)?] -> [$($field_out)*] [$($($container_field)+,)? network: Some($network.into())])
@@ -158,13 +158,13 @@ pub enum DirectiveContainer {
 #[derive(Debug, Default, PartialEq)]
 pub struct DirectiveContainerAugment {
     pub layers: Option<Vec<LayerSpec>>,
-    pub added_layers: Option<Vec<LayerSpec>>,
+    pub added_layers: Vec<LayerSpec>,
     pub environment: Option<BTreeMap<String, String>>,
-    pub added_environment: Option<BTreeMap<String, String>>,
+    pub added_environment: BTreeMap<String, String>,
     pub working_directory: Option<Utf8PathBuf>,
     pub enable_writable_file_system: Option<bool>,
     pub mounts: Option<Vec<JobMount>>,
-    pub added_mounts: Option<Vec<JobMount>>,
+    pub added_mounts: Vec<JobMount>,
     pub network: Option<JobNetwork>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
@@ -236,14 +236,13 @@ where
                 filter,
                 container: DirectiveContainer::Augment(DirectiveContainerAugment {
                     layers,
-                    added_layers,
+                    added_layers: added_layers.unwrap_or_default(),
                     environment,
-                    added_environment,
+                    added_environment: added_environment.unwrap_or_default(),
                     working_directory,
                     enable_writable_file_system,
                     mounts: mounts.map(|mounts| mounts.into_iter().map(Into::into).collect()),
-                    added_mounts: added_mounts
-                        .map(|mounts| mounts.into_iter().map(Into::into).collect()),
+                    added_mounts: added_mounts.into_iter().flatten().map(Into::into).collect(),
                     network,
                     user,
                     group,
@@ -647,7 +646,7 @@ mod tests {
                 augment_directive!(added_layers: [tar_layer_spec!("foo.tar")]),
                 Directive::<String> {
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
-                        added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                        added_layers: vec![tar_layer_spec!("foo.tar")],
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -678,10 +677,10 @@ mod tests {
                 augment_directive!(added_environment: [("foo", "bar"), ("frob", "baz")]),
                 Directive::<String> {
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
-                        added_environment: Some(btreemap! {
+                        added_environment: btreemap! {
                             "foo".into() => "bar".into(),
                             "frob".into() => "baz".into(),
-                        }),
+                        },
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -747,7 +746,7 @@ mod tests {
                 augment_directive!(added_mounts: [proc_mount!("/proc"), tmp_mount!("/tmp")]),
                 Directive::<String> {
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
-                        added_mounts: Some(vec![proc_mount!("/proc"), tmp_mount!("/tmp")]),
+                        added_mounts: vec![proc_mount!("/proc"), tmp_mount!("/tmp")],
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -826,15 +825,15 @@ mod tests {
                     filter: Some(SimpleFilter::Package("package1".into())),
                     container: DirectiveContainer::Augment(DirectiveContainerAugment {
                         layers: Some(vec![tar_layer_spec!("foo.tar")]),
-                        added_layers: Some(vec![tar_layer_spec!("foo.tar")]),
+                        added_layers: vec![tar_layer_spec!("foo.tar")],
                         environment: Some(btreemap! {
                             "foo".into() => "bar".into(),
                             "frob".into() => "baz".into(),
                         }),
-                        added_environment: Some(btreemap! {
+                        added_environment: btreemap! {
                             "foo".into() => "bar".into(),
                             "frob".into() => "baz".into(),
-                        }),
+                        },
                         working_directory: Some("/foo".into()),
                         network: Some(JobNetwork::Loopback),
                         ..Default::default()

@@ -156,16 +156,12 @@ impl MetadataInternal {
                 if let Some(new_layers) = new_layers {
                     layers = new_layers.clone();
                 }
-                layers.extend(added_layers.iter().flatten().cloned());
+                layers.extend(added_layers.clone());
 
                 if let Some(new_environment) = new_environment {
                     environment = new_environment.clone().into_environment();
                 }
-                environment.extend(
-                    added_environment
-                        .clone()
-                        .map_or(Default::default(), IntoEnvironment::into_environment),
-                );
+                environment.extend(added_environment.clone().into_environment());
 
                 if new_working_directory.is_some() {
                     working_directory = new_working_directory.clone();
@@ -178,7 +174,7 @@ impl MetadataInternal {
                 if let Some(new_mounts) = new_mounts {
                     mounts = new_mounts.clone();
                 }
-                mounts.extend(added_mounts.iter().flatten().cloned());
+                mounts.extend(added_mounts.clone());
 
                 if new_network.is_some() {
                     network = *new_network;
