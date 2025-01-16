@@ -58,7 +58,7 @@ pub trait SchedulerDeps {
         sender: &mut Self::WorkerArtifactFetcherSender,
         message: Option<(PathBuf, u64)>,
     );
-    fn read_manifest(
+    fn send_message_to_manifest_reader(
         &mut self,
         sender: &mut Self::ManifestReaderSender,
         request: ManifestReadRequest<Self::ArtifactStream>,
@@ -457,7 +457,7 @@ where
 
         if is_manifest.is_manifest() {
             let manifest_stream = cache.read_artifact(digest);
-            deps.read_manifest(
+            deps.send_message_to_manifest_reader(
                 manifest_reader_sender,
                 ManifestReadRequest {
                     manifest_stream,
@@ -1004,7 +1004,7 @@ mod tests {
                 .push(ToWorkerArtifactFetcher(sender.0, message));
         }
 
-        fn read_manifest(
+        fn send_message_to_manifest_reader(
             &mut self,
             _sender: &mut TestManifestReaderSender,
             req: ManifestReadRequest<TestArtifactStream>,

@@ -59,7 +59,7 @@ impl<ArtifactStreamT> SchedulerDeps for PassThroughDeps<ArtifactStreamT> {
         sender.send(message).ok();
     }
 
-    fn read_manifest(
+    fn send_message_to_manifest_reader(
         &mut self,
         sender: &mut Self::ManifestReaderSender,
         req: ManifestReadRequest<Self::ArtifactStream>,
