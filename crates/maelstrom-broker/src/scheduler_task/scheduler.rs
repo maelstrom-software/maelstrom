@@ -191,11 +191,11 @@ where
             }
             Message::DecrementRefcount(digest) => self.receive_decrement_refcount(digest),
             Message::StatisticsHeartbeat => self.receive_statistics_heartbeat(),
-            Message::GotManifestEntry(entry_digest, job_id) => {
-                self.receive_manifest_entry(deps, entry_digest, job_id)
+            Message::GotManifestEntry(entry_digest, jid) => {
+                self.receive_manifest_entry(deps, entry_digest, jid)
             }
-            Message::FinishedReadingManifest(manifest_digest, job_id, result) => {
-                self.receive_finished_reading_manifest(deps, manifest_digest, job_id, result)
+            Message::FinishedReadingManifest(manifest_digest, jid, result) => {
+                self.receive_finished_reading_manifest(deps, manifest_digest, jid, result)
             }
         }
     }
@@ -751,14 +751,14 @@ where
         &mut self,
         deps: &mut DepsT,
         manifest_digest: Sha256Digest,
-        job_id: JobId,
+        jid: JobId,
         result: anyhow::Result<()>,
     ) {
         // It would be better to not crash...
         result.expect("failed reading a manifest");
 
-        let client = self.clients.0.get_mut(&job_id.cid).unwrap();
-        let job = client.jobs.get_mut(&job_id.cjid).unwrap();
+        let client = self.clients.0.get_mut(&jid.cid).unwrap();
+        let job = client.jobs.get_mut(&jid.cjid).unwrap();
         job.manifests_being_read
             .remove(&manifest_digest)
             .assert_is_true();
@@ -766,11 +766,11 @@ where
         let mut just_enqueued = HashSet::default();
         if job.have_all_artifacts() {
             self.queued_jobs.push(QueuedJob::new(
-                job_id,
+                jid,
                 job.spec.priority,
                 job.spec.estimated_duration,
             ));
-            just_enqueued.insert(job_id);
+            just_enqueued.insert(jid);
         }
         self.possibly_start_jobs(deps, just_enqueued);
     }
