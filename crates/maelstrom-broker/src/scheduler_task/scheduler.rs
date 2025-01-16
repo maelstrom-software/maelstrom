@@ -168,7 +168,7 @@ where
                 self.receive_client_job_request(deps, cid, cjid, spec)
             }
             Message::FromClient(cid, ClientToBroker::ArtifactTransferred(digest, location)) => {
-                self.receive_artifact_transfered(deps, cid, digest, location)
+                self.receive_artifact_transferred(deps, cid, digest, location)
             }
             Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
@@ -683,7 +683,7 @@ where
         );
     }
 
-    fn receive_artifact_transfered(
+    fn receive_artifact_transferred(
         &mut self,
         deps: &mut DepsT,
         cid: ClientId,
