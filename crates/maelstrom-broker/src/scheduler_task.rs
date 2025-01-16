@@ -18,7 +18,7 @@ use tokio::task::JoinSet;
 pub struct ManifestReadRequest<ArtifactStreamT> {
     manifest_stream: ArtifactStreamT,
     digest: Sha256Digest,
-    job_id: JobId,
+    jid: JobId,
 }
 
 #[derive(Debug)]
@@ -109,10 +109,10 @@ where
         while let Some(req) = self.receiver.recv().await {
             let sender = self.sender.clone();
             self.tasks.spawn(async move {
-                let result = read_manifest(sender.clone(), req.manifest_stream, req.job_id).await;
+                let result = read_manifest(sender.clone(), req.manifest_stream, req.jid).await;
                 sender
                     .send(Message::FinishedReadingManifest(
-                        req.digest, req.job_id, result,
+                        req.digest, req.jid, result,
                     ))
                     .ok();
             });

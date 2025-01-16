@@ -462,7 +462,7 @@ where
                 ManifestReadRequest {
                     manifest_stream,
                     digest: digest.clone(),
-                    job_id: jid,
+                    jid,
                 },
             );
             job.manifests_being_read
@@ -2052,7 +2052,7 @@ mod tests {
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
                 digest: digest![42],
-                job_id: jid![1, 2],
+                jid: jid![1, 2],
             }),
         };
 
@@ -2110,7 +2110,7 @@ mod tests {
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
                 digest: digest![42],
-                job_id: jid![1, 2],
+                jid: jid![1, 2],
             }),
         };
 
@@ -2160,7 +2160,7 @@ mod tests {
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
                 digest: digest![42],
-                job_id: jid![1, 2],
+                jid: jid![1, 2],
             }),
             ToClient(
                 cid![1],
@@ -2212,7 +2212,7 @@ mod tests {
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
                 digest: digest![42],
-                job_id: jid![1, 2],
+                jid: jid![1, 2],
             }),
             ToClient(
                 cid![1],
@@ -2264,7 +2264,7 @@ mod tests {
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
                 digest: digest![42],
-                job_id: jid![1, 2],
+                jid: jid![1, 2],
             }),
             ToClient(
                 cid![1],
@@ -2308,7 +2308,7 @@ mod tests {
             ReadManifest(ManifestReadRequest {
                 manifest_stream: artifact![42],
                 digest: digest![42],
-                job_id: jid![1, 2],
+                jid: jid![1, 2],
             }),
             ToClient(
                 cid![1],
