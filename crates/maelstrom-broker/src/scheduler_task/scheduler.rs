@@ -434,7 +434,7 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn ensure_artifact_for_job(
+    fn start_artifact_acquisition_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
         deps: &mut DepsT,
@@ -525,7 +525,7 @@ where
 
         for (digest, type_) in layers {
             let is_manifest = IsManifest::from(type_ == ArtifactType::Manifest);
-            Self::ensure_artifact_for_job(
+            Self::start_artifact_acquisition_for_job(
                 &mut self.cache,
                 &mut client.sender,
                 deps,
@@ -792,7 +792,7 @@ where
     fn receive_manifest_entry(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
         let client = self.clients.0.get_mut(&jid.cid).unwrap();
         let job = client.jobs.get_mut(&jid.cjid).unwrap();
-        Self::ensure_artifact_for_job(
+        Self::start_artifact_acquisition_for_job(
             &mut self.cache,
             &mut client.sender,
             deps,
