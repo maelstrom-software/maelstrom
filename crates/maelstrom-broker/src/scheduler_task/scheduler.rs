@@ -23,7 +23,7 @@ use maelstrom_util::{
 };
 use std::{
     cmp::Ordering,
-    collections::{BinaryHeap, HashMap, HashSet},
+    collections::{BinaryHeap, HashMap, HashSet, hash_map::Entry},
     path::PathBuf,
     time::Duration,
 };
@@ -434,26 +434,27 @@ where
     }
 
     fn ensure_artifact_for_job(
-        &mut self,
+        cache: &mut CacheT,
+        client_sender: &mut DepsT::ClientSender,
         deps: &mut DepsT,
         digest: Sha256Digest,
-        jid: JobId,
         is_manifest: IsManifest,
+        jid: JobId,
+        job: &mut Job,
+        manifest_reader_sender: &mut DepsT::ManifestReaderSender,
     ) {
-        let client = self.clients.0.get_mut(&jid.cid).unwrap();
-        let job = client.jobs.get_mut(&jid.cjid).unwrap();
         if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains_key(&digest) {
             return;
         }
-        match self.cache.get_artifact(jid, digest.clone()) {
+        match cache.get_artifact(jid, digest.clone()) {
             GetArtifact::Success => {
                 job.acquired_artifacts
                     .insert(digest.clone())
                     .assert_is_true();
                 if is_manifest.is_manifest() {
-                    let manifest_stream = self.cache.read_artifact(&digest);
+                    let manifest_stream = cache.read_artifact(&digest);
                     deps.read_manifest(
-                        &mut self.manifest_reader_sender,
+                        manifest_reader_sender,
                         ManifestReadRequest {
                             manifest_stream,
                             digest: digest.clone(),
@@ -475,7 +476,7 @@ where
                     .insert(digest.clone(), is_manifest)
                     .assert_is_none();
                 deps.send_message_to_client(
-                    &mut client.sender,
+                    client_sender,
                     BrokerToClient::TransferArtifact(digest),
                 );
             }
@@ -489,20 +490,31 @@ where
         cjid: ClientJobId,
         spec: JobSpec,
     ) {
-        let jid = JobId { cid, cjid };
-        let client = self.clients.0.get_mut(&cid).unwrap();
         let layers = spec.layers.clone();
         let priority = spec.priority;
         let estimated_duration = spec.estimated_duration;
-        client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
+
+        let client = self.clients.0.get_mut(&cid).unwrap();
+        let jid = JobId { cid, cjid };
+        let Entry::Vacant(job_entry) = client.jobs.entry(cjid) else {
+            panic!("entry already exists for {jid:?}");
+        };
+        let job = job_entry.insert(Job::new(spec));
 
         for (digest, type_) in layers {
             let is_manifest = IsManifest::from(type_ == ArtifactType::Manifest);
-            self.ensure_artifact_for_job(deps, digest, jid, is_manifest);
+            Self::ensure_artifact_for_job(
+                &mut self.cache,
+                &mut client.sender,
+                deps,
+                digest,
+                is_manifest,
+                jid,
+                job,
+                &mut self.manifest_reader_sender,
+            );
         }
 
-        let client = self.clients.0.get_mut(&jid.cid).unwrap();
-        let job = client.jobs.get(&jid.cjid).unwrap();
         if job.have_all_artifacts() {
             self.queued_jobs
                 .push(QueuedJob::new(jid, priority, estimated_duration));
@@ -678,7 +690,7 @@ where
             job.acquired_artifacts
                 .insert(digest.clone())
                 .assert_is_true();
-            let is_manifest = job.missing_artifacts.remove(&digest.clone()).unwrap();
+            let is_manifest = job.missing_artifacts.remove(&digest).unwrap();
 
             if is_manifest.is_manifest() {
                 let manifest_stream = self.cache.read_artifact(&digest);
@@ -695,7 +707,6 @@ where
                     .assert_is_true();
             }
 
-            let job = self.clients.job_from_jid(jid);
             if job.have_all_artifacts() {
                 self.queued_jobs.push(QueuedJob::new(
                     jid,
@@ -765,13 +776,19 @@ where
         self.job_statistics.insert(sample);
     }
 
-    fn receive_manifest_entry(
-        &mut self,
-        deps: &mut DepsT,
-        entry_digest: Sha256Digest,
-        job_id: JobId,
-    ) {
-        self.ensure_artifact_for_job(deps, entry_digest, job_id, IsManifest::NotManifest);
+    fn receive_manifest_entry(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
+        let client = self.clients.0.get_mut(&jid.cid).unwrap();
+        let job = client.jobs.get_mut(&jid.cjid).unwrap();
+        Self::ensure_artifact_for_job(
+            &mut self.cache,
+            &mut client.sender,
+            deps,
+            digest,
+            IsManifest::NotManifest,
+            jid,
+            job,
+            &mut self.manifest_reader_sender,
+        );
     }
 
     fn receive_finished_reading_manifest(
