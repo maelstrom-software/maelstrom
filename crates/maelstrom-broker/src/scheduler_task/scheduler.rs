@@ -23,7 +23,7 @@ use maelstrom_util::{
 };
 use std::{
     cmp::Ordering,
-    collections::{BinaryHeap, HashMap, HashSet, hash_map::Entry},
+    collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
     path::PathBuf,
     time::Duration,
 };
@@ -433,6 +433,7 @@ where
         self.possibly_start_jobs(deps, HashSet::default());
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn ensure_artifact_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
@@ -448,23 +449,15 @@ where
         }
         match cache.get_artifact(jid, digest.clone()) {
             GetArtifact::Success => {
-                job.acquired_artifacts
-                    .insert(digest.clone())
-                    .assert_is_true();
-                if is_manifest.is_manifest() {
-                    let manifest_stream = cache.read_artifact(&digest);
-                    deps.read_manifest(
-                        manifest_reader_sender,
-                        ManifestReadRequest {
-                            manifest_stream,
-                            digest: digest.clone(),
-                            job_id: jid,
-                        },
-                    );
-                    job.manifests_being_read
-                        .insert(digest.clone())
-                        .assert_is_true();
-                }
+                Self::complete_artifact_acquisition_for_job(
+                    cache,
+                    deps,
+                    &digest,
+                    is_manifest,
+                    jid,
+                    job,
+                    manifest_reader_sender,
+                );
             }
             GetArtifact::Wait => {
                 job.missing_artifacts
@@ -480,6 +473,35 @@ where
                     BrokerToClient::TransferArtifact(digest),
                 );
             }
+        }
+    }
+
+    fn complete_artifact_acquisition_for_job(
+        cache: &mut CacheT,
+        deps: &mut DepsT,
+        digest: &Sha256Digest,
+        is_manifest: IsManifest,
+        jid: JobId,
+        job: &mut Job,
+        manifest_reader_sender: &mut DepsT::ManifestReaderSender,
+    ) {
+        job.acquired_artifacts
+            .insert(digest.clone())
+            .assert_is_true();
+
+        if is_manifest.is_manifest() {
+            let manifest_stream = cache.read_artifact(digest);
+            deps.read_manifest(
+                manifest_reader_sender,
+                ManifestReadRequest {
+                    manifest_stream,
+                    digest: digest.clone(),
+                    job_id: jid,
+                },
+            );
+            job.manifests_being_read
+                .insert(digest.clone())
+                .assert_is_true();
         }
     }
 
@@ -687,25 +709,16 @@ where
         for jid in jids {
             let client = self.clients.0.get_mut(&jid.cid).unwrap();
             let job = client.jobs.get_mut(&jid.cjid).unwrap();
-            job.acquired_artifacts
-                .insert(digest.clone())
-                .assert_is_true();
             let is_manifest = job.missing_artifacts.remove(&digest).unwrap();
-
-            if is_manifest.is_manifest() {
-                let manifest_stream = self.cache.read_artifact(&digest);
-                deps.read_manifest(
-                    &mut self.manifest_reader_sender,
-                    ManifestReadRequest {
-                        manifest_stream,
-                        digest: digest.clone(),
-                        job_id: jid,
-                    },
-                );
-                job.manifests_being_read
-                    .insert(digest.clone())
-                    .assert_is_true();
-            }
+            Self::complete_artifact_acquisition_for_job(
+                &mut self.cache,
+                deps,
+                &digest,
+                is_manifest,
+                jid,
+                job,
+                &mut self.manifest_reader_sender,
+            );
 
             if job.have_all_artifacts() {
                 self.queued_jobs.push(QueuedJob::new(
