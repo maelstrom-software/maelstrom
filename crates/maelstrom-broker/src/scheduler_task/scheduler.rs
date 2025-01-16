@@ -399,27 +399,27 @@ where
         }
     }
 
-    fn receive_client_connected(&mut self, id: ClientId, sender: DepsT::ClientSender) {
+    fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
         self.clients
             .0
-            .insert(id, Client::new(sender))
+            .insert(cid, Client::new(sender))
             .assert_is_none();
     }
 
-    fn receive_client_disconnected(&mut self, deps: &mut DepsT, id: ClientId) {
-        self.cache.client_disconnected(id);
+    fn receive_client_disconnected(&mut self, deps: &mut DepsT, cid: ClientId) {
+        self.cache.client_disconnected(cid);
 
-        let client = self.clients.0.remove(&id).unwrap();
+        let client = self.clients.0.remove(&cid).unwrap();
         for job in client.jobs.into_values() {
             for artifact in job.acquired_artifacts {
                 self.cache.decrement_refcount(&artifact);
             }
         }
 
-        self.queued_jobs.retain(|qj| qj.jid.cid != id);
+        self.queued_jobs.retain(|qj| qj.jid.cid != cid);
         for worker in self.workers.0.values_mut() {
             worker.pending.retain(|jid| {
-                jid.cid != id || {
+                jid.cid != cid || {
                     deps.send_message_to_worker(
                         &mut worker.sender,
                         BrokerToWorker::CancelJob(*jid),
