@@ -399,40 +399,6 @@ where
         }
     }
 
-    fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
-        self.clients
-            .0
-            .insert(cid, Client::new(sender))
-            .assert_is_none();
-    }
-
-    fn receive_client_disconnected(&mut self, deps: &mut DepsT, cid: ClientId) {
-        self.cache.client_disconnected(cid);
-
-        let client = self.clients.0.remove(&cid).unwrap();
-        for job in client.jobs.into_values() {
-            for artifact in job.acquired_artifacts {
-                self.cache.decrement_refcount(&artifact);
-            }
-        }
-
-        self.queued_jobs.retain(|qj| qj.jid.cid != cid);
-        for worker in self.workers.0.values_mut() {
-            worker.pending.retain(|jid| {
-                let retain = jid.cid != cid;
-                if !retain {
-                    deps.send_message_to_worker(
-                        &mut worker.sender,
-                        BrokerToWorker::CancelJob(*jid),
-                    );
-                }
-                retain
-            });
-        }
-        self.worker_heap.rebuild(&mut self.workers);
-        self.possibly_start_jobs(deps, HashSet::default());
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn start_artifact_acquisition_for_job(
         cache: &mut CacheT,
@@ -503,6 +469,40 @@ where
                 .insert(digest.clone())
                 .assert_is_true();
         }
+    }
+
+    fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
+        self.clients
+            .0
+            .insert(cid, Client::new(sender))
+            .assert_is_none();
+    }
+
+    fn receive_client_disconnected(&mut self, deps: &mut DepsT, cid: ClientId) {
+        self.cache.client_disconnected(cid);
+
+        let client = self.clients.0.remove(&cid).unwrap();
+        for job in client.jobs.into_values() {
+            for artifact in job.acquired_artifacts {
+                self.cache.decrement_refcount(&artifact);
+            }
+        }
+
+        self.queued_jobs.retain(|qj| qj.jid.cid != cid);
+        for worker in self.workers.0.values_mut() {
+            worker.pending.retain(|jid| {
+                let retain = jid.cid != cid;
+                if !retain {
+                    deps.send_message_to_worker(
+                        &mut worker.sender,
+                        BrokerToWorker::CancelJob(*jid),
+                    );
+                }
+                retain
+            });
+        }
+        self.worker_heap.rebuild(&mut self.workers);
+        self.possibly_start_jobs(deps, HashSet::default());
     }
 
     fn receive_client_job_request(
@@ -732,6 +732,49 @@ where
         self.possibly_start_jobs(deps, just_enqueued);
     }
 
+    fn receive_manifest_entry(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
+        let client = self.clients.0.get_mut(&jid.cid).unwrap();
+        let job = client.jobs.get_mut(&jid.cjid).unwrap();
+        Self::start_artifact_acquisition_for_job(
+            &mut self.cache,
+            &mut client.sender,
+            deps,
+            digest,
+            IsManifest::NotManifest,
+            jid,
+            job,
+            &mut self.manifest_reader_sender,
+        );
+    }
+
+    fn receive_finished_reading_manifest(
+        &mut self,
+        deps: &mut DepsT,
+        manifest_digest: Sha256Digest,
+        job_id: JobId,
+        result: anyhow::Result<()>,
+    ) {
+        // It would be better to not crash...
+        result.expect("failed reading a manifest");
+
+        let client = self.clients.0.get_mut(&job_id.cid).unwrap();
+        let job = client.jobs.get_mut(&job_id.cjid).unwrap();
+        job.manifests_being_read
+            .remove(&manifest_digest)
+            .assert_is_true();
+
+        let mut just_enqueued = HashSet::default();
+        if job.have_all_artifacts() {
+            self.queued_jobs.push(QueuedJob::new(
+                job_id,
+                job.spec.priority,
+                job.spec.estimated_duration,
+            ));
+            just_enqueued.insert(job_id);
+        }
+        self.possibly_start_jobs(deps, just_enqueued);
+    }
+
     fn receive_get_artifact_for_worker(
         &mut self,
         deps: &mut DepsT,
@@ -787,49 +830,6 @@ where
                 .collect(),
         };
         self.job_statistics.insert(sample);
-    }
-
-    fn receive_manifest_entry(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
-        let client = self.clients.0.get_mut(&jid.cid).unwrap();
-        let job = client.jobs.get_mut(&jid.cjid).unwrap();
-        Self::start_artifact_acquisition_for_job(
-            &mut self.cache,
-            &mut client.sender,
-            deps,
-            digest,
-            IsManifest::NotManifest,
-            jid,
-            job,
-            &mut self.manifest_reader_sender,
-        );
-    }
-
-    fn receive_finished_reading_manifest(
-        &mut self,
-        deps: &mut DepsT,
-        manifest_digest: Sha256Digest,
-        job_id: JobId,
-        result: anyhow::Result<()>,
-    ) {
-        // It would be better to not crash...
-        result.expect("failed reading a manifest");
-
-        let client = self.clients.0.get_mut(&job_id.cid).unwrap();
-        let job = client.jobs.get_mut(&job_id.cjid).unwrap();
-        job.manifests_being_read
-            .remove(&manifest_digest)
-            .assert_is_true();
-
-        let mut just_enqueued = HashSet::default();
-        if job.have_all_artifacts() {
-            self.queued_jobs.push(QueuedJob::new(
-                job_id,
-                job.spec.priority,
-                job.spec.estimated_duration,
-            ));
-            just_enqueued.insert(job_id);
-        }
-        self.possibly_start_jobs(deps, just_enqueued);
     }
 }
 
