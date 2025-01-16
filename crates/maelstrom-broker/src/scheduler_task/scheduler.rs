@@ -419,13 +419,14 @@ where
         self.queued_jobs.retain(|qj| qj.jid.cid != cid);
         for worker in self.workers.0.values_mut() {
             worker.pending.retain(|jid| {
-                jid.cid != cid || {
+                let retain = jid.cid != cid;
+                if !retain {
                     deps.send_message_to_worker(
                         &mut worker.sender,
                         BrokerToWorker::CancelJob(*jid),
                     );
-                    false
                 }
+                retain
             });
         }
         self.worker_heap.rebuild(&mut self.workers);
