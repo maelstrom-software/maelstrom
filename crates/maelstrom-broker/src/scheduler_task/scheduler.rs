@@ -733,7 +733,13 @@ where
     }
 
     fn receive_manifest_entry(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
-        let client = self.clients.0.get_mut(&jid.cid).unwrap();
+        let Some(client) = self.clients.0.get_mut(&jid.cid) else {
+            // This indicates that the client isn't around anymore. Just ignore this message. When
+            // the client disconnected, we canceled all of the outstanding requests. Ideally, we
+            // would have a way to cancel the outstanding manifest read, but we don't currently
+            // have that.
+            return;
+        };
         let job = client.jobs.get_mut(&jid.cjid).unwrap();
         Self::start_artifact_acquisition_for_job(
             &mut self.cache,
@@ -757,7 +763,11 @@ where
         // It would be better to not crash...
         result.expect("failed reading a manifest");
 
-        let client = self.clients.0.get_mut(&jid.cid).unwrap();
+        let Some(client) = self.clients.0.get_mut(&jid.cid) else {
+            // This indicates that the client isn't around anymore. Just ignore this message. When
+            // the client disconnected, we canceled all of the outstanding requests.
+            return;
+        };
         let job = client.jobs.get_mut(&jid.cjid).unwrap();
         job.manifests_being_read
             .remove(&manifest_digest)
