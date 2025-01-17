@@ -1,5 +1,5 @@
 use crate::wasm::rpc::MonitorConnection;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use eframe::{App, CreationContext, Frame};
 use egui::{Align2, CentralPanel, CollapsingHeader, Color32, Context, ScrollArea, Ui};
 use egui_gauge::Gauge;
@@ -221,11 +221,8 @@ impl<RpcConnectionT: MonitorConnection> UiHandler<RpcConnectionT> {
                 self.freshness = now;
             }
 
-            if let Some(msg) = rpc.try_recv()? {
-                match msg {
-                    BrokerToMonitor::StatisticsResponse(stats) => self.stats = Some(stats),
-                    r => bail!("unexpected response: {r:?}"),
-                }
+            if let Some(BrokerToMonitor::StatisticsResponse(stats)) = rpc.try_recv()? {
+                self.stats = Some(stats);
             }
         }
 
