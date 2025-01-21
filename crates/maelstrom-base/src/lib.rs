@@ -87,10 +87,26 @@ macro_rules! manifest_digest {
 }
 
 /// An absolute job ID that includes a [`ClientId`] for disambiguation.
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Display, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[display("{cid}.{cjid}")]
 pub struct JobId {
     pub cid: ClientId,
     pub cjid: ClientJobId,
+}
+
+impl<ClientIdT, ClientJobIdT> From<(ClientIdT, ClientJobIdT)> for JobId
+where
+    ClientId: From<ClientIdT>,
+    ClientJobId: From<ClientJobIdT>,
+{
+    fn from((cid, cjid): (ClientIdT, ClientJobIdT)) -> Self {
+        Self {
+            cid: ClientId::from(cid),
+            cjid: ClientJobId::from(cjid),
+        }
+    }
 }
 
 #[pocket_definition(export)]
@@ -831,6 +847,22 @@ mod tests {
         assert_eq!(format!("{}", WorkerId::from(0)), "0");
         assert_eq!(format!("{:03}", WorkerId::from(0)), "000");
         assert_eq!(format!("{:3}", WorkerId::from(43)), " 43");
+    }
+
+    #[test]
+    fn job_id_from() {
+        assert_eq!(
+            JobId {
+                cid: ClientId::from(1),
+                cjid: ClientJobId::from(2)
+            },
+            JobId::from((1, 2))
+        );
+    }
+
+    #[test]
+    fn job_id_display() {
+        assert_eq!(format!("{}", JobId::from((0, 0))), "0.0");
     }
 
     #[test]

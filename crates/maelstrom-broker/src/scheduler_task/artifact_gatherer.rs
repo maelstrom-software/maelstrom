@@ -59,6 +59,7 @@ struct Client {
 }
 
 #[must_use]
+#[derive(Debug, PartialEq)]
 pub enum StartJob {
     NotReady(Vec<Sha256Digest>),
     Ready,
@@ -351,5 +352,725 @@ where
 
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
         self.get_waiting_for_artifacts_count(cid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hashbag::HashBag;
+    use maelstrom_base::digest;
+    use std::{
+        cell::{RefCell, RefMut},
+        rc::Rc,
+    };
+    use ArtifactType::*;
+
+    #[derive(Default)]
+    struct TestStateInner {
+        send_message_to_manifest_reader_returns: HashSet<ManifestReadRequest<i32>>,
+        get_artifact_returns: HashMap<(JobId, Sha256Digest), GetArtifact>,
+        got_artifact_returns: HashMap<(Sha256Digest, Option<String>), Result<Vec<JobId>>>,
+        decrement_refcount_returns: HashBag<Sha256Digest>,
+        client_disconnected_returns: HashSet<ClientId>,
+        read_artifact_returns: HashMap<Sha256Digest, i32>,
+    }
+
+    impl Drop for TestStateInner {
+        fn drop(&mut self) {
+            assert!(
+                self.send_message_to_manifest_reader_returns.is_empty(),
+                "unused test fixture entries for Deps::send_message_to_manifest_reader: {:?}",
+                self.send_message_to_manifest_reader_returns,
+            );
+            assert!(
+                self.get_artifact_returns.is_empty(),
+                "unused test fixture entries for Cache::get_artifact: {:?}",
+                self.get_artifact_returns,
+            );
+            assert!(
+                self.got_artifact_returns.is_empty(),
+                "unused test fixture entries for Cache::got_artifact: {:?}",
+                self.got_artifact_returns,
+            );
+            assert!(
+                self.decrement_refcount_returns.is_empty(),
+                "unused test fixture entries for Cache::decrement_refcount: {:?}",
+                self.decrement_refcount_returns,
+            );
+            assert!(
+                self.client_disconnected_returns.is_empty(),
+                "unused test fixture entries for Cache::client_disconnected: {:?}",
+                self.client_disconnected_returns,
+            );
+            assert!(
+                self.read_artifact_returns.is_empty(),
+                "unused test fixture entries for Cache::read_artifact: {:?}",
+                self.read_artifact_returns,
+            );
+        }
+    }
+
+    struct Expect<'a> {
+        test_state: RefMut<'a, TestState>,
+    }
+
+    impl<'a> Expect<'a> {
+        fn send_message_to_manifest_reader(
+            mut self,
+            jid: impl Into<JobId>,
+            digest: impl Into<Sha256Digest>,
+            manifest_stream: i32,
+        ) -> Self {
+            self.test_state
+                .inner
+                .as_mut()
+                .unwrap()
+                .send_message_to_manifest_reader_returns
+                .insert(ManifestReadRequest {
+                    jid: jid.into(),
+                    digest: digest.into(),
+                    manifest_stream,
+                })
+                .assert_is_true();
+            self
+        }
+
+        fn get_artifact(
+            mut self,
+            jid: impl Into<JobId>,
+            digest: impl Into<Sha256Digest>,
+            result: GetArtifact,
+        ) -> Self {
+            self.test_state
+                .inner
+                .as_mut()
+                .unwrap()
+                .get_artifact_returns
+                .insert((jid.into(), digest.into()), result)
+                .assert_is_none();
+            self
+        }
+
+        fn got_artifact<DigestT, TempFileT, JobIdIterT, JobIdT>(
+            mut self,
+            digest: DigestT,
+            file: TempFileT,
+            result: Result<JobIdIterT>,
+        ) -> Self
+        where
+            Sha256Digest: From<DigestT>,
+            String: From<TempFileT>,
+            JobId: From<JobIdT>,
+            JobIdIterT: IntoIterator<Item = JobIdT>,
+        {
+            self.test_state
+                .inner
+                .as_mut()
+                .unwrap()
+                .got_artifact_returns
+                .insert(
+                    (digest.into(), Some(file.into())),
+                    result.map(|iter| iter.into_iter().map(Into::into).collect()),
+                )
+                .assert_is_none();
+            self
+        }
+
+        fn decrement_refcount(mut self, digest: impl Into<Sha256Digest>) -> Self {
+            self.test_state
+                .inner
+                .as_mut()
+                .unwrap()
+                .decrement_refcount_returns
+                .insert(digest.into());
+            self
+        }
+
+        fn client_disconnected(mut self, cid: impl Into<ClientId>) -> Self {
+            self.test_state
+                .inner
+                .as_mut()
+                .unwrap()
+                .client_disconnected_returns
+                .insert(cid.into())
+                .assert_is_true();
+            self
+        }
+
+        fn read_artifact(mut self, digest: impl Into<Sha256Digest>, result: i32) -> Self {
+            self.test_state
+                .inner
+                .as_mut()
+                .unwrap()
+                .read_artifact_returns
+                .insert(digest.into(), result)
+                .assert_is_none();
+            self
+        }
+    }
+
+    #[derive(Default)]
+    struct TestState {
+        inner: Option<TestStateInner>,
+    }
+
+    impl Deps for Rc<RefCell<TestState>> {
+        type ArtifactStream = i32;
+
+        fn send_message_to_manifest_reader(
+            &mut self,
+            request: ManifestReadRequest<Self::ArtifactStream>,
+        ) {
+            self.borrow_mut()
+                .inner
+                .as_mut()
+                .unwrap()
+                .send_message_to_manifest_reader_returns
+                .remove(&request)
+                .assert_is_true();
+        }
+    }
+
+    impl SchedulerCache for Rc<RefCell<TestState>> {
+        type TempFile = String;
+        type ArtifactStream = i32;
+
+        fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
+            self.borrow_mut()
+                .inner
+                .as_mut()
+                .unwrap()
+                .get_artifact_returns
+                .remove(&(jid, digest))
+                .unwrap()
+        }
+
+        fn got_artifact(
+            &mut self,
+            digest: &Sha256Digest,
+            file: Option<Self::TempFile>,
+        ) -> Result<Vec<JobId>> {
+            self.borrow_mut()
+                .inner
+                .as_mut()
+                .unwrap()
+                .got_artifact_returns
+                .remove(&(digest.clone(), file))
+                .unwrap()
+        }
+
+        fn decrement_refcount(&mut self, digest: &Sha256Digest) {
+            let refcount_before = self
+                .borrow_mut()
+                .inner
+                .as_mut()
+                .unwrap()
+                .decrement_refcount_returns
+                .remove(&digest);
+            assert!(refcount_before > 0);
+        }
+
+        fn client_disconnected(&mut self, cid: ClientId) {
+            self.borrow_mut()
+                .inner
+                .as_mut()
+                .unwrap()
+                .client_disconnected_returns
+                .remove(&cid)
+                .assert_is_true()
+        }
+
+        fn get_artifact_for_worker(&mut self, _digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
+            todo!();
+        }
+
+        fn read_artifact(&mut self, digest: &Sha256Digest) -> Self::ArtifactStream {
+            self.borrow_mut()
+                .inner
+                .as_mut()
+                .unwrap()
+                .read_artifact_returns
+                .remove(digest)
+                .unwrap()
+        }
+    }
+
+    struct Fixture {
+        test_state: Rc<RefCell<TestState>>,
+        sut: ArtifactGatherer<Rc<RefCell<TestState>>, Rc<RefCell<TestState>>>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let test_state = Rc::new(RefCell::new(Default::default()));
+            let sut = ArtifactGatherer::new(test_state.clone(), test_state.clone());
+            Self { test_state, sut }
+        }
+
+        fn expect(&mut self) -> Expect {
+            let mut test_state = self.test_state.borrow_mut();
+            test_state.inner.replace(Default::default());
+            Expect { test_state }
+        }
+
+        #[track_caller]
+        fn client_connected(&mut self, cid: impl Into<ClientId>) {
+            self.sut.client_connected(cid.into());
+            self.test_state.take();
+        }
+
+        #[track_caller]
+        fn client_disconnected(&mut self, cid: impl Into<ClientId>) {
+            self.sut.client_disconnected(cid.into());
+            self.test_state.take();
+        }
+
+        #[track_caller]
+        fn start_job<LayersT, DigestT>(
+            &mut self,
+            jid: impl Into<JobId>,
+            layers: LayersT,
+            expected: StartJob,
+        ) where
+            LayersT: IntoIterator<Item = (DigestT, ArtifactType)>,
+            Sha256Digest: From<DigestT>,
+        {
+            let actual = self.sut.start_job(
+                jid.into(),
+                NonEmpty::collect(
+                    layers
+                        .into_iter()
+                        .map(|(digest, type_)| (digest.into(), type_)),
+                )
+                .unwrap(),
+            );
+            assert_eq!(actual, expected);
+            self.test_state.take();
+        }
+
+        #[track_caller]
+        fn complete_job(&mut self, jid: impl Into<JobId>) {
+            self.sut.complete_job(jid.into());
+            self.test_state.take();
+        }
+
+        #[track_caller]
+        fn artifact_transferred_ok<JobIdT>(
+            &mut self,
+            digest: impl Into<Sha256Digest>,
+            file: impl Into<String>,
+            expected: impl IntoIterator<Item = JobIdT>,
+        ) where
+            JobIdT: Into<JobId>,
+        {
+            let actual = self
+                .sut
+                .artifact_transferred(&digest.into(), Some(file.into()))
+                .unwrap();
+            assert_eq!(actual, expected.into_iter().map(Into::into).collect());
+            self.test_state.take();
+        }
+
+        fn manifest_read_for_job_entry(
+            &mut self,
+            digest: impl Into<Sha256Digest>,
+            jid: impl Into<JobId>,
+            expected: bool,
+        ) {
+            let actual = self
+                .sut
+                .manifest_read_for_job_entry(&digest.into(), jid.into());
+            assert_eq!(actual, expected);
+            self.test_state.take();
+        }
+
+        fn manifest_read_for_job_complete(
+            &mut self,
+            digest: impl Into<Sha256Digest>,
+            jid: impl Into<JobId>,
+            result: Result<()>,
+            expected: bool,
+        ) {
+            let actual = self
+                .sut
+                .manifest_read_for_job_complete(digest.into(), jid.into(), result);
+            assert_eq!(actual, expected);
+            self.test_state.take();
+        }
+    }
+
+    #[test]
+    fn start_job_get_tar_artifact_success() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success);
+        fixture.start_job((1, 2), [(3, Tar)], StartJob::Ready);
+    }
+
+    #[test]
+    fn start_job_duplicate_artifacts_get_tar_artifact_success() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success);
+        fixture.start_job((1, 2), [(3, Tar), (3, Tar)], StartJob::Ready);
+    }
+
+    #[test]
+    fn start_job_get_tar_artifact_get() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
+        fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady(vec![digest!(3)]));
+
+        fixture.expect().got_artifact(3, "foo.tmp", Ok([(1, 2)]));
+        fixture.artifact_transferred_ok(3, "foo.tmp", [(1, 2)]);
+    }
+
+    #[test]
+    fn start_job_duplicate_artifacts_get_tar_artifact_get() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
+        fixture.start_job(
+            (1, 2),
+            [(3, Tar), (3, Tar)],
+            StartJob::NotReady(vec![digest!(3)]),
+        );
+
+        fixture.expect().got_artifact(3, "foo.tmp", Ok([(1, 2)]));
+        fixture.artifact_transferred_ok(3, "foo.tmp", [(1, 2)]);
+    }
+
+    #[test]
+    fn start_job_get_tar_artifact_wait() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Wait);
+        fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady(vec![]));
+    }
+
+    #[test]
+    fn start_job_duplicate_artifacts_get_tar_artifact_wait() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Wait);
+        fixture.start_job((1, 2), [(3, Tar), (3, Tar)], StartJob::NotReady(vec![]));
+    }
+
+    #[test]
+    fn start_job_get_manifest_artifact_success() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success)
+            .read_artifact(3, 33)
+            .send_message_to_manifest_reader((1, 2), 3, 33);
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+    }
+
+    #[test]
+    fn start_job_duplicate_artifacts_get_manifest_artifact_success() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success)
+            .read_artifact(3, 33)
+            .send_message_to_manifest_reader((1, 2), 3, 33);
+        fixture.start_job(
+            (1, 2),
+            [(3, Manifest), (3, Manifest)],
+            StartJob::NotReady(vec![]),
+        );
+    }
+
+    #[test]
+    fn start_job_get_manifest_artifact_get() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
+        fixture.start_job(
+            (1, 2),
+            [(3, Manifest)],
+            StartJob::NotReady(vec![digest!(3)]),
+        );
+    }
+
+    #[test]
+    fn start_job_duplicate_artifacts_get_manifest_artifact_get() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
+        fixture.start_job(
+            (1, 2),
+            [(3, Manifest), (3, Manifest)],
+            StartJob::NotReady(vec![digest!(3)]),
+        );
+    }
+
+    #[test]
+    fn start_job_get_manifest_artifact_wait() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Wait);
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+    }
+
+    #[test]
+    fn start_job_duplicate_artifacts_get_manifest_artifact_wait() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Wait);
+        fixture.start_job(
+            (1, 2),
+            [(3, Manifest), (3, Manifest)],
+            StartJob::NotReady(vec![]),
+        );
+    }
+
+    #[test]
+    fn manifest_read_for_job_entry_from_disconnected_client() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success)
+            .read_artifact(3, 33)
+            .send_message_to_manifest_reader((1, 2), 3, 33);
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+
+        fixture
+            .expect()
+            .client_disconnected(1)
+            .decrement_refcount(3);
+        fixture.client_disconnected(1);
+
+        fixture.manifest_read_for_job_entry(4, (1, 2), false);
+    }
+
+    #[test]
+    fn manifest_read_for_job_complete_from_disconnected_client() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success)
+            .read_artifact(3, 33)
+            .send_message_to_manifest_reader((1, 2), 3, 33);
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+
+        fixture
+            .expect()
+            .client_disconnected(1)
+            .decrement_refcount(3);
+        fixture.client_disconnected(1);
+
+        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()), false);
+    }
+
+    #[test]
+    fn manifest_read_for_job_entry_various_cache_states() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success)
+            .read_artifact(3, 33)
+            .send_message_to_manifest_reader((1, 2), 3, 33);
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 4, GetArtifact::Success);
+        fixture.manifest_read_for_job_entry(4, (1, 2), false);
+
+        fixture.manifest_read_for_job_entry(4, (1, 2), false);
+
+        fixture.expect().get_artifact((1, 2), 5, GetArtifact::Wait);
+        fixture.manifest_read_for_job_entry(5, (1, 2), false);
+
+        fixture.manifest_read_for_job_entry(5, (1, 2), false);
+
+        fixture.expect().get_artifact((1, 2), 6, GetArtifact::Get);
+        fixture.manifest_read_for_job_entry(6, (1, 2), true);
+
+        fixture.manifest_read_for_job_entry(6, (1, 2), false);
+
+        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()), false);
+
+        fixture.expect().got_artifact(6, "6.tmp", Ok([(1, 2)]));
+        fixture.artifact_transferred_ok(6, "6.tmp", [] as [JobId; 0]);
+
+        fixture.expect().got_artifact(5, "5.tmp", Ok([(1, 2)]));
+        fixture.artifact_transferred_ok(5, "5.tmp", [(1, 2)]);
+    }
+
+    #[test]
+    fn artifact_tranferred_ok_for_multiple_jobs() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+        fixture.client_connected(2);
+
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
+        fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady(vec![digest!(3)]));
+
+        fixture.expect().get_artifact((2, 2), 3, GetArtifact::Wait);
+        fixture.start_job((2, 2), [(3, Tar)], StartJob::NotReady(vec![]));
+
+        fixture
+            .expect()
+            .got_artifact(3, "foo.tmp", Ok([(1, 2), (2, 2)]));
+        fixture.artifact_transferred_ok(3, "foo.tmp", [(1, 2), (2, 2)]);
+    }
+
+    #[test]
+    fn artifact_tranferred_ok_kicks_off_manifest_read() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
+        fixture.start_job(
+            (1, 2),
+            [(3, Manifest)],
+            StartJob::NotReady(vec![digest!(3)]),
+        );
+
+        fixture
+            .expect()
+            .got_artifact(3, "foo.tmp", Ok([(1, 2)]))
+            .read_artifact(3, 33)
+            .send_message_to_manifest_reader((1, 2), 3, 33);
+        fixture.artifact_transferred_ok(3, "foo.tmp", [] as [JobId; 0]);
+    }
+
+    #[test]
+    fn manifest_read_for_job_complete_tracks_count_for_job() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success)
+            .get_artifact((1, 2), 4, GetArtifact::Success)
+            .read_artifact(3, 33)
+            .send_message_to_manifest_reader((1, 2), 3, 33)
+            .read_artifact(4, 44)
+            .send_message_to_manifest_reader((1, 2), 4, 44);
+        fixture.start_job(
+            (1, 2),
+            [(3, Manifest), (4, Manifest)],
+            StartJob::NotReady(vec![]),
+        );
+
+        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()), false);
+        fixture.manifest_read_for_job_complete(4, (1, 2), Ok(()), true);
+    }
+
+    #[test]
+    fn complete_job_one_artifact() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success);
+        fixture.start_job((1, 2), [(3, Tar)], StartJob::Ready);
+
+        fixture.expect().decrement_refcount(3);
+        fixture.complete_job((1, 2));
+    }
+
+    #[test]
+    fn complete_job_two_artifacts() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success)
+            .get_artifact((1, 2), 4, GetArtifact::Success);
+        fixture.start_job((1, 2), [(3, Tar), (4, Tar)], StartJob::Ready);
+
+        fixture.expect().decrement_refcount(3).decrement_refcount(4);
+        fixture.complete_job((1, 2));
+    }
+
+    #[test]
+    fn complete_job_duplicate_artifacts() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success);
+        fixture.start_job((1, 2), [(3, Tar), (3, Tar)], StartJob::Ready);
+
+        fixture.expect().decrement_refcount(3);
+        fixture.complete_job((1, 2));
+    }
+
+    #[test]
+    fn client_disconnect_no_jobs() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture.expect().client_disconnected(1);
+        fixture.client_disconnected(1);
+    }
+
+    #[test]
+    fn client_disconnect_jobs_with_some_artifacts() {
+        let mut fixture = Fixture::new();
+        fixture.client_connected(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 1), 1, GetArtifact::Success)
+            .get_artifact((1, 1), 2, GetArtifact::Wait)
+            .get_artifact((1, 1), 3, GetArtifact::Get)
+            .get_artifact((1, 1), 4, GetArtifact::Success)
+            .read_artifact(4, 44)
+            .send_message_to_manifest_reader((1, 1), 4, 44);
+        fixture.start_job(
+            (1, 1),
+            [(1, Tar), (2, Tar), (3, Tar), (4, Manifest), (1, Tar)],
+            StartJob::NotReady(vec![digest!(3)]),
+        );
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 1, GetArtifact::Success);
+        fixture.start_job((1, 2), [(1, Tar)], StartJob::Ready);
+
+        fixture.client_connected(2);
+        fixture
+            .expect()
+            .get_artifact((2, 2), 1, GetArtifact::Success);
+        fixture.start_job((2, 2), [(1, Tar)], StartJob::Ready);
+
+        fixture
+            .expect()
+            .client_disconnected(1)
+            .decrement_refcount(1)
+            .decrement_refcount(1)
+            .decrement_refcount(4);
+        fixture.client_disconnected(1);
     }
 }

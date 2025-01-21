@@ -26,7 +26,7 @@ macro_rules! jid {
         jid!($n, $n)
     };
     [$cid:expr, $cjid:expr] => {
-        maelstrom_base::JobId{cid: cid![$cid], cjid: cjid![$cjid]}
+        maelstrom_base::JobId{cid: $crate::cid![$cid], cjid: $crate::cjid![$cjid]}
     };
 }
 

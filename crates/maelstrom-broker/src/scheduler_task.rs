@@ -13,7 +13,7 @@ use scheduler::{Message, Scheduler, SchedulerDeps};
 use std::{path::PathBuf, sync::mpsc as std_mpsc};
 use tokio::{io::AsyncRead, sync::mpsc as tokio_mpsc, task::JoinSet};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct ManifestReadRequest<ArtifactStreamT> {
     manifest_stream: ArtifactStreamT,
     digest: Sha256Digest,
