@@ -1,13 +1,7 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use crate::{
-    cache::SchedulerCache,
-    scheduler_task::{
-        artifact_gatherer::{ArtifactGatherer, StartJob},
-        ManifestReadRequest,
-    },
-};
+use crate::scheduler_task::artifact_gatherer::StartJob;
 use anyhow::Result;
 use enum_map::enum_map;
 use maelstrom_base::{
@@ -19,8 +13,8 @@ use maelstrom_base::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
-    ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec, JobWorkerStatus,
-    MonitorId, Sha256Digest, WorkerId,
+    ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
+    JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
     duration,
@@ -43,6 +37,32 @@ use std::{
  *  FIGLET: public
  */
 
+pub trait ArtifactGatherer {
+    type TempFile;
+    fn client_connected(&mut self, cid: ClientId);
+    fn client_disconnected(&mut self, cid: ClientId);
+    fn start_job(&mut self, jid: JobId, layers: NonEmpty<(Sha256Digest, ArtifactType)>)
+        -> StartJob;
+    fn artifact_transferred(
+        &mut self,
+        digest: &Sha256Digest,
+        file: Option<Self::TempFile>,
+    ) -> Result<HashSet<JobId>>;
+    #[must_use]
+    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) -> bool;
+    #[must_use]
+    fn manifest_read_for_job_complete(
+        &mut self,
+        digest: Sha256Digest,
+        jid: JobId,
+        result: anyhow::Result<()>,
+    ) -> bool;
+    fn complete_job(&mut self, jid: JobId);
+    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)>;
+    fn receive_decrement_refcount(&mut self, digest: Sha256Digest);
+    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64;
+}
+
 /// The external dependencies for [`Scheduler`]. All of these methods must be asynchronous: they
 /// must not block the current thread.
 pub trait SchedulerDeps {
@@ -50,8 +70,6 @@ pub trait SchedulerDeps {
     type WorkerSender;
     type MonitorSender;
     type WorkerArtifactFetcherSender;
-    type ArtifactStream;
-    type ManifestReaderSender;
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
     fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker);
     fn send_message_to_monitor(
@@ -63,11 +81,6 @@ pub trait SchedulerDeps {
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
         message: Option<(PathBuf, u64)>,
-    );
-    fn send_message_to_manifest_reader(
-        &mut self,
-        sender: &mut Self::ManifestReaderSender,
-        request: ManifestReadRequest<Self::ArtifactStream>,
     );
 }
 
@@ -143,16 +156,14 @@ pub enum Message<
     FinishedReadingManifest(Sha256Digest, JobId, anyhow::Result<()>),
 }
 
-impl<CacheT, DepsT> Scheduler<CacheT, DepsT>
-where
-    CacheT: SchedulerCache,
-    DepsT: SchedulerDeps<ArtifactStream = CacheT::ArtifactStream>,
+impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
+    Scheduler<ArtifactGathererT, DepsT>
 {
-    /// Create a new scheduler with the given [`SchedulerCache`]. Note that [`SchedulerDeps`] are
+    /// Create a new scheduler with the given [`ArtifactGatherer`]. Note that [`SchedulerDeps`] are
     /// passed in to `Self::receive_message`.
-    pub fn new(cache: CacheT, manifest_reader_sender: DepsT::ManifestReaderSender) -> Self {
+    pub fn new(artifact_gatherer: ArtifactGathererT) -> Self {
         Scheduler {
-            artifact_gatherer: ArtifactGatherer::new(cache, manifest_reader_sender),
+            artifact_gatherer,
             clients: ClientMap(HashMap::default()),
             workers: WorkerMap(HashMap::default()),
             monitors: HashMap::default(),
@@ -165,7 +176,11 @@ where
 
     /// Process an individual [`Message`]. This function doesn't block as the scheduler is
     /// implemented as an async state machine.
-    pub fn receive_message(&mut self, deps: &mut DepsT, msg: MessageM<DepsT, CacheT::TempFile>) {
+    pub fn receive_message(
+        &mut self,
+        deps: &mut DepsT,
+        msg: MessageM<DepsT, ArtifactGathererT::TempFile>,
+    ) {
         match msg {
             Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
             Message::ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
@@ -199,8 +214,8 @@ where
             Message::GotManifestEntry(entry_digest, jid) => {
                 self.receive_manifest_entry(deps, entry_digest, jid)
             }
-            Message::FinishedReadingManifest(manifest_digest, jid, result) => {
-                self.receive_finished_reading_manifest(deps, manifest_digest, jid, result)
+            Message::FinishedReadingManifest(digest, jid, result) => {
+                self.receive_finished_reading_manifest(deps, digest, jid, result)
             }
         }
     }
@@ -323,21 +338,19 @@ impl Ord for QueuedJob {
     }
 }
 
-pub struct Scheduler<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
-    artifact_gatherer: ArtifactGatherer<CacheT, DepsT>,
+pub struct Scheduler<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps> {
+    artifact_gatherer: ArtifactGathererT,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
     monitors: HashMap<MonitorId, DepsT::MonitorSender>,
     queued_jobs: BinaryHeap<QueuedJob>,
     worker_heap: Heap<WorkerMap<DepsT>>,
     job_statistics: JobStatisticsTimeSeries,
-    tcp_upload_landing_pad: HashMap<Sha256Digest, CacheT::TempFile>,
+    tcp_upload_landing_pad: HashMap<Sha256Digest, ArtifactGathererT::TempFile>,
 }
 
-impl<CacheT, DepsT> Scheduler<CacheT, DepsT>
-where
-    CacheT: SchedulerCache,
-    DepsT: SchedulerDeps<ArtifactStream = CacheT::ArtifactStream>,
+impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
+    Scheduler<ArtifactGathererT, DepsT>
 {
     fn possibly_start_jobs(&mut self, deps: &mut DepsT, mut just_enqueued: HashSet<JobId>) {
         while !self.queued_jobs.is_empty() && !self.workers.0.is_empty() {
@@ -370,7 +383,7 @@ where
     }
 
     fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
-        self.artifact_gatherer.receive_client_connected(cid);
+        self.artifact_gatherer.client_connected(cid);
         self.clients
             .0
             .insert(cid, Client::new(sender))
@@ -378,7 +391,7 @@ where
     }
 
     fn receive_client_disconnected(&mut self, deps: &mut DepsT, cid: ClientId) {
-        self.artifact_gatherer.receive_client_disconnected(cid);
+        self.artifact_gatherer.client_disconnected(cid);
         self.clients.0.remove(&cid).assert_is_some();
 
         self.queued_jobs.retain(|qj| qj.jid.cid != cid);
@@ -413,7 +426,7 @@ where
         let jid = JobId { cid, cjid };
         client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
 
-        match self.artifact_gatherer.start_job(deps, jid, layers) {
+        match self.artifact_gatherer.start_job(jid, layers) {
             StartJob::Ready => {
                 self.queued_jobs
                     .push(QueuedJob::new(jid, priority, estimated_duration));
@@ -548,7 +561,7 @@ where
         deps.send_message_to_monitor(self.monitors.get_mut(&mid).unwrap(), resp);
     }
 
-    fn receive_got_artifact(&mut self, digest: Sha256Digest, file: CacheT::TempFile) {
+    fn receive_got_artifact(&mut self, digest: Sha256Digest, file: ArtifactGathererT::TempFile) {
         self.tcp_upload_landing_pad.insert(digest, file);
     }
 
@@ -577,10 +590,7 @@ where
             .then(|| self.tcp_upload_landing_pad.remove(&digest))
             .flatten();
 
-        match self
-            .artifact_gatherer
-            .receive_artifact_transferred(deps, &digest, file)
-        {
+        match self.artifact_gatherer.artifact_transferred(&digest, file) {
             Err(err) => {
                 self.send_artifact_transferred_response(deps, cid, digest, Err(err.to_string()));
             }
@@ -602,7 +612,7 @@ where
     fn receive_manifest_entry(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
         let fetch_artifact = self
             .artifact_gatherer
-            .receive_manifest_entry(deps, &digest, jid);
+            .manifest_read_for_job_entry(&digest, jid);
         if fetch_artifact {
             let client = self.clients.0.get_mut(&jid.cid).unwrap();
             deps.send_message_to_client(
@@ -621,7 +631,7 @@ where
     ) {
         let job_ready = self
             .artifact_gatherer
-            .receive_finished_reading_manifest(digest, jid, result);
+            .manifest_read_for_job_complete(digest, jid, result);
         if job_ready {
             let job = self.clients.job_from_jid(jid);
             self.queued_jobs.push(QueuedJob::new(
@@ -698,6 +708,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
+    use crate::{
+        cache::SchedulerCache,
+        scheduler_task::{artifact_gatherer::Deps as ArtifactGathererDeps, ManifestReadRequest},
+    };
     use anyhow::{anyhow, Result};
     use enum_map::enum_map;
     use itertools::Itertools;
@@ -733,7 +747,6 @@ mod tests {
     struct TestWorkerSender(WorkerId);
     struct TestMonitorSender(MonitorId);
     struct TestWorkerArtifactFetcherSender(u32);
-    struct TestManifestReaderSender;
 
     #[derive(Default)]
     struct TestState {
@@ -819,8 +832,6 @@ mod tests {
         type WorkerSender = TestWorkerSender;
         type MonitorSender = TestMonitorSender;
         type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
-        type ArtifactStream = TestArtifactStream;
-        type ManifestReaderSender = TestManifestReaderSender;
 
         fn send_message_to_client(
             &mut self,
@@ -857,10 +868,13 @@ mod tests {
                 .messages
                 .push(ToWorkerArtifactFetcher(sender.0, message));
         }
+    }
+
+    impl ArtifactGathererDeps for Rc<RefCell<TestState>> {
+        type ArtifactStream = TestArtifactStream;
 
         fn send_message_to_manifest_reader(
             &mut self,
-            _sender: &mut TestManifestReaderSender,
             req: ManifestReadRequest<TestArtifactStream>,
         ) {
             self.borrow_mut().messages.push(ReadManifest(req));
@@ -869,7 +883,13 @@ mod tests {
 
     struct Fixture {
         test_state: Rc<RefCell<TestState>>,
-        scheduler: Scheduler<Rc<RefCell<TestState>>, Rc<RefCell<TestState>>>,
+        scheduler: Scheduler<
+            super::super::artifact_gatherer::ArtifactGatherer<
+                Rc<RefCell<TestState>>,
+                Rc<RefCell<TestState>>,
+            >,
+            Rc<RefCell<TestState>>,
+        >,
     }
 
     impl Default for Fixture {
@@ -877,7 +897,10 @@ mod tests {
             let test_state = Rc::new(RefCell::new(TestState::default()));
             Fixture {
                 test_state: test_state.clone(),
-                scheduler: Scheduler::new(test_state, TestManifestReaderSender),
+                scheduler: Scheduler::new(super::super::artifact_gatherer::ArtifactGatherer::new(
+                    test_state.clone(),
+                    test_state.clone(),
+                )),
             }
         }
     }
