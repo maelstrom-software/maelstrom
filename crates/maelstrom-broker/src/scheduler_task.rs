@@ -1,3 +1,4 @@
+mod artifact_gatherer;
 mod scheduler;
 
 use crate::cache::SchedulerCache;

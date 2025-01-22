@@ -1,7 +1,13 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use crate::{cache::SchedulerCache, scheduler_task::ManifestReadRequest};
+use crate::{
+    cache::SchedulerCache,
+    scheduler_task::{
+        artifact_gatherer::{ArtifactGatherer, StartJob},
+        ManifestReadRequest,
+    },
+};
 use anyhow::Result;
 use enum_map::enum_map;
 use maelstrom_base::{
@@ -13,18 +19,17 @@ use maelstrom_base::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
-    ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
-    JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
+    ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec, JobWorkerStatus,
+    MonitorId, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
-    cache::GetArtifact,
     duration,
     ext::{BoolExt as _, OptionExt as _},
     heap::{Heap, HeapDeps, HeapIndex},
 };
 use std::{
     cmp::Ordering,
-    collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
+    collections::{BinaryHeap, HashMap, HashSet},
     path::PathBuf,
     time::Duration,
 };
@@ -210,28 +215,6 @@ where
  *  FIGLET: private
  */
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum IsManifest {
-    Manifest,
-    NotManifest,
-}
-
-impl From<bool> for IsManifest {
-    fn from(is_manifest: bool) -> Self {
-        if is_manifest {
-            Self::Manifest
-        } else {
-            Self::NotManifest
-        }
-    }
-}
-
-impl IsManifest {
-    fn is_manifest(&self) -> bool {
-        self == &Self::Manifest
-    }
-}
-
 struct Job {
     spec: JobSpec,
 }
@@ -340,271 +323,6 @@ impl Ord for QueuedJob {
     }
 }
 
-#[derive(Default)]
-struct ArtifactGathererJob {
-    acquired_artifacts: HashSet<Sha256Digest>,
-    missing_artifacts: HashMap<Sha256Digest, IsManifest>,
-    manifests_being_read: HashSet<Sha256Digest>,
-}
-
-impl ArtifactGathererJob {
-    fn have_all_artifacts(&self) -> bool {
-        self.missing_artifacts.is_empty() && self.manifests_being_read.is_empty()
-    }
-}
-
-#[derive(Default)]
-struct ArtifactGathererClient {
-    jobs: HashMap<ClientJobId, ArtifactGathererJob>,
-}
-
-#[must_use]
-enum ArtifactGathererStartJob {
-    NotReady(Vec<Sha256Digest>),
-    Ready,
-}
-
-struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
-    cache: CacheT,
-    clients: HashMap<ClientId, ArtifactGathererClient>,
-    manifest_reader_sender: DepsT::ManifestReaderSender,
-}
-
-impl<CacheT, DepsT> ArtifactGatherer<CacheT, DepsT>
-where
-    CacheT: SchedulerCache,
-    DepsT: SchedulerDeps<ArtifactStream = CacheT::ArtifactStream>,
-{
-    fn new(cache: CacheT, manifest_reader_sender: DepsT::ManifestReaderSender) -> Self {
-        Self {
-            cache,
-            clients: Default::default(),
-            manifest_reader_sender,
-        }
-    }
-
-    fn receive_client_connected(&mut self, cid: ClientId) {
-        self.clients
-            .insert(cid, Default::default())
-            .assert_is_none();
-    }
-
-    fn receive_client_disconnected(&mut self, cid: ClientId) {
-        self.cache.client_disconnected(cid);
-
-        let client = self.clients.remove(&cid).unwrap();
-        for job in client.jobs.into_values() {
-            for artifact in job.acquired_artifacts {
-                self.cache.decrement_refcount(&artifact);
-            }
-        }
-    }
-
-    #[must_use]
-    fn start_artifact_acquisition_for_job(
-        cache: &mut CacheT,
-        deps: &mut DepsT,
-        digest: &Sha256Digest,
-        is_manifest: IsManifest,
-        jid: JobId,
-        job: &mut ArtifactGathererJob,
-        manifest_reader_sender: &mut DepsT::ManifestReaderSender,
-    ) -> bool {
-        if job.acquired_artifacts.contains(digest) || job.missing_artifacts.contains_key(digest) {
-            return false;
-        }
-        match cache.get_artifact(jid, digest.clone()) {
-            GetArtifact::Success => {
-                Self::complete_artifact_acquisition_for_job(
-                    cache,
-                    deps,
-                    digest,
-                    is_manifest,
-                    jid,
-                    job,
-                    manifest_reader_sender,
-                );
-                false
-            }
-            GetArtifact::Wait => {
-                job.missing_artifacts
-                    .insert(digest.clone(), is_manifest)
-                    .assert_is_none();
-                false
-            }
-            GetArtifact::Get => {
-                job.missing_artifacts
-                    .insert(digest.clone(), is_manifest)
-                    .assert_is_none();
-                true
-            }
-        }
-    }
-
-    fn complete_artifact_acquisition_for_job(
-        cache: &mut CacheT,
-        deps: &mut DepsT,
-        digest: &Sha256Digest,
-        is_manifest: IsManifest,
-        jid: JobId,
-        job: &mut ArtifactGathererJob,
-        manifest_reader_sender: &mut DepsT::ManifestReaderSender,
-    ) {
-        job.acquired_artifacts
-            .insert(digest.clone())
-            .assert_is_true();
-        if is_manifest.is_manifest() {
-            let manifest_stream = cache.read_artifact(digest);
-            deps.send_message_to_manifest_reader(
-                manifest_reader_sender,
-                ManifestReadRequest {
-                    manifest_stream,
-                    digest: digest.clone(),
-                    jid,
-                },
-            );
-            job.manifests_being_read
-                .insert(digest.clone())
-                .assert_is_true();
-        }
-    }
-
-    fn start_job(
-        &mut self,
-        deps: &mut DepsT,
-        jid: JobId,
-        layers: NonEmpty<(Sha256Digest, ArtifactType)>,
-    ) -> ArtifactGathererStartJob {
-        let JobId { cid, cjid } = jid;
-        let client = self.clients.get_mut(&cid).unwrap();
-        let Entry::Vacant(job_entry) = client.jobs.entry(cjid) else {
-            panic!("job entry already exists for {jid:?}");
-        };
-        let job = job_entry.insert(Default::default());
-
-        let mut artifacts_to_fetch = vec![];
-        for (digest, type_) in layers {
-            let is_manifest = IsManifest::from(type_ == ArtifactType::Manifest);
-            let fetch_artifact = Self::start_artifact_acquisition_for_job(
-                &mut self.cache,
-                deps,
-                &digest,
-                is_manifest,
-                jid,
-                job,
-                &mut self.manifest_reader_sender,
-            );
-            if fetch_artifact {
-                artifacts_to_fetch.push(digest);
-            }
-        }
-
-        if job.have_all_artifacts() {
-            ArtifactGathererStartJob::Ready
-        } else {
-            ArtifactGathererStartJob::NotReady(artifacts_to_fetch)
-        }
-    }
-
-    fn receive_artifact_transferred(
-        &mut self,
-        deps: &mut DepsT,
-        digest: &Sha256Digest,
-        file: Option<CacheT::TempFile>,
-    ) -> Result<HashSet<JobId>> {
-        Ok(self
-            .cache
-            .got_artifact(digest, file)?
-            .into_iter()
-            .filter(|jid| {
-                let client = self.clients.get_mut(&jid.cid).unwrap();
-                let job = client.jobs.get_mut(&jid.cjid).unwrap();
-                let is_manifest = job.missing_artifacts.remove(digest).unwrap();
-                Self::complete_artifact_acquisition_for_job(
-                    &mut self.cache,
-                    deps,
-                    digest,
-                    is_manifest,
-                    *jid,
-                    job,
-                    &mut self.manifest_reader_sender,
-                );
-                job.have_all_artifacts()
-            })
-            .collect())
-    }
-
-    fn receive_manifest_entry(
-        &mut self,
-        deps: &mut DepsT,
-        digest: &Sha256Digest,
-        jid: JobId,
-    ) -> bool {
-        let Some(client) = self.clients.get_mut(&jid.cid) else {
-            // This indicates that the client isn't around anymore. Just ignore this message. When
-            // the client disconnected, we canceled all of the outstanding requests. Ideally, we
-            // would have a way to cancel the outstanding manifest read, but we don't currently
-            // have that.
-            return false;
-        };
-        let job = client.jobs.get_mut(&jid.cjid).unwrap();
-        Self::start_artifact_acquisition_for_job(
-            &mut self.cache,
-            deps,
-            digest,
-            IsManifest::NotManifest,
-            jid,
-            job,
-            &mut self.manifest_reader_sender,
-        )
-    }
-
-    #[must_use]
-    fn receive_finished_reading_manifest(
-        &mut self,
-        manifest_digest: Sha256Digest,
-        jid: JobId,
-        result: anyhow::Result<()>,
-    ) -> bool {
-        // It would be better to not crash...
-        result.expect("failed reading a manifest");
-
-        let Some(client) = self.clients.get_mut(&jid.cid) else {
-            // This indicates that the client isn't around anymore. Just ignore this message. When
-            // the client disconnected, we canceled all of the outstanding requests.
-            return false;
-        };
-        let job = client.jobs.get_mut(&jid.cjid).unwrap();
-        job.manifests_being_read
-            .remove(&manifest_digest)
-            .assert_is_true();
-
-        job.have_all_artifacts()
-    }
-
-    fn complete_job(&mut self, jid: JobId) {
-        let client = self.clients.get_mut(&jid.cid).unwrap();
-        let job = client.jobs.remove(&jid.cjid).unwrap();
-        for artifact in job.acquired_artifacts {
-            self.cache.decrement_refcount(&artifact);
-        }
-    }
-
-    fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
-        self.cache.decrement_refcount(&digest);
-    }
-
-    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
-        self.clients
-            .get(&cid)
-            .unwrap()
-            .jobs
-            .values()
-            .filter(|job| !job.have_all_artifacts())
-            .count() as u64
-    }
-}
-
 pub struct Scheduler<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
     artifact_gatherer: ArtifactGatherer<CacheT, DepsT>,
     clients: ClientMap<DepsT>,
@@ -696,12 +414,12 @@ where
         client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
 
         match self.artifact_gatherer.start_job(deps, jid, layers) {
-            ArtifactGathererStartJob::Ready => {
+            StartJob::Ready => {
                 self.queued_jobs
                     .push(QueuedJob::new(jid, priority, estimated_duration));
                 self.possibly_start_jobs(deps, HashSet::from_iter([jid]));
             }
-            ArtifactGathererStartJob::NotReady(to_fetch) => {
+            StartJob::NotReady(to_fetch) => {
                 for digest in to_fetch {
                     deps.send_message_to_client(
                         &mut client.sender,
@@ -923,9 +641,7 @@ where
     ) {
         deps.send_message_to_worker_artifact_fetcher(
             &mut sender,
-            self.artifact_gatherer
-                .cache
-                .get_artifact_for_worker(&digest),
+            self.artifact_gatherer.get_artifact_for_worker(&digest),
         );
     }
 
@@ -985,14 +701,13 @@ mod tests {
     use anyhow::{anyhow, Result};
     use enum_map::enum_map;
     use itertools::Itertools;
-    use maelstrom_base::job_spec;
     use maelstrom_base::{
-        digest, manifest_digest,
+        digest, job_spec, manifest_digest,
         proto::BrokerToWorker::{self, *},
         tar_digest,
     };
     use maelstrom_test::*;
-    use maelstrom_util::cache::fs::test;
+    use maelstrom_util::cache::{fs::test, GetArtifact};
     use maplit::hashmap;
     use std::{cell::RefCell, rc::Rc};
 
