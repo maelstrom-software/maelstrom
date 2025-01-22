@@ -119,10 +119,10 @@ macro_rules! completed {
 
 #[macro_export]
 macro_rules! outcome {
-    [1] => { maelstrom_base::JobOutcome::Completed(completed![1]) };
-    [2] => { maelstrom_base::JobOutcome::Completed(completed![2]) };
-    [3] => { maelstrom_base::JobOutcome::Completed(completed![3]) };
-    [$n:expr] => { maelstrom_base::JobOutcome::Completed(completed![$n]) };
+    [1] => { maelstrom_base::JobOutcome::Completed($crate::completed![1]) };
+    [2] => { maelstrom_base::JobOutcome::Completed($crate::completed![2]) };
+    [3] => { maelstrom_base::JobOutcome::Completed($crate::completed![3]) };
+    [$n:expr] => { maelstrom_base::JobOutcome::Completed($crate::completed![$n]) };
 }
 
 #[macro_export]
