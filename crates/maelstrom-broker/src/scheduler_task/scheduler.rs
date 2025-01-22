@@ -1,8 +1,9 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use crate::cache::SchedulerCache;
-use crate::scheduler_task::ManifestReadRequest;
+use crate::{cache::SchedulerCache, scheduler_task::ManifestReadRequest};
+use anyhow::Result;
+use enum_map::enum_map;
 use maelstrom_base::{
     proto::{
         ArtifactUploadLocation, BrokerToClient, BrokerToMonitor, BrokerToWorker, ClientToBroker,
@@ -13,7 +14,7 @@ use maelstrom_base::{
         WorkerStatistics,
     },
     ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
-    JobWorkerStatus, MonitorId, Sha256Digest, WorkerId,
+    JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
     cache::GetArtifact,
@@ -146,7 +147,7 @@ where
     /// passed in to `Self::receive_message`.
     pub fn new(cache: CacheT, manifest_reader_sender: DepsT::ManifestReaderSender) -> Self {
         Scheduler {
-            cache,
+            artifact_gatherer: ArtifactGatherer::new(cache, manifest_reader_sender),
             clients: ClientMap(HashMap::default()),
             workers: WorkerMap(HashMap::default()),
             monitors: HashMap::default(),
@@ -154,7 +155,6 @@ where
             worker_heap: Heap::default(),
             job_statistics: JobStatisticsTimeSeries::default(),
             tcp_upload_landing_pad: Default::default(),
-            manifest_reader_sender,
         }
     }
 
@@ -234,23 +234,11 @@ impl IsManifest {
 
 struct Job {
     spec: JobSpec,
-    acquired_artifacts: HashSet<Sha256Digest>,
-    missing_artifacts: HashMap<Sha256Digest, IsManifest>,
-    manifests_being_read: HashSet<Sha256Digest>,
 }
 
 impl Job {
     fn new(spec: JobSpec) -> Self {
-        Job {
-            spec,
-            acquired_artifacts: Default::default(),
-            missing_artifacts: Default::default(),
-            manifests_being_read: Default::default(),
-        }
-    }
-
-    fn have_all_artifacts(&self) -> bool {
-        self.missing_artifacts.is_empty() && self.manifests_being_read.is_empty()
+        Job { spec }
     }
 }
 
@@ -352,8 +340,273 @@ impl Ord for QueuedJob {
     }
 }
 
-pub struct Scheduler<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
+#[derive(Default)]
+struct ArtifactGathererJob {
+    acquired_artifacts: HashSet<Sha256Digest>,
+    missing_artifacts: HashMap<Sha256Digest, IsManifest>,
+    manifests_being_read: HashSet<Sha256Digest>,
+}
+
+impl ArtifactGathererJob {
+    fn have_all_artifacts(&self) -> bool {
+        self.missing_artifacts.is_empty() && self.manifests_being_read.is_empty()
+    }
+}
+
+#[derive(Default)]
+struct ArtifactGathererClient {
+    jobs: HashMap<ClientJobId, ArtifactGathererJob>,
+}
+
+#[must_use]
+enum ArtifactGathererStartJob {
+    NotReady(Vec<Sha256Digest>),
+    Ready,
+}
+
+struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
     cache: CacheT,
+    clients: HashMap<ClientId, ArtifactGathererClient>,
+    manifest_reader_sender: DepsT::ManifestReaderSender,
+}
+
+impl<CacheT, DepsT> ArtifactGatherer<CacheT, DepsT>
+where
+    CacheT: SchedulerCache,
+    DepsT: SchedulerDeps<ArtifactStream = CacheT::ArtifactStream>,
+{
+    fn new(cache: CacheT, manifest_reader_sender: DepsT::ManifestReaderSender) -> Self {
+        Self {
+            cache,
+            clients: Default::default(),
+            manifest_reader_sender,
+        }
+    }
+
+    fn receive_client_connected(&mut self, cid: ClientId) {
+        self.clients
+            .insert(cid, Default::default())
+            .assert_is_none();
+    }
+
+    fn receive_client_disconnected(&mut self, cid: ClientId) {
+        self.cache.client_disconnected(cid);
+
+        let client = self.clients.remove(&cid).unwrap();
+        for job in client.jobs.into_values() {
+            for artifact in job.acquired_artifacts {
+                self.cache.decrement_refcount(&artifact);
+            }
+        }
+    }
+
+    #[must_use]
+    fn start_artifact_acquisition_for_job(
+        cache: &mut CacheT,
+        deps: &mut DepsT,
+        digest: &Sha256Digest,
+        is_manifest: IsManifest,
+        jid: JobId,
+        job: &mut ArtifactGathererJob,
+        manifest_reader_sender: &mut DepsT::ManifestReaderSender,
+    ) -> bool {
+        if job.acquired_artifacts.contains(digest) || job.missing_artifacts.contains_key(digest) {
+            return false;
+        }
+        match cache.get_artifact(jid, digest.clone()) {
+            GetArtifact::Success => {
+                Self::complete_artifact_acquisition_for_job(
+                    cache,
+                    deps,
+                    digest,
+                    is_manifest,
+                    jid,
+                    job,
+                    manifest_reader_sender,
+                );
+                false
+            }
+            GetArtifact::Wait => {
+                job.missing_artifacts
+                    .insert(digest.clone(), is_manifest)
+                    .assert_is_none();
+                false
+            }
+            GetArtifact::Get => {
+                job.missing_artifacts
+                    .insert(digest.clone(), is_manifest)
+                    .assert_is_none();
+                true
+            }
+        }
+    }
+
+    fn complete_artifact_acquisition_for_job(
+        cache: &mut CacheT,
+        deps: &mut DepsT,
+        digest: &Sha256Digest,
+        is_manifest: IsManifest,
+        jid: JobId,
+        job: &mut ArtifactGathererJob,
+        manifest_reader_sender: &mut DepsT::ManifestReaderSender,
+    ) {
+        job.acquired_artifacts
+            .insert(digest.clone())
+            .assert_is_true();
+        if is_manifest.is_manifest() {
+            let manifest_stream = cache.read_artifact(digest);
+            deps.send_message_to_manifest_reader(
+                manifest_reader_sender,
+                ManifestReadRequest {
+                    manifest_stream,
+                    digest: digest.clone(),
+                    jid,
+                },
+            );
+            job.manifests_being_read
+                .insert(digest.clone())
+                .assert_is_true();
+        }
+    }
+
+    fn start_job(
+        &mut self,
+        deps: &mut DepsT,
+        jid: JobId,
+        layers: NonEmpty<(Sha256Digest, ArtifactType)>,
+    ) -> ArtifactGathererStartJob {
+        let JobId { cid, cjid } = jid;
+        let client = self.clients.get_mut(&cid).unwrap();
+        let Entry::Vacant(job_entry) = client.jobs.entry(cjid) else {
+            panic!("job entry already exists for {jid:?}");
+        };
+        let job = job_entry.insert(Default::default());
+
+        let mut artifacts_to_fetch = vec![];
+        for (digest, type_) in layers {
+            let is_manifest = IsManifest::from(type_ == ArtifactType::Manifest);
+            let fetch_artifact = Self::start_artifact_acquisition_for_job(
+                &mut self.cache,
+                deps,
+                &digest,
+                is_manifest,
+                jid,
+                job,
+                &mut self.manifest_reader_sender,
+            );
+            if fetch_artifact {
+                artifacts_to_fetch.push(digest);
+            }
+        }
+
+        if job.have_all_artifacts() {
+            ArtifactGathererStartJob::Ready
+        } else {
+            ArtifactGathererStartJob::NotReady(artifacts_to_fetch)
+        }
+    }
+
+    fn receive_artifact_transferred(
+        &mut self,
+        deps: &mut DepsT,
+        digest: &Sha256Digest,
+        file: Option<CacheT::TempFile>,
+    ) -> Result<HashSet<JobId>> {
+        Ok(self
+            .cache
+            .got_artifact(digest, file)?
+            .into_iter()
+            .filter(|jid| {
+                let client = self.clients.get_mut(&jid.cid).unwrap();
+                let job = client.jobs.get_mut(&jid.cjid).unwrap();
+                let is_manifest = job.missing_artifacts.remove(digest).unwrap();
+                Self::complete_artifact_acquisition_for_job(
+                    &mut self.cache,
+                    deps,
+                    digest,
+                    is_manifest,
+                    *jid,
+                    job,
+                    &mut self.manifest_reader_sender,
+                );
+                job.have_all_artifacts()
+            })
+            .collect())
+    }
+
+    fn receive_manifest_entry(
+        &mut self,
+        deps: &mut DepsT,
+        digest: &Sha256Digest,
+        jid: JobId,
+    ) -> bool {
+        let Some(client) = self.clients.get_mut(&jid.cid) else {
+            // This indicates that the client isn't around anymore. Just ignore this message. When
+            // the client disconnected, we canceled all of the outstanding requests. Ideally, we
+            // would have a way to cancel the outstanding manifest read, but we don't currently
+            // have that.
+            return false;
+        };
+        let job = client.jobs.get_mut(&jid.cjid).unwrap();
+        Self::start_artifact_acquisition_for_job(
+            &mut self.cache,
+            deps,
+            digest,
+            IsManifest::NotManifest,
+            jid,
+            job,
+            &mut self.manifest_reader_sender,
+        )
+    }
+
+    #[must_use]
+    fn receive_finished_reading_manifest(
+        &mut self,
+        manifest_digest: Sha256Digest,
+        jid: JobId,
+        result: anyhow::Result<()>,
+    ) -> bool {
+        // It would be better to not crash...
+        result.expect("failed reading a manifest");
+
+        let Some(client) = self.clients.get_mut(&jid.cid) else {
+            // This indicates that the client isn't around anymore. Just ignore this message. When
+            // the client disconnected, we canceled all of the outstanding requests.
+            return false;
+        };
+        let job = client.jobs.get_mut(&jid.cjid).unwrap();
+        job.manifests_being_read
+            .remove(&manifest_digest)
+            .assert_is_true();
+
+        job.have_all_artifacts()
+    }
+
+    fn complete_job(&mut self, jid: JobId) {
+        let client = self.clients.get_mut(&jid.cid).unwrap();
+        let job = client.jobs.remove(&jid.cjid).unwrap();
+        for artifact in job.acquired_artifacts {
+            self.cache.decrement_refcount(&artifact);
+        }
+    }
+
+    fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
+        self.cache.decrement_refcount(&digest);
+    }
+
+    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
+        self.clients
+            .get(&cid)
+            .unwrap()
+            .jobs
+            .values()
+            .filter(|job| !job.have_all_artifacts())
+            .count() as u64
+    }
+}
+
+pub struct Scheduler<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
+    artifact_gatherer: ArtifactGatherer<CacheT, DepsT>,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
     monitors: HashMap<MonitorId, DepsT::MonitorSender>,
@@ -361,7 +614,6 @@ pub struct Scheduler<CacheT: SchedulerCache, DepsT: SchedulerDeps> {
     worker_heap: Heap<WorkerMap<DepsT>>,
     job_statistics: JobStatisticsTimeSeries,
     tcp_upload_landing_pad: HashMap<Sha256Digest, CacheT::TempFile>,
-    manifest_reader_sender: DepsT::ManifestReaderSender,
 }
 
 impl<CacheT, DepsT> Scheduler<CacheT, DepsT>
@@ -399,79 +651,8 @@ where
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn start_artifact_acquisition_for_job(
-        cache: &mut CacheT,
-        client_sender: &mut DepsT::ClientSender,
-        deps: &mut DepsT,
-        digest: Sha256Digest,
-        is_manifest: IsManifest,
-        jid: JobId,
-        job: &mut Job,
-        manifest_reader_sender: &mut DepsT::ManifestReaderSender,
-    ) {
-        if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains_key(&digest) {
-            return;
-        }
-        match cache.get_artifact(jid, digest.clone()) {
-            GetArtifact::Success => {
-                Self::complete_artifact_acquisition_for_job(
-                    cache,
-                    deps,
-                    &digest,
-                    is_manifest,
-                    jid,
-                    job,
-                    manifest_reader_sender,
-                );
-            }
-            GetArtifact::Wait => {
-                job.missing_artifacts
-                    .insert(digest, is_manifest)
-                    .assert_is_none();
-            }
-            GetArtifact::Get => {
-                job.missing_artifacts
-                    .insert(digest.clone(), is_manifest)
-                    .assert_is_none();
-                deps.send_message_to_client(
-                    client_sender,
-                    BrokerToClient::TransferArtifact(digest),
-                );
-            }
-        }
-    }
-
-    fn complete_artifact_acquisition_for_job(
-        cache: &mut CacheT,
-        deps: &mut DepsT,
-        digest: &Sha256Digest,
-        is_manifest: IsManifest,
-        jid: JobId,
-        job: &mut Job,
-        manifest_reader_sender: &mut DepsT::ManifestReaderSender,
-    ) {
-        job.acquired_artifacts
-            .insert(digest.clone())
-            .assert_is_true();
-
-        if is_manifest.is_manifest() {
-            let manifest_stream = cache.read_artifact(digest);
-            deps.send_message_to_manifest_reader(
-                manifest_reader_sender,
-                ManifestReadRequest {
-                    manifest_stream,
-                    digest: digest.clone(),
-                    jid,
-                },
-            );
-            job.manifests_being_read
-                .insert(digest.clone())
-                .assert_is_true();
-        }
-    }
-
     fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
+        self.artifact_gatherer.receive_client_connected(cid);
         self.clients
             .0
             .insert(cid, Client::new(sender))
@@ -479,14 +660,8 @@ where
     }
 
     fn receive_client_disconnected(&mut self, deps: &mut DepsT, cid: ClientId) {
-        self.cache.client_disconnected(cid);
-
-        let client = self.clients.0.remove(&cid).unwrap();
-        for job in client.jobs.into_values() {
-            for artifact in job.acquired_artifacts {
-                self.cache.decrement_refcount(&artifact);
-            }
-        }
+        self.artifact_gatherer.receive_client_disconnected(cid);
+        self.clients.0.remove(&cid).assert_is_some();
 
         self.queued_jobs.retain(|qj| qj.jid.cid != cid);
         for worker in self.workers.0.values_mut() {
@@ -518,34 +693,26 @@ where
 
         let client = self.clients.0.get_mut(&cid).unwrap();
         let jid = JobId { cid, cjid };
-        let Entry::Vacant(job_entry) = client.jobs.entry(cjid) else {
-            panic!("entry already exists for {jid:?}");
-        };
-        let job = job_entry.insert(Job::new(spec));
+        client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
 
-        for (digest, type_) in layers {
-            let is_manifest = IsManifest::from(type_ == ArtifactType::Manifest);
-            Self::start_artifact_acquisition_for_job(
-                &mut self.cache,
-                &mut client.sender,
-                deps,
-                digest,
-                is_manifest,
-                jid,
-                job,
-                &mut self.manifest_reader_sender,
-            );
-        }
-
-        if job.have_all_artifacts() {
-            self.queued_jobs
-                .push(QueuedJob::new(jid, priority, estimated_duration));
-            self.possibly_start_jobs(deps, HashSet::from_iter([jid]));
-        } else {
-            deps.send_message_to_client(
-                &mut client.sender,
-                BrokerToClient::JobStatusUpdate(jid.cjid, JobBrokerStatus::WaitingForLayers),
-            );
+        match self.artifact_gatherer.start_job(deps, jid, layers) {
+            ArtifactGathererStartJob::Ready => {
+                self.queued_jobs
+                    .push(QueuedJob::new(jid, priority, estimated_duration));
+                self.possibly_start_jobs(deps, HashSet::from_iter([jid]));
+            }
+            ArtifactGathererStartJob::NotReady(to_fetch) => {
+                for digest in to_fetch {
+                    deps.send_message_to_client(
+                        &mut client.sender,
+                        BrokerToClient::TransferArtifact(digest),
+                    );
+                }
+                deps.send_message_to_client(
+                    &mut client.sender,
+                    BrokerToClient::JobStatusUpdate(jid.cjid, JobBrokerStatus::WaitingForLayers),
+                );
+            }
         }
     }
 
@@ -604,10 +771,8 @@ where
             &mut client.sender,
             BrokerToClient::JobResponse(jid.cjid, result),
         );
-        let job = client.jobs.remove(&jid.cjid).unwrap();
-        for artifact in job.acquired_artifacts {
-            self.cache.decrement_refcount(&artifact);
-        }
+        client.jobs.remove(&jid.cjid).assert_is_some();
+        self.artifact_gatherer.complete_job(jid);
         client.num_completed_jobs += 1;
 
         if let Some(QueuedJob { jid, .. }) = self.queued_jobs.pop() {
@@ -694,95 +859,60 @@ where
             .then(|| self.tcp_upload_landing_pad.remove(&digest))
             .flatten();
 
-        let jids = match self.cache.got_artifact(&digest, file) {
-            Ok(jids) => {
-                self.send_artifact_transferred_response(deps, cid, digest.clone(), Ok(()));
-                jids
-            }
+        match self
+            .artifact_gatherer
+            .receive_artifact_transferred(deps, &digest, file)
+        {
             Err(err) => {
                 self.send_artifact_transferred_response(deps, cid, digest, Err(err.to_string()));
-                return;
             }
-        };
-
-        let mut just_enqueued = HashSet::default();
-        for jid in jids {
-            let client = self.clients.0.get_mut(&jid.cid).unwrap();
-            let job = client.jobs.get_mut(&jid.cjid).unwrap();
-            let is_manifest = job.missing_artifacts.remove(&digest).unwrap();
-            Self::complete_artifact_acquisition_for_job(
-                &mut self.cache,
-                deps,
-                &digest,
-                is_manifest,
-                jid,
-                job,
-                &mut self.manifest_reader_sender,
-            );
-
-            if job.have_all_artifacts() {
-                self.queued_jobs.push(QueuedJob::new(
-                    jid,
-                    job.spec.priority,
-                    job.spec.estimated_duration,
-                ));
-                just_enqueued.insert(jid);
+            Ok(ready) => {
+                self.send_artifact_transferred_response(deps, cid, digest.clone(), Ok(()));
+                for jid in &ready {
+                    let job = self.clients.job_from_jid(*jid);
+                    self.queued_jobs.push(QueuedJob::new(
+                        *jid,
+                        job.spec.priority,
+                        job.spec.estimated_duration,
+                    ));
+                }
+                self.possibly_start_jobs(deps, ready);
             }
         }
-        self.possibly_start_jobs(deps, just_enqueued);
     }
 
     fn receive_manifest_entry(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
-        let Some(client) = self.clients.0.get_mut(&jid.cid) else {
-            // This indicates that the client isn't around anymore. Just ignore this message. When
-            // the client disconnected, we canceled all of the outstanding requests. Ideally, we
-            // would have a way to cancel the outstanding manifest read, but we don't currently
-            // have that.
-            return;
-        };
-        let job = client.jobs.get_mut(&jid.cjid).unwrap();
-        Self::start_artifact_acquisition_for_job(
-            &mut self.cache,
-            &mut client.sender,
-            deps,
-            digest,
-            IsManifest::NotManifest,
-            jid,
-            job,
-            &mut self.manifest_reader_sender,
-        );
+        let fetch_artifact = self
+            .artifact_gatherer
+            .receive_manifest_entry(deps, &digest, jid);
+        if fetch_artifact {
+            let client = self.clients.0.get_mut(&jid.cid).unwrap();
+            deps.send_message_to_client(
+                &mut client.sender,
+                BrokerToClient::TransferArtifact(digest),
+            );
+        }
     }
 
     fn receive_finished_reading_manifest(
         &mut self,
         deps: &mut DepsT,
-        manifest_digest: Sha256Digest,
+        digest: Sha256Digest,
         jid: JobId,
         result: anyhow::Result<()>,
     ) {
-        // It would be better to not crash...
-        result.expect("failed reading a manifest");
-
-        let Some(client) = self.clients.0.get_mut(&jid.cid) else {
-            // This indicates that the client isn't around anymore. Just ignore this message. When
-            // the client disconnected, we canceled all of the outstanding requests.
-            return;
-        };
-        let job = client.jobs.get_mut(&jid.cjid).unwrap();
-        job.manifests_being_read
-            .remove(&manifest_digest)
-            .assert_is_true();
-
-        let mut just_enqueued = HashSet::default();
-        if job.have_all_artifacts() {
+        let job_ready = self
+            .artifact_gatherer
+            .receive_finished_reading_manifest(digest, jid, result);
+        if job_ready {
+            let job = self.clients.job_from_jid(jid);
             self.queued_jobs.push(QueuedJob::new(
                 jid,
                 job.spec.priority,
                 job.spec.estimated_duration,
             ));
-            just_enqueued.insert(jid);
+            self.possibly_start_jobs(deps, HashSet::from_iter([jid]));
         }
-        self.possibly_start_jobs(deps, just_enqueued);
     }
 
     fn receive_get_artifact_for_worker(
@@ -793,41 +923,39 @@ where
     ) {
         deps.send_message_to_worker_artifact_fetcher(
             &mut sender,
-            self.cache.get_artifact_for_worker(&digest),
+            self.artifact_gatherer
+                .cache
+                .get_artifact_for_worker(&digest),
         );
     }
 
     fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
-        self.cache.decrement_refcount(&digest);
+        self.artifact_gatherer.receive_decrement_refcount(digest);
     }
 
     fn sample_job_statistics_for_client(&self, cid: ClientId) -> JobStateCounts {
-        let client = self.clients.0.get(&cid).unwrap();
-        let jobs = &client.jobs;
-
-        let mut counts = JobStateCounts::default();
-        counts[JobState::WaitingForArtifacts] = jobs
-            .values()
-            .filter(|job| !job.have_all_artifacts())
-            .count() as u64;
-
-        counts[JobState::Pending] = self
-            .queued_jobs
-            .iter()
-            .filter(|QueuedJob { jid, .. }| jid.cid == cid)
-            .count() as u64;
-
-        counts[JobState::Running] = self
-            .workers
-            .0
-            .values()
-            .flat_map(|w| w.pending.iter())
-            .filter(|jid| jid.cid == cid)
-            .count() as u64;
-
-        counts[JobState::Complete] = client.num_completed_jobs;
-
-        counts
+        enum_map! {
+            JobState::WaitingForArtifacts => {
+                self.artifact_gatherer.get_waiting_for_artifacts_count(cid)
+            }
+            JobState::Pending => {
+                self
+                    .queued_jobs
+                    .iter()
+                    .filter(|QueuedJob { jid, .. }| jid.cid == cid)
+                    .count() as u64
+            }
+            JobState::Running => {
+                self
+                    .workers
+                    .0
+                    .values()
+                    .flat_map(|w| w.pending.iter())
+                    .filter(|jid| jid.cid == cid)
+                    .count() as u64
+            }
+            JobState::Complete => self.clients.0.get(&cid).unwrap().num_completed_jobs,
+        }
     }
 
     fn receive_statistics_heartbeat(&mut self) {
@@ -885,6 +1013,7 @@ mod tests {
 
     use TestMessage::*;
 
+    #[derive(Clone)]
     struct TestClientSender(ClientId);
     struct TestWorkerSender(WorkerId);
     struct TestMonitorSender(MonitorId);

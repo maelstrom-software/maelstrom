@@ -16,6 +16,7 @@ anyhow.workspace = true
 bytesize.workspace = true
 clap.workspace = true
 derive_more.workspace = true
+enum-map.workspace = true
 futures.workspace = true
 hyper-tungstenite.workspace = true
 hyper.workspace = true
@@ -37,7 +38,6 @@ xdg.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 colored-diff.workspace = true
-enum-map.workspace = true
 itertools.workspace = true
 maplit.workspace = true
 maelstrom-test.workspace = true
