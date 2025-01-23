@@ -629,7 +629,7 @@ pub enum JobOutcome {
 
 /// A job failed to execute for some reason. We separate the universe of errors into "execution"
 /// errors and "system" errors.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum JobError<T> {
     /// There was something wrong with the job that made it unable to be executed. This error
     /// indicates that there was something wrong with the job itself, and thus is obstensibly the
@@ -660,7 +660,7 @@ pub type JobResult<T, E> = Result<T, JobError<E>>;
 pub type JobOutcomeResult = JobResult<JobOutcome, String>;
 
 #[pocket_definition(export)]
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum JobWorkerStatus {
     WaitingForLayers,
     WaitingToExecute,
@@ -668,7 +668,7 @@ pub enum JobWorkerStatus {
 }
 
 #[pocket_definition(export)]
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum JobBrokerStatus {
     WaitingForLayers,
     WaitingForWorker,
@@ -678,8 +678,8 @@ pub enum JobBrokerStatus {
 /// ID of a worker connection. These share the same ID space as [`ClientId`] and [`MonitorId`].
 #[pocket_definition(export)]
 #[derive(
-    Copy,
     Clone,
+    Copy,
     Debug,
     Default,
     Deserialize,
@@ -687,11 +687,11 @@ pub enum JobBrokerStatus {
     Eq,
     From,
     Hash,
+    Into,
     Ord,
     PartialEq,
     PartialOrd,
     Serialize,
-    Into,
 )]
 pub struct WorkerId(u32);
 

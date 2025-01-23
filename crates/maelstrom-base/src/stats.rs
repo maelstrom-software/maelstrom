@@ -131,13 +131,13 @@ impl JobStatisticsTimeSeries {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct WorkerStatistics {
     pub slots: usize,
 }
 
 /// Useful information for a client to display about the broker's state.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct BrokerStatistics {
     pub worker_statistics: HashMap<WorkerId, WorkerStatistics>,
     pub job_statistics: JobStatisticsTimeSeries,
