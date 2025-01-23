@@ -712,11 +712,11 @@ mod tests {
         cache::SchedulerCache,
         scheduler_task::{artifact_gatherer::Deps as ArtifactGathererDeps, ManifestReadRequest},
     };
-    use anyhow::{anyhow, Result};
+    use anyhow::Result;
     use enum_map::enum_map;
     use itertools::Itertools;
     use maelstrom_base::{
-        digest, job_spec, manifest_digest,
+        digest, job_spec,
         proto::BrokerToWorker::{self, *},
         tar_digest,
     };
@@ -742,7 +742,6 @@ mod tests {
 
     use TestMessage::*;
 
-    #[derive(Clone)]
     struct TestClientSender(ClientId);
     struct TestWorkerSender(WorkerId);
     struct TestMonitorSender(MonitorId);
@@ -759,12 +758,6 @@ mod tests {
 
     #[derive(Clone, Debug, PartialEq)]
     struct TestArtifactStream(Sha256Digest);
-
-    macro_rules! artifact {
-        ($v:expr) => {
-            TestArtifactStream(digest!($v))
-        };
-    }
 
     impl SchedulerCache for Rc<RefCell<TestState>> {
         type TempFile = test::TempFile;
@@ -979,95 +972,9 @@ mod tests {
     }
 
     script_test! {
-        message_from_known_client_ok,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        ClientConnected(cid![1], client_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForWorker)),
-        };
-    }
-
-    #[test]
-    #[should_panic]
-    fn request_from_unknown_client_panics() {
-        let mut fixture = Fixture::default();
-        fixture.receive_message(FromClient(
-            cid![1],
-            ClientToBroker::JobRequest(cjid![1], spec!(1)),
-        ));
-    }
-
-    #[test]
-    #[should_panic]
-    fn disconnect_from_unknown_client_panics() {
-        let mut fixture = Fixture::default();
-        fixture.receive_message(ClientDisconnected(cid![1]));
-    }
-
-    #[test]
-    #[should_panic]
-    fn connect_from_duplicate_client_panics() {
-        let mut fixture = Fixture::default();
-        fixture.receive_message(ClientDisconnected(cid![1]));
-        fixture.receive_message(ClientDisconnected(cid![1]));
-    }
-
-    #[test]
-    #[should_panic]
-    fn response_from_unknown_worker_panics() {
-        let mut fixture = Fixture::default();
-        // The response will be ignored unless we use a valid ClientId.
-        fixture.receive_message(ClientConnected(cid![1], client_sender![1]));
-
-        fixture.receive_message(FromWorker(
-            wid![1],
-            WorkerToBroker::JobResponse(jid![1], Ok(outcome![1])),
-        ));
-    }
-
-    #[test]
-    #[should_panic]
-    fn disconnect_from_unknown_worker_panics() {
-        let mut fixture = Fixture::default();
-        fixture.receive_message(WorkerDisconnected(wid![1]));
-    }
-
-    #[test]
-    #[should_panic]
-    fn connect_from_duplicate_worker_panics() {
-        let mut fixture = Fixture::default();
-        fixture.receive_message(WorkerConnected(wid![1], 2, worker_sender![1]));
-        fixture.receive_message(WorkerConnected(wid![1], 2, worker_sender![1]));
-    }
-
-    script_test! {
         response_from_known_worker_for_unknown_job_ignored,
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
         FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1], Ok(outcome![1]))) => {};
-    }
-
-    script_test! {
-        one_client_one_worker,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        ClientConnected(cid![1], client_sender![1]) => {};
-        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1], spec!(1))),
-        };
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1], Ok(outcome![1]))) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
-            CacheDecrementRefcount(digest![1]),
-        };
     }
 
     script_test! {
@@ -1229,208 +1136,6 @@ mod tests {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 6], spec!(6))),
-        };
-    }
-
-    script_test! {
-        queued_requests_go_to_workers_on_connect,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-                ((jid![1, 5], digest![5]), vec![GetArtifact::Success]),
-                ((jid![1, 6], digest![6]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
-            CacheGetArtifact(jid![1, 1], digest!(1)),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForWorker)),
-        };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(2, priority: -1, estimated_duration: millis!(6)))) => {
-            CacheGetArtifact(jid![1, 2], digest!(2)),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForWorker)),
-        };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec!(3, estimated_duration: millis!(5)))) => {
-            CacheGetArtifact(jid![1, 3], digest!(3)),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![3], JobBrokerStatus::WaitingForWorker)),
-        };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec!(4, estimated_duration: millis!(4)))) => {
-            CacheGetArtifact(jid![1, 4], digest!(4)),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![4], JobBrokerStatus::WaitingForWorker)),
-        };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], spec!(5, estimated_duration: millis!(3)))) => {
-            CacheGetArtifact(jid![1, 5], digest!(5)),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![5], JobBrokerStatus::WaitingForWorker)),
-        };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![6], spec!(6, priority: 1, estimated_duration: millis!(2)))) => {
-            CacheGetArtifact(jid![1, 6], digest!(6)),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![6], JobBrokerStatus::WaitingForWorker)),
-        };
-
-        WorkerConnected(wid![1], 2, worker_sender![1]) => {
-            ToWorker(wid![1], EnqueueJob(jid![1, 6], spec!(6, priority: 1, estimated_duration: millis!(2)))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 3], spec!(3, estimated_duration: millis!(5)))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 4], spec!(4, estimated_duration: millis!(4)))),
-        };
-
-        WorkerConnected(wid![2], 2, worker_sender![2]) => {
-            ToWorker(wid![2], EnqueueJob(jid![1, 5], spec!(5, estimated_duration: millis!(3)))),
-            ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(2, priority: -1, estimated_duration: millis!(6)))),
-        };
-    }
-
-    script_test! {
-        requests_outstanding_on_disconnected_worker_get_sent_to_new_workers,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-                ((jid![1, 5], digest![5]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
-        WorkerConnected(wid![3], 1, worker_sender![3]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1, priority: 1, estimated_duration: millis!(50)))) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1, priority: 1, estimated_duration: millis!(50)))),
-        };
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(2))) => {
-            CacheGetArtifact(jid![1, 2], digest![2]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(2))),
-        };
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec!(3))) => {
-            CacheGetArtifact(jid![1, 3], digest![3]),
-            ToWorker(wid![3], EnqueueJob(jid![1, 3], spec!(3))),
-        };
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec!(4, estimated_duration: millis!(40)))) => {
-            CacheGetArtifact(jid![1, 4], digest![4]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 4], spec!(4, estimated_duration: millis!(40)))),
-        };
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], spec!(5))) => {
-            CacheGetArtifact(jid![1, 5], digest![5]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 5], spec!(5))),
-        };
-
-        WorkerDisconnected(wid![1]) => {
-            ToWorker(wid![3], EnqueueJob(jid![1, 1], spec!(1, priority: 1, estimated_duration: millis!(50)))),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![4], JobBrokerStatus::WaitingForWorker)),
-        };
-
-        FromWorker(wid![2], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![2]))) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
-            CacheDecrementRefcount(digest![2]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 4], spec!(4, estimated_duration: millis!(40)))),
-        };
-    }
-
-    script_test! {
-        requests_outstanding_on_disconnected_worker_get_sent_to_new_workers_2,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(2))) => {
-            CacheGetArtifact(jid![1, 2], digest![2]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec!(2))),
-        };
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec!(3, estimated_duration: millis!(300)))) => {
-            CacheGetArtifact(jid![1, 3], digest![3]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![3], JobBrokerStatus::WaitingForWorker)),
-        };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec!(4, estimated_duration: millis!(40)))) => {
-            CacheGetArtifact(jid![1, 4], digest![4]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![4], JobBrokerStatus::WaitingForWorker)),
-        };
-
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
-            CacheDecrementRefcount(digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 3], spec!(3, estimated_duration: millis!(300)))),
-        };
-
-        WorkerConnected(wid![2], 1, worker_sender![2]) => {
-            ToWorker(wid![2], EnqueueJob(jid![1, 4], spec!(4, estimated_duration: millis!(40)))),
-        };
-
-        WorkerDisconnected(wid![1]) => {
-            ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(2))),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![3], JobBrokerStatus::WaitingForWorker)),
-        };
-
-        FromWorker(wid![2], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![2]))) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
-            CacheDecrementRefcount(digest![2]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 3], spec!(3, estimated_duration: millis!(300)))),
-        };
-    }
-
-    script_test! {
-        requests_outstanding_on_disconnected_worker_get_reenqueued_for_other_workers,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1, estimated_duration: millis!(10)))) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1, estimated_duration: millis!(10)))),
-        };
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(2, estimated_duration: millis!(20)))) => {
-            CacheGetArtifact(jid![1, 2], digest![2]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec!(2, estimated_duration: millis!(20)))),
-        };
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec!(3, priority: 1, estimated_duration: millis!(1)))) => {
-            CacheGetArtifact(jid![1, 3], digest![3]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![3], JobBrokerStatus::WaitingForWorker)),
-        };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec!(4, estimated_duration: millis!(40)))) => {
-            CacheGetArtifact(jid![1, 4], digest![4]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![4], JobBrokerStatus::WaitingForWorker)),
-        };
-
-        WorkerDisconnected(wid![1]) => {
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForWorker)),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForWorker)),
-        };
-
-        WorkerConnected(wid![2], 1, worker_sender![2]) => {
-            ToWorker(wid![2], EnqueueJob(jid![1, 3], spec!(3, priority: 1, estimated_duration: millis!(1)))),
-            ToWorker(wid![2], EnqueueJob(jid![1, 4], spec!(4, estimated_duration: millis!(40)))),
         };
     }
 
@@ -1661,551 +1366,6 @@ mod tests {
         ClientDisconnected(cid![1]) => {
             CacheClientDisconnected(cid![1]),
             CacheDecrementRefcount(digest![42]),
-        }
-    }
-
-    script_test! {
-        request_with_layers_2,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![44]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(
-            cid![1],
-            ClientToBroker::JobRequest(cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))
-        ) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            CacheGetArtifact(jid![1, 2], digest![43]),
-            CacheGetArtifact(jid![1, 2], digest![44]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))),
-        };
-
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![1]))) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![1]))),
-            CacheDecrementRefcount(digest![42]),
-            CacheDecrementRefcount(digest![43]),
-            CacheDecrementRefcount(digest![44]),
-        };
-    }
-
-    script_test! {
-        request_with_layers_3,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
-                ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
-            ], [
-                (digest![43], vec![Ok(vec![jid![1, 2]])]),
-                (digest![44], vec![Ok(vec![jid![1, 2]])]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(
-            cid![1],
-            ClientToBroker::JobRequest(cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))
-        ) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            CacheGetArtifact(jid![1, 2], digest![43]),
-            CacheGetArtifact(jid![1, 2], digest![44]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
-        };
-
-        GotArtifact(digest![43], "/z/tmp/foo".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![43], ArtifactUploadLocation::TcpUpload)
-        ) => {
-            CacheGotArtifact(digest![43], Some("/z/tmp/foo".into())),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
-        };
-        GotArtifact(digest![44], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![44], ArtifactUploadLocation::TcpUpload)
-        ) => {
-            CacheGotArtifact(digest![44], Some("/z/tmp/bar".into())),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![44], Ok(()))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-            CacheDecrementRefcount(digest![43]),
-            CacheDecrementRefcount(digest![44]),
-        }
-    }
-
-    script_test! {
-        request_with_layers_3_remote_cache,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
-                ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
-            ], [
-                (digest![43], vec![Ok(vec![jid![1, 2]])]),
-                (digest![44], vec![Ok(vec![jid![1, 2]])]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(
-            cid![1],
-            ClientToBroker::JobRequest(cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))
-        ) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            CacheGetArtifact(jid![1, 2], digest![43]),
-            CacheGetArtifact(jid![1, 2], digest![44]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
-        };
-
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![43], ArtifactUploadLocation::Remote)
-        ) => {
-            CacheGotArtifact(digest![43], None),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
-        };
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![44], ArtifactUploadLocation::Remote)
-        ) => {
-            CacheGotArtifact(digest![44], None),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![44], Ok(()))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-            CacheDecrementRefcount(digest![43]),
-            CacheDecrementRefcount(digest![44]),
-        }
-    }
-
-    script_test! {
-        request_with_layers_3_cache_errors,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
-                ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
-            ], [
-                (digest![43], vec![Err(anyhow!("test error"))]),
-                (digest![44], vec![Err(anyhow!("test error"))]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(
-            cid![1],
-            ClientToBroker::JobRequest(cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))
-        ) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            CacheGetArtifact(jid![1, 2], digest![43]),
-            CacheGetArtifact(jid![1, 2], digest![44]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
-        };
-
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![43], ArtifactUploadLocation::Remote)
-        ) => {
-            CacheGotArtifact(digest![43], None),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Err("test error".into()))),
-        };
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![44], ArtifactUploadLocation::Remote)
-        ) => {
-            CacheGotArtifact(digest![44], None),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![44], Err("test error".into()))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-        }
-    }
-
-    script_test! {
-        request_with_duplicate_layers_in_cache,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(
-            cid![1], ClientToBroker::JobRequest(cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(42)]))
-        ) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(42)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-        }
-    }
-
-    script_test! {
-        request_with_duplicate_layers_not_in_cache,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Get]),
-            ], [
-                (digest![42], vec![Ok(vec![jid![1, 2]])]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(
-            cid![1], ClientToBroker::JobRequest(cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(42)]))
-        ) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![42])),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
-        };
-
-        GotArtifact(digest![42], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![42], ArtifactUploadLocation::TcpUpload)
-        ) => {
-            CacheGotArtifact(digest![42], Some("/z/tmp/bar".into())),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [tar_digest!(42), tar_digest!(42)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-        }
-    }
-
-    script_test! {
-        request_with_manifest_nothing_in_cache,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Get]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
-            ], [
-                (digest![42], vec![Ok(vec![jid![1, 2]])]),
-                (digest![43], vec![Ok(vec![jid![1, 2]])]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], job_spec!("1", [manifest_digest!(42)]))) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![42])),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
-        };
-
-        GotArtifact(digest![42], "/z/tmp/foo".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![42], ArtifactUploadLocation::TcpUpload)
-        ) => {
-            CacheGotArtifact(digest![42], Some("/z/tmp/foo".into())),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
-            CacheReadArtifact(digest![42]),
-            ReadManifest(ManifestReadRequest {
-                manifest_stream: artifact![42],
-                digest: digest![42],
-                jid: jid![1, 2],
-            }),
-        };
-
-        GotManifestEntry(digest![43], jid![1, 2]) => {
-            CacheGetArtifact(jid![1, 2], digest![43]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
-        };
-
-        FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
-
-        GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![43], ArtifactUploadLocation::TcpUpload)
-        ) => {
-            CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-            CacheDecrementRefcount(digest![43]),
-        }
-    }
-
-    script_test! {
-        request_with_manifest_with_duplicate_digests_with_nothing_in_cache,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Get]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
-            ], [
-                (digest![42], vec![Ok(vec![jid![1, 2]])]),
-                (digest![43], vec![Ok(vec![jid![1, 2]])]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], job_spec!("1", [manifest_digest!(42)]))) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![42])),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
-        };
-
-        GotArtifact(digest![42], "/z/tmp/foo".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![42], ArtifactUploadLocation::TcpUpload)
-        ) => {
-            CacheGotArtifact(digest![42], Some("/z/tmp/foo".into())),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![42], Ok(()))),
-            CacheReadArtifact(digest![42]),
-            ReadManifest(ManifestReadRequest {
-                manifest_stream: artifact![42],
-                digest: digest![42],
-                jid: jid![1, 2],
-            }),
-        };
-
-        GotManifestEntry(digest![43], jid![1, 2]) => {
-            CacheGetArtifact(jid![1, 2], digest![43]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
-        };
-
-        GotManifestEntry(digest![43], jid![1, 2]) => {};
-
-        FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
-
-        GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![43], ArtifactUploadLocation::TcpUpload)
-        ) => {
-            CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-            CacheDecrementRefcount(digest![43]),
-        }
-    }
-
-    script_test! {
-        request_with_manifest_already_in_cache,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
-            ], [
-                (digest![42], vec![Ok(vec![jid![1, 2]])]),
-                (digest![43], vec![Ok(vec![jid![1, 2]])]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], job_spec!("1", [manifest_digest!(42)]))) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            CacheReadArtifact(digest![42]),
-            ReadManifest(ManifestReadRequest {
-                manifest_stream: artifact![42],
-                digest: digest![42],
-                jid: jid![1, 2],
-            }),
-            ToClient(
-                cid![1],
-                BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)
-            ),
-        };
-
-        GotManifestEntry(digest![43], jid![1, 2]) => {
-            CacheGetArtifact(jid![1, 2], digest![43]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
-        };
-
-        FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
-
-        GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![43], ArtifactUploadLocation::TcpUpload)
-        ) => {
-            CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-            CacheDecrementRefcount(digest![43]),
-        }
-    }
-
-    script_test! {
-        request_with_manifest_with_manifest_dependency_not_in_cache,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
-            ], [
-                (digest![42], vec![Ok(vec![jid![1, 2]])]),
-                (digest![43], vec![Ok(vec![jid![1, 2]])]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], job_spec!("1", [manifest_digest!(42)]))) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            CacheReadArtifact(digest![42]),
-            ReadManifest(ManifestReadRequest {
-                manifest_stream: artifact![42],
-                digest: digest![42],
-                jid: jid![1, 2],
-            }),
-            ToClient(
-                cid![1],
-                BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)
-            ),
-        };
-
-        GotManifestEntry(digest![43], jid![1, 2]) => {
-            CacheGetArtifact(jid![1, 2], digest![43]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
-        };
-
-        FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {};
-
-        GotArtifact(digest![43], "/z/tmp/bar".into()) => {};
-        FromClient(cid![1], ClientToBroker::ArtifactTransferred(
-            digest![43], ArtifactUploadLocation::TcpUpload)
-        ) => {
-            CacheGotArtifact(digest![43], Some("/z/tmp/bar".into())),
-            ToClient(cid![1], BrokerToClient::ArtifactTransferredResponse(digest![43], Ok(()))),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-            CacheDecrementRefcount(digest![43]),
-        }
-    }
-
-    script_test! {
-        request_with_manifest_with_manifest_dependency_in_cache,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Success]),
-            ], [
-                (digest![42], vec![Ok(vec![jid![1, 2]])]),
-                (digest![43], vec![Ok(vec![jid![1, 2]])]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], job_spec!("1", [manifest_digest!(42)]))) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            CacheReadArtifact(digest![42]),
-            ReadManifest(ManifestReadRequest {
-                manifest_stream: artifact![42],
-                digest: digest![42],
-                jid: jid![1, 2],
-            }),
-            ToClient(
-                cid![1],
-                BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)
-            ),
-        };
-
-        GotManifestEntry(digest![43], jid![1, 2]) => {
-            CacheGetArtifact(jid![1, 2], digest![43]),
-        };
-
-        FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-            CacheDecrementRefcount(digest![43]),
-        }
-    }
-
-    script_test! {
-        request_with_manifest_with_duplicate_digests_already_in_cache,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Success]),
-            ], [
-                (digest![42], vec![Ok(vec![jid![1, 2]])]),
-                (digest![43], vec![Ok(vec![jid![1, 2]])]),
-            ], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], job_spec!("1", [manifest_digest!(42)]))) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            CacheReadArtifact(digest![42]),
-            ReadManifest(ManifestReadRequest {
-                manifest_stream: artifact![42],
-                digest: digest![42],
-                jid: jid![1, 2],
-            }),
-            ToClient(
-                cid![1],
-                BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)
-            ),
-        };
-
-        GotManifestEntry(digest![43], jid![1, 2]) => {
-            CacheGetArtifact(jid![1, 2], digest![43]),
-        };
-
-        FinishedReadingManifest(digest![42], jid![1, 2], Ok(())) => {
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], job_spec!("1", [manifest_digest!(42)]))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 2])),
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-            CacheDecrementRefcount(digest![43]),
         }
     }
 
@@ -2457,5 +1617,766 @@ mod tests {
             wid![1],
             WorkerToBroker::JobStatusUpdate(jid![2, 3], JobWorkerStatus::Executing)
         ) => {};
+    }
+}
+
+#[cfg(test)]
+mod tests2 {
+    use super::{Message::*, *};
+    use maelstrom_base::{digest, job_spec, nonempty, tar_digest};
+    use maelstrom_test::{cid, cjid, jid, mid, outcome, wid};
+    use std::{
+        cell::RefCell,
+        ops::{Deref, DerefMut},
+        rc::Rc,
+    };
+
+    #[derive(Debug)]
+    struct TestClientSender(ClientId);
+
+    #[derive(Debug)]
+    struct TestWorkerSender(WorkerId);
+
+    #[derive(Debug)]
+    struct TestMonitorSender(MonitorId);
+
+//    struct TestWorkerArtifactFetcherSender(u32);
+    #[derive(Debug)]
+    struct TestWorkerArtifactFetcherSender;
+
+    macro_rules! client_sender {
+        [$n:expr] => { TestClientSender(cid![$n]) };
+    }
+
+    macro_rules! worker_sender {
+        [$n:expr] => { TestWorkerSender(wid![$n]) };
+    }
+
+    macro_rules! monitor_sender {
+        [$n:expr] => { TestMonitorSender(mid![$n]) };
+    }
+
+    /*
+    macro_rules! worker_artifact_fetcher_sender {
+        [$n:expr] => { TestWorkerArtifactFetcherSender($n) };
+    }
+    */
+
+    #[derive(Default)]
+    struct Mock {
+        client_connected: Vec<ClientId>,
+        client_disconnected: Vec<ClientId>,
+        start_job: Vec<(JobId, NonEmpty<(Sha256Digest, ArtifactType)>, StartJob)>,
+        complete_job: Vec<JobId>,
+        send_message_to_client: Vec<(ClientId, BrokerToClient)>,
+        send_message_to_worker: Vec<(WorkerId, BrokerToWorker)>,
+        send_message_to_monitor: Vec<(MonitorId, BrokerToMonitor)>,
+    }
+
+    impl ArtifactGatherer for Rc<RefCell<Mock>> {
+        type TempFile = String;
+        fn client_connected(&mut self, cid: ClientId) {
+            let client_connected = &mut self.borrow_mut().client_connected;
+            let index = client_connected
+                .iter()
+                .position(|e| *e == cid)
+                .expect(&format!(
+                    "sending unexpected client_connected to artifact gatherer for client {cid}"
+                ));
+            client_connected.remove(index);
+        }
+        fn client_disconnected(&mut self, cid: ClientId) {
+            let client_disconnected = &mut self.borrow_mut().client_disconnected;
+            let index = client_disconnected
+                .iter()
+                .position(|e| *e == cid)
+                .expect(&format!(
+                    "sending unexpected client_disconnected to artifact gatherer for client {cid}"
+                ));
+            client_disconnected.remove(index);
+        }
+        fn start_job(
+            &mut self,
+            jid: JobId,
+            layers: NonEmpty<(Sha256Digest, ArtifactType)>,
+        ) -> StartJob {
+            let start_job = &mut self.borrow_mut().start_job;
+            let index = start_job
+                .iter()
+                .position(|e| e.0 == jid && e.1 == layers)
+                .expect(&format!(
+                    "sending unexpected start_job to artifact gatherer for job {jid}: {layers:#?}"
+                ));
+            start_job.remove(index).2
+        }
+        fn artifact_transferred(
+            &mut self,
+            digest: &Sha256Digest,
+            file: Option<Self::TempFile>,
+        ) -> Result<HashSet<JobId>> {
+            todo!("{digest:?} {file:?}");
+        }
+        fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) -> bool {
+            todo!("{digest:?} {jid:?}");
+        }
+        fn manifest_read_for_job_complete(
+            &mut self,
+            digest: Sha256Digest,
+            jid: JobId,
+            result: anyhow::Result<()>,
+        ) -> bool {
+            todo!("{digest:?} {jid:?} {result:?}");
+        }
+        fn complete_job(&mut self, jid: JobId) {
+            let complete_job = &mut self.borrow_mut().complete_job;
+            let index = complete_job.iter().position(|e| *e == jid).expect(&format!(
+                "sending unexpected complete_job to artifact gatherer for job {jid}"
+            ));
+            complete_job.remove(index);
+        }
+        fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
+            todo!("{digest:?}");
+        }
+        fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
+            todo!("{digest:?}");
+        }
+        fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
+            todo!("{cid:?}");
+        }
+    }
+
+    impl SchedulerDeps for Rc<RefCell<Mock>> {
+        type ClientSender = TestClientSender;
+        type WorkerSender = TestWorkerSender;
+        type MonitorSender = TestMonitorSender;
+        type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
+
+        fn send_message_to_client(
+            &mut self,
+            sender: &mut Self::ClientSender,
+            message: BrokerToClient,
+        ) {
+            let send_message_to_client = &mut self.borrow_mut().send_message_to_client;
+            let index = send_message_to_client
+                .iter()
+                .position(|e| e.0 == sender.0 && e.1 == message)
+                .expect(&format!(
+                    "sending unexpected message to client {sender:?}: {message:#?}"
+                ));
+            send_message_to_client.remove(index);
+        }
+
+        fn send_message_to_worker(
+            &mut self,
+            sender: &mut Self::WorkerSender,
+            message: BrokerToWorker,
+        ) {
+            let send_message_to_worker = &mut self.borrow_mut().send_message_to_worker;
+            let index = send_message_to_worker
+                .iter()
+                .position(|e| e.0 == sender.0 && e.1 == message)
+                .expect(&format!(
+                    "sending unexpected message to worker {sender:?}: {message:#?}"
+                ));
+            send_message_to_worker.remove(index);
+        }
+
+        fn send_message_to_monitor(
+            &mut self,
+            sender: &mut Self::MonitorSender,
+            message: BrokerToMonitor,
+        ) {
+            let send_message_to_monitor = &mut self.borrow_mut().send_message_to_monitor;
+            let index = send_message_to_monitor
+                .iter()
+                .position(|e| e.0 == sender.0 && e.1 == message)
+                .expect(&format!(
+                    "sending unexpected message to monitor {sender:?}: {message:#?}"
+                ));
+            send_message_to_monitor.remove(index);
+        }
+
+        fn send_message_to_worker_artifact_fetcher(
+            &mut self,
+            sender: &mut Self::WorkerArtifactFetcherSender,
+            message: Option<(PathBuf, u64)>,
+        ) {
+            todo!("{sender:?} {message:?}");
+        }
+    }
+
+    struct Fixture {
+        mock: Rc<RefCell<Mock>>,
+        sut: Scheduler<Rc<RefCell<Mock>>, Rc<RefCell<Mock>>>,
+    }
+
+    struct Expect<'a> {
+        fixture: &'a mut Fixture,
+    }
+
+    impl<'a> Expect<'a> {
+        fn client_connected(self, cid: ClientId) -> Self {
+            self.fixture.mock.borrow_mut().client_connected.push(cid);
+            self
+        }
+
+        /*
+        fn client_disconnected(self, cid: ClientId) -> Self {
+            self.fixture.mock.borrow_mut().client_disconnected.push(cid);
+            self
+        }
+        */
+
+        fn start_job(
+            self,
+            jid: JobId,
+            layers: NonEmpty<(Sha256Digest, ArtifactType)>,
+            result: StartJob,
+        ) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .start_job
+                .push((jid, layers, result));
+            self
+        }
+
+        /*
+        fn artifact_transferred(
+            self,
+            digest: Sha256Digest,
+            file: Option<String>,
+            result: Result<HashSet<JobId>>,
+        ) -> Self {
+            todo!();
+        }
+        */
+
+        /*
+        fn manifest_read_for_job_entry(
+            self,
+            digest: Sha256Digest,
+            jid: JobId,
+            job_ready: bool,
+        ) -> Self {
+            todo!();
+        }
+
+        fn manifest_read_for_job_complete(
+            self,
+            digest: Sha256Digest,
+            jid: JobId,
+            result: anyhow::Result<()>,
+            job_ready: bool,
+        ) -> Self {
+            todo!();
+        }
+        */
+
+        fn complete_job(self, jid: JobId) -> Self {
+            self.fixture.mock.borrow_mut().complete_job.push(jid);
+            self
+        }
+
+        /*
+        fn get_artifact_for_worker(
+            self,
+            digest: Sha256Digest,
+            result: Option<(PathBuf, u64)>,
+        ) -> Self {
+            todo!();
+        }
+
+        fn receive_decrement_refcount(self, digest: Sha256Digest) -> Self {
+            todo!();
+        }
+
+        fn get_waiting_for_artifacts_count(&self, cid: ClientId, count: u64) -> Self {
+            todo!();
+        }
+        */
+
+        fn send_message_to_client(self, sender: TestClientSender, message: BrokerToClient) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .send_message_to_client
+                .push((sender.0, message));
+            self
+        }
+
+        fn send_message_to_worker(self, sender: TestWorkerSender, message: BrokerToWorker) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .send_message_to_worker
+                .push((sender.0, message));
+            self
+        }
+
+        /*
+        fn send_message_to_monitor(
+            self,
+            sender: TestMonitorSender,
+            message: BrokerToMonitor,
+        ) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .send_message_to_monitor
+                .push((sender.0, message));
+            self
+        }
+        */
+
+        /*
+        fn send_message_to_worker_artifact_fetcher(
+            self,
+            sender: TestWorkerArtifactFetcherSender,
+            message: Option<(PathBuf, u64)>,
+        ) -> Self {
+            todo!();
+        }
+        */
+
+        fn when(self) -> When<'a> {
+            let Expect { fixture } = self;
+            When { fixture }
+        }
+    }
+
+    struct When<'a> {
+        fixture: &'a mut Fixture,
+    }
+
+    impl<'a> Deref for When<'a> {
+        type Target = Fixture;
+
+        fn deref(&self) -> &Self::Target {
+            &self.fixture
+        }
+    }
+
+    impl<'a> DerefMut for When<'a> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.fixture
+        }
+    }
+
+    impl<'a> Drop for When<'a> {
+        fn drop(&mut self) {
+            let mock = self.fixture.mock.borrow();
+            assert!(mock.client_connected.is_empty());
+            assert!(mock.client_disconnected.is_empty());
+            assert!(mock.start_job.is_empty());
+            assert!(mock.complete_job.is_empty());
+            assert!(mock.send_message_to_client.is_empty());
+            assert!(mock.send_message_to_worker.is_empty());
+            assert!(mock.send_message_to_monitor.is_empty());
+        }
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let mock = Rc::new(RefCell::new(Default::default()));
+            let sut = Scheduler::new(mock.clone());
+            Self { mock, sut }
+        }
+
+        fn expect(&mut self) -> Expect {
+            Expect { fixture: self }
+        }
+
+        fn with_client(mut self, cid: ClientId) -> Self {
+            self.expect()
+                .client_connected(cid)
+                .when()
+                .receive_message(ClientConnected(cid, TestClientSender(cid)));
+            self
+        }
+
+        fn with_worker(mut self, wid: WorkerId, slots: usize) -> Self {
+            self.receive_message(WorkerConnected(wid, slots, TestWorkerSender(wid)));
+            self
+        }
+
+        fn receive_message(
+            &mut self,
+            message: Message<
+                TestClientSender,
+                TestWorkerSender,
+                TestMonitorSender,
+                TestWorkerArtifactFetcherSender,
+                String,
+            >,
+        ) {
+            self.sut.receive_message(&mut self.mock, message);
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn message_from_unknown_client_panics() {
+        let mut fixture = Fixture::new();
+        fixture.receive_message(FromClient(
+            cid!(1),
+            ClientToBroker::JobRequest(cjid!(1), job_spec!("test", [tar_digest!(1)])),
+        ));
+    }
+
+    #[test]
+    #[should_panic]
+    fn disconnect_from_unknown_client_panics() {
+        let mut fixture = Fixture::new();
+        fixture.receive_message(ClientDisconnected(cid!(1)));
+    }
+
+    #[test]
+    #[should_panic]
+    fn connect_from_duplicate_client_panics() {
+        Fixture::new().with_client(cid!(1)).with_client(cid!(1));
+    }
+
+    #[test]
+    #[should_panic]
+    fn message_from_unknown_worker_panics() {
+        let mut fixture = Fixture::new();
+        fixture.receive_message(FromWorker(
+            wid!(1),
+            WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing),
+        ));
+    }
+
+    #[test]
+    #[should_panic]
+    fn disconnect_from_unknown_worker_panics() {
+        let mut fixture = Fixture::new();
+        fixture.receive_message(WorkerDisconnected(wid!(1)));
+    }
+
+    #[test]
+    #[should_panic]
+    fn connect_from_duplicate_worker_panics() {
+        Fixture::new()
+            .with_worker(wid!(1), 2)
+            .with_worker(wid!(1), 2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn message_from_unknown_monitor_panics() {
+        let mut fixture = Fixture::new();
+        fixture.receive_message(FromMonitor(mid!(1), MonitorToBroker::StatisticsRequest));
+    }
+
+    #[test]
+    #[should_panic]
+    fn disconnect_from_unknown_monitor_panics() {
+        let mut fixture = Fixture::new();
+        fixture.receive_message(MonitorDisconnected(mid!(1)));
+    }
+
+    #[test]
+    #[should_panic]
+    fn connect_from_duplicate_monitor_panics() {
+        let mut fixture = Fixture::new();
+        fixture.receive_message(MonitorConnected(mid!(1), monitor_sender!(1)));
+        fixture.receive_message(MonitorConnected(mid!(1), monitor_sender!(1)));
+    }
+
+    #[test]
+    fn job_request_ready_worker_available() {
+        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+
+        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
+
+        fixture
+            .expect()
+            .start_job(
+                jid!(1),
+                nonempty![tar_digest!(1), tar_digest!(2)],
+                StartJob::Ready,
+            )
+            .send_message_to_worker(
+                worker_sender!(1),
+                BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(cjid!(1), job_spec),
+            ));
+    }
+
+    #[test]
+    fn job_request_ready_no_worker_available() {
+        let mut fixture = Fixture::new().with_client(cid!(1));
+        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
+
+        fixture
+            .expect()
+            .start_job(
+                jid!(1),
+                nonempty![tar_digest!(1), tar_digest!(2)],
+                StartJob::Ready,
+            )
+            .send_message_to_client(
+                client_sender!(1),
+                BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForWorker),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(cjid!(1), job_spec.clone()),
+            ));
+
+        fixture
+            .expect()
+            .send_message_to_worker(
+                worker_sender!(1),
+                BrokerToWorker::EnqueueJob(jid!(1), job_spec),
+            )
+            .when()
+            .receive_message(WorkerConnected(wid!(1), 2, TestWorkerSender(wid!(1))));
+    }
+
+    #[test]
+    fn job_request_not_ready_start_fetching_some() {
+        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+
+        fixture
+            .expect()
+            .start_job(
+                jid!(1),
+                nonempty![tar_digest!(1), tar_digest!(2)],
+                StartJob::NotReady(vec![digest!(1), digest!(2)]),
+            )
+            .send_message_to_client(
+                client_sender!(1),
+                BrokerToClient::TransferArtifact(digest!(1)),
+            )
+            .send_message_to_client(
+                client_sender!(1),
+                BrokerToClient::TransferArtifact(digest!(2)),
+            )
+            .send_message_to_client(
+                client_sender!(1),
+                BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForLayers),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(
+                    cjid!(1),
+                    job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
+                ),
+            ));
+    }
+
+    #[test]
+    fn job_request_not_ready_start_fetching_none() {
+        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+
+        fixture
+            .expect()
+            .start_job(
+                jid!(1),
+                nonempty![tar_digest!(1), tar_digest!(2)],
+                StartJob::NotReady(vec![]),
+            )
+            .send_message_to_client(
+                client_sender!(1),
+                BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForLayers),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(
+                    cjid!(1),
+                    job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
+                ),
+            ));
+    }
+
+    #[test]
+    fn worker_disconnected_with_outstanding_jobs_no_other_available_workers() {
+        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
+
+        fixture
+            .expect()
+            .start_job(
+                jid!(1),
+                nonempty![tar_digest!(1), tar_digest!(2)],
+                StartJob::Ready,
+            )
+            .send_message_to_worker(
+                worker_sender!(1),
+                BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(cjid!(1), job_spec.clone()),
+            ));
+
+        fixture
+            .expect()
+            .send_message_to_client(
+                client_sender!(1),
+                BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForWorker),
+            )
+            .when()
+            .receive_message(WorkerDisconnected(wid!(1)));
+
+        fixture
+            .expect()
+            .send_message_to_worker(
+                worker_sender!(2),
+                BrokerToWorker::EnqueueJob(jid!(1), job_spec),
+            )
+            .when()
+            .receive_message(WorkerConnected(wid!(2), 2, TestWorkerSender(wid!(2))));
+    }
+
+    #[test]
+    fn worker_disconnected_with_outstanding_jobs_with_other_available_workers() {
+        let mut fixture = Fixture::new()
+            .with_client(cid!(1))
+            .with_worker(wid!(1), 2)
+            .with_worker(wid!(2), 2);
+        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
+
+        fixture
+            .expect()
+            .start_job(
+                jid!(1),
+                nonempty![tar_digest!(1), tar_digest!(2)],
+                StartJob::Ready,
+            )
+            .send_message_to_worker(
+                worker_sender!(1),
+                BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(cjid!(1), job_spec.clone()),
+            ));
+
+        fixture
+            .expect()
+            .send_message_to_worker(
+                worker_sender!(2),
+                BrokerToWorker::EnqueueJob(jid!(1), job_spec),
+            )
+            .when()
+            .receive_message(WorkerDisconnected(wid!(1)));
+    }
+
+    #[test]
+    fn worker_response_with_no_other_available_jobs() {
+        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
+        let result = Ok(outcome!(1));
+
+        fixture
+            .expect()
+            .start_job(
+                jid!(1),
+                nonempty![tar_digest!(1), tar_digest!(2)],
+                StartJob::Ready,
+            )
+            .send_message_to_worker(
+                worker_sender!(1),
+                BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(cjid!(1), job_spec.clone()),
+            ));
+
+        fixture
+            .expect()
+            .complete_job(jid!(1))
+            .send_message_to_client(
+                client_sender!(1),
+                BrokerToClient::JobResponse(cjid!(1), result.clone()),
+            )
+            .when()
+            .receive_message(FromWorker(
+                wid!(1),
+                WorkerToBroker::JobResponse(jid!(1), result.clone()),
+            ));
+    }
+
+    #[test]
+    fn worker_response_with_other_available_jobs() {
+        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 1);
+        let job_spec_1 = job_spec!("test_1", [tar_digest!(1), tar_digest!(2)]);
+        let job_spec_2 = job_spec!("test_2", [tar_digest!(1)]);
+        let job_spec_3 = job_spec!("test_3", [tar_digest!(2)]);
+        let result_1 = Ok(outcome!(1));
+
+        fixture
+            .expect()
+            .start_job(
+                jid!(1, 1),
+                nonempty![tar_digest!(1), tar_digest!(2)],
+                StartJob::Ready,
+            )
+            .send_message_to_worker(
+                worker_sender!(1),
+                BrokerToWorker::EnqueueJob(jid!(1, 1), job_spec_1.clone()),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(cjid!(1), job_spec_1),
+            ));
+
+        fixture
+            .expect()
+            .start_job(jid!(1, 2), nonempty![tar_digest!(1)], StartJob::Ready)
+            .send_message_to_worker(
+                worker_sender!(1),
+                BrokerToWorker::EnqueueJob(jid!(1, 2), job_spec_2.clone()),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(cjid!(2), job_spec_2),
+            ));
+
+        fixture
+            .expect()
+            .start_job(jid!(1, 3), nonempty![tar_digest!(2)], StartJob::Ready)
+            .send_message_to_client(
+                client_sender!(1),
+                BrokerToClient::JobStatusUpdate(cjid!(3), JobBrokerStatus::WaitingForWorker),
+            )
+            .when()
+            .receive_message(FromClient(
+                cid!(1),
+                ClientToBroker::JobRequest(cjid!(3), job_spec_3.clone()),
+            ));
+
+        fixture
+            .expect()
+            .complete_job(jid!(1, 1))
+            .send_message_to_client(
+                client_sender!(1),
+                BrokerToClient::JobResponse(cjid!(1), result_1.clone()),
+            )
+            .send_message_to_worker(
+                worker_sender!(1),
+                BrokerToWorker::EnqueueJob(jid!(1, 3), job_spec_3),
+            )
+            .when()
+            .receive_message(FromWorker(
+                wid!(1),
+                WorkerToBroker::JobResponse(jid!(1), result_1),
+            ));
     }
 }
