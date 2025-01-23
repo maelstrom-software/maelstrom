@@ -181,9 +181,48 @@ where
     /// ignore the error in that case. Besides, the [scheduler::SchedulerDeps] interface doesn't
     /// give us a way to return an error, for precisely this reason.
     pub async fn run(mut self) {
-        let mut deps = PassThroughSchedulerDeps;
-        sync::channel_reader(self.receiver, |msg| {
-            self.scheduler.receive_message(&mut deps, msg);
+        let deps = &mut PassThroughSchedulerDeps;
+        sync::channel_reader(self.receiver, |msg| match msg {
+            Message::ClientConnected(id, sender) => {
+                self.scheduler.receive_client_connected(id, sender)
+            }
+            Message::ClientDisconnected(id) => self.scheduler.receive_client_disconnected(deps, id),
+            Message::JobRequestFromClient(cid, cjid, spec) => self
+                .scheduler
+                .receive_job_request_from_client(deps, cid, cjid, spec),
+            Message::ArtifactTransferredFromClient(cid, digest, location) => self
+                .scheduler
+                .receive_artifact_transferred_from_client(deps, cid, digest, location),
+            Message::WorkerConnected(id, slots, sender) => self
+                .scheduler
+                .receive_worker_connected(deps, id, slots, sender),
+            Message::WorkerDisconnected(id) => self.scheduler.receive_worker_disconnected(deps, id),
+            Message::JobResponseFromWorker(wid, jid, result) => self
+                .scheduler
+                .receive_job_response_from_worker(deps, wid, jid, result),
+            Message::JobStatusUpdateFromWorker(wid, jid, status) => self
+                .scheduler
+                .receive_job_status_update_from_worker(deps, wid, jid, status),
+            Message::MonitorConnected(id, sender) => {
+                self.scheduler.receive_monitor_connected(id, sender)
+            }
+            Message::MonitorDisconnected(id) => self.scheduler.receive_monitor_disconnected(id),
+            Message::StatisticsRequestFromMonitor(mid) => self
+                .scheduler
+                .receive_statistics_request_from_monitor(deps, mid),
+            Message::GotArtifact(digest, file) => self.scheduler.receive_got_artifact(digest, file),
+            Message::GetArtifactForWorker(digest, sender) => self
+                .scheduler
+                .receive_get_artifact_for_worker(deps, digest, sender),
+            Message::DecrementRefcount(digest) => self.scheduler.receive_decrement_refcount(digest),
+            Message::StatisticsHeartbeat => self.scheduler.receive_statistics_heartbeat(),
+            Message::GotManifestEntry(entry_digest, jid) => {
+                self.scheduler
+                    .receive_manifest_entry(deps, entry_digest, jid)
+            }
+            Message::FinishedReadingManifest(digest, jid, result) => self
+                .scheduler
+                .receive_finished_reading_manifest(deps, digest, jid, result),
         })
         .await
         .unwrap();
