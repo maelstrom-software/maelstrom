@@ -19,7 +19,7 @@ use futures::{
 use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Request, Response};
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
 use maelstrom_base::{
-    proto::{self, BrokerToMonitor},
+    proto::{self, BrokerToMonitor, MonitorToBroker},
     MonitorId,
 };
 use maelstrom_web::WASM_TAR;
@@ -117,17 +117,21 @@ async fn websocket_writer(
 async fn websocket_reader<TempFileT>(
     mut socket: SplitStream<WebSocketStream<Upgraded>>,
     scheduler_sender: SchedulerSender<TempFileT>,
-    id: MonitorId,
+    mid: MonitorId,
 ) {
     while let Some(Ok(Message::Binary(msg))) = socket.next().await {
         let Ok(msg) = proto::deserialize(&msg) else {
             break;
         };
-        if scheduler_sender
-            .send(SchedulerMessage::FromMonitor(id, msg))
-            .is_err()
-        {
-            break;
+        match msg {
+            MonitorToBroker::StatisticsRequest => {
+                if scheduler_sender
+                    .send(SchedulerMessage::StatisticsRequestFromMonitor(mid))
+                    .is_err()
+                {
+                    break;
+                }
+            }
         }
     }
 }

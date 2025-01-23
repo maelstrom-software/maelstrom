@@ -7,7 +7,7 @@ use crate::{
 use anyhow::Result;
 use futures::FutureExt as _;
 use maelstrom_base::{
-    proto::{ClientToBroker, Hello},
+    proto::{ClientToBroker, Hello, MonitorToBroker, WorkerToBroker},
     ClientId, MonitorId, WorkerId,
 };
 use maelstrom_github::{GitHubClient, GitHubQueue, GitHubQueueAcceptor};
@@ -130,30 +130,38 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
         Ok(Hello::Client) => {
             let (read_stream, write_stream) = socket.into_split();
             let read_stream = BufReader::new(read_stream);
-            let id: ClientId = id_vendor.vend();
-            let log = log.new(o!("cid" => id.to_string()));
+            let cid: ClientId = id_vendor.vend();
+            let log = log.new(o!("cid" => cid.to_string()));
             let log_clone = log.clone();
             let log_clone2 = log.clone();
             debug!(log, "client connected");
             connection_main(
                 scheduler_sender,
-                id,
+                cid,
                 SchedulerMessage::ClientConnected,
                 SchedulerMessage::ClientDisconnected,
                 |scheduler_sender| async move {
                     let _ = net::async_socket_reader(
                         read_stream,
                         scheduler_sender,
-                        |msg| {
-                            assert!(!matches!(&msg, ClientToBroker::JobRequest(_, spec) if spec.must_be_run_locally()));
-                            SchedulerMessage::FromClient(id, msg)
+                        |msg| match msg {
+                            ClientToBroker::JobRequest(cjid, job_spec) => {
+                                assert!(!job_spec.must_be_run_locally());
+                                SchedulerMessage::JobRequestFromClient(cid, cjid, job_spec)
+                            }
+                            ClientToBroker::ArtifactTransferred(digest, location) => {
+                                SchedulerMessage::ArtifactTransferredFromClient(
+                                    cid, digest, location,
+                                )
+                            }
                         },
-                        &log_clone
+                        &log_clone,
                     )
                     .await;
                 },
                 |scheduler_receiver| async move {
-                    let _ = net::async_socket_writer(scheduler_receiver, write_stream, &log_clone2).await;
+                    let _ = net::async_socket_writer(scheduler_receiver, write_stream, &log_clone2)
+                        .await;
                 },
             )
             .await;
@@ -162,21 +170,28 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
         Ok(Hello::Worker { slots }) => {
             let (read_stream, write_stream) = socket.into_split();
             let read_stream = BufReader::new(read_stream);
-            let id: WorkerId = id_vendor.vend();
-            let log = log.new(o!("wid" => id.to_string(), "slots" => slots));
+            let wid: WorkerId = id_vendor.vend();
+            let log = log.new(o!("wid" => wid.to_string(), "slots" => slots));
             info!(log, "worker connected");
             let log_clone = log.clone();
             let log_clone2 = log.clone();
             connection_main(
                 scheduler_sender,
-                id,
+                wid,
                 |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
                 SchedulerMessage::WorkerDisconnected,
                 |scheduler_sender| async move {
                     let _ = net::async_socket_reader(
                         read_stream,
                         scheduler_sender,
-                        |msg| SchedulerMessage::FromWorker(id, msg),
+                        |msg| match msg {
+                            WorkerToBroker::JobResponse(jid, result) => {
+                                SchedulerMessage::JobResponseFromWorker(wid, jid, result)
+                            }
+                            WorkerToBroker::JobStatusUpdate(jid, status) => {
+                                SchedulerMessage::JobStatusUpdateFromWorker(wid, jid, status)
+                            }
+                        },
                         &log_clone,
                     )
                     .await;
@@ -192,21 +207,25 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
         Ok(Hello::Monitor) => {
             let (read_stream, write_stream) = socket.into_split();
             let read_stream = BufReader::new(read_stream);
-            let id: MonitorId = id_vendor.vend();
-            let log = log.new(o!("mid" => id.to_string()));
+            let mid: MonitorId = id_vendor.vend();
+            let log = log.new(o!("mid" => mid.to_string()));
             let log_clone = log.clone();
             let log_clone2 = log.clone();
             debug!(log, "monitor connected");
             connection_main(
                 scheduler_sender,
-                id,
+                mid,
                 SchedulerMessage::MonitorConnected,
                 SchedulerMessage::MonitorDisconnected,
                 |scheduler_sender| async move {
                     let _ = net::async_socket_reader(
                         read_stream,
                         scheduler_sender,
-                        |msg| SchedulerMessage::FromMonitor(id, msg),
+                        |msg| match msg {
+                            MonitorToBroker::StatisticsRequest => {
+                                SchedulerMessage::StatisticsRequestFromMonitor(mid)
+                            }
+                        },
                         &log_clone,
                     )
                     .await;
@@ -286,8 +305,8 @@ async fn unassigned_github_connection_main<TempFileT>(
             warn!(log, "github queue said it was client");
         }
         Ok(Some(Hello::Worker { slots })) => {
-            let id: WorkerId = id_vendor.vend();
-            let log = log.new(o!("wid" => id.to_string(), "slots" => slots));
+            let wid: WorkerId = id_vendor.vend();
+            let log = log.new(o!("wid" => wid.to_string(), "slots" => slots));
             info!(log, "worker connected");
             let log_clone = log.clone();
             let log_clone2 = log.clone();
@@ -296,14 +315,21 @@ async fn unassigned_github_connection_main<TempFileT>(
             let write_queue_clone = write_queue.clone();
             connection_main(
                 scheduler_sender,
-                id,
+                wid,
                 |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
                 SchedulerMessage::WorkerDisconnected,
                 |scheduler_sender| async move {
                     let _ = net::github_queue_reader(
                         &mut read_queue,
                         scheduler_sender,
-                        |msg| SchedulerMessage::FromWorker(id, msg),
+                        |msg| match msg {
+                            WorkerToBroker::JobResponse(jid, result) => {
+                                SchedulerMessage::JobResponseFromWorker(wid, jid, result)
+                            }
+                            WorkerToBroker::JobStatusUpdate(jid, status) => {
+                                SchedulerMessage::JobStatusUpdateFromWorker(wid, jid, status)
+                            }
+                        },
                         &log_clone,
                     )
                     .await;

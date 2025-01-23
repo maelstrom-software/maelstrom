@@ -5,10 +5,7 @@ use crate::scheduler_task::artifact_gatherer::StartJob;
 use anyhow::Result;
 use enum_map::enum_map;
 use maelstrom_base::{
-    proto::{
-        ArtifactUploadLocation, BrokerToClient, BrokerToMonitor, BrokerToWorker, ClientToBroker,
-        MonitorToBroker, WorkerToBroker,
-    },
+    proto::{ArtifactUploadLocation, BrokerToClient, BrokerToMonitor, BrokerToWorker},
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
@@ -110,7 +107,8 @@ pub enum Message<
     ClientDisconnected(ClientId),
 
     /// The given client has sent us the given message.
-    FromClient(ClientId, ClientToBroker),
+    JobRequestFromClient(ClientId, ClientJobId, JobSpec),
+    ArtifactTransferredFromClient(ClientId, Sha256Digest, ArtifactUploadLocation),
 
     /// The given worker connected. It has the given number of slots and messages can be sent to it
     /// on the given sender.
@@ -120,7 +118,8 @@ pub enum Message<
     WorkerDisconnected(WorkerId),
 
     /// The given worker has sent us the given message.
-    FromWorker(WorkerId, WorkerToBroker),
+    JobResponseFromWorker(WorkerId, JobId, JobOutcomeResult),
+    JobStatusUpdateFromWorker(WorkerId, JobId, JobWorkerStatus),
 
     /// The given monitor connected, and messages can be sent to it on the given sender.
     MonitorConnected(MonitorId, MonitorSenderT),
@@ -129,7 +128,7 @@ pub enum Message<
     MonitorDisconnected(MonitorId),
 
     /// The given client has sent us the given message.
-    FromMonitor(MonitorId, MonitorToBroker),
+    StatisticsRequestFromMonitor(MonitorId),
 
     /// An artifact has been pushed to us. The artifact has the given digest and length. It is
     /// temporarily stored at the given path.
@@ -184,26 +183,26 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         match msg {
             Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
             Message::ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
-            Message::FromClient(cid, ClientToBroker::JobRequest(cjid, spec)) => {
-                self.receive_client_job_request(deps, cid, cjid, spec)
+            Message::JobRequestFromClient(cid, cjid, spec) => {
+                self.receive_job_request_from_client(deps, cid, cjid, spec)
             }
-            Message::FromClient(cid, ClientToBroker::ArtifactTransferred(digest, location)) => {
-                self.receive_artifact_transferred(deps, cid, digest, location)
+            Message::ArtifactTransferredFromClient(cid, digest, location) => {
+                self.receive_artifact_transferred_from_client(deps, cid, digest, location)
             }
             Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
             }
             Message::WorkerDisconnected(id) => self.receive_worker_disconnected(deps, id),
-            Message::FromWorker(wid, WorkerToBroker::JobResponse(jid, result)) => {
-                self.receive_worker_response(deps, wid, jid, result)
+            Message::JobResponseFromWorker(wid, jid, result) => {
+                self.receive_job_response_from_worker(deps, wid, jid, result)
             }
-            Message::FromWorker(wid, WorkerToBroker::JobStatusUpdate(jid, status)) => {
-                self.receive_worker_job_status_update(deps, wid, jid, status)
+            Message::JobStatusUpdateFromWorker(wid, jid, status) => {
+                self.receive_job_status_update_from_worker(deps, wid, jid, status)
             }
             Message::MonitorConnected(id, sender) => self.receive_monitor_connected(id, sender),
             Message::MonitorDisconnected(id) => self.receive_monitor_disconnected(id),
-            Message::FromMonitor(mid, MonitorToBroker::StatisticsRequest) => {
-                self.receive_monitor_statistics_request(deps, mid)
+            Message::StatisticsRequestFromMonitor(mid) => {
+                self.receive_statistics_request_from_monitor(deps, mid)
             }
             Message::GotArtifact(digest, file) => self.receive_got_artifact(digest, file),
             Message::GetArtifactForWorker(digest, sender) => {
@@ -411,7 +410,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         self.possibly_start_jobs(deps, HashSet::default());
     }
 
-    fn receive_client_job_request(
+    fn receive_job_request_from_client(
         &mut self,
         deps: &mut DepsT,
         cid: ClientId,
@@ -481,7 +480,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         self.possibly_start_jobs(deps, just_enqueued);
     }
 
-    fn receive_worker_response(
+    fn receive_job_response_from_worker(
         &mut self,
         deps: &mut DepsT,
         wid: WorkerId,
@@ -524,7 +523,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         }
     }
 
-    fn receive_worker_job_status_update(
+    fn receive_job_status_update_from_worker(
         &mut self,
         deps: &mut DepsT,
         wid: WorkerId,
@@ -550,7 +549,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         self.monitors.remove(&id).unwrap();
     }
 
-    fn receive_monitor_statistics_request(&mut self, deps: &mut DepsT, mid: MonitorId) {
+    fn receive_statistics_request_from_monitor(&mut self, deps: &mut DepsT, mid: MonitorId) {
         let worker_iter = self.workers.0.iter();
         let resp = BrokerToMonitor::StatisticsResponse(BrokerStatistics {
             worker_statistics: worker_iter
@@ -579,7 +578,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         );
     }
 
-    fn receive_artifact_transferred(
+    fn receive_artifact_transferred_from_client(
         &mut self,
         deps: &mut DepsT,
         cid: ClientId,
@@ -974,13 +973,13 @@ mod tests {
     script_test! {
         response_from_known_worker_for_unknown_job_ignored,
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1], Ok(outcome![1]))) => {};
+        JobResponseFromWorker(wid![1], jid![1], Ok(outcome![1])) => {};
     }
 
     script_test! {
         response_from_worker_for_disconnected_client_ignored,
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1], Ok(outcome![1]))) => {};
+        JobResponseFromWorker(wid![1], jid![1], Ok(outcome![1])) => {};
     }
 
     script_test! {
@@ -1005,70 +1004,70 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
 
         // 0/2 0/2 0/3
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
         };
 
         // 1/2 0/2 0/3
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(2))) => {
+        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
             CacheGetArtifact(jid![1, 2], digest![2]),
             ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(2))),
         };
 
         // 1/2 1/2 0/3
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec!(3))) => {
+        JobRequestFromClient(cid![1], cjid![3], spec!(3)) => {
             CacheGetArtifact(jid![1, 3], digest![3]),
             ToWorker(wid![3], EnqueueJob(jid![1, 3], spec!(3))),
         };
 
         // 1/2 1/2 1/3
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec!(4))) => {
+        JobRequestFromClient(cid![1], cjid![4], spec!(4)) => {
             CacheGetArtifact(jid![1, 4], digest![4]),
             ToWorker(wid![3], EnqueueJob(jid![1, 4], spec!(4))),
         };
 
         // 1/2 1/2 2/3
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], spec!(5))) => {
+        JobRequestFromClient(cid![1], cjid![5], spec!(5)) => {
             CacheGetArtifact(jid![1, 5], digest![5]),
             ToWorker(wid![1], EnqueueJob(jid![1, 5], spec!(5))),
         };
 
         // 2/2 1/2 2/3
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![6], spec!(6))) => {
+        JobRequestFromClient(cid![1], cjid![6], spec!(6)) => {
             CacheGetArtifact(jid![1, 6], digest![6]),
             ToWorker(wid![2], EnqueueJob(jid![1, 6], spec!(6))),
         };
 
         // 2/2 2/2 2/3
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![7], spec!(7))) => {
+        JobRequestFromClient(cid![1], cjid![7], spec!(7)) => {
             CacheGetArtifact(jid![1, 7], digest![7]),
             ToWorker(wid![3], EnqueueJob(jid![1, 7], spec!(7))),
         };
 
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
+        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![8], spec!(8))) => {
+        JobRequestFromClient(cid![1], cjid![8], spec!(8)) => {
             CacheGetArtifact(jid![1, 8], digest![8]),
             ToWorker(wid![1], EnqueueJob(jid![1, 8], spec!(8))),
         };
 
-        FromWorker(wid![2], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![2]))) => {
+        JobResponseFromWorker(wid![2], jid![1, 2], Ok(outcome![2])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
             CacheDecrementRefcount(digest![2]),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![9], spec!(9))) => {
+        JobRequestFromClient(cid![1], cjid![9], spec!(9)) => {
             CacheGetArtifact(jid![1, 9], digest![9]),
             ToWorker(wid![2], EnqueueJob(jid![1, 9], spec!(9))),
         };
 
-        FromWorker(wid![3], WorkerToBroker::JobResponse(jid![1, 3], Ok(outcome![3]))) => {
+        JobResponseFromWorker(wid![3], jid![1, 3], Ok(outcome![3])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![3], Ok(outcome![3]))),
             CacheDecrementRefcount(digest![3]),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![10], spec!(10))) => {
+        JobRequestFromClient(cid![1], cjid![10], spec!(10)) => {
             CacheGetArtifact(jid![1, 10], digest![10]),
             ToWorker(wid![3], EnqueueJob(jid![1, 10], spec!(10))),
         };
@@ -1091,48 +1090,48 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
 
         // 0/1 0/1
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
         };
 
         // 1/1 0/1
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(2))) => {
+        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
             CacheGetArtifact(jid![1, 2], digest![2]),
             ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(2))),
         };
 
         // 1/1 1/1
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec!(3))) => {
+        JobRequestFromClient(cid![1], cjid![3], spec!(3)) => {
             CacheGetArtifact(jid![1, 3], digest![3]),
             ToWorker(wid![1], EnqueueJob(jid![1, 3], spec!(3))),
         };
 
         // 2/1 1/1
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec!(4))) => {
+        JobRequestFromClient(cid![1], cjid![4], spec!(4)) => {
             CacheGetArtifact(jid![1, 4], digest![4]),
             ToWorker(wid![2], EnqueueJob(jid![1, 4], spec!(4))),
         };
 
         // 2/1 2/1
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], spec!(5))) => {
+        JobRequestFromClient(cid![1], cjid![5], spec!(5)) => {
             CacheGetArtifact(jid![1, 5], digest![5]),
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![5], JobBrokerStatus::WaitingForWorker)),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![6], spec!(6))) => {
+        JobRequestFromClient(cid![1], cjid![6], spec!(6)) => {
             CacheGetArtifact(jid![1, 6], digest![6]),
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![6], JobBrokerStatus::WaitingForWorker)),
         };
 
         // 2/2 1/2
-        FromWorker(wid![2], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![2]))) => {
+        JobResponseFromWorker(wid![2], jid![1, 2], Ok(outcome![2])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
             CacheDecrementRefcount(digest![2]),
             ToWorker(wid![2], EnqueueJob(jid![1, 5], spec!(5))),
         };
 
         // 1/2 2/2
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
+        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 6], spec!(6))),
@@ -1151,22 +1150,22 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
         };
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(2))) => {
+        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
             CacheGetArtifact(jid![1, 2], digest![2]),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec!(2))),
         };
 
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
+        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
         };
 
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 2], Ok(outcome![1]))) => {
+        JobResponseFromWorker(wid![1], jid![1, 2], Ok(outcome![1])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![2]),
         };
@@ -1185,7 +1184,7 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid!(1, 1), digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
         };
@@ -1211,12 +1210,12 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
         ClientConnected(cid![2], client_sender![2]) => {};
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid!(1, 1), digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
         };
 
-        FromClient(cid![2], ClientToBroker::JobRequest(cjid![1], spec!(2))) => {
+        JobRequestFromClient(cid![2], cjid![1], spec!(2)) => {
             CacheGetArtifact(jid!(2, 1), digest![2]),
             ToWorker(wid![2], EnqueueJob(jid![2, 1], spec!(2))),
         };
@@ -1227,7 +1226,7 @@ mod tests {
             CacheClientDisconnected(cid![2]),
         };
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(3))) => {
+        JobRequestFromClient(cid![1], cjid![2], spec!(3)) => {
             CacheGetArtifact(jid!(1, 2), digest![3]),
             ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(3))),
         };
@@ -1246,22 +1245,22 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid!(1, 1), digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
         };
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(2))) => {
+        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
             CacheGetArtifact(jid!(1, 2), digest![2]),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec!(2))),
         };
 
         ClientConnected(cid![2], client_sender![2]) => {};
-        FromClient(cid![2], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![2], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid!(2, 1), digest![1]),
             ToClient(cid![2], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForWorker)),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec!(3))) => {
+        JobRequestFromClient(cid![1], cjid![3], spec!(3)) => {
             CacheGetArtifact(jid!(1, 3), digest![3]),
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![3], JobBrokerStatus::WaitingForWorker)),
         };
@@ -1271,7 +1270,7 @@ mod tests {
             CacheClientDisconnected(cid![2]),
         };
 
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
+        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 3], spec!(3))),
@@ -1295,31 +1294,31 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
         ClientConnected(cid![2], client_sender![2]) => {};
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid!(1, 1), digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
         };
 
-        FromClient(cid![2], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![2], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid!(2, 1), digest![1]),
             ToWorker(wid![2], EnqueueJob(jid![2, 1], spec!(1))),
         };
 
-        FromClient(cid![2], ClientToBroker::JobRequest(cjid![2], spec!(2))) => {
+        JobRequestFromClient(cid![2], cjid![2], spec!(2)) => {
             CacheGetArtifact(jid!(2, 2), digest![2]),
             ToWorker(wid![1], EnqueueJob(jid![2, 2], spec!(2))),
         };
 
-        FromClient(cid![2], ClientToBroker::JobRequest(cjid![3], spec!(3))) => {
+        JobRequestFromClient(cid![2], cjid![3], spec!(3)) => {
             CacheGetArtifact(jid!(2, 3), digest![3]),
             ToWorker(wid![2], EnqueueJob(jid![2, 3], spec!(3))),
         };
 
-        FromClient(cid![2], ClientToBroker::JobRequest(cjid![4], spec!(4))) => {
+        JobRequestFromClient(cid![2], cjid![4], spec!(4)) => {
             CacheGetArtifact(jid!(2, 4), digest![4]),
             ToClient(cid![2], BrokerToClient::JobStatusUpdate(cjid![4], JobBrokerStatus::WaitingForWorker)),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec!(2))) => {
+        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
             CacheGetArtifact(jid!(1, 2), digest![2]),
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForWorker)),
         };
@@ -1352,10 +1351,7 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(
-            cid![1],
-            ClientToBroker::JobRequest(cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)]))
-        ) => {
+        JobRequestFromClient(cid![1], cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)])) => {
             CacheGetArtifact(jid![1, 2], digest![42]),
             CacheGetArtifact(jid![1, 2], digest![43]),
             CacheGetArtifact(jid![1, 2], digest![44]),
@@ -1418,7 +1414,7 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
         MonitorConnected(mid![1], monitor_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], job_spec!("1", [tar_digest!(42)]))) => {
+        JobRequestFromClient(cid![1], cjid![1], job_spec!("1", [tar_digest!(42)])) => {
             CacheGetArtifact(jid![1, 1], digest![42]),
             ToClient(
                 cid![1],
@@ -1426,7 +1422,7 @@ mod tests {
             ),
         };
         StatisticsHeartbeat => {};
-        FromMonitor(mid![1], MonitorToBroker::StatisticsRequest) => {
+        StatisticsRequestFromMonitor(mid![1]) => {
             ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap! {
                     wid![1] => WorkerStatistics { slots: 2 }
@@ -1454,12 +1450,12 @@ mod tests {
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         MonitorConnected(mid![1], monitor_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForWorker)),
         };
         StatisticsHeartbeat => {};
-        FromMonitor(mid![1], MonitorToBroker::StatisticsRequest) => {
+        StatisticsRequestFromMonitor(mid![1]) => {
             ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap!{},
                 job_statistics: [JobStatisticsSample {
@@ -1486,12 +1482,12 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
         MonitorConnected(mid![1], monitor_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
         };
         StatisticsHeartbeat => {};
-        FromMonitor(mid![1], MonitorToBroker::StatisticsRequest) => {
+        StatisticsRequestFromMonitor(mid![1]) => {
             ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap! {
                     wid![1] => WorkerStatistics { slots: 2 }
@@ -1520,16 +1516,16 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
         MonitorConnected(mid![1], monitor_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
         };
-        FromWorker(wid![1], WorkerToBroker::JobResponse(jid![1, 1], Ok(outcome![1]))) => {
+        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
         };
         StatisticsHeartbeat => {};
-        FromMonitor(mid![1], MonitorToBroker::StatisticsRequest) => {
+        StatisticsRequestFromMonitor(mid![1]) => {
             ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap! {
                     wid![1] => WorkerStatistics { slots: 2 }
@@ -1557,14 +1553,11 @@ mod tests {
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![2], 1, worker_sender![2]) => {};
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec!(1))) => {
+        JobRequestFromClient(cid![1], cjid![3], spec!(1)) => {
             CacheGetArtifact(jid![1, 3], digest![1]),
             ToWorker(wid![2], EnqueueJob(jid![1, 3], spec!(1))),
         };
-        FromWorker(
-            wid![2],
-            WorkerToBroker::JobStatusUpdate(jid![1, 3], JobWorkerStatus::WaitingForLayers)
-        ) => {
+        JobStatusUpdateFromWorker(wid![2], jid![1, 3], JobWorkerStatus::WaitingForLayers) => {
             ToClient(
                 cid![1],
                 BrokerToClient::JobStatusUpdate(
@@ -1573,10 +1566,7 @@ mod tests {
                 )
             )
         };
-        FromWorker(
-            wid![2],
-            WorkerToBroker::JobStatusUpdate(jid![1, 3], JobWorkerStatus::WaitingToExecute)
-        ) => {
+        JobStatusUpdateFromWorker(wid![2], jid![1, 3], JobWorkerStatus::WaitingToExecute) => {
             ToClient(
                 cid![1],
                 BrokerToClient::JobStatusUpdate(
@@ -1585,10 +1575,7 @@ mod tests {
                 )
             )
         };
-        FromWorker(
-            wid![2],
-            WorkerToBroker::JobStatusUpdate(jid![1, 3], JobWorkerStatus::Executing)
-        ) => {
+        JobStatusUpdateFromWorker(wid![2], jid![1, 3], JobWorkerStatus::Executing) => {
             ToClient(
                 cid![1],
                 BrokerToClient::JobStatusUpdate(
@@ -1605,18 +1592,9 @@ mod tests {
             Fixture::new([], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        FromWorker(
-            wid![1],
-            WorkerToBroker::JobStatusUpdate(jid![2, 3], JobWorkerStatus::WaitingForLayers)
-        ) => {};
-        FromWorker(
-            wid![1],
-            WorkerToBroker::JobStatusUpdate(jid![2, 3], JobWorkerStatus::WaitingToExecute)
-        ) => {};
-        FromWorker(
-            wid![1],
-            WorkerToBroker::JobStatusUpdate(jid![2, 3], JobWorkerStatus::Executing)
-        ) => {};
+        JobStatusUpdateFromWorker(wid![1], jid![2, 3], JobWorkerStatus::WaitingForLayers) => {};
+        JobStatusUpdateFromWorker(wid![1], jid![2, 3], JobWorkerStatus::WaitingToExecute) => {};
+        JobStatusUpdateFromWorker(wid![1], jid![2, 3], JobWorkerStatus::Executing) => {};
     }
 }
 
@@ -1640,7 +1618,7 @@ mod tests2 {
     #[derive(Debug)]
     struct TestMonitorSender(MonitorId);
 
-//    struct TestWorkerArtifactFetcherSender(u32);
+    //    struct TestWorkerArtifactFetcherSender(u32);
     #[derive(Debug)]
     struct TestWorkerArtifactFetcherSender;
 
@@ -2018,9 +1996,10 @@ mod tests2 {
     #[should_panic]
     fn message_from_unknown_client_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_message(FromClient(
+        fixture.receive_message(JobRequestFromClient(
             cid!(1),
-            ClientToBroker::JobRequest(cjid!(1), job_spec!("test", [tar_digest!(1)])),
+            cjid!(1),
+            job_spec!("test", [tar_digest!(1)]),
         ));
     }
 
@@ -2041,9 +2020,10 @@ mod tests2 {
     #[should_panic]
     fn message_from_unknown_worker_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_message(FromWorker(
+        fixture.receive_message(JobStatusUpdateFromWorker(
             wid!(1),
-            WorkerToBroker::JobStatusUpdate(jid!(1), JobWorkerStatus::Executing),
+            jid!(1),
+            JobWorkerStatus::Executing,
         ));
     }
 
@@ -2066,7 +2046,7 @@ mod tests2 {
     #[should_panic]
     fn message_from_unknown_monitor_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_message(FromMonitor(mid!(1), MonitorToBroker::StatisticsRequest));
+        fixture.receive_message(StatisticsRequestFromMonitor(mid!(1)));
     }
 
     #[test]
@@ -2102,10 +2082,7 @@ mod tests2 {
                 BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
             )
             .when()
-            .receive_message(FromClient(
-                cid!(1),
-                ClientToBroker::JobRequest(cjid!(1), job_spec),
-            ));
+            .receive_message(JobRequestFromClient(cid!(1), cjid!(1), job_spec));
     }
 
     #[test]
@@ -2125,10 +2102,7 @@ mod tests2 {
                 BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForWorker),
             )
             .when()
-            .receive_message(FromClient(
-                cid!(1),
-                ClientToBroker::JobRequest(cjid!(1), job_spec.clone()),
-            ));
+            .receive_message(JobRequestFromClient(cid!(1), cjid!(1), job_spec.clone()));
 
         fixture
             .expect()
@@ -2164,12 +2138,10 @@ mod tests2 {
                 BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForLayers),
             )
             .when()
-            .receive_message(FromClient(
+            .receive_message(JobRequestFromClient(
                 cid!(1),
-                ClientToBroker::JobRequest(
-                    cjid!(1),
-                    job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
-                ),
+                cjid!(1),
+                job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
             ));
     }
 
@@ -2189,12 +2161,10 @@ mod tests2 {
                 BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForLayers),
             )
             .when()
-            .receive_message(FromClient(
+            .receive_message(JobRequestFromClient(
                 cid!(1),
-                ClientToBroker::JobRequest(
-                    cjid!(1),
-                    job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
-                ),
+                cjid!(1),
+                job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
             ));
     }
 
@@ -2215,10 +2185,7 @@ mod tests2 {
                 BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
             )
             .when()
-            .receive_message(FromClient(
-                cid!(1),
-                ClientToBroker::JobRequest(cjid!(1), job_spec.clone()),
-            ));
+            .receive_message(JobRequestFromClient(cid!(1), cjid!(1), job_spec.clone()));
 
         fixture
             .expect()
@@ -2259,10 +2226,7 @@ mod tests2 {
                 BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
             )
             .when()
-            .receive_message(FromClient(
-                cid!(1),
-                ClientToBroker::JobRequest(cjid!(1), job_spec.clone()),
-            ));
+            .receive_message(JobRequestFromClient(cid!(1), cjid!(1), job_spec.clone()));
 
         fixture
             .expect()
@@ -2292,10 +2256,7 @@ mod tests2 {
                 BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
             )
             .when()
-            .receive_message(FromClient(
-                cid!(1),
-                ClientToBroker::JobRequest(cjid!(1), job_spec.clone()),
-            ));
+            .receive_message(JobRequestFromClient(cid!(1), cjid!(1), job_spec.clone()));
 
         fixture
             .expect()
@@ -2305,10 +2266,7 @@ mod tests2 {
                 BrokerToClient::JobResponse(cjid!(1), result.clone()),
             )
             .when()
-            .receive_message(FromWorker(
-                wid!(1),
-                WorkerToBroker::JobResponse(jid!(1), result.clone()),
-            ));
+            .receive_message(JobResponseFromWorker(wid!(1), jid!(1), result.clone()));
     }
 
     #[test]
@@ -2331,10 +2289,7 @@ mod tests2 {
                 BrokerToWorker::EnqueueJob(jid!(1, 1), job_spec_1.clone()),
             )
             .when()
-            .receive_message(FromClient(
-                cid!(1),
-                ClientToBroker::JobRequest(cjid!(1), job_spec_1),
-            ));
+            .receive_message(JobRequestFromClient(cid!(1), cjid!(1), job_spec_1));
 
         fixture
             .expect()
@@ -2344,10 +2299,7 @@ mod tests2 {
                 BrokerToWorker::EnqueueJob(jid!(1, 2), job_spec_2.clone()),
             )
             .when()
-            .receive_message(FromClient(
-                cid!(1),
-                ClientToBroker::JobRequest(cjid!(2), job_spec_2),
-            ));
+            .receive_message(JobRequestFromClient(cid!(1), cjid!(2), job_spec_2));
 
         fixture
             .expect()
@@ -2357,10 +2309,7 @@ mod tests2 {
                 BrokerToClient::JobStatusUpdate(cjid!(3), JobBrokerStatus::WaitingForWorker),
             )
             .when()
-            .receive_message(FromClient(
-                cid!(1),
-                ClientToBroker::JobRequest(cjid!(3), job_spec_3.clone()),
-            ));
+            .receive_message(JobRequestFromClient(cid!(1), cjid!(3), job_spec_3.clone()));
 
         fixture
             .expect()
@@ -2374,9 +2323,6 @@ mod tests2 {
                 BrokerToWorker::EnqueueJob(jid!(1, 3), job_spec_3),
             )
             .when()
-            .receive_message(FromWorker(
-                wid!(1),
-                WorkerToBroker::JobResponse(jid!(1), result_1),
-            ));
+            .receive_message(JobResponseFromWorker(wid!(1), jid!(1), result_1));
     }
 }
