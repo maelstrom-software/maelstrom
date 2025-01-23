@@ -152,9 +152,8 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
 {
     /// Create a new scheduler with the given [`ArtifactGatherer`]. Note that [`SchedulerDeps`] are
     /// passed in to `Self::receive_message`.
-    pub fn new(artifact_gatherer: ArtifactGathererT, deps: DepsT) -> Self {
+    pub fn new(deps: DepsT) -> Self {
         Scheduler {
-            artifact_gatherer,
             deps,
             clients: ClientMap(HashMap::default()),
             workers: WorkerMap(HashMap::default()),
@@ -285,7 +284,6 @@ impl Ord for QueuedJob {
 }
 
 pub struct Scheduler<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps> {
-    artifact_gatherer: ArtifactGathererT,
     deps: DepsT,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
@@ -329,16 +327,25 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         }
     }
 
-    pub fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
-        self.artifact_gatherer.client_connected(cid);
+    pub fn receive_client_connected(
+        &mut self,
+        artifact_gatherer: &mut ArtifactGathererT,
+        cid: ClientId,
+        sender: DepsT::ClientSender,
+    ) {
+        artifact_gatherer.client_connected(cid);
         self.clients
             .0
             .insert(cid, Client::new(sender))
             .assert_is_none();
     }
 
-    pub fn receive_client_disconnected(&mut self, cid: ClientId) {
-        self.artifact_gatherer.client_disconnected(cid);
+    pub fn receive_client_disconnected(
+        &mut self,
+        artifact_gatherer: &mut ArtifactGathererT,
+        cid: ClientId,
+    ) {
+        artifact_gatherer.client_disconnected(cid);
         self.clients.0.remove(&cid).assert_is_some();
 
         self.queued_jobs.retain(|qj| qj.jid.cid != cid);
@@ -360,6 +367,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
 
     pub fn receive_job_request_from_client(
         &mut self,
+        artifact_gatherer: &mut ArtifactGathererT,
         cid: ClientId,
         cjid: ClientJobId,
         spec: JobSpec,
@@ -372,7 +380,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         let jid = JobId { cid, cjid };
         client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
 
-        match self.artifact_gatherer.start_job(jid, layers) {
+        match artifact_gatherer.start_job(jid, layers) {
             StartJob::Ready => {
                 self.queued_jobs
                     .push(QueuedJob::new(jid, priority, estimated_duration));
@@ -428,6 +436,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
 
     pub fn receive_job_response_from_worker(
         &mut self,
+        artifact_gatherer: &mut ArtifactGathererT,
         wid: WorkerId,
         jid: JobId,
         result: JobOutcomeResult,
@@ -447,7 +456,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
             BrokerToClient::JobResponse(jid.cjid, result),
         );
         client.jobs.remove(&jid.cjid).assert_is_some();
-        self.artifact_gatherer.complete_job(jid);
+        artifact_gatherer.complete_job(jid);
         client.num_completed_jobs += 1;
 
         if let Some(QueuedJob { jid, .. }) = self.queued_jobs.pop() {
@@ -528,6 +537,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
 
     pub fn receive_artifact_transferred_from_client(
         &mut self,
+        artifact_gatherer: &mut ArtifactGathererT,
         cid: ClientId,
         digest: Sha256Digest,
         location: ArtifactUploadLocation,
@@ -536,7 +546,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
             .then(|| self.tcp_upload_landing_pad.remove(&digest))
             .flatten();
 
-        match self.artifact_gatherer.artifact_transferred(&digest, file) {
+        match artifact_gatherer.artifact_transferred(&digest, file) {
             Err(err) => {
                 self.send_artifact_transferred_response(cid, digest, Err(err.to_string()));
             }
@@ -555,10 +565,13 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         }
     }
 
-    pub fn receive_manifest_entry(&mut self, digest: Sha256Digest, jid: JobId) {
-        let fetch_artifact = self
-            .artifact_gatherer
-            .manifest_read_for_job_entry(&digest, jid);
+    pub fn receive_manifest_entry(
+        &mut self,
+        artifact_gatherer: &mut ArtifactGathererT,
+        digest: Sha256Digest,
+        jid: JobId,
+    ) {
+        let fetch_artifact = artifact_gatherer.manifest_read_for_job_entry(&digest, jid);
         if fetch_artifact {
             let client = self.clients.0.get_mut(&jid.cid).unwrap();
             self.deps.send_message_to_client(
@@ -570,13 +583,12 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
 
     pub fn receive_finished_reading_manifest(
         &mut self,
+        artifact_gatherer: &mut ArtifactGathererT,
         digest: Sha256Digest,
         jid: JobId,
         result: anyhow::Result<()>,
     ) {
-        let job_ready = self
-            .artifact_gatherer
-            .manifest_read_for_job_complete(digest, jid, result);
+        let job_ready = artifact_gatherer.manifest_read_for_job_complete(digest, jid, result);
         if job_ready {
             let job = self.clients.job_from_jid(jid);
             self.queued_jobs.push(QueuedJob::new(
@@ -590,23 +602,32 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
 
     pub fn receive_get_artifact_for_worker(
         &mut self,
+        artifact_gatherer: &mut ArtifactGathererT,
         digest: Sha256Digest,
         mut sender: DepsT::WorkerArtifactFetcherSender,
     ) {
         self.deps.send_message_to_worker_artifact_fetcher(
             &mut sender,
-            self.artifact_gatherer.get_artifact_for_worker(&digest),
+            artifact_gatherer.get_artifact_for_worker(&digest),
         );
     }
 
-    pub fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
-        self.artifact_gatherer.receive_decrement_refcount(digest);
+    pub fn receive_decrement_refcount(
+        &mut self,
+        artifact_gatherer: &mut ArtifactGathererT,
+        digest: Sha256Digest,
+    ) {
+        artifact_gatherer.receive_decrement_refcount(digest);
     }
 
-    fn sample_job_statistics_for_client(&self, cid: ClientId) -> JobStateCounts {
+    fn sample_job_statistics_for_client(
+        &self,
+        artifact_gatherer: &mut ArtifactGathererT,
+        cid: ClientId,
+    ) -> JobStateCounts {
         enum_map! {
             JobState::WaitingForArtifacts => {
-                self.artifact_gatherer.get_waiting_for_artifacts_count(cid)
+                artifact_gatherer.get_waiting_for_artifacts_count(cid)
             }
             JobState::Pending => {
                 self
@@ -628,13 +649,18 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         }
     }
 
-    pub fn receive_statistics_heartbeat(&mut self) {
+    pub fn receive_statistics_heartbeat(&mut self, artifact_gatherer: &mut ArtifactGathererT) {
         let sample = JobStatisticsSample {
             client_to_stats: self
                 .clients
                 .0
                 .keys()
-                .map(|&cid| (cid, self.sample_job_statistics_for_client(cid)))
+                .map(|&cid| {
+                    (
+                        cid,
+                        self.sample_job_statistics_for_client(artifact_gatherer, cid),
+                    )
+                })
                 .collect(),
         };
         self.job_statistics.insert(sample);
@@ -828,6 +854,10 @@ mod tests {
 
     struct Fixture {
         test_state: Rc<RefCell<TestState>>,
+        artifact_gatherer: super::super::artifact_gatherer::ArtifactGatherer<
+            Rc<RefCell<TestState>>,
+            Rc<RefCell<TestState>>,
+        >,
         scheduler: Scheduler<
             super::super::artifact_gatherer::ArtifactGatherer<
                 Rc<RefCell<TestState>>,
@@ -842,13 +872,11 @@ mod tests {
             let test_state = Rc::new(RefCell::new(TestState::default()));
             Fixture {
                 test_state: test_state.clone(),
-                scheduler: Scheduler::new(
-                    super::super::artifact_gatherer::ArtifactGatherer::new(
-                        test_state.clone(),
-                        test_state.clone(),
-                    ),
+                artifact_gatherer: super::super::artifact_gatherer::ArtifactGatherer::new(
+                    test_state.clone(),
                     test_state.clone(),
                 ),
+                scheduler: Scheduler::new(test_state.clone()),
             }
         }
     }
@@ -892,22 +920,35 @@ mod tests {
         fn receive_message(&mut self, msg: MessageM<Rc<RefCell<TestState>>, test::TempFile>) {
             match msg {
                 Message::ClientConnected(id, sender) => {
-                    self.scheduler.receive_client_connected(id, sender)
+                    self.scheduler
+                        .receive_client_connected(&mut self.artifact_gatherer, id, sender)
                 }
-                Message::ClientDisconnected(id) => self.scheduler.receive_client_disconnected(id),
+                Message::ClientDisconnected(id) => self
+                    .scheduler
+                    .receive_client_disconnected(&mut self.artifact_gatherer, id),
                 Message::JobRequestFromClient(cid, cjid, spec) => self
                     .scheduler
-                    .receive_job_request_from_client(cid, cjid, spec),
-                Message::ArtifactTransferredFromClient(cid, digest, location) => self
-                    .scheduler
-                    .receive_artifact_transferred_from_client(cid, digest, location),
+                    .receive_job_request_from_client(&mut self.artifact_gatherer, cid, cjid, spec),
+                Message::ArtifactTransferredFromClient(cid, digest, location) => {
+                    self.scheduler.receive_artifact_transferred_from_client(
+                        &mut self.artifact_gatherer,
+                        cid,
+                        digest,
+                        location,
+                    )
+                }
                 Message::WorkerConnected(id, slots, sender) => {
                     self.scheduler.receive_worker_connected(id, slots, sender)
                 }
                 Message::WorkerDisconnected(id) => self.scheduler.receive_worker_disconnected(id),
-                Message::JobResponseFromWorker(wid, jid, result) => self
-                    .scheduler
-                    .receive_job_response_from_worker(wid, jid, result),
+                Message::JobResponseFromWorker(wid, jid, result) => {
+                    self.scheduler.receive_job_response_from_worker(
+                        &mut self.artifact_gatherer,
+                        wid,
+                        jid,
+                        result,
+                    )
+                }
                 Message::JobStatusUpdateFromWorker(wid, jid, status) => self
                     .scheduler
                     .receive_job_status_update_from_worker(wid, jid, status),
@@ -923,17 +964,24 @@ mod tests {
                 }
                 Message::GetArtifactForWorker(digest, sender) => self
                     .scheduler
-                    .receive_get_artifact_for_worker(digest, sender),
-                Message::DecrementRefcount(digest) => {
-                    self.scheduler.receive_decrement_refcount(digest)
-                }
-                Message::StatisticsHeartbeat => self.scheduler.receive_statistics_heartbeat(),
-                Message::GotManifestEntry(entry_digest, jid) => {
-                    self.scheduler.receive_manifest_entry(entry_digest, jid)
-                }
-                Message::FinishedReadingManifest(digest, jid, result) => self
+                    .receive_get_artifact_for_worker(&mut self.artifact_gatherer, digest, sender),
+                Message::DecrementRefcount(digest) => self
                     .scheduler
-                    .receive_finished_reading_manifest(digest, jid, result),
+                    .receive_decrement_refcount(&mut self.artifact_gatherer, digest),
+                Message::StatisticsHeartbeat => self
+                    .scheduler
+                    .receive_statistics_heartbeat(&mut self.artifact_gatherer),
+                Message::GotManifestEntry(entry_digest, jid) => self
+                    .scheduler
+                    .receive_manifest_entry(&mut self.artifact_gatherer, entry_digest, jid),
+                Message::FinishedReadingManifest(digest, jid, result) => {
+                    self.scheduler.receive_finished_reading_manifest(
+                        &mut self.artifact_gatherer,
+                        digest,
+                        jid,
+                        result,
+                    )
+                }
             }
         }
     }
@@ -1957,7 +2005,7 @@ mod tests2 {
     impl Fixture {
         fn new() -> Self {
             let mock = Rc::new(RefCell::new(Default::default()));
-            let sut = Scheduler::new(mock.clone(), mock.clone());
+            let sut = Scheduler::new(mock.clone());
             Self { mock, sut }
         }
 
@@ -1979,11 +2027,12 @@ mod tests2 {
         }
 
         fn receive_client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
-            self.sut.receive_client_connected(cid, sender);
+            self.sut
+                .receive_client_connected(&mut self.mock, cid, sender);
         }
 
         fn receive_client_disconnected(&mut self, cid: ClientId) {
-            self.sut.receive_client_disconnected(cid);
+            self.sut.receive_client_disconnected(&mut self.mock, cid);
         }
 
         fn receive_job_request_from_client(
@@ -1992,7 +2041,8 @@ mod tests2 {
             cjid: ClientJobId,
             spec: JobSpec,
         ) {
-            self.sut.receive_job_request_from_client(cid, cjid, spec);
+            self.sut
+                .receive_job_request_from_client(&mut self.mock, cid, cjid, spec);
         }
 
         fn receive_worker_connected(
@@ -2014,7 +2064,8 @@ mod tests2 {
             jid: JobId,
             result: JobOutcomeResult,
         ) {
-            self.sut.receive_job_response_from_worker(wid, jid, result);
+            self.sut
+                .receive_job_response_from_worker(&mut self.mock, wid, jid, result);
         }
 
         fn receive_job_status_update_from_worker(

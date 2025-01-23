@@ -134,6 +134,8 @@ pub type SchedulerMessage<TempFileT> = Message<
 pub type SchedulerSender<TempFileT> = tokio_mpsc::UnboundedSender<SchedulerMessage<TempFileT>>;
 
 pub struct SchedulerTask<CacheT: SchedulerCache> {
+    artifact_gatherer:
+        ArtifactGatherer<CacheT, PassThroughArtifactGathererDeps<CacheT::ArtifactStream>>,
     scheduler: Scheduler<
         ArtifactGatherer<CacheT, PassThroughArtifactGathererDeps<CacheT::ArtifactStream>>,
         PassThroughSchedulerDeps,
@@ -156,13 +158,11 @@ where
         tokio::task::spawn(async move { manifest_reader.run().await });
 
         SchedulerTask {
-            scheduler: Scheduler::new(
-                ArtifactGatherer::new(
-                    cache,
-                    PassThroughArtifactGathererDeps(manifest_reader_sender),
-                ),
-                PassThroughSchedulerDeps,
+            artifact_gatherer: ArtifactGatherer::new(
+                cache,
+                PassThroughArtifactGathererDeps(manifest_reader_sender),
             ),
+            scheduler: Scheduler::new(PassThroughSchedulerDeps),
             sender,
             receiver,
         }
@@ -186,22 +186,30 @@ where
     pub async fn run(mut self) {
         sync::channel_reader(self.receiver, |msg| match msg {
             Message::ClientConnected(id, sender) => {
-                self.scheduler.receive_client_connected(id, sender)
+                self.scheduler
+                    .receive_client_connected(&mut self.artifact_gatherer, id, sender)
             }
-            Message::ClientDisconnected(id) => self.scheduler.receive_client_disconnected(id),
+            Message::ClientDisconnected(id) => self
+                .scheduler
+                .receive_client_disconnected(&mut self.artifact_gatherer, id),
             Message::JobRequestFromClient(cid, cjid, spec) => self
                 .scheduler
-                .receive_job_request_from_client(cid, cjid, spec),
-            Message::ArtifactTransferredFromClient(cid, digest, location) => self
-                .scheduler
-                .receive_artifact_transferred_from_client(cid, digest, location),
+                .receive_job_request_from_client(&mut self.artifact_gatherer, cid, cjid, spec),
+            Message::ArtifactTransferredFromClient(cid, digest, location) => {
+                self.scheduler.receive_artifact_transferred_from_client(
+                    &mut self.artifact_gatherer,
+                    cid,
+                    digest,
+                    location,
+                )
+            }
             Message::WorkerConnected(id, slots, sender) => {
                 self.scheduler.receive_worker_connected(id, slots, sender)
             }
             Message::WorkerDisconnected(id) => self.scheduler.receive_worker_disconnected(id),
             Message::JobResponseFromWorker(wid, jid, result) => self
                 .scheduler
-                .receive_job_response_from_worker(wid, jid, result),
+                .receive_job_response_from_worker(&mut self.artifact_gatherer, wid, jid, result),
             Message::JobStatusUpdateFromWorker(wid, jid, status) => self
                 .scheduler
                 .receive_job_status_update_from_worker(wid, jid, status),
@@ -215,15 +223,26 @@ where
             Message::GotArtifact(digest, file) => self.scheduler.receive_got_artifact(digest, file),
             Message::GetArtifactForWorker(digest, sender) => self
                 .scheduler
-                .receive_get_artifact_for_worker(digest, sender),
-            Message::DecrementRefcount(digest) => self.scheduler.receive_decrement_refcount(digest),
-            Message::StatisticsHeartbeat => self.scheduler.receive_statistics_heartbeat(),
-            Message::GotManifestEntry(entry_digest, jid) => {
-                self.scheduler.receive_manifest_entry(entry_digest, jid)
-            }
-            Message::FinishedReadingManifest(digest, jid, result) => self
+                .receive_get_artifact_for_worker(&mut self.artifact_gatherer, digest, sender),
+            Message::DecrementRefcount(digest) => self
                 .scheduler
-                .receive_finished_reading_manifest(digest, jid, result),
+                .receive_decrement_refcount(&mut self.artifact_gatherer, digest),
+            Message::StatisticsHeartbeat => self
+                .scheduler
+                .receive_statistics_heartbeat(&mut self.artifact_gatherer),
+            Message::GotManifestEntry(entry_digest, jid) => self.scheduler.receive_manifest_entry(
+                &mut self.artifact_gatherer,
+                entry_digest,
+                jid,
+            ),
+            Message::FinishedReadingManifest(digest, jid, result) => {
+                self.scheduler.receive_finished_reading_manifest(
+                    &mut self.artifact_gatherer,
+                    digest,
+                    jid,
+                    result,
+                )
+            }
         })
         .await
         .unwrap();
