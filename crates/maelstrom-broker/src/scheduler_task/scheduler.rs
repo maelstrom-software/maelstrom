@@ -56,7 +56,6 @@ pub trait ArtifactGatherer {
     ) -> bool;
     fn complete_job(&mut self, jid: JobId);
     fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)>;
-    fn receive_decrement_refcount(&mut self, digest: Sha256Digest);
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64;
 }
 
@@ -612,14 +611,6 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         );
     }
 
-    pub fn receive_decrement_refcount(
-        &mut self,
-        artifact_gatherer: &mut ArtifactGathererT,
-        digest: Sha256Digest,
-    ) {
-        artifact_gatherer.receive_decrement_refcount(digest);
-    }
-
     fn sample_job_statistics_for_client(
         &self,
         artifact_gatherer: &mut ArtifactGathererT,
@@ -966,8 +957,8 @@ mod tests {
                     .scheduler
                     .receive_get_artifact_for_worker(&mut self.artifact_gatherer, digest, sender),
                 Message::DecrementRefcount(digest) => self
-                    .scheduler
-                    .receive_decrement_refcount(&mut self.artifact_gatherer, digest),
+                    .artifact_gatherer
+                    .receive_decrement_refcount_from_worker(digest),
                 Message::StatisticsHeartbeat => self
                     .scheduler
                     .receive_statistics_heartbeat(&mut self.artifact_gatherer),
@@ -1761,9 +1752,6 @@ mod tests2 {
             complete_job.remove(index);
         }
         fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
-            todo!("{digest:?}");
-        }
-        fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
             todo!("{digest:?}");
         }
         fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {

@@ -277,7 +277,7 @@ where
         self.cache.get_artifact_for_worker(digest)
     }
 
-    fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
+    pub fn receive_decrement_refcount_from_worker(&mut self, digest: Sha256Digest) {
         self.cache.decrement_refcount(&digest);
     }
 
@@ -344,10 +344,6 @@ where
 
     fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
         self.get_artifact_for_worker(digest)
-    }
-
-    fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
-        self.receive_decrement_refcount(digest)
     }
 
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {

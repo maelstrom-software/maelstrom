@@ -225,8 +225,8 @@ where
                 .scheduler
                 .receive_get_artifact_for_worker(&mut self.artifact_gatherer, digest, sender),
             Message::DecrementRefcount(digest) => self
-                .scheduler
-                .receive_decrement_refcount(&mut self.artifact_gatherer, digest),
+                .artifact_gatherer
+                .receive_decrement_refcount_from_worker(digest),
             Message::StatisticsHeartbeat => self
                 .scheduler
                 .receive_statistics_heartbeat(&mut self.artifact_gatherer),
