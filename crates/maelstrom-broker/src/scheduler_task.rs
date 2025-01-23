@@ -55,6 +55,7 @@ pub struct PassThroughArtifactGathererDeps<ArtifactStreamT>(
 impl<ArtifactStreamT> ArtifactGathererDeps for PassThroughArtifactGathererDeps<ArtifactStreamT> {
     type ArtifactStream = ArtifactStreamT;
     type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
+    type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
 
     fn send_message_to_manifest_reader(&mut self, req: ManifestReadRequest<Self::ArtifactStream>) {
         let _ = self.0.send(req);
@@ -65,6 +66,10 @@ impl<ArtifactStreamT> ArtifactGathererDeps for PassThroughArtifactGathererDeps<A
         sender: &mut Self::WorkerArtifactFetcherSender,
         message: Option<(PathBuf, u64)>,
     ) {
+        let _ = sender.send(message);
+    }
+
+    fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient) {
         let _ = sender.send(message);
     }
 }

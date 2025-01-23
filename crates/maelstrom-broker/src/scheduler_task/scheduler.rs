@@ -35,7 +35,8 @@ use std::{
 
 pub trait ArtifactGatherer {
     type TempFile;
-    fn client_connected(&mut self, cid: ClientId);
+    type ClientSender;
+    fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender);
     fn client_disconnected(&mut self, cid: ClientId);
     fn start_job(&mut self, jid: JobId, layers: NonEmpty<(Sha256Digest, ArtifactType)>)
         -> StartJob;
@@ -44,8 +45,7 @@ pub trait ArtifactGatherer {
         digest: &Sha256Digest,
         file: Option<Self::TempFile>,
     ) -> Result<HashSet<JobId>>;
-    #[must_use]
-    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) -> bool;
+    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId);
     #[must_use]
     fn manifest_read_for_job_complete(
         &mut self,
@@ -60,7 +60,7 @@ pub trait ArtifactGatherer {
 /// The external dependencies for [`Scheduler`]. All of these methods must be asynchronous: they
 /// must not block the current thread.
 pub trait SchedulerDeps {
-    type ClientSender;
+    type ClientSender: Clone;
     type WorkerSender;
     type MonitorSender;
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
@@ -285,8 +285,10 @@ pub struct Scheduler<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps> 
     tcp_upload_landing_pad: HashMap<Sha256Digest, ArtifactGathererT::TempFile>,
 }
 
-impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
-    Scheduler<ArtifactGathererT, DepsT>
+impl<ArtifactGathererT, DepsT> Scheduler<ArtifactGathererT, DepsT>
+where
+    DepsT: SchedulerDeps,
+    ArtifactGathererT: ArtifactGatherer<ClientSender = DepsT::ClientSender>,
 {
     fn possibly_start_jobs(&mut self, mut just_enqueued: HashSet<JobId>) {
         while !self.queued_jobs.is_empty() && !self.workers.0.is_empty() {
@@ -324,7 +326,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         cid: ClientId,
         sender: DepsT::ClientSender,
     ) {
-        artifact_gatherer.client_connected(cid);
+        artifact_gatherer.client_connected(cid, sender.clone());
         self.clients
             .0
             .insert(cid, Client::new(sender))
@@ -377,13 +379,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
                     .push(QueuedJob::new(jid, priority, estimated_duration));
                 self.possibly_start_jobs(HashSet::from_iter([jid]));
             }
-            StartJob::NotReady(to_fetch) => {
-                for digest in to_fetch {
-                    self.deps.send_message_to_client(
-                        &mut client.sender,
-                        BrokerToClient::TransferArtifact(digest),
-                    );
-                }
+            StartJob::NotReady => {
                 self.deps.send_message_to_client(
                     &mut client.sender,
                     BrokerToClient::JobStatusUpdate(jid.cjid, JobBrokerStatus::WaitingForLayers),
@@ -562,14 +558,7 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         digest: Sha256Digest,
         jid: JobId,
     ) {
-        let fetch_artifact = artifact_gatherer.manifest_read_for_job_entry(&digest, jid);
-        if fetch_artifact {
-            let client = self.clients.0.get_mut(&jid.cid).unwrap();
-            self.deps.send_message_to_client(
-                &mut client.sender,
-                BrokerToClient::TransferArtifact(digest),
-            );
-        }
+        artifact_gatherer.manifest_read_for_job_entry(&digest, jid);
     }
 
     pub fn receive_finished_reading_manifest(
@@ -691,6 +680,7 @@ mod tests {
 
     use TestMessage::*;
 
+    #[derive(Clone)]
     struct TestClientSender(ClientId);
     struct TestWorkerSender(WorkerId);
     struct TestMonitorSender(MonitorId);
@@ -804,6 +794,7 @@ mod tests {
     impl ArtifactGathererDeps for Rc<RefCell<TestState>> {
         type ArtifactStream = TestArtifactStream;
         type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
+        type ClientSender = TestClientSender;
 
         fn send_message_to_manifest_reader(
             &mut self,
@@ -820,6 +811,14 @@ mod tests {
             self.borrow_mut()
                 .messages
                 .push(ToWorkerArtifactFetcher(sender.0, message));
+        }
+
+        fn send_message_to_client(
+            &mut self,
+            sender: &mut TestClientSender,
+            message: BrokerToClient,
+        ) {
+            self.borrow_mut().messages.push(ToClient(sender.0, message));
         }
     }
 
@@ -1620,7 +1619,7 @@ mod tests {
 #[cfg(test)]
 mod tests2 {
     use super::*;
-    use maelstrom_base::{digest, job_spec, nonempty, tar_digest};
+    use maelstrom_base::{job_spec, nonempty, tar_digest};
     use maelstrom_test::{cid, cjid, jid, mid, outcome, wid};
     use std::{
         cell::RefCell,
@@ -1628,7 +1627,7 @@ mod tests2 {
         rc::Rc,
     };
 
-    #[derive(Debug)]
+    #[derive(Clone, Debug)]
     struct TestClientSender(ClientId);
 
     #[derive(Debug)]
@@ -1662,7 +1661,9 @@ mod tests2 {
 
     impl ArtifactGatherer for Rc<RefCell<Mock>> {
         type TempFile = String;
-        fn client_connected(&mut self, cid: ClientId) {
+        type ClientSender = TestClientSender;
+        fn client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
+            assert_eq!(sender.0, cid);
             let client_connected = &mut self.borrow_mut().client_connected;
             let index = client_connected
                 .iter()
@@ -1703,7 +1704,7 @@ mod tests2 {
         ) -> Result<HashSet<JobId>> {
             todo!("{digest:?} {file:?}");
         }
-        fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) -> bool {
+        fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
             todo!("{digest:?} {jid:?}");
         }
         fn manifest_read_for_job_complete(
@@ -2164,15 +2165,7 @@ mod tests2 {
             .start_job(
                 jid!(1),
                 nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::NotReady(vec![digest!(1), digest!(2)]),
-            )
-            .send_message_to_client(
-                client_sender!(1),
-                BrokerToClient::TransferArtifact(digest!(1)),
-            )
-            .send_message_to_client(
-                client_sender!(1),
-                BrokerToClient::TransferArtifact(digest!(2)),
+                StartJob::NotReady,
             )
             .send_message_to_client(
                 client_sender!(1),
@@ -2195,7 +2188,7 @@ mod tests2 {
             .start_job(
                 jid!(1),
                 nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::NotReady(vec![]),
+                StartJob::NotReady,
             )
             .send_message_to_client(
                 client_sender!(1),

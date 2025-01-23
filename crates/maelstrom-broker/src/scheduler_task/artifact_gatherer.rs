@@ -1,6 +1,8 @@
 use crate::{cache::SchedulerCache, scheduler_task::ManifestReadRequest};
 use anyhow::Result;
-use maelstrom_base::{ArtifactType, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest};
+use maelstrom_base::{
+    proto::BrokerToClient, ArtifactType, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest,
+};
 use maelstrom_util::{
     cache::GetArtifact,
     ext::{BoolExt as _, OptionExt as _},
@@ -13,6 +15,7 @@ use std::{
 pub trait Deps {
     type ArtifactStream;
     type WorkerArtifactFetcherSender;
+    type ClientSender;
     fn send_message_to_manifest_reader(
         &mut self,
         request: ManifestReadRequest<Self::ArtifactStream>,
@@ -22,6 +25,7 @@ pub trait Deps {
         sender: &mut Self::WorkerArtifactFetcherSender,
         message: Option<(PathBuf, u64)>,
     );
+    fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -59,22 +63,31 @@ impl Job {
     }
 }
 
-#[derive(Default)]
-struct Client {
+struct Client<DepsT: Deps> {
+    sender: DepsT::ClientSender,
     jobs: HashMap<ClientJobId, Job>,
+}
+
+impl<DepsT: Deps> Client<DepsT> {
+    fn new(sender: DepsT::ClientSender) -> Self {
+        Self {
+            sender,
+            jobs: Default::default(),
+        }
+    }
 }
 
 #[must_use]
 #[derive(Debug, PartialEq)]
 pub enum StartJob {
-    NotReady(Vec<Sha256Digest>),
+    NotReady,
     Ready,
 }
 
 pub struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: Deps> {
     cache: CacheT,
     deps: DepsT,
-    clients: HashMap<ClientId, Client>,
+    clients: HashMap<ClientId, Client<DepsT>>,
 }
 
 impl<CacheT, DepsT> ArtifactGatherer<CacheT, DepsT>
@@ -90,9 +103,9 @@ where
         }
     }
 
-    fn client_connected(&mut self, cid: ClientId) {
+    fn client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
         self.clients
-            .insert(cid, Default::default())
+            .insert(cid, Client::new(sender))
             .assert_is_none();
     }
 
@@ -107,17 +120,17 @@ where
         }
     }
 
-    #[must_use]
     fn start_artifact_acquisition_for_job(
         cache: &mut CacheT,
+        client_sender: &mut DepsT::ClientSender,
         deps: &mut DepsT,
         digest: &Sha256Digest,
         is_manifest: IsManifest,
         jid: JobId,
         job: &mut Job,
-    ) -> bool {
+    ) {
         if job.acquired_artifacts.contains(digest) || job.missing_artifacts.contains_key(digest) {
-            return false;
+            return;
         }
         match cache.get_artifact(jid, digest.clone()) {
             GetArtifact::Success => {
@@ -129,19 +142,20 @@ where
                     jid,
                     job,
                 );
-                false
             }
             GetArtifact::Wait => {
                 job.missing_artifacts
                     .insert(digest.clone(), is_manifest)
                     .assert_is_none();
-                false
             }
             GetArtifact::Get => {
                 job.missing_artifacts
                     .insert(digest.clone(), is_manifest)
                     .assert_is_none();
-                true
+                deps.send_message_to_client(
+                    client_sender,
+                    BrokerToClient::TransferArtifact(digest.clone()),
+                );
             }
         }
     }
@@ -182,26 +196,23 @@ where
         };
         let job = job_entry.insert(Default::default());
 
-        let mut artifacts_to_fetch = vec![];
         for (digest, type_) in layers {
             let is_manifest = IsManifest::from(type_ == ArtifactType::Manifest);
-            let fetch_artifact = Self::start_artifact_acquisition_for_job(
+            Self::start_artifact_acquisition_for_job(
                 &mut self.cache,
+                &mut client.sender,
                 &mut self.deps,
                 &digest,
                 is_manifest,
                 jid,
                 job,
             );
-            if fetch_artifact {
-                artifacts_to_fetch.push(digest);
-            }
         }
 
         if job.have_all_artifacts() {
             StartJob::Ready
         } else {
-            StartJob::NotReady(artifacts_to_fetch)
+            StartJob::NotReady
         }
     }
 
@@ -231,23 +242,24 @@ where
             .collect())
     }
 
-    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) -> bool {
+    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
         let Some(client) = self.clients.get_mut(&jid.cid) else {
             // This indicates that the client isn't around anymore. Just ignore this message. When
             // the client disconnected, we canceled all of the outstanding requests. Ideally, we
             // would have a way to cancel the outstanding manifest read, but we don't currently
             // have that.
-            return false;
+            return;
         };
         let job = client.jobs.get_mut(&jid.cjid).unwrap();
         Self::start_artifact_acquisition_for_job(
             &mut self.cache,
+            &mut client.sender,
             &mut self.deps,
             digest,
             IsManifest::NotManifest,
             jid,
             job,
-        )
+        );
     }
 
     #[must_use]
@@ -311,9 +323,10 @@ where
     DepsT: Deps<ArtifactStream = CacheT::ArtifactStream>,
 {
     type TempFile = CacheT::TempFile;
+    type ClientSender = DepsT::ClientSender;
 
-    fn client_connected(&mut self, cid: ClientId) {
-        self.client_connected(cid)
+    fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
+        self.client_connected(cid, sender)
     }
 
     fn client_disconnected(&mut self, cid: ClientId) {
@@ -336,9 +349,8 @@ where
         self.artifact_transferred(digest, file)
     }
 
-    #[must_use]
-    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) -> bool {
-        self.manifest_read_for_job_entry(digest, jid)
+    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
+        self.manifest_read_for_job_entry(digest, jid);
     }
 
     #[must_use]
@@ -375,6 +387,7 @@ mod tests {
     struct TestStateInner {
         send_message_to_manifest_reader_returns: HashSet<ManifestReadRequest<i32>>,
         send_message_to_worker_artifact_fetcher_returns: HashSet<(i32, Option<(PathBuf, u64)>)>,
+        send_message_to_client_returns: Vec<(ClientId, BrokerToClient)>,
         get_artifact_returns: HashMap<(JobId, Sha256Digest), GetArtifact>,
         got_artifact_returns: HashMap<(Sha256Digest, Option<String>), Result<Vec<JobId>>>,
         decrement_refcount_returns: HashBag<Sha256Digest>,
@@ -391,8 +404,13 @@ mod tests {
             );
             assert!(
                 self.send_message_to_worker_artifact_fetcher_returns.is_empty(),
-                "unused test fixture entries for Deps::send_message_to-worker_artifact_fetcher: {:?}",
-                self.read_artifact_returns,
+                "unused test fixture entries for Deps::send_message_to_worker_artifact_fetcher: {:?}",
+                self.send_message_to_worker_artifact_fetcher_returns,
+            );
+            assert!(
+                self.send_message_to_client_returns.is_empty(),
+                "unused test fixture entries for Deps::send_message_to_client: {:?}",
+                self.send_message_to_client_returns,
             );
             assert!(
                 self.get_artifact_returns.is_empty(),
@@ -444,6 +462,20 @@ mod tests {
                     manifest_stream,
                 })
                 .assert_is_true();
+            self
+        }
+
+        fn send_message_to_client(
+            mut self,
+            cid: impl Into<ClientId>,
+            message: BrokerToClient,
+        ) -> Self {
+            self.test_state
+                .inner
+                .as_mut()
+                .unwrap()
+                .send_message_to_client_returns
+                .push((cid.into(), message));
             self
         }
 
@@ -529,6 +561,7 @@ mod tests {
     impl Deps for Rc<RefCell<TestState>> {
         type ArtifactStream = i32;
         type WorkerArtifactFetcherSender = i32;
+        type ClientSender = ClientId;
 
         fn send_message_to_manifest_reader(
             &mut self,
@@ -555,6 +588,26 @@ mod tests {
                 .send_message_to_worker_artifact_fetcher_returns
                 .remove(&(*sender, message))
                 .assert_is_true();
+        }
+
+        fn send_message_to_client(
+            &mut self,
+            sender: &mut Self::ClientSender,
+            message: BrokerToClient,
+        ) {
+            let mut borrow = self.borrow_mut();
+            let send_message_to_client = &mut borrow
+                .inner
+                .as_mut()
+                .unwrap()
+                .send_message_to_client_returns;
+            let index = send_message_to_client
+                .iter()
+                .position(|e| e.0 == *sender && e.1 == message)
+                .expect(&format!(
+                    "sending unexpected message to client {sender}: {message:#?}"
+                ));
+            send_message_to_client.remove(index);
         }
     }
 
@@ -642,7 +695,8 @@ mod tests {
 
         #[track_caller]
         fn client_connected(&mut self, cid: impl Into<ClientId>) {
-            self.sut.client_connected(cid.into());
+            let cid = cid.into();
+            self.sut.client_connected(cid, cid);
             self.test_state.take();
         }
 
@@ -702,12 +756,9 @@ mod tests {
             &mut self,
             digest: impl Into<Sha256Digest>,
             jid: impl Into<JobId>,
-            expected: bool,
         ) {
-            let actual = self
-                .sut
+            self.sut
                 .manifest_read_for_job_entry(&digest.into(), jid.into());
-            assert_eq!(actual, expected);
             self.test_state.take();
         }
 
@@ -753,8 +804,11 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.client_connected(1);
 
-        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
-        fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady(vec![digest!(3)]));
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Get)
+            .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(3)));
+        fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady);
 
         fixture.expect().got_artifact(3, "foo.tmp", Ok([(1, 2)]));
         fixture.artifact_transferred_ok(3, "foo.tmp", [(1, 2)]);
@@ -765,12 +819,11 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.client_connected(1);
 
-        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
-        fixture.start_job(
-            (1, 2),
-            [(3, Tar), (3, Tar)],
-            StartJob::NotReady(vec![digest!(3)]),
-        );
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Get)
+            .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(3)));
+        fixture.start_job((1, 2), [(3, Tar), (3, Tar)], StartJob::NotReady);
 
         fixture.expect().got_artifact(3, "foo.tmp", Ok([(1, 2)]));
         fixture.artifact_transferred_ok(3, "foo.tmp", [(1, 2)]);
@@ -782,7 +835,7 @@ mod tests {
         fixture.client_connected(1);
 
         fixture.expect().get_artifact((1, 2), 3, GetArtifact::Wait);
-        fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady(vec![]));
+        fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady);
     }
 
     #[test]
@@ -791,7 +844,7 @@ mod tests {
         fixture.client_connected(1);
 
         fixture.expect().get_artifact((1, 2), 3, GetArtifact::Wait);
-        fixture.start_job((1, 2), [(3, Tar), (3, Tar)], StartJob::NotReady(vec![]));
+        fixture.start_job((1, 2), [(3, Tar), (3, Tar)], StartJob::NotReady);
     }
 
     #[test]
@@ -804,7 +857,7 @@ mod tests {
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
             .send_message_to_manifest_reader((1, 2), 3, 33);
-        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
     }
 
     #[test]
@@ -817,35 +870,29 @@ mod tests {
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
             .send_message_to_manifest_reader((1, 2), 3, 33);
-        fixture.start_job(
-            (1, 2),
-            [(3, Manifest), (3, Manifest)],
-            StartJob::NotReady(vec![]),
-        );
+        fixture.start_job((1, 2), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
     }
 
     #[test]
     fn start_job_get_manifest_artifact_get() {
         let mut fixture = Fixture::new();
         fixture.client_connected(1);
-        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
-        fixture.start_job(
-            (1, 2),
-            [(3, Manifest)],
-            StartJob::NotReady(vec![digest!(3)]),
-        );
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Get)
+            .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(3)));
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
     }
 
     #[test]
     fn start_job_duplicate_artifacts_get_manifest_artifact_get() {
         let mut fixture = Fixture::new();
         fixture.client_connected(1);
-        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
-        fixture.start_job(
-            (1, 2),
-            [(3, Manifest), (3, Manifest)],
-            StartJob::NotReady(vec![digest!(3)]),
-        );
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Get)
+            .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(3)));
+        fixture.start_job((1, 2), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
     }
 
     #[test]
@@ -853,7 +900,7 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.client_connected(1);
         fixture.expect().get_artifact((1, 2), 3, GetArtifact::Wait);
-        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
     }
 
     #[test]
@@ -861,11 +908,7 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.client_connected(1);
         fixture.expect().get_artifact((1, 2), 3, GetArtifact::Wait);
-        fixture.start_job(
-            (1, 2),
-            [(3, Manifest), (3, Manifest)],
-            StartJob::NotReady(vec![]),
-        );
+        fixture.start_job((1, 2), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
     }
 
     #[test]
@@ -878,7 +921,7 @@ mod tests {
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
             .send_message_to_manifest_reader((1, 2), 3, 33);
-        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
 
         fixture
             .expect()
@@ -886,7 +929,7 @@ mod tests {
             .decrement_refcount(3);
         fixture.client_disconnected(1);
 
-        fixture.manifest_read_for_job_entry(4, (1, 2), false);
+        fixture.manifest_read_for_job_entry(4, (1, 2));
     }
 
     #[test]
@@ -899,7 +942,7 @@ mod tests {
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
             .send_message_to_manifest_reader((1, 2), 3, 33);
-        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
 
         fixture
             .expect()
@@ -920,24 +963,27 @@ mod tests {
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
             .send_message_to_manifest_reader((1, 2), 3, 33);
-        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady(vec![]));
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
 
         fixture
             .expect()
             .get_artifact((1, 2), 4, GetArtifact::Success);
-        fixture.manifest_read_for_job_entry(4, (1, 2), false);
+        fixture.manifest_read_for_job_entry(4, (1, 2));
 
-        fixture.manifest_read_for_job_entry(4, (1, 2), false);
+        fixture.manifest_read_for_job_entry(4, (1, 2));
 
         fixture.expect().get_artifact((1, 2), 5, GetArtifact::Wait);
-        fixture.manifest_read_for_job_entry(5, (1, 2), false);
+        fixture.manifest_read_for_job_entry(5, (1, 2));
 
-        fixture.manifest_read_for_job_entry(5, (1, 2), false);
+        fixture.manifest_read_for_job_entry(5, (1, 2));
 
-        fixture.expect().get_artifact((1, 2), 6, GetArtifact::Get);
-        fixture.manifest_read_for_job_entry(6, (1, 2), true);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 6, GetArtifact::Get)
+            .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(6)));
+        fixture.manifest_read_for_job_entry(6, (1, 2));
 
-        fixture.manifest_read_for_job_entry(6, (1, 2), false);
+        fixture.manifest_read_for_job_entry(6, (1, 2));
 
         fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()), false);
 
@@ -954,11 +1000,14 @@ mod tests {
         fixture.client_connected(1);
         fixture.client_connected(2);
 
-        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
-        fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady(vec![digest!(3)]));
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Get)
+            .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(3)));
+        fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady);
 
         fixture.expect().get_artifact((2, 2), 3, GetArtifact::Wait);
-        fixture.start_job((2, 2), [(3, Tar)], StartJob::NotReady(vec![]));
+        fixture.start_job((2, 2), [(3, Tar)], StartJob::NotReady);
 
         fixture
             .expect()
@@ -971,12 +1020,11 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.client_connected(1);
 
-        fixture.expect().get_artifact((1, 2), 3, GetArtifact::Get);
-        fixture.start_job(
-            (1, 2),
-            [(3, Manifest)],
-            StartJob::NotReady(vec![digest!(3)]),
-        );
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Get)
+            .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(3)));
+        fixture.start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
 
         fixture
             .expect()
@@ -999,11 +1047,7 @@ mod tests {
             .send_message_to_manifest_reader((1, 2), 3, 33)
             .read_artifact(4, 44)
             .send_message_to_manifest_reader((1, 2), 4, 44);
-        fixture.start_job(
-            (1, 2),
-            [(3, Manifest), (4, Manifest)],
-            StartJob::NotReady(vec![]),
-        );
+        fixture.start_job((1, 2), [(3, Manifest), (4, Manifest)], StartJob::NotReady);
 
         fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()), false);
         fixture.manifest_read_for_job_complete(4, (1, 2), Ok(()), true);
@@ -1073,11 +1117,12 @@ mod tests {
             .get_artifact((1, 1), 3, GetArtifact::Get)
             .get_artifact((1, 1), 4, GetArtifact::Success)
             .read_artifact(4, 44)
-            .send_message_to_manifest_reader((1, 1), 4, 44);
+            .send_message_to_manifest_reader((1, 1), 4, 44)
+            .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(3)));
         fixture.start_job(
             (1, 1),
             [(1, Tar), (2, Tar), (3, Tar), (4, Manifest), (1, Tar)],
-            StartJob::NotReady(vec![digest!(3)]),
+            StartJob::NotReady,
         );
 
         fixture
