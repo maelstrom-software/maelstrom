@@ -2,7 +2,6 @@
 //! workers.
 
 use crate::scheduler_task::artifact_gatherer::StartJob;
-use anyhow::Result;
 use enum_map::enum_map;
 use maelstrom_base::{
     proto::{ArtifactUploadLocation, BrokerToClient, BrokerToMonitor, BrokerToWorker},
@@ -42,9 +41,10 @@ pub trait ArtifactGatherer {
         -> StartJob;
     fn artifact_transferred(
         &mut self,
-        digest: &Sha256Digest,
+        cid: ClientId,
+        digest: Sha256Digest,
         file: Option<Self::TempFile>,
-    ) -> Result<HashSet<JobId>>;
+    ) -> HashSet<JobId>;
     fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId);
     #[must_use]
     fn manifest_read_for_job_complete(
@@ -520,31 +520,16 @@ where
             .then(|| self.tcp_upload_landing_pad.remove(&digest))
             .flatten();
 
-        let client = self.clients.0.get_mut(&cid).unwrap();
-
-        match artifact_gatherer.artifact_transferred(&digest, file) {
-            Err(err) => {
-                self.deps.send_message_to_client(
-                    &mut client.sender,
-                    BrokerToClient::ArtifactTransferredResponse(digest, Err(err.to_string())),
-                );
-            }
-            Ok(ready) => {
-                self.deps.send_message_to_client(
-                    &mut client.sender,
-                    BrokerToClient::ArtifactTransferredResponse(digest, Ok(())),
-                );
-                for jid in &ready {
-                    let job = self.clients.job_from_jid(*jid);
-                    self.queued_jobs.push(QueuedJob::new(
-                        *jid,
-                        job.spec.priority,
-                        job.spec.estimated_duration,
-                    ));
-                }
-                self.possibly_start_jobs(ready);
-            }
+        let ready = artifact_gatherer.artifact_transferred(cid, digest, file);
+        for jid in &ready {
+            let job = self.clients.job_from_jid(*jid);
+            self.queued_jobs.push(QueuedJob::new(
+                *jid,
+                job.spec.priority,
+                job.spec.estimated_duration,
+            ));
         }
+        self.possibly_start_jobs(ready);
     }
 
     pub fn receive_manifest_entry(
@@ -1694,10 +1679,11 @@ mod tests2 {
         }
         fn artifact_transferred(
             &mut self,
-            digest: &Sha256Digest,
+            cid: ClientId,
+            digest: Sha256Digest,
             file: Option<Self::TempFile>,
-        ) -> Result<HashSet<JobId>> {
-            todo!("{digest:?} {file:?}");
+        ) -> HashSet<JobId> {
+            todo!("{cid} {digest:?} {file:?}");
         }
         fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
             todo!("{digest:?} {jid:?}");

@@ -1,5 +1,4 @@
 use crate::{cache::SchedulerCache, scheduler_task::ManifestReadRequest};
-use anyhow::Result;
 use maelstrom_base::{
     proto::BrokerToClient, ArtifactType, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest,
 };
@@ -218,28 +217,44 @@ where
 
     fn artifact_transferred(
         &mut self,
-        digest: &Sha256Digest,
+        cid: ClientId,
+        digest: Sha256Digest,
         file: Option<CacheT::TempFile>,
-    ) -> Result<HashSet<JobId>> {
-        Ok(self
-            .cache
-            .got_artifact(digest, file)?
-            .into_iter()
-            .filter(|jid| {
-                let client = self.clients.get_mut(&jid.cid).unwrap();
-                let job = client.jobs.get_mut(&jid.cjid).unwrap();
-                let is_manifest = job.missing_artifacts.remove(digest).unwrap();
-                Self::complete_artifact_acquisition_for_job(
-                    &mut self.cache,
-                    &mut self.deps,
-                    digest,
-                    is_manifest,
-                    *jid,
-                    job,
+    ) -> HashSet<JobId> {
+        let client = self.clients.get_mut(&cid).unwrap();
+        match self.cache.got_artifact(&digest, file) {
+            Err(err) => {
+                self.deps.send_message_to_client(
+                    &mut client.sender,
+                    BrokerToClient::ArtifactTransferredResponse(digest, Err(err.to_string())),
                 );
-                job.have_all_artifacts()
-            })
-            .collect())
+                Default::default()
+            }
+            Ok(jids) => {
+                self.deps.send_message_to_client(
+                    &mut client.sender,
+                    BrokerToClient::ArtifactTransferredResponse(digest.clone(), Ok(())),
+                );
+                let mut ready = HashSet::new();
+                for jid in jids {
+                    let client = self.clients.get_mut(&jid.cid).unwrap();
+                    let job = client.jobs.get_mut(&jid.cjid).unwrap();
+                    let is_manifest = job.missing_artifacts.remove(&digest).unwrap();
+                    Self::complete_artifact_acquisition_for_job(
+                        &mut self.cache,
+                        &mut self.deps,
+                        &digest,
+                        is_manifest,
+                        jid,
+                        job,
+                    );
+                    if job.have_all_artifacts() {
+                        ready.insert(jid).assert_is_true();
+                    }
+                }
+                ready
+            }
+        }
     }
 
     fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
@@ -343,10 +358,11 @@ where
 
     fn artifact_transferred(
         &mut self,
-        digest: &Sha256Digest,
+        cid: ClientId,
+        digest: Sha256Digest,
         file: Option<Self::TempFile>,
-    ) -> Result<HashSet<JobId>> {
-        self.artifact_transferred(digest, file)
+    ) -> HashSet<JobId> {
+        self.artifact_transferred(cid, digest, file)
     }
 
     fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
@@ -375,6 +391,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
     use hashbag::HashBag;
     use maelstrom_base::digest;
     use std::{
@@ -736,18 +753,18 @@ mod tests {
         }
 
         #[track_caller]
-        fn artifact_transferred_ok<JobIdT>(
+        fn artifact_transferred<JobIdT>(
             &mut self,
+            cid: impl Into<ClientId>,
             digest: impl Into<Sha256Digest>,
             file: impl Into<String>,
             expected: impl IntoIterator<Item = JobIdT>,
         ) where
             JobIdT: Into<JobId>,
         {
-            let actual = self
-                .sut
-                .artifact_transferred(&digest.into(), Some(file.into()))
-                .unwrap();
+            let actual =
+                self.sut
+                    .artifact_transferred(cid.into(), digest.into(), Some(file.into()));
             assert_eq!(actual, expected.into_iter().map(Into::into).collect());
             self.test_state.take();
         }
@@ -810,8 +827,14 @@ mod tests {
             .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(3)));
         fixture.start_job((1, 2), [(3, Tar)], StartJob::NotReady);
 
-        fixture.expect().got_artifact(3, "foo.tmp", Ok([(1, 2)]));
-        fixture.artifact_transferred_ok(3, "foo.tmp", [(1, 2)]);
+        fixture
+            .expect()
+            .got_artifact(3, "foo.tmp", Ok([(1, 2)]))
+            .send_message_to_client(
+                1,
+                BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
+            );
+        fixture.artifact_transferred(1, 3, "foo.tmp", [(1, 2)]);
     }
 
     #[test]
@@ -825,8 +848,14 @@ mod tests {
             .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(3)));
         fixture.start_job((1, 2), [(3, Tar), (3, Tar)], StartJob::NotReady);
 
-        fixture.expect().got_artifact(3, "foo.tmp", Ok([(1, 2)]));
-        fixture.artifact_transferred_ok(3, "foo.tmp", [(1, 2)]);
+        fixture
+            .expect()
+            .got_artifact(3, "foo.tmp", Ok([(1, 2)]))
+            .send_message_to_client(
+                1,
+                BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
+            );
+        fixture.artifact_transferred(1, 3, "foo.tmp", [(1, 2)]);
     }
 
     #[test]
@@ -987,11 +1016,23 @@ mod tests {
 
         fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()), false);
 
-        fixture.expect().got_artifact(6, "6.tmp", Ok([(1, 2)]));
-        fixture.artifact_transferred_ok(6, "6.tmp", [] as [JobId; 0]);
+        fixture
+            .expect()
+            .got_artifact(6, "6.tmp", Ok([(1, 2)]))
+            .send_message_to_client(
+                1,
+                BrokerToClient::ArtifactTransferredResponse(digest!(6), Ok(())),
+            );
+        fixture.artifact_transferred(1, 6, "6.tmp", [] as [JobId; 0]);
 
-        fixture.expect().got_artifact(5, "5.tmp", Ok([(1, 2)]));
-        fixture.artifact_transferred_ok(5, "5.tmp", [(1, 2)]);
+        fixture
+            .expect()
+            .got_artifact(5, "5.tmp", Ok([(1, 2)]))
+            .send_message_to_client(
+                1,
+                BrokerToClient::ArtifactTransferredResponse(digest!(5), Ok(())),
+            );
+        fixture.artifact_transferred(1, 5, "5.tmp", [(1, 2)]);
     }
 
     #[test]
@@ -1011,8 +1052,12 @@ mod tests {
 
         fixture
             .expect()
-            .got_artifact(3, "foo.tmp", Ok([(1, 2), (2, 2)]));
-        fixture.artifact_transferred_ok(3, "foo.tmp", [(1, 2), (2, 2)]);
+            .got_artifact(3, "foo.tmp", Ok([(1, 2), (2, 2)]))
+            .send_message_to_client(
+                1,
+                BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
+            );
+        fixture.artifact_transferred(1, 3, "foo.tmp", [(1, 2), (2, 2)]);
     }
 
     #[test]
@@ -1029,9 +1074,13 @@ mod tests {
         fixture
             .expect()
             .got_artifact(3, "foo.tmp", Ok([(1, 2)]))
+            .send_message_to_client(
+                1,
+                BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
+            )
             .read_artifact(3, 33)
             .send_message_to_manifest_reader((1, 2), 3, 33);
-        fixture.artifact_transferred_ok(3, "foo.tmp", [] as [JobId; 0]);
+        fixture.artifact_transferred(1, 3, "foo.tmp", [] as [JobId; 0]);
     }
 
     #[test]
