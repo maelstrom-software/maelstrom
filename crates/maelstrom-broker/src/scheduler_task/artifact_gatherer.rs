@@ -12,9 +12,15 @@ use std::{
 
 pub trait Deps {
     type ArtifactStream;
+    type WorkerArtifactFetcherSender;
     fn send_message_to_manifest_reader(
         &mut self,
         request: ManifestReadRequest<Self::ArtifactStream>,
+    );
+    fn send_message_to_worker_artifact_fetcher(
+        &mut self,
+        sender: &mut Self::WorkerArtifactFetcherSender,
+        message: Option<(PathBuf, u64)>,
     );
 }
 
@@ -273,8 +279,15 @@ where
         }
     }
 
-    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
-        self.cache.get_artifact_for_worker(digest)
+    pub fn receive_get_artifact_for_worker(
+        &mut self,
+        digest: Sha256Digest,
+        mut sender: DepsT::WorkerArtifactFetcherSender,
+    ) {
+        self.deps.send_message_to_worker_artifact_fetcher(
+            &mut sender,
+            self.cache.get_artifact_for_worker(&digest),
+        );
     }
 
     pub fn receive_decrement_refcount_from_worker(&mut self, digest: Sha256Digest) {
@@ -342,10 +355,6 @@ where
         self.complete_job(jid)
     }
 
-    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
-        self.get_artifact_for_worker(digest)
-    }
-
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
         self.get_waiting_for_artifacts_count(cid)
     }
@@ -365,6 +374,7 @@ mod tests {
     #[derive(Default)]
     struct TestStateInner {
         send_message_to_manifest_reader_returns: HashSet<ManifestReadRequest<i32>>,
+        send_message_to_worker_artifact_fetcher_returns: HashSet<(i32, Option<(PathBuf, u64)>)>,
         get_artifact_returns: HashMap<(JobId, Sha256Digest), GetArtifact>,
         got_artifact_returns: HashMap<(Sha256Digest, Option<String>), Result<Vec<JobId>>>,
         decrement_refcount_returns: HashBag<Sha256Digest>,
@@ -378,6 +388,11 @@ mod tests {
                 self.send_message_to_manifest_reader_returns.is_empty(),
                 "unused test fixture entries for Deps::send_message_to_manifest_reader: {:?}",
                 self.send_message_to_manifest_reader_returns,
+            );
+            assert!(
+                self.send_message_to_worker_artifact_fetcher_returns.is_empty(),
+                "unused test fixture entries for Deps::send_message_to-worker_artifact_fetcher: {:?}",
+                self.read_artifact_returns,
             );
             assert!(
                 self.get_artifact_returns.is_empty(),
@@ -513,6 +528,7 @@ mod tests {
 
     impl Deps for Rc<RefCell<TestState>> {
         type ArtifactStream = i32;
+        type WorkerArtifactFetcherSender = i32;
 
         fn send_message_to_manifest_reader(
             &mut self,
@@ -524,6 +540,20 @@ mod tests {
                 .unwrap()
                 .send_message_to_manifest_reader_returns
                 .remove(&request)
+                .assert_is_true();
+        }
+
+        fn send_message_to_worker_artifact_fetcher(
+            &mut self,
+            sender: &mut Self::WorkerArtifactFetcherSender,
+            message: Option<(PathBuf, u64)>,
+        ) {
+            self.borrow_mut()
+                .inner
+                .as_mut()
+                .unwrap()
+                .send_message_to_worker_artifact_fetcher_returns
+                .remove(&(*sender, message))
                 .assert_is_true();
         }
     }

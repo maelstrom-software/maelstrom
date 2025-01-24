@@ -21,7 +21,6 @@ use maelstrom_util::{
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap, HashSet},
-    path::PathBuf,
     time::Duration,
 };
 
@@ -55,7 +54,6 @@ pub trait ArtifactGatherer {
         result: anyhow::Result<()>,
     ) -> bool;
     fn complete_job(&mut self, jid: JobId);
-    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)>;
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64;
 }
 
@@ -65,18 +63,12 @@ pub trait SchedulerDeps {
     type ClientSender;
     type WorkerSender;
     type MonitorSender;
-    type WorkerArtifactFetcherSender;
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
     fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker);
     fn send_message_to_monitor(
         &mut self,
         sender: &mut Self::MonitorSender,
         message: BrokerToMonitor,
-    );
-    fn send_message_to_worker_artifact_fetcher(
-        &mut self,
-        sender: &mut Self::WorkerArtifactFetcherSender,
-        message: Option<(PathBuf, u64)>,
     );
 }
 
@@ -599,18 +591,6 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
         }
     }
 
-    pub fn receive_get_artifact_for_worker(
-        &mut self,
-        artifact_gatherer: &mut ArtifactGathererT,
-        digest: Sha256Digest,
-        mut sender: DepsT::WorkerArtifactFetcherSender,
-    ) {
-        self.deps.send_message_to_worker_artifact_fetcher(
-            &mut sender,
-            artifact_gatherer.get_artifact_for_worker(&digest),
-        );
-    }
-
     fn sample_job_statistics_for_client(
         &self,
         artifact_gatherer: &mut ArtifactGathererT,
@@ -684,13 +664,13 @@ mod tests {
     use maelstrom_test::*;
     use maelstrom_util::cache::{fs::test, GetArtifact};
     use maplit::hashmap;
-    use std::{cell::RefCell, rc::Rc};
+    use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
     type MessageM<DepsT, TempFileT> = Message<
         <DepsT as SchedulerDeps>::ClientSender,
         <DepsT as SchedulerDeps>::WorkerSender,
         <DepsT as SchedulerDeps>::MonitorSender,
-        <DepsT as SchedulerDeps>::WorkerArtifactFetcherSender,
+        <DepsT as ArtifactGathererDeps>::WorkerArtifactFetcherSender,
         TempFileT,
     >;
 
@@ -793,7 +773,6 @@ mod tests {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
         type MonitorSender = TestMonitorSender;
-        type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
 
         fn send_message_to_client(
             &mut self,
@@ -820,6 +799,18 @@ mod tests {
                 .messages
                 .push(ToMonitor(sender.0, message));
         }
+    }
+
+    impl ArtifactGathererDeps for Rc<RefCell<TestState>> {
+        type ArtifactStream = TestArtifactStream;
+        type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
+
+        fn send_message_to_manifest_reader(
+            &mut self,
+            req: ManifestReadRequest<TestArtifactStream>,
+        ) {
+            self.borrow_mut().messages.push(ReadManifest(req));
+        }
 
         fn send_message_to_worker_artifact_fetcher(
             &mut self,
@@ -829,17 +820,6 @@ mod tests {
             self.borrow_mut()
                 .messages
                 .push(ToWorkerArtifactFetcher(sender.0, message));
-        }
-    }
-
-    impl ArtifactGathererDeps for Rc<RefCell<TestState>> {
-        type ArtifactStream = TestArtifactStream;
-
-        fn send_message_to_manifest_reader(
-            &mut self,
-            req: ManifestReadRequest<TestArtifactStream>,
-        ) {
-            self.borrow_mut().messages.push(ReadManifest(req));
         }
     }
 
@@ -954,8 +934,8 @@ mod tests {
                     self.scheduler.receive_got_artifact(digest, file)
                 }
                 Message::GetArtifactForWorker(digest, sender) => self
-                    .scheduler
-                    .receive_get_artifact_for_worker(&mut self.artifact_gatherer, digest, sender),
+                    .artifact_gatherer
+                    .receive_get_artifact_for_worker(digest, sender),
                 Message::DecrementRefcount(digest) => self
                     .artifact_gatherer
                     .receive_decrement_refcount_from_worker(digest),
@@ -1657,10 +1637,6 @@ mod tests2 {
     #[derive(Debug)]
     struct TestMonitorSender(MonitorId);
 
-    //    struct TestWorkerArtifactFetcherSender(u32);
-    #[derive(Debug)]
-    struct TestWorkerArtifactFetcherSender;
-
     macro_rules! client_sender {
         [$n:expr] => { TestClientSender(cid![$n]) };
     }
@@ -1672,12 +1648,6 @@ mod tests2 {
     macro_rules! monitor_sender {
         [$n:expr] => { TestMonitorSender(mid![$n]) };
     }
-
-    /*
-    macro_rules! worker_artifact_fetcher_sender {
-        [$n:expr] => { TestWorkerArtifactFetcherSender($n) };
-    }
-    */
 
     #[derive(Default)]
     struct Mock {
@@ -1751,9 +1721,6 @@ mod tests2 {
             ));
             complete_job.remove(index);
         }
-        fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
-            todo!("{digest:?}");
-        }
         fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
             todo!("{cid:?}");
         }
@@ -1763,7 +1730,6 @@ mod tests2 {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
         type MonitorSender = TestMonitorSender;
-        type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
 
         fn send_message_to_client(
             &mut self,
@@ -1808,14 +1774,6 @@ mod tests2 {
                     "sending unexpected message to monitor {sender:?}: {message:#?}"
                 ));
             send_message_to_monitor.remove(index);
-        }
-
-        fn send_message_to_worker_artifact_fetcher(
-            &mut self,
-            sender: &mut Self::WorkerArtifactFetcherSender,
-            message: Option<(PathBuf, u64)>,
-        ) {
-            todo!("{sender:?} {message:?}");
         }
     }
 

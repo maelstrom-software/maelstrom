@@ -29,7 +29,6 @@ impl SchedulerDeps for PassThroughSchedulerDeps {
     type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
     type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
     type MonitorSender = tokio_mpsc::UnboundedSender<BrokerToMonitor>;
-    type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
 
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient) {
         let _ = sender.send(message);
@@ -46,14 +45,6 @@ impl SchedulerDeps for PassThroughSchedulerDeps {
     ) {
         let _ = sender.send(message);
     }
-
-    fn send_message_to_worker_artifact_fetcher(
-        &mut self,
-        sender: &mut Self::WorkerArtifactFetcherSender,
-        message: Option<(PathBuf, u64)>,
-    ) {
-        let _ = sender.send(message);
-    }
 }
 
 #[derive(Debug)]
@@ -63,9 +54,18 @@ pub struct PassThroughArtifactGathererDeps<ArtifactStreamT>(
 
 impl<ArtifactStreamT> ArtifactGathererDeps for PassThroughArtifactGathererDeps<ArtifactStreamT> {
     type ArtifactStream = ArtifactStreamT;
+    type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
 
     fn send_message_to_manifest_reader(&mut self, req: ManifestReadRequest<Self::ArtifactStream>) {
         let _ = self.0.send(req);
+    }
+
+    fn send_message_to_worker_artifact_fetcher(
+        &mut self,
+        sender: &mut Self::WorkerArtifactFetcherSender,
+        message: Option<(PathBuf, u64)>,
+    ) {
+        let _ = sender.send(message);
     }
 }
 
@@ -222,8 +222,8 @@ where
             }
             Message::GotArtifact(digest, file) => self.scheduler.receive_got_artifact(digest, file),
             Message::GetArtifactForWorker(digest, sender) => self
-                .scheduler
-                .receive_get_artifact_for_worker(&mut self.artifact_gatherer, digest, sender),
+                .artifact_gatherer
+                .receive_get_artifact_for_worker(digest, sender),
             Message::DecrementRefcount(digest) => self
                 .artifact_gatherer
                 .receive_decrement_refcount_from_worker(digest),
