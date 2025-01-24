@@ -509,19 +509,6 @@ where
         self.tcp_upload_landing_pad.insert(digest, file);
     }
 
-    fn send_artifact_transferred_response(
-        &mut self,
-        cid: ClientId,
-        digest: Sha256Digest,
-        res: Result<(), String>,
-    ) {
-        let client = self.clients.0.get_mut(&cid).unwrap();
-        self.deps.send_message_to_client(
-            &mut client.sender,
-            BrokerToClient::ArtifactTransferredResponse(digest, res),
-        );
-    }
-
     pub fn receive_artifact_transferred_from_client(
         &mut self,
         artifact_gatherer: &mut ArtifactGathererT,
@@ -533,12 +520,20 @@ where
             .then(|| self.tcp_upload_landing_pad.remove(&digest))
             .flatten();
 
+        let client = self.clients.0.get_mut(&cid).unwrap();
+
         match artifact_gatherer.artifact_transferred(&digest, file) {
             Err(err) => {
-                self.send_artifact_transferred_response(cid, digest, Err(err.to_string()));
+                self.deps.send_message_to_client(
+                    &mut client.sender,
+                    BrokerToClient::ArtifactTransferredResponse(digest, Err(err.to_string())),
+                );
             }
             Ok(ready) => {
-                self.send_artifact_transferred_response(cid, digest.clone(), Ok(()));
+                self.deps.send_message_to_client(
+                    &mut client.sender,
+                    BrokerToClient::ArtifactTransferredResponse(digest, Ok(())),
+                );
                 for jid in &ready {
                     let job = self.clients.job_from_jid(*jid);
                     self.queued_jobs.push(QueuedJob::new(
