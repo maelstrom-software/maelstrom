@@ -239,7 +239,9 @@ where
             Message::StatisticsRequestFromMonitor(mid) => {
                 self.scheduler.receive_statistics_request_from_monitor(mid)
             }
-            Message::GotArtifact(digest, file) => self.scheduler.receive_got_artifact(digest, file),
+            Message::GotArtifact(digest, file) => {
+                self.artifact_gatherer.receive_got_artifact(digest, file)
+            }
             Message::GetArtifactForWorker(digest, sender) => self
                 .artifact_gatherer
                 .receive_get_artifact_for_worker(digest, sender),

@@ -20,6 +20,7 @@ use maelstrom_util::{
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap, HashSet},
+    marker::PhantomData,
     time::Duration,
 };
 
@@ -33,7 +34,6 @@ use std::{
  */
 
 pub trait ArtifactGatherer {
-    type TempFile;
     type ClientSender;
     fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender);
     fn client_disconnected(&mut self, cid: ClientId);
@@ -43,7 +43,7 @@ pub trait ArtifactGatherer {
         &mut self,
         cid: ClientId,
         digest: Sha256Digest,
-        file: Option<Self::TempFile>,
+        location: ArtifactUploadLocation,
     ) -> HashSet<JobId>;
     fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId);
     #[must_use]
@@ -157,13 +157,13 @@ impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
     pub fn new(deps: DepsT) -> Self {
         Scheduler {
             deps,
-            clients: ClientMap(HashMap::default()),
-            workers: WorkerMap(HashMap::default()),
-            monitors: HashMap::default(),
-            queued_jobs: BinaryHeap::default(),
-            worker_heap: Heap::default(),
-            job_statistics: JobStatisticsTimeSeries::default(),
-            tcp_upload_landing_pad: Default::default(),
+            clients: ClientMap(Default::default()),
+            workers: WorkerMap(Default::default()),
+            monitors: Default::default(),
+            queued_jobs: Default::default(),
+            worker_heap: Default::default(),
+            job_statistics: Default::default(),
+            _artifact_gatherer: Default::default(),
         }
     }
 }
@@ -285,7 +285,7 @@ impl Ord for QueuedJob {
     }
 }
 
-pub struct Scheduler<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps> {
+pub struct Scheduler<ArtifactGathererT, DepsT: SchedulerDeps> {
     deps: DepsT,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
@@ -293,7 +293,7 @@ pub struct Scheduler<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps> 
     queued_jobs: BinaryHeap<QueuedJob>,
     worker_heap: Heap<WorkerMap<DepsT>>,
     job_statistics: JobStatisticsTimeSeries,
-    tcp_upload_landing_pad: HashMap<Sha256Digest, ArtifactGathererT::TempFile>,
+    _artifact_gatherer: PhantomData<ArtifactGathererT>,
 }
 
 impl<ArtifactGathererT, DepsT> Scheduler<ArtifactGathererT, DepsT>
@@ -513,14 +513,6 @@ where
             .send_message_to_monitor(self.monitors.get_mut(&mid).unwrap(), resp);
     }
 
-    pub fn receive_got_artifact(
-        &mut self,
-        digest: Sha256Digest,
-        file: ArtifactGathererT::TempFile,
-    ) {
-        self.tcp_upload_landing_pad.insert(digest, file);
-    }
-
     pub fn receive_artifact_transferred_from_client(
         &mut self,
         artifact_gatherer: &mut ArtifactGathererT,
@@ -528,11 +520,7 @@ where
         digest: Sha256Digest,
         location: ArtifactUploadLocation,
     ) {
-        let file = (location == ArtifactUploadLocation::TcpUpload)
-            .then(|| self.tcp_upload_landing_pad.remove(&digest))
-            .flatten();
-
-        let ready = artifact_gatherer.artifact_transferred(cid, digest, file);
+        let ready = artifact_gatherer.artifact_transferred(cid, digest, location);
         for jid in &ready {
             let job = self.clients.job_from_jid(*jid);
             self.queued_jobs.push(QueuedJob::new(
@@ -941,7 +929,7 @@ mod tests {
                     self.scheduler.receive_statistics_request_from_monitor(mid)
                 }
                 Message::GotArtifact(digest, file) => {
-                    self.scheduler.receive_got_artifact(digest, file)
+                    self.artifact_gatherer.receive_got_artifact(digest, file)
                 }
                 Message::GetArtifactForWorker(digest, sender) => self
                     .artifact_gatherer
@@ -1672,7 +1660,6 @@ mod tests2 {
     }
 
     impl ArtifactGatherer for Rc<RefCell<Mock>> {
-        type TempFile = String;
         type ClientSender = TestClientSender;
         fn client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
             assert_eq!(sender.0, cid);
@@ -1713,9 +1700,9 @@ mod tests2 {
             &mut self,
             cid: ClientId,
             digest: Sha256Digest,
-            file: Option<Self::TempFile>,
+            location: ArtifactUploadLocation,
         ) -> HashSet<JobId> {
-            todo!("{cid} {digest:?} {file:?}");
+            todo!("{cid} {digest:?} {location:?}");
         }
         fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
             todo!("{digest:?} {jid:?}");

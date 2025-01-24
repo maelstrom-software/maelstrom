@@ -1,6 +1,7 @@
 use crate::{cache::SchedulerCache, scheduler_task::ManifestReadRequest};
 use maelstrom_base::{
-    proto::BrokerToClient, ArtifactType, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest,
+    proto::{ArtifactUploadLocation, BrokerToClient},
+    ArtifactType, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest,
 };
 use maelstrom_util::{
     cache::GetArtifact,
@@ -87,6 +88,7 @@ pub struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: Deps> {
     cache: CacheT,
     deps: DepsT,
     clients: HashMap<ClientId, Client<DepsT>>,
+    tcp_upload_landing_pad: HashMap<Sha256Digest, CacheT::TempFile>,
 }
 
 impl<CacheT, DepsT> ArtifactGatherer<CacheT, DepsT>
@@ -99,6 +101,7 @@ where
             deps,
             cache,
             clients: Default::default(),
+            tcp_upload_landing_pad: Default::default(),
         }
     }
 
@@ -219,8 +222,12 @@ where
         &mut self,
         cid: ClientId,
         digest: Sha256Digest,
-        file: Option<CacheT::TempFile>,
+        location: ArtifactUploadLocation,
     ) -> HashSet<JobId> {
+        let file = (location == ArtifactUploadLocation::TcpUpload)
+            .then(|| self.tcp_upload_landing_pad.remove(&digest))
+            .flatten();
+
         let client = self.clients.get_mut(&cid).unwrap();
         match self.cache.got_artifact(&digest, file) {
             Err(err) => {
@@ -330,6 +337,10 @@ where
             .filter(|job| !job.have_all_artifacts())
             .count() as u64
     }
+
+    pub fn receive_got_artifact(&mut self, digest: Sha256Digest, file: CacheT::TempFile) {
+        self.tcp_upload_landing_pad.insert(digest, file);
+    }
 }
 
 impl<CacheT, DepsT> super::scheduler::ArtifactGatherer for ArtifactGatherer<CacheT, DepsT>
@@ -337,7 +348,6 @@ where
     CacheT: SchedulerCache,
     DepsT: Deps<ArtifactStream = CacheT::ArtifactStream>,
 {
-    type TempFile = CacheT::TempFile;
     type ClientSender = DepsT::ClientSender;
 
     fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
@@ -360,9 +370,9 @@ where
         &mut self,
         cid: ClientId,
         digest: Sha256Digest,
-        file: Option<Self::TempFile>,
+        location: ArtifactUploadLocation,
     ) -> HashSet<JobId> {
-        self.artifact_transferred(cid, digest, file)
+        self.artifact_transferred(cid, digest, location)
     }
 
     fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
@@ -512,15 +522,14 @@ mod tests {
             self
         }
 
-        fn got_artifact<DigestT, TempFileT, JobIdIterT, JobIdT>(
+        fn got_artifact<DigestT, JobIdIterT, JobIdT>(
             mut self,
             digest: DigestT,
-            file: TempFileT,
+            file: Option<&str>,
             result: Result<JobIdIterT>,
         ) -> Self
         where
             Sha256Digest: From<DigestT>,
-            String: From<TempFileT>,
             JobId: From<JobIdT>,
             JobIdIterT: IntoIterator<Item = JobIdT>,
         {
@@ -530,7 +539,7 @@ mod tests {
                 .unwrap()
                 .got_artifact_returns
                 .insert(
-                    (digest.into(), Some(file.into())),
+                    (digest.into(), file.map(Into::into)),
                     result.map(|iter| iter.into_iter().map(Into::into).collect()),
                 )
                 .assert_is_none();
@@ -757,14 +766,14 @@ mod tests {
             &mut self,
             cid: impl Into<ClientId>,
             digest: impl Into<Sha256Digest>,
-            file: impl Into<String>,
+            location: impl Into<ArtifactUploadLocation>,
             expected: impl IntoIterator<Item = JobIdT>,
         ) where
             JobIdT: Into<JobId>,
         {
-            let actual =
-                self.sut
-                    .artifact_transferred(cid.into(), digest.into(), Some(file.into()));
+            let actual = self
+                .sut
+                .artifact_transferred(cid.into(), digest.into(), location.into());
             assert_eq!(actual, expected.into_iter().map(Into::into).collect());
             self.test_state.take();
         }
@@ -829,12 +838,12 @@ mod tests {
 
         fixture
             .expect()
-            .got_artifact(3, "foo.tmp", Ok([(1, 2)]))
+            .got_artifact(3, None, Ok([(1, 2)]))
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
             );
-        fixture.artifact_transferred(1, 3, "foo.tmp", [(1, 2)]);
+        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote, [(1, 2)]);
     }
 
     #[test]
@@ -850,12 +859,12 @@ mod tests {
 
         fixture
             .expect()
-            .got_artifact(3, "foo.tmp", Ok([(1, 2)]))
+            .got_artifact(3, None, Ok([(1, 2)]))
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
             );
-        fixture.artifact_transferred(1, 3, "foo.tmp", [(1, 2)]);
+        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote, [(1, 2)]);
     }
 
     #[test]
@@ -1018,21 +1027,21 @@ mod tests {
 
         fixture
             .expect()
-            .got_artifact(6, "6.tmp", Ok([(1, 2)]))
+            .got_artifact(6, None, Ok([(1, 2)]))
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(6), Ok(())),
             );
-        fixture.artifact_transferred(1, 6, "6.tmp", [] as [JobId; 0]);
+        fixture.artifact_transferred(1, 6, ArtifactUploadLocation::Remote, [] as [JobId; 0]);
 
         fixture
             .expect()
-            .got_artifact(5, "5.tmp", Ok([(1, 2)]))
+            .got_artifact(5, None, Ok([(1, 2)]))
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(5), Ok(())),
             );
-        fixture.artifact_transferred(1, 5, "5.tmp", [(1, 2)]);
+        fixture.artifact_transferred(1, 5, ArtifactUploadLocation::Remote, [(1, 2)]);
     }
 
     #[test]
@@ -1052,12 +1061,12 @@ mod tests {
 
         fixture
             .expect()
-            .got_artifact(3, "foo.tmp", Ok([(1, 2), (2, 2)]))
+            .got_artifact(3, None, Ok([(1, 2), (2, 2)]))
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
             );
-        fixture.artifact_transferred(1, 3, "foo.tmp", [(1, 2), (2, 2)]);
+        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote, [(1, 2), (2, 2)]);
     }
 
     #[test]
@@ -1073,14 +1082,14 @@ mod tests {
 
         fixture
             .expect()
-            .got_artifact(3, "foo.tmp", Ok([(1, 2)]))
+            .got_artifact(3, None, Ok([(1, 2)]))
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
             )
             .read_artifact(3, 33)
             .send_message_to_manifest_reader((1, 2), 3, 33);
-        fixture.artifact_transferred(1, 3, "foo.tmp", [] as [JobId; 0]);
+        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote, [] as [JobId; 0]);
     }
 
     #[test]
