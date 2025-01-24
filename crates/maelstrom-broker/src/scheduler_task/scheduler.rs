@@ -4,7 +4,7 @@
 use crate::scheduler_task::artifact_gatherer::StartJob;
 use enum_map::enum_map;
 use maelstrom_base::{
-    proto::{ArtifactUploadLocation, BrokerToClient, BrokerToMonitor, BrokerToWorker},
+    proto::{ArtifactUploadLocation, BrokerToMonitor, BrokerToWorker},
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
@@ -63,7 +63,18 @@ pub trait SchedulerDeps {
     type ClientSender: Clone;
     type WorkerSender;
     type MonitorSender;
-    fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
+    fn send_job_response_to_client(
+        &mut self,
+        sender: &mut Self::ClientSender,
+        cjid: ClientJobId,
+        result: JobOutcomeResult,
+    );
+    fn send_job_status_update_to_client(
+        &mut self,
+        sender: &mut Self::ClientSender,
+        cjid: ClientJobId,
+        status: JobBrokerStatus,
+    );
     fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker);
     fn send_message_to_monitor(
         &mut self,
@@ -313,9 +324,10 @@ where
         }
         for jid in just_enqueued {
             let client = self.clients.0.get_mut(&jid.cid).unwrap();
-            self.deps.send_message_to_client(
+            self.deps.send_job_status_update_to_client(
                 &mut client.sender,
-                BrokerToClient::JobStatusUpdate(jid.cjid, JobBrokerStatus::WaitingForWorker),
+                jid.cjid,
+                JobBrokerStatus::WaitingForWorker,
             );
         }
     }
@@ -380,9 +392,10 @@ where
                 self.possibly_start_jobs(HashSet::from_iter([jid]));
             }
             StartJob::NotReady => {
-                self.deps.send_message_to_client(
+                self.deps.send_job_status_update_to_client(
                     &mut client.sender,
-                    BrokerToClient::JobStatusUpdate(jid.cjid, JobBrokerStatus::WaitingForLayers),
+                    jid.cjid,
+                    JobBrokerStatus::WaitingForLayers,
                 );
             }
         }
@@ -438,10 +451,8 @@ where
         }
 
         let client = self.clients.0.get_mut(&jid.cid).unwrap();
-        self.deps.send_message_to_client(
-            &mut client.sender,
-            BrokerToClient::JobResponse(jid.cjid, result),
-        );
+        self.deps
+            .send_job_response_to_client(&mut client.sender, jid.cjid, result);
         client.jobs.remove(&jid.cjid).assert_is_some();
         artifact_gatherer.complete_job(jid);
         client.num_completed_jobs += 1;
@@ -475,9 +486,10 @@ where
             return;
         }
         let client = self.clients.0.get_mut(&jid.cid).unwrap();
-        self.deps.send_message_to_client(
+        self.deps.send_job_status_update_to_client(
             &mut client.sender,
-            BrokerToClient::JobStatusUpdate(jid.cjid, JobBrokerStatus::AtWorker(wid, status)),
+            jid.cjid,
+            JobBrokerStatus::AtWorker(wid, status),
         );
     }
 
@@ -627,7 +639,10 @@ mod tests {
     use itertools::Itertools;
     use maelstrom_base::{
         digest, job_spec,
-        proto::BrokerToWorker::{self, *},
+        proto::{
+            BrokerToClient,
+            BrokerToWorker::{self, *},
+        },
         tar_digest,
     };
     use maelstrom_test::*;
@@ -744,12 +759,28 @@ mod tests {
         type WorkerSender = TestWorkerSender;
         type MonitorSender = TestMonitorSender;
 
-        fn send_message_to_client(
+        fn send_job_response_to_client(
             &mut self,
-            sender: &mut TestClientSender,
-            message: BrokerToClient,
+            sender: &mut Self::ClientSender,
+            cjid: ClientJobId,
+            result: JobOutcomeResult,
         ) {
-            self.borrow_mut().messages.push(ToClient(sender.0, message));
+            self.borrow_mut().messages.push(ToClient(
+                sender.0,
+                BrokerToClient::JobResponse(cjid, result),
+            ));
+        }
+
+        fn send_job_status_update_to_client(
+            &mut self,
+            sender: &mut Self::ClientSender,
+            cjid: ClientJobId,
+            status: JobBrokerStatus,
+        ) {
+            self.borrow_mut().messages.push(ToClient(
+                sender.0,
+                BrokerToClient::JobStatusUpdate(cjid, status),
+            ));
         }
 
         fn send_message_to_worker(
@@ -1634,7 +1665,8 @@ mod tests2 {
         client_disconnected: Vec<ClientId>,
         start_job: Vec<(JobId, NonEmpty<(Sha256Digest, ArtifactType)>, StartJob)>,
         complete_job: Vec<JobId>,
-        send_message_to_client: Vec<(ClientId, BrokerToClient)>,
+        send_job_response_to_client: Vec<(ClientId, ClientJobId, JobOutcomeResult)>,
+        send_job_status_update_to_client: Vec<(ClientId, ClientJobId, JobBrokerStatus)>,
         send_message_to_worker: Vec<(WorkerId, BrokerToWorker)>,
         send_message_to_monitor: Vec<(MonitorId, BrokerToMonitor)>,
     }
@@ -1713,19 +1745,37 @@ mod tests2 {
         type WorkerSender = TestWorkerSender;
         type MonitorSender = TestMonitorSender;
 
-        fn send_message_to_client(
+        fn send_job_response_to_client(
             &mut self,
             sender: &mut Self::ClientSender,
-            message: BrokerToClient,
+            cjid: ClientJobId,
+            result: JobOutcomeResult,
         ) {
-            let send_message_to_client = &mut self.borrow_mut().send_message_to_client;
-            let index = send_message_to_client
+            let send_job_response_to_client = &mut self.borrow_mut().send_job_response_to_client;
+            let index = send_job_response_to_client
                 .iter()
-                .position(|e| e.0 == sender.0 && e.1 == message)
+                .position(|e| e.0 == sender.0 && e.1 == cjid && e.2 == result)
                 .expect(&format!(
-                    "sending unexpected message to client {sender:?}: {message:#?}"
+                    "sending unexpected job_response to client {sender:?}: {cjid} {result:?}"
                 ));
-            send_message_to_client.remove(index);
+            let _ = send_job_response_to_client.remove(index);
+        }
+
+        fn send_job_status_update_to_client(
+            &mut self,
+            sender: &mut Self::ClientSender,
+            cjid: ClientJobId,
+            status: JobBrokerStatus,
+        ) {
+            let send_job_status_update_to_client =
+                &mut self.borrow_mut().send_job_status_update_to_client;
+            let index = send_job_status_update_to_client
+                .iter()
+                .position(|e| e.0 == sender.0 && e.1 == cjid && e.2 == status)
+                .expect(&format!(
+                    "sending unexpected message to client {sender:?}: {cjid} {status:?}"
+                ));
+            send_job_status_update_to_client.remove(index);
         }
 
         fn send_message_to_worker(
@@ -1850,12 +1900,31 @@ mod tests2 {
         }
         */
 
-        fn send_message_to_client(self, sender: TestClientSender, message: BrokerToClient) -> Self {
+        fn send_job_response_to_client(
+            self,
+            sender: TestClientSender,
+            cjid: ClientJobId,
+            result: JobOutcomeResult,
+        ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
-                .send_message_to_client
-                .push((sender.0, message));
+                .send_job_response_to_client
+                .push((sender.0, cjid, result));
+            self
+        }
+
+        fn send_job_status_update_to_client(
+            self,
+            sender: TestClientSender,
+            cjid: ClientJobId,
+            status: JobBrokerStatus,
+        ) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .send_job_status_update_to_client
+                .push((sender.0, cjid, status));
             self
         }
 
@@ -1924,7 +1993,8 @@ mod tests2 {
             assert!(mock.client_disconnected.is_empty());
             assert!(mock.start_job.is_empty());
             assert!(mock.complete_job.is_empty());
-            assert!(mock.send_message_to_client.is_empty());
+            assert!(mock.send_job_response_to_client.is_empty());
+            assert!(mock.send_job_status_update_to_client.is_empty());
             assert!(mock.send_message_to_worker.is_empty());
             assert!(mock.send_message_to_monitor.is_empty());
         }
@@ -2120,9 +2190,10 @@ mod tests2 {
                 nonempty![tar_digest!(1), tar_digest!(2)],
                 StartJob::Ready,
             )
-            .send_message_to_client(
+            .send_job_status_update_to_client(
                 client_sender!(1),
-                BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForWorker),
+                cjid!(1),
+                JobBrokerStatus::WaitingForWorker,
             )
             .when()
             .receive_job_request_from_client(cid!(1), cjid!(1), job_spec.clone());
@@ -2148,9 +2219,10 @@ mod tests2 {
                 nonempty![tar_digest!(1), tar_digest!(2)],
                 StartJob::NotReady,
             )
-            .send_message_to_client(
+            .send_job_status_update_to_client(
                 client_sender!(1),
-                BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForLayers),
+                cjid!(1),
+                JobBrokerStatus::WaitingForLayers,
             )
             .when()
             .receive_job_request_from_client(
@@ -2171,9 +2243,10 @@ mod tests2 {
                 nonempty![tar_digest!(1), tar_digest!(2)],
                 StartJob::NotReady,
             )
-            .send_message_to_client(
+            .send_job_status_update_to_client(
                 client_sender!(1),
-                BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForLayers),
+                cjid!(1),
+                JobBrokerStatus::WaitingForLayers,
             )
             .when()
             .receive_job_request_from_client(
@@ -2204,9 +2277,10 @@ mod tests2 {
 
         fixture
             .expect()
-            .send_message_to_client(
+            .send_job_status_update_to_client(
                 client_sender!(1),
-                BrokerToClient::JobStatusUpdate(cjid!(1), JobBrokerStatus::WaitingForWorker),
+                cjid!(1),
+                JobBrokerStatus::WaitingForWorker,
             )
             .when()
             .receive_worker_disconnected(wid!(1));
@@ -2276,10 +2350,7 @@ mod tests2 {
         fixture
             .expect()
             .complete_job(jid!(1))
-            .send_message_to_client(
-                client_sender!(1),
-                BrokerToClient::JobResponse(cjid!(1), result.clone()),
-            )
+            .send_job_response_to_client(client_sender!(1), cjid!(1), result.clone())
             .when()
             .receive_job_response_from_worker(wid!(1), jid!(1), result.clone());
     }
@@ -2319,9 +2390,10 @@ mod tests2 {
         fixture
             .expect()
             .start_job(jid!(1, 3), nonempty![tar_digest!(2)], StartJob::Ready)
-            .send_message_to_client(
+            .send_job_status_update_to_client(
                 client_sender!(1),
-                BrokerToClient::JobStatusUpdate(cjid!(3), JobBrokerStatus::WaitingForWorker),
+                cjid!(3),
+                JobBrokerStatus::WaitingForWorker,
             )
             .when()
             .receive_job_request_from_client(cid!(1), cjid!(3), job_spec_3.clone());
@@ -2329,10 +2401,7 @@ mod tests2 {
         fixture
             .expect()
             .complete_job(jid!(1, 1))
-            .send_message_to_client(
-                client_sender!(1),
-                BrokerToClient::JobResponse(cjid!(1), result_1.clone()),
-            )
+            .send_job_response_to_client(client_sender!(1), cjid!(1), result_1.clone())
             .send_message_to_worker(
                 worker_sender!(1),
                 BrokerToWorker::EnqueueJob(jid!(1, 3), job_spec_3),

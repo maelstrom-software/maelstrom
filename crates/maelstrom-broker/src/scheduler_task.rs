@@ -30,8 +30,22 @@ impl SchedulerDeps for PassThroughSchedulerDeps {
     type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
     type MonitorSender = tokio_mpsc::UnboundedSender<BrokerToMonitor>;
 
-    fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient) {
-        let _ = sender.send(message);
+    fn send_job_response_to_client(
+        &mut self,
+        sender: &mut Self::ClientSender,
+        cjid: maelstrom_base::ClientJobId,
+        result: maelstrom_base::JobOutcomeResult,
+    ) {
+        let _ = sender.send(BrokerToClient::JobResponse(cjid, result));
+    }
+
+    fn send_job_status_update_to_client(
+        &mut self,
+        sender: &mut Self::ClientSender,
+        cjid: maelstrom_base::ClientJobId,
+        status: maelstrom_base::JobBrokerStatus,
+    ) {
+        let _ = sender.send(BrokerToClient::JobStatusUpdate(cjid, status));
     }
 
     fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker) {
