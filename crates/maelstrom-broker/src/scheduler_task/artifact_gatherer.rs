@@ -220,7 +220,7 @@ where
         }
     }
 
-    fn artifact_transferred(
+    pub fn artifact_transferred(
         &mut self,
         cid: ClientId,
         digest: Sha256Digest,
@@ -264,7 +264,7 @@ where
         }
     }
 
-    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
+    pub fn receive_manifest_entry(&mut self, digest: Sha256Digest, jid: JobId) {
         let Some(client) = self.clients.get_mut(&jid.cid) else {
             // This indicates that the client isn't around anymore. Just ignore this message. When
             // the client disconnected, we canceled all of the outstanding requests. Ideally, we
@@ -277,14 +277,14 @@ where
             &mut self.cache,
             &mut client.sender,
             &mut self.deps,
-            digest,
+            &digest,
             IsManifest::NotManifest,
             jid,
             job,
         );
     }
 
-    fn manifest_read_for_job_complete(
+    pub fn receive_finished_reading_manifest(
         &mut self,
         digest: Sha256Digest,
         jid: JobId,
@@ -371,28 +371,6 @@ where
         layers: NonEmpty<(Sha256Digest, ArtifactType)>,
     ) -> StartJob {
         self.start_job(jid, layers)
-    }
-
-    fn artifact_transferred(
-        &mut self,
-        cid: ClientId,
-        digest: Sha256Digest,
-        location: ArtifactUploadLocation,
-    ) {
-        self.artifact_transferred(cid, digest, location)
-    }
-
-    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
-        self.manifest_read_for_job_entry(digest, jid);
-    }
-
-    fn manifest_read_for_job_complete(
-        &mut self,
-        digest: Sha256Digest,
-        jid: JobId,
-        result: anyhow::Result<()>,
-    ) {
-        self.manifest_read_for_job_complete(digest, jid, result)
     }
 
     fn complete_job(&mut self, jid: JobId) {
@@ -810,24 +788,23 @@ mod tests {
             self.test_state.take();
         }
 
-        fn manifest_read_for_job_entry(
+        fn receive_manifest_entry(
             &mut self,
             digest: impl Into<Sha256Digest>,
             jid: impl Into<JobId>,
         ) {
-            self.sut
-                .manifest_read_for_job_entry(&digest.into(), jid.into());
+            self.sut.receive_manifest_entry(digest.into(), jid.into());
             self.test_state.take();
         }
 
-        fn manifest_read_for_job_complete(
+        fn receive_finished_reading_manifest(
             &mut self,
             digest: impl Into<Sha256Digest>,
             jid: impl Into<JobId>,
             result: Result<()>,
         ) {
             self.sut
-                .manifest_read_for_job_complete(digest.into(), jid.into(), result);
+                .receive_finished_reading_manifest(digest.into(), jid.into(), result);
             self.test_state.take();
         }
     }
@@ -998,7 +975,7 @@ mod tests {
             .decrement_refcount(3);
         fixture.client_disconnected(1);
 
-        fixture.manifest_read_for_job_entry(4, (1, 2));
+        fixture.receive_manifest_entry(4, (1, 2));
     }
 
     #[test]
@@ -1019,7 +996,7 @@ mod tests {
             .decrement_refcount(3);
         fixture.client_disconnected(1);
 
-        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()));
+        fixture.receive_finished_reading_manifest(3, (1, 2), Ok(()));
     }
 
     #[test]
@@ -1037,24 +1014,24 @@ mod tests {
         fixture
             .expect()
             .get_artifact((1, 2), 4, GetArtifact::Success);
-        fixture.manifest_read_for_job_entry(4, (1, 2));
+        fixture.receive_manifest_entry(4, (1, 2));
 
-        fixture.manifest_read_for_job_entry(4, (1, 2));
+        fixture.receive_manifest_entry(4, (1, 2));
 
         fixture.expect().get_artifact((1, 2), 5, GetArtifact::Wait);
-        fixture.manifest_read_for_job_entry(5, (1, 2));
+        fixture.receive_manifest_entry(5, (1, 2));
 
-        fixture.manifest_read_for_job_entry(5, (1, 2));
+        fixture.receive_manifest_entry(5, (1, 2));
 
         fixture
             .expect()
             .get_artifact((1, 2), 6, GetArtifact::Get)
             .send_message_to_client(1, BrokerToClient::TransferArtifact(digest!(6)));
-        fixture.manifest_read_for_job_entry(6, (1, 2));
+        fixture.receive_manifest_entry(6, (1, 2));
 
-        fixture.manifest_read_for_job_entry(6, (1, 2));
+        fixture.receive_manifest_entry(6, (1, 2));
 
-        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()));
+        fixture.receive_finished_reading_manifest(3, (1, 2), Ok(()));
 
         fixture
             .expect()
@@ -1141,9 +1118,9 @@ mod tests {
             .send_message_to_manifest_reader((1, 2), 4, 44);
         fixture.start_job((1, 2), [(3, Manifest), (4, Manifest)], StartJob::NotReady);
 
-        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()));
+        fixture.receive_finished_reading_manifest(3, (1, 2), Ok(()));
         fixture.expect().send_job_ready_to_scheduler((1, 2));
-        fixture.manifest_read_for_job_complete(4, (1, 2), Ok(()));
+        fixture.receive_finished_reading_manifest(4, (1, 2), Ok(()));
     }
 
     #[test]

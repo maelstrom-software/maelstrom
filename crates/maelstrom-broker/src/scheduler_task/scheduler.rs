@@ -39,19 +39,6 @@ pub trait ArtifactGatherer {
     fn client_disconnected(&mut self, cid: ClientId);
     fn start_job(&mut self, jid: JobId, layers: NonEmpty<(Sha256Digest, ArtifactType)>)
         -> StartJob;
-    fn artifact_transferred(
-        &mut self,
-        cid: ClientId,
-        digest: Sha256Digest,
-        location: ArtifactUploadLocation,
-    );
-    fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId);
-    fn manifest_read_for_job_complete(
-        &mut self,
-        digest: Sha256Digest,
-        jid: JobId,
-        result: anyhow::Result<()>,
-    );
     fn complete_job(&mut self, jid: JobId);
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64;
 }
@@ -520,35 +507,6 @@ where
             .send_message_to_monitor(self.monitors.get_mut(&mid).unwrap(), resp);
     }
 
-    pub fn receive_artifact_transferred_from_client(
-        &mut self,
-        artifact_gatherer: &mut ArtifactGathererT,
-        cid: ClientId,
-        digest: Sha256Digest,
-        location: ArtifactUploadLocation,
-    ) {
-        artifact_gatherer.artifact_transferred(cid, digest, location);
-    }
-
-    pub fn receive_manifest_entry(
-        &mut self,
-        artifact_gatherer: &mut ArtifactGathererT,
-        digest: Sha256Digest,
-        jid: JobId,
-    ) {
-        artifact_gatherer.manifest_read_for_job_entry(&digest, jid);
-    }
-
-    pub fn receive_finished_reading_manifest(
-        &mut self,
-        artifact_gatherer: &mut ArtifactGathererT,
-        digest: Sha256Digest,
-        jid: JobId,
-        result: anyhow::Result<()>,
-    ) {
-        artifact_gatherer.manifest_read_for_job_complete(digest, jid, result);
-    }
-
     pub fn receive_job_ready_from_artifact_gatherer(&mut self, jid: JobId) {
         let Some(client) = self.clients.0.get_mut(&jid.cid) else {
             return;
@@ -912,14 +870,9 @@ mod tests {
                 Message::JobRequestFromClient(cid, cjid, spec) => self
                     .scheduler
                     .receive_job_request_from_client(&mut self.artifact_gatherer, cid, cjid, spec),
-                Message::ArtifactTransferredFromClient(cid, digest, location) => {
-                    self.scheduler.receive_artifact_transferred_from_client(
-                        &mut self.artifact_gatherer,
-                        cid,
-                        digest,
-                        location,
-                    )
-                }
+                Message::ArtifactTransferredFromClient(cid, digest, location) => self
+                    .artifact_gatherer
+                    .artifact_transferred(cid, digest, location),
                 Message::WorkerConnected(id, slots, sender) => {
                     self.scheduler.receive_worker_connected(id, slots, sender)
                 }
@@ -955,16 +908,11 @@ mod tests {
                     .scheduler
                     .receive_statistics_heartbeat(&mut self.artifact_gatherer),
                 Message::GotManifestEntry(entry_digest, jid) => self
-                    .scheduler
-                    .receive_manifest_entry(&mut self.artifact_gatherer, entry_digest, jid),
-                Message::FinishedReadingManifest(digest, jid, result) => {
-                    self.scheduler.receive_finished_reading_manifest(
-                        &mut self.artifact_gatherer,
-                        digest,
-                        jid,
-                        result,
-                    )
-                }
+                    .artifact_gatherer
+                    .receive_manifest_entry(entry_digest, jid),
+                Message::FinishedReadingManifest(digest, jid, result) => self
+                    .artifact_gatherer
+                    .receive_finished_reading_manifest(digest, jid, result),
                 Message::JobReadyFromArtifactGatherer(jid) => {
                     self.scheduler.receive_job_ready_from_artifact_gatherer(jid);
                 }
@@ -1682,6 +1630,7 @@ mod tests2 {
 
     impl ArtifactGatherer for Rc<RefCell<Mock>> {
         type ClientSender = TestClientSender;
+
         fn client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
             assert_eq!(sender.0, cid);
             let client_connected = &mut self.borrow_mut().client_connected;
@@ -1693,6 +1642,7 @@ mod tests2 {
                 ));
             client_connected.remove(index);
         }
+
         fn client_disconnected(&mut self, cid: ClientId) {
             let client_disconnected = &mut self.borrow_mut().client_disconnected;
             let index = client_disconnected
@@ -1703,6 +1653,7 @@ mod tests2 {
                 ));
             client_disconnected.remove(index);
         }
+
         fn start_job(
             &mut self,
             jid: JobId,
@@ -1717,25 +1668,7 @@ mod tests2 {
                 ));
             start_job.remove(index).2
         }
-        fn artifact_transferred(
-            &mut self,
-            cid: ClientId,
-            digest: Sha256Digest,
-            location: ArtifactUploadLocation,
-        ) {
-            todo!("{cid} {digest:?} {location:?}");
-        }
-        fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
-            todo!("{digest:?} {jid:?}");
-        }
-        fn manifest_read_for_job_complete(
-            &mut self,
-            digest: Sha256Digest,
-            jid: JobId,
-            result: anyhow::Result<()>,
-        ) {
-            todo!("{digest:?} {jid:?} {result:?}");
-        }
+
         fn complete_job(&mut self, jid: JobId) {
             let complete_job = &mut self.borrow_mut().complete_job;
             let index = complete_job.iter().position(|e| *e == jid).expect(&format!(
@@ -1743,6 +1676,7 @@ mod tests2 {
             ));
             complete_job.remove(index);
         }
+
         fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
             todo!("{cid:?}");
         }

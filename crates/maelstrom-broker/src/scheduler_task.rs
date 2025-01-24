@@ -245,14 +245,9 @@ where
             Message::JobRequestFromClient(cid, cjid, spec) => self
                 .scheduler
                 .receive_job_request_from_client(&mut self.artifact_gatherer, cid, cjid, spec),
-            Message::ArtifactTransferredFromClient(cid, digest, location) => {
-                self.scheduler.receive_artifact_transferred_from_client(
-                    &mut self.artifact_gatherer,
-                    cid,
-                    digest,
-                    location,
-                )
-            }
+            Message::ArtifactTransferredFromClient(cid, digest, location) => self
+                .artifact_gatherer
+                .artifact_transferred(cid, digest, location),
             Message::WorkerConnected(id, slots, sender) => {
                 self.scheduler.receive_worker_connected(id, slots, sender)
             }
@@ -282,19 +277,12 @@ where
             Message::StatisticsHeartbeat => self
                 .scheduler
                 .receive_statistics_heartbeat(&mut self.artifact_gatherer),
-            Message::GotManifestEntry(entry_digest, jid) => self.scheduler.receive_manifest_entry(
-                &mut self.artifact_gatherer,
-                entry_digest,
-                jid,
-            ),
-            Message::FinishedReadingManifest(digest, jid, result) => {
-                self.scheduler.receive_finished_reading_manifest(
-                    &mut self.artifact_gatherer,
-                    digest,
-                    jid,
-                    result,
-                )
+            Message::GotManifestEntry(digest, jid) => {
+                self.artifact_gatherer.receive_manifest_entry(digest, jid)
             }
+            Message::FinishedReadingManifest(digest, jid, result) => self
+                .artifact_gatherer
+                .receive_finished_reading_manifest(digest, jid, result),
             Message::JobReadyFromArtifactGatherer(jid) => {
                 self.scheduler.receive_job_ready_from_artifact_gatherer(jid);
             }
