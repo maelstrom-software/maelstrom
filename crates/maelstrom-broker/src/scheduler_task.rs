@@ -98,8 +98,21 @@ impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
         let _ = sender.send(message);
     }
 
-    fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient) {
-        let _ = sender.send(message);
+    fn send_transfer_artifact_to_client(
+        &mut self,
+        sender: &mut Self::ClientSender,
+        digest: Sha256Digest,
+    ) {
+        let _ = sender.send(BrokerToClient::TransferArtifact(digest));
+    }
+
+    fn send_artifact_transferred_response_to_client(
+        &mut self,
+        sender: &mut Self::ClientSender,
+        digest: Sha256Digest,
+        result: Result<(), String>,
+    ) {
+        let _ = sender.send(BrokerToClient::ArtifactTransferredResponse(digest, result));
     }
 
     fn send_job_ready_to_scheduler(&mut self, jid: JobId) {

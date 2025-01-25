@@ -776,12 +776,26 @@ mod tests {
                 .push(ToWorkerArtifactFetcher(sender.0, message));
         }
 
-        fn send_message_to_client(
+        fn send_transfer_artifact_to_client(
             &mut self,
             sender: &mut TestClientSender,
-            message: BrokerToClient,
+            digest: Sha256Digest,
         ) {
-            self.borrow_mut().messages.push(ToClient(sender.0, message));
+            self.borrow_mut()
+                .messages
+                .push(ToClient(sender.0, BrokerToClient::TransferArtifact(digest)));
+        }
+
+        fn send_artifact_transferred_response_to_client(
+            &mut self,
+            sender: &mut TestClientSender,
+            digest: Sha256Digest,
+            result: Result<(), String>,
+        ) {
+            self.borrow_mut().messages.push(ToClient(
+                sender.0,
+                BrokerToClient::ArtifactTransferredResponse(digest, result),
+            ));
         }
 
         fn send_job_ready_to_scheduler(&mut self, jid: JobId) {
