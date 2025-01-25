@@ -44,15 +44,14 @@ pub trait ArtifactGatherer {
         cid: ClientId,
         digest: Sha256Digest,
         location: ArtifactUploadLocation,
-    ) -> HashSet<JobId>;
+    );
     fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId);
-    #[must_use]
     fn manifest_read_for_job_complete(
         &mut self,
         digest: Sha256Digest,
         jid: JobId,
         result: anyhow::Result<()>,
-    ) -> bool;
+    );
     fn complete_job(&mut self, jid: JobId);
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64;
 }
@@ -147,6 +146,14 @@ pub enum Message<
     /// Finished reading the manifest either due to reaching EOF or an error and no more dependent
     /// digests messages will be sent.
     FinishedReadingManifest(Sha256Digest, JobId, anyhow::Result<()>),
+
+    /// The ArtifactGatherer has determined that it has everything necessary to start the job. This
+    /// isn't generated for every job, as there is a "fast path" in the situation where the
+    /// ArtifactGatherer has everything it needs when it first receives the JobRequest.
+    JobReadyFromArtifactGatherer(JobId),
+
+    /// The ArtifactGatherer has encountered an error gatherering artifacts for the given job.
+    JobFailureFromArtifactGatherer(JobId, String),
 }
 
 impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
@@ -520,16 +527,7 @@ where
         digest: Sha256Digest,
         location: ArtifactUploadLocation,
     ) {
-        let ready = artifact_gatherer.artifact_transferred(cid, digest, location);
-        for jid in &ready {
-            let job = self.clients.job_from_jid(*jid);
-            self.queued_jobs.push(QueuedJob::new(
-                *jid,
-                job.spec.priority,
-                job.spec.estimated_duration,
-            ));
-        }
-        self.possibly_start_jobs(ready);
+        artifact_gatherer.artifact_transferred(cid, digest, location);
     }
 
     pub fn receive_manifest_entry(
@@ -548,16 +546,24 @@ where
         jid: JobId,
         result: anyhow::Result<()>,
     ) {
-        let job_ready = artifact_gatherer.manifest_read_for_job_complete(digest, jid, result);
-        if job_ready {
-            let job = self.clients.job_from_jid(jid);
-            self.queued_jobs.push(QueuedJob::new(
-                jid,
-                job.spec.priority,
-                job.spec.estimated_duration,
-            ));
-            self.possibly_start_jobs(HashSet::from_iter([jid]));
-        }
+        artifact_gatherer.manifest_read_for_job_complete(digest, jid, result);
+    }
+
+    pub fn receive_job_ready_from_artifact_gatherer(&mut self, jid: JobId) {
+        let Some(client) = self.clients.0.get_mut(&jid.cid) else {
+            return;
+        };
+        let job = client.jobs.get(&jid.cjid).unwrap();
+        self.queued_jobs.push(QueuedJob::new(
+            jid,
+            job.spec.priority,
+            job.spec.estimated_duration,
+        ));
+        self.possibly_start_jobs(HashSet::from_iter([jid]));
+    }
+
+    pub fn receive_job_failure_from_artifact_gatherer(&mut self, jid: JobId, err: String) {
+        todo!("{jid} {err}");
     }
 
     fn sample_job_statistics_for_client(
@@ -819,6 +825,14 @@ mod tests {
         ) {
             self.borrow_mut().messages.push(ToClient(sender.0, message));
         }
+
+        fn send_job_ready_to_scheduler(&mut self, jid: JobId) {
+            todo!("{jid}");
+        }
+
+        fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
+            todo!("{jid} {err}");
+        }
     }
 
     struct Fixture {
@@ -950,6 +964,13 @@ mod tests {
                         jid,
                         result,
                     )
+                }
+                Message::JobReadyFromArtifactGatherer(jid) => {
+                    self.scheduler.receive_job_ready_from_artifact_gatherer(jid);
+                }
+                Message::JobFailureFromArtifactGatherer(jid, err) => {
+                    self.scheduler
+                        .receive_job_failure_from_artifact_gatherer(jid, err);
                 }
             }
         }
@@ -1701,7 +1722,7 @@ mod tests2 {
             cid: ClientId,
             digest: Sha256Digest,
             location: ArtifactUploadLocation,
-        ) -> HashSet<JobId> {
+        ) {
             todo!("{cid} {digest:?} {location:?}");
         }
         fn manifest_read_for_job_entry(&mut self, digest: &Sha256Digest, jid: JobId) {
@@ -1712,7 +1733,7 @@ mod tests2 {
             digest: Sha256Digest,
             jid: JobId,
             result: anyhow::Result<()>,
-        ) -> bool {
+        ) {
             todo!("{digest:?} {jid:?} {result:?}");
         }
         fn complete_job(&mut self, jid: JobId) {

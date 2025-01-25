@@ -26,6 +26,8 @@ pub trait Deps {
         message: Option<(PathBuf, u64)>,
     );
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
+    fn send_job_ready_to_scheduler(&mut self, jid: JobId);
+    fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -223,7 +225,7 @@ where
         cid: ClientId,
         digest: Sha256Digest,
         location: ArtifactUploadLocation,
-    ) -> HashSet<JobId> {
+    ) {
         let file = (location == ArtifactUploadLocation::TcpUpload)
             .then(|| self.tcp_upload_landing_pad.remove(&digest))
             .flatten();
@@ -242,7 +244,6 @@ where
                     &mut client.sender,
                     BrokerToClient::ArtifactTransferredResponse(digest.clone(), Ok(())),
                 );
-                let mut ready = HashSet::new();
                 for jid in jids {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
                     let job = client.jobs.get_mut(&jid.cjid).unwrap();
@@ -256,10 +257,9 @@ where
                         job,
                     );
                     if job.have_all_artifacts() {
-                        ready.insert(jid).assert_is_true();
+                        self.deps.send_job_ready_to_scheduler(jid);
                     }
                 }
-                ready
             }
         }
     }
@@ -284,25 +284,32 @@ where
         );
     }
 
-    #[must_use]
     fn manifest_read_for_job_complete(
         &mut self,
         digest: Sha256Digest,
         jid: JobId,
         result: anyhow::Result<()>,
-    ) -> bool {
-        // It would be better to not crash...
-        result.expect("failed reading a manifest");
+    ) {
+        match result {
+            Ok(()) => {}
+            Err(err) => {
+                self.deps
+                    .send_job_failure_to_scheduler(jid, err.to_string());
+                return;
+            }
+        }
 
         let Some(client) = self.clients.get_mut(&jid.cid) else {
             // This indicates that the client isn't around anymore. Just ignore this message. When
             // the client disconnected, we canceled all of the outstanding requests.
-            return false;
+            return;
         };
         let job = client.jobs.get_mut(&jid.cjid).unwrap();
         job.manifests_being_read.remove(&digest).assert_is_true();
 
-        job.have_all_artifacts()
+        if job.have_all_artifacts() {
+            self.deps.send_job_ready_to_scheduler(jid);
+        }
     }
 
     fn complete_job(&mut self, jid: JobId) {
@@ -371,7 +378,7 @@ where
         cid: ClientId,
         digest: Sha256Digest,
         location: ArtifactUploadLocation,
-    ) -> HashSet<JobId> {
+    ) {
         self.artifact_transferred(cid, digest, location)
     }
 
@@ -379,13 +386,12 @@ where
         self.manifest_read_for_job_entry(digest, jid);
     }
 
-    #[must_use]
     fn manifest_read_for_job_complete(
         &mut self,
         digest: Sha256Digest,
         jid: JobId,
         result: anyhow::Result<()>,
-    ) -> bool {
+    ) {
         self.manifest_read_for_job_complete(digest, jid, result)
     }
 
@@ -415,6 +421,7 @@ mod tests {
         send_message_to_manifest_reader_returns: HashSet<ManifestReadRequest<i32>>,
         send_message_to_worker_artifact_fetcher_returns: HashSet<(i32, Option<(PathBuf, u64)>)>,
         send_message_to_client_returns: Vec<(ClientId, BrokerToClient)>,
+        send_job_ready_to_scheduler: HashSet<JobId>,
         get_artifact_returns: HashMap<(JobId, Sha256Digest), GetArtifact>,
         got_artifact_returns: HashMap<(Sha256Digest, Option<String>), Result<Vec<JobId>>>,
         decrement_refcount_returns: HashBag<Sha256Digest>,
@@ -438,6 +445,11 @@ mod tests {
                 self.send_message_to_client_returns.is_empty(),
                 "unused test fixture entries for Deps::send_message_to_client: {:?}",
                 self.send_message_to_client_returns,
+            );
+            assert!(
+                self.send_job_ready_to_scheduler.is_empty(),
+                "unused test fixture entries for Deps::send_job_ready_to_scheduler: {:?}",
+                self.send_job_ready_to_scheduler,
             );
             assert!(
                 self.get_artifact_returns.is_empty(),
@@ -503,6 +515,17 @@ mod tests {
                 .unwrap()
                 .send_message_to_client_returns
                 .push((cid.into(), message));
+            self
+        }
+
+        fn send_job_ready_to_scheduler(mut self, jid: impl Into<JobId>) -> Self {
+            self.test_state
+                .inner
+                .as_mut()
+                .unwrap()
+                .send_job_ready_to_scheduler
+                .insert(jid.into())
+                .assert_is_true();
             self
         }
 
@@ -635,6 +658,20 @@ mod tests {
                 ));
             send_message_to_client.remove(index);
         }
+
+        fn send_job_ready_to_scheduler(&mut self, jid: JobId) {
+            self.borrow_mut()
+                .inner
+                .as_mut()
+                .unwrap()
+                .send_job_ready_to_scheduler
+                .remove(&jid)
+                .assert_is_true();
+        }
+
+        fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
+            todo!("{jid} {err}");
+        }
     }
 
     impl SchedulerCache for Rc<RefCell<TestState>> {
@@ -762,19 +799,14 @@ mod tests {
         }
 
         #[track_caller]
-        fn artifact_transferred<JobIdT>(
+        fn artifact_transferred(
             &mut self,
             cid: impl Into<ClientId>,
             digest: impl Into<Sha256Digest>,
             location: impl Into<ArtifactUploadLocation>,
-            expected: impl IntoIterator<Item = JobIdT>,
-        ) where
-            JobIdT: Into<JobId>,
-        {
-            let actual = self
-                .sut
+        ) {
+            self.sut
                 .artifact_transferred(cid.into(), digest.into(), location.into());
-            assert_eq!(actual, expected.into_iter().map(Into::into).collect());
             self.test_state.take();
         }
 
@@ -793,12 +825,9 @@ mod tests {
             digest: impl Into<Sha256Digest>,
             jid: impl Into<JobId>,
             result: Result<()>,
-            expected: bool,
         ) {
-            let actual = self
-                .sut
+            self.sut
                 .manifest_read_for_job_complete(digest.into(), jid.into(), result);
-            assert_eq!(actual, expected);
             self.test_state.take();
         }
     }
@@ -842,8 +871,9 @@ mod tests {
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
-            );
-        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote, [(1, 2)]);
+            )
+            .send_job_ready_to_scheduler((1, 2));
+        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
 
     #[test]
@@ -863,8 +893,9 @@ mod tests {
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
-            );
-        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote, [(1, 2)]);
+            )
+            .send_job_ready_to_scheduler((1, 2));
+        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
 
     #[test]
@@ -988,7 +1019,7 @@ mod tests {
             .decrement_refcount(3);
         fixture.client_disconnected(1);
 
-        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()), false);
+        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()));
     }
 
     #[test]
@@ -1023,7 +1054,7 @@ mod tests {
 
         fixture.manifest_read_for_job_entry(6, (1, 2));
 
-        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()), false);
+        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()));
 
         fixture
             .expect()
@@ -1032,7 +1063,7 @@ mod tests {
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(6), Ok(())),
             );
-        fixture.artifact_transferred(1, 6, ArtifactUploadLocation::Remote, [] as [JobId; 0]);
+        fixture.artifact_transferred(1, 6, ArtifactUploadLocation::Remote);
 
         fixture
             .expect()
@@ -1040,8 +1071,9 @@ mod tests {
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(5), Ok(())),
-            );
-        fixture.artifact_transferred(1, 5, ArtifactUploadLocation::Remote, [(1, 2)]);
+            )
+            .send_job_ready_to_scheduler((1, 2));
+        fixture.artifact_transferred(1, 5, ArtifactUploadLocation::Remote);
     }
 
     #[test]
@@ -1065,8 +1097,10 @@ mod tests {
             .send_message_to_client(
                 1,
                 BrokerToClient::ArtifactTransferredResponse(digest!(3), Ok(())),
-            );
-        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote, [(1, 2), (2, 2)]);
+            )
+            .send_job_ready_to_scheduler((1, 2))
+            .send_job_ready_to_scheduler((2, 2));
+        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
 
     #[test]
@@ -1089,7 +1123,7 @@ mod tests {
             )
             .read_artifact(3, 33)
             .send_message_to_manifest_reader((1, 2), 3, 33);
-        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote, [] as [JobId; 0]);
+        fixture.artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
 
     #[test]
@@ -1107,8 +1141,9 @@ mod tests {
             .send_message_to_manifest_reader((1, 2), 4, 44);
         fixture.start_job((1, 2), [(3, Manifest), (4, Manifest)], StartJob::NotReady);
 
-        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()), false);
-        fixture.manifest_read_for_job_complete(4, (1, 2), Ok(()), true);
+        fixture.manifest_read_for_job_complete(3, (1, 2), Ok(()));
+        fixture.expect().send_job_ready_to_scheduler((1, 2));
+        fixture.manifest_read_for_job_complete(4, (1, 2), Ok(()));
     }
 
     #[test]

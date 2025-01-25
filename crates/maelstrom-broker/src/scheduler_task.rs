@@ -62,17 +62,32 @@ impl SchedulerDeps for PassThroughSchedulerDeps {
 }
 
 #[derive(Debug)]
-pub struct PassThroughArtifactGathererDeps<ArtifactStreamT>(
-    tokio_mpsc::UnboundedSender<ManifestReadRequest<ArtifactStreamT>>,
-);
+struct PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT> {
+    task_sender: SchedulerSender<TempFileT>,
+    manifest_reader_sender: tokio_mpsc::UnboundedSender<ManifestReadRequest<ArtifactStreamT>>,
+}
 
-impl<ArtifactStreamT> ArtifactGathererDeps for PassThroughArtifactGathererDeps<ArtifactStreamT> {
+impl<TempFileT, ArtifactStreamT> PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT> {
+    fn new(
+        task_sender: SchedulerSender<TempFileT>,
+        manifest_reader_sender: tokio_mpsc::UnboundedSender<ManifestReadRequest<ArtifactStreamT>>,
+    ) -> Self {
+        Self {
+            task_sender,
+            manifest_reader_sender,
+        }
+    }
+}
+
+impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
+    for PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT>
+{
     type ArtifactStream = ArtifactStreamT;
     type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
     type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
 
     fn send_message_to_manifest_reader(&mut self, req: ManifestReadRequest<Self::ArtifactStream>) {
-        let _ = self.0.send(req);
+        let _ = self.manifest_reader_sender.send(req);
     }
 
     fn send_message_to_worker_artifact_fetcher(
@@ -85,6 +100,18 @@ impl<ArtifactStreamT> ArtifactGathererDeps for PassThroughArtifactGathererDeps<A
 
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient) {
         let _ = sender.send(message);
+    }
+
+    fn send_job_ready_to_scheduler(&mut self, jid: JobId) {
+        let _ = self
+            .task_sender
+            .send(Message::JobReadyFromArtifactGatherer(jid));
+    }
+
+    fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
+        let _ = self
+            .task_sender
+            .send(Message::JobFailureFromArtifactGatherer(jid, err));
     }
 }
 
@@ -152,13 +179,17 @@ pub type SchedulerMessage<TempFileT> = Message<
 /// This type is used often enough to warrant an alias.
 pub type SchedulerSender<TempFileT> = tokio_mpsc::UnboundedSender<SchedulerMessage<TempFileT>>;
 
-pub struct SchedulerTask<CacheT: SchedulerCache> {
-    artifact_gatherer:
-        ArtifactGatherer<CacheT, PassThroughArtifactGathererDeps<CacheT::ArtifactStream>>,
-    scheduler: Scheduler<
-        ArtifactGatherer<CacheT, PassThroughArtifactGathererDeps<CacheT::ArtifactStream>>,
-        PassThroughSchedulerDeps,
+type ArtifactGathererForCache<CacheT> = ArtifactGatherer<
+    CacheT,
+    PassThroughArtifactGathererDeps<
+        <CacheT as SchedulerCache>::TempFile,
+        <CacheT as SchedulerCache>::ArtifactStream,
     >,
+>;
+
+pub struct SchedulerTask<CacheT: SchedulerCache> {
+    artifact_gatherer: ArtifactGathererForCache<CacheT>,
+    scheduler: Scheduler<ArtifactGathererForCache<CacheT>, PassThroughSchedulerDeps>,
     sender: SchedulerSender<CacheT::TempFile>,
     receiver: tokio_mpsc::UnboundedReceiver<SchedulerMessage<CacheT::TempFile>>,
 }
@@ -179,7 +210,7 @@ where
         SchedulerTask {
             artifact_gatherer: ArtifactGatherer::new(
                 cache,
-                PassThroughArtifactGathererDeps(manifest_reader_sender),
+                PassThroughArtifactGathererDeps::new(sender.clone(), manifest_reader_sender),
             ),
             scheduler: Scheduler::new(PassThroughSchedulerDeps),
             sender,
@@ -263,6 +294,13 @@ where
                     jid,
                     result,
                 )
+            }
+            Message::JobReadyFromArtifactGatherer(jid) => {
+                self.scheduler.receive_job_ready_from_artifact_gatherer(jid);
+            }
+            Message::JobFailureFromArtifactGatherer(jid, err) => {
+                self.scheduler
+                    .receive_job_failure_from_artifact_gatherer(jid, err);
             }
         })
         .await
