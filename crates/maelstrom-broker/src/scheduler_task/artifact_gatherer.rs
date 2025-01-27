@@ -117,13 +117,13 @@ where
         }
     }
 
-    fn client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
+    fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
         self.clients
             .insert(cid, Client::new(sender))
             .assert_is_none();
     }
 
-    fn client_disconnected(&mut self, cid: ClientId) {
+    fn receive_client_disconnected(&mut self, cid: ClientId) {
         self.cache.client_disconnected(cid);
 
         let client = self.clients.remove(&cid).unwrap();
@@ -366,12 +366,12 @@ where
 {
     type ClientSender = DepsT::ClientSender;
 
-    fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
-        self.client_connected(cid, sender)
+    fn receive_client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
+        self.receive_client_connected(cid, sender)
     }
 
-    fn client_disconnected(&mut self, cid: ClientId) {
-        self.client_disconnected(cid)
+    fn receive_client_disconnected(&mut self, cid: ClientId) {
+        self.receive_client_disconnected(cid)
     }
 
     fn start_job(
@@ -673,7 +673,7 @@ mod tests {
                 cid,
                 mock: self.mock.clone(),
             };
-            self.sut.client_connected(cid, sender);
+            self.sut.receive_client_connected(cid, sender);
         }
 
         #[track_caller]
@@ -709,7 +709,7 @@ mod tests {
         }
 
         fn client_disconnected(&mut self, cid: impl Into<ClientId>) {
-            self.sut.client_disconnected(cid.into());
+            self.sut.receive_client_disconnected(cid.into());
         }
 
         fn receive_manifest_entry(

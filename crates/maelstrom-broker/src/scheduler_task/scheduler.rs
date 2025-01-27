@@ -35,8 +35,8 @@ use std::{
 
 pub trait ArtifactGatherer {
     type ClientSender;
-    fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender);
-    fn client_disconnected(&mut self, cid: ClientId);
+    fn receive_client_connected(&mut self, cid: ClientId, sender: Self::ClientSender);
+    fn receive_client_disconnected(&mut self, cid: ClientId);
     fn start_job(&mut self, jid: JobId, layers: NonEmpty<(Sha256Digest, ArtifactType)>)
         -> StartJob;
     fn complete_job(&mut self, jid: JobId);
@@ -332,7 +332,7 @@ where
         cid: ClientId,
         sender: DepsT::ClientSender,
     ) {
-        artifact_gatherer.client_connected(cid, sender.clone());
+        artifact_gatherer.receive_client_connected(cid, sender.clone());
         self.clients
             .0
             .insert(cid, Client::new(sender))
@@ -344,7 +344,7 @@ where
         artifact_gatherer: &mut ArtifactGathererT,
         cid: ClientId,
     ) {
-        artifact_gatherer.client_disconnected(cid);
+        artifact_gatherer.receive_client_disconnected(cid);
         self.clients.0.remove(&cid).assert_is_some();
 
         self.queued_jobs.retain(|qj| qj.jid.cid != cid);
@@ -1645,7 +1645,7 @@ mod tests2 {
     impl ArtifactGatherer for Rc<RefCell<Mock>> {
         type ClientSender = TestClientSender;
 
-        fn client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
+        fn receive_client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
             assert_eq!(sender.0, cid);
             let client_connected = &mut self.borrow_mut().client_connected;
             let index = client_connected
@@ -1657,7 +1657,7 @@ mod tests2 {
             client_connected.remove(index);
         }
 
-        fn client_disconnected(&mut self, cid: ClientId) {
+        fn receive_client_disconnected(&mut self, cid: ClientId) {
             let client_disconnected = &mut self.borrow_mut().client_disconnected;
             let index = client_disconnected
                 .iter()
