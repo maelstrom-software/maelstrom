@@ -6,7 +6,7 @@ use artifact_gatherer::{ArtifactGatherer, Deps as ArtifactGathererDeps};
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
     proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker},
-    JobId, Sha256Digest,
+    JobId, NonEmpty, Sha256Digest,
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
 use scheduler::{Message, Scheduler, SchedulerDeps};
@@ -115,10 +115,10 @@ impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
         let _ = sender.send(BrokerToClient::ArtifactTransferredResponse(digest, result));
     }
 
-    fn send_job_ready_to_scheduler(&mut self, jid: JobId) {
+    fn send_jobs_ready_to_scheduler(&mut self, jids: NonEmpty<JobId>) {
         let _ = self
             .task_sender
-            .send(Message::JobReadyFromArtifactGatherer(jid));
+            .send(Message::JobsReadyFromArtifactGatherer(jids));
     }
 
     fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
@@ -296,8 +296,9 @@ where
             Message::FinishedReadingManifest(digest, jid, result) => self
                 .artifact_gatherer
                 .receive_finished_reading_manifest(digest, jid, result),
-            Message::JobReadyFromArtifactGatherer(jid) => {
-                self.scheduler.receive_job_ready_from_artifact_gatherer(jid);
+            Message::JobsReadyFromArtifactGatherer(ready) => {
+                self.scheduler
+                    .receive_jobs_ready_from_artifact_gatherer(ready);
             }
             Message::JobFailureFromArtifactGatherer(jid, err) => {
                 self.scheduler

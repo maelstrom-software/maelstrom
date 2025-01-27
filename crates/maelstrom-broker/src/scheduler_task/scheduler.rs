@@ -134,10 +134,10 @@ pub enum Message<
     /// digests messages will be sent.
     FinishedReadingManifest(Sha256Digest, JobId, anyhow::Result<()>),
 
-    /// The ArtifactGatherer has determined that it has everything necessary to start the job. This
-    /// isn't generated for every job, as there is a "fast path" in the situation where the
+    /// The ArtifactGatherer has determined that it has everything necessary to start the given
+    /// job. This isn't used for every job, as there is a "fast path" in the situation where the
     /// ArtifactGatherer has everything it needs when it first receives the JobRequest.
-    JobReadyFromArtifactGatherer(JobId),
+    JobsReadyFromArtifactGatherer(NonEmpty<JobId>),
 
     /// The ArtifactGatherer has encountered an error gatherering artifacts for the given job.
     JobFailureFromArtifactGatherer(JobId, String),
@@ -507,17 +507,23 @@ where
             .send_message_to_monitor(self.monitors.get_mut(&mid).unwrap(), resp);
     }
 
-    pub fn receive_job_ready_from_artifact_gatherer(&mut self, jid: JobId) {
-        let Some(client) = self.clients.0.get_mut(&jid.cid) else {
-            return;
-        };
-        let job = client.jobs.get(&jid.cjid).unwrap();
-        self.queued_jobs.push(QueuedJob::new(
-            jid,
-            job.spec.priority,
-            job.spec.estimated_duration,
-        ));
-        self.possibly_start_jobs(HashSet::from_iter([jid]));
+    pub fn receive_jobs_ready_from_artifact_gatherer(&mut self, ready: NonEmpty<JobId>) {
+        let just_enqueued = ready
+            .into_iter()
+            .filter(|jid| match self.clients.0.get_mut(&jid.cid) {
+                None => false,
+                Some(client) => {
+                    let job = client.jobs.get(&jid.cjid).unwrap();
+                    self.queued_jobs.push(QueuedJob::new(
+                        *jid,
+                        job.spec.priority,
+                        job.spec.estimated_duration,
+                    ));
+                    true
+                }
+            })
+            .collect();
+        self.possibly_start_jobs(just_enqueued);
     }
 
     pub fn receive_job_failure_from_artifact_gatherer(&mut self, jid: JobId, err: String) {
@@ -798,8 +804,8 @@ mod tests {
             ));
         }
 
-        fn send_job_ready_to_scheduler(&mut self, jid: JobId) {
-            todo!("{jid}");
+        fn send_jobs_ready_to_scheduler(&mut self, ready: NonEmpty<JobId>) {
+            todo!("{ready:?}");
         }
 
         fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
@@ -927,8 +933,9 @@ mod tests {
                 Message::FinishedReadingManifest(digest, jid, result) => self
                     .artifact_gatherer
                     .receive_finished_reading_manifest(digest, jid, result),
-                Message::JobReadyFromArtifactGatherer(jid) => {
-                    self.scheduler.receive_job_ready_from_artifact_gatherer(jid);
+                Message::JobsReadyFromArtifactGatherer(ready) => {
+                    self.scheduler
+                        .receive_jobs_ready_from_artifact_gatherer(ready);
                 }
                 Message::JobFailureFromArtifactGatherer(jid, err) => {
                     self.scheduler

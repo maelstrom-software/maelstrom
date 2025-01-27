@@ -36,7 +36,7 @@ pub trait Deps {
         digest: Sha256Digest,
         result: Result<(), String>,
     );
-    fn send_job_ready_to_scheduler(&mut self, jid: JobId);
+    fn send_jobs_ready_to_scheduler(&mut self, jids: NonEmpty<JobId>);
     fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String);
 }
 
@@ -250,6 +250,7 @@ where
                     digest.clone(),
                     Ok(()),
                 );
+                let mut ready = Vec::new();
                 for jid in jids {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
                     let job = client.jobs.get_mut(&jid.cjid).unwrap();
@@ -263,8 +264,11 @@ where
                         job,
                     );
                     if job.have_all_artifacts() {
-                        self.deps.send_job_ready_to_scheduler(jid);
+                        ready.push(jid);
                     }
+                }
+                if let Some(ready) = NonEmpty::from_vec(ready) {
+                    self.deps.send_jobs_ready_to_scheduler(ready);
                 }
             }
         }
@@ -314,7 +318,7 @@ where
         job.manifests_being_read.remove(&digest).assert_is_true();
 
         if job.have_all_artifacts() {
-            self.deps.send_job_ready_to_scheduler(jid);
+            self.deps.send_jobs_ready_to_scheduler(NonEmpty::new(jid));
         }
     }
 
@@ -407,7 +411,7 @@ mod tests {
         send_transfer_artifact_to_client: Vec<(ClientId, Sha256Digest)>,
         send_artifact_transferred_response_to_client:
             Vec<(ClientId, Sha256Digest, Result<(), String>)>,
-        send_job_ready_to_scheduler: HashSet<JobId>,
+        send_jobs_ready_to_scheduler: Vec<HashSet<JobId>>,
         client_sender_dropped: HashSet<ClientId>,
         // Cache.
         get_artifact: HashMap<(JobId, Sha256Digest), GetArtifact>,
@@ -440,9 +444,9 @@ mod tests {
                 self.send_artifact_transferred_response_to_client,
             );
             assert!(
-                self.send_job_ready_to_scheduler.is_empty(),
-                "unused mock entries for Deps::send_job_ready_to_scheduler: {:?}",
-                self.send_job_ready_to_scheduler,
+                self.send_jobs_ready_to_scheduler.is_empty(),
+                "unused mock entries for Deps::send_jobs_ready_to_scheduler: {:?}",
+                self.send_jobs_ready_to_scheduler,
             );
             assert!(
                 self.client_sender_dropped.is_empty(),
@@ -558,11 +562,13 @@ mod tests {
             let _ = vec.remove(index);
         }
 
-        fn send_job_ready_to_scheduler(&mut self, jid: JobId) {
-            self.borrow_mut()
-                .send_job_ready_to_scheduler
-                .remove(&jid)
-                .assert_is_true();
+        fn send_jobs_ready_to_scheduler(&mut self, ready: NonEmpty<JobId>) {
+            let ready = HashSet::from_iter(ready);
+            let vec = &mut self.borrow_mut().send_jobs_ready_to_scheduler;
+            let index = vec.iter().position(|e| e == &ready).expect(&format!(
+                "sending unexpected jobs_ready to scheduler: {ready:?}"
+            ));
+            let _ = vec.remove(index);
         }
 
         fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
@@ -793,13 +799,15 @@ mod tests {
             self
         }
 
-        fn send_job_ready_to_scheduler(self, jid: impl Into<JobId>) -> Self {
+        fn send_jobs_ready_to_scheduler(
+            self,
+            ready: impl IntoIterator<Item = impl Into<JobId>>,
+        ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
-                .send_job_ready_to_scheduler
-                .insert(jid.into())
-                .assert_is_true();
+                .send_jobs_ready_to_scheduler
+                .push(ready.into_iter().map(Into::into).collect());
             self
         }
 
@@ -932,7 +940,7 @@ mod tests {
             .expect()
             .got_artifact(3, None, Ok([(1, 2)]))
             .send_artifact_transferred_response_to_client(1, 3, Ok(()))
-            .send_job_ready_to_scheduler((1, 2))
+            .send_jobs_ready_to_scheduler([(1, 2)])
             .when()
             .artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
@@ -950,7 +958,7 @@ mod tests {
             .expect()
             .got_artifact(3, None, Ok([(1, 2)]))
             .send_artifact_transferred_response_to_client(1, 3, Ok(()))
-            .send_job_ready_to_scheduler((1, 2))
+            .send_jobs_ready_to_scheduler([(1, 2)])
             .when()
             .artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
@@ -1121,7 +1129,7 @@ mod tests {
             .expect()
             .got_artifact(5, None, Ok([(1, 2)]))
             .send_artifact_transferred_response_to_client(1, 5, Ok(()))
-            .send_job_ready_to_scheduler((1, 2))
+            .send_jobs_ready_to_scheduler([(1, 2)])
             .when()
             .artifact_transferred(1, 5, ArtifactUploadLocation::Remote);
     }
@@ -1144,8 +1152,7 @@ mod tests {
             .expect()
             .got_artifact(3, None, Ok([(1, 2), (2, 2)]))
             .send_artifact_transferred_response_to_client(1, 3, Ok(()))
-            .send_job_ready_to_scheduler((1, 2))
-            .send_job_ready_to_scheduler((2, 2))
+            .send_jobs_ready_to_scheduler([(1, 2), (2, 2)])
             .when()
             .artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
@@ -1185,7 +1192,7 @@ mod tests {
         fixture.receive_finished_reading_manifest(3, (1, 2), Ok(()));
         fixture
             .expect()
-            .send_job_ready_to_scheduler((1, 2))
+            .send_jobs_ready_to_scheduler([(1, 2)])
             .when()
             .receive_finished_reading_manifest(4, (1, 2), Ok(()));
     }
