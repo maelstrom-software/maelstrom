@@ -403,41 +403,41 @@ mod tests {
     use ArtifactType::*;
 
     #[derive(Default)]
-    struct TestStateInner {
-        send_message_to_manifest_reader_returns: HashSet<ManifestReadRequest<i32>>,
-        send_message_to_worker_artifact_fetcher_returns: HashSet<(i32, Option<(PathBuf, u64)>)>,
-        send_transfer_artifact_to_client_returns: Vec<(ClientId, Sha256Digest)>,
-        send_artifact_transferred_response_to_client_returns:
+    struct Mock {
+        send_message_to_manifest_reader: HashSet<ManifestReadRequest<i32>>,
+        send_message_to_worker_artifact_fetcher: HashSet<(i32, Option<(PathBuf, u64)>)>,
+        send_transfer_artifact_to_client: Vec<(ClientId, Sha256Digest)>,
+        send_artifact_transferred_response_to_client:
             Vec<(ClientId, Sha256Digest, Result<(), String>)>,
         send_job_ready_to_scheduler: HashSet<JobId>,
-        get_artifact_returns: HashMap<(JobId, Sha256Digest), GetArtifact>,
-        got_artifact_returns: HashMap<(Sha256Digest, Option<String>), Result<Vec<JobId>>>,
-        decrement_refcount_returns: HashBag<Sha256Digest>,
-        client_disconnected_returns: HashSet<ClientId>,
-        read_artifact_returns: HashMap<Sha256Digest, i32>,
+        get_artifact: HashMap<(JobId, Sha256Digest), GetArtifact>,
+        got_artifact: HashMap<(Sha256Digest, Option<String>), Result<Vec<JobId>>>,
+        decrement_refcount: HashBag<Sha256Digest>,
+        client_disconnected: HashSet<ClientId>,
+        read_artifact: HashMap<Sha256Digest, i32>,
     }
 
-    impl Drop for TestStateInner {
+    impl Drop for Mock {
         fn drop(&mut self) {
             assert!(
-                self.send_message_to_manifest_reader_returns.is_empty(),
+                self.send_message_to_manifest_reader.is_empty(),
                 "unused test fixture entries for Deps::send_message_to_manifest_reader: {:?}",
-                self.send_message_to_manifest_reader_returns,
+                self.send_message_to_manifest_reader,
             );
             assert!(
-                self.send_message_to_worker_artifact_fetcher_returns.is_empty(),
+                self.send_message_to_worker_artifact_fetcher.is_empty(),
                 "unused test fixture entries for Deps::send_message_to_worker_artifact_fetcher: {:?}",
-                self.send_message_to_worker_artifact_fetcher_returns,
+                self.send_message_to_worker_artifact_fetcher,
             );
             assert!(
-                self.send_transfer_artifact_to_client_returns.is_empty(),
+                self.send_transfer_artifact_to_client.is_empty(),
                 "unused test fixture entries for Deps::send_transfer_artifact_to_client: {:?}",
-                self.send_transfer_artifact_to_client_returns,
+                self.send_transfer_artifact_to_client,
             );
             assert!(
-                self.send_artifact_transferred_response_to_client_returns.is_empty(),
+                self.send_artifact_transferred_response_to_client.is_empty(),
                 "unused test fixture entries for Deps::send_artifact_transferred_response_to_client: {:?}",
-                self.send_artifact_transferred_response_to_client_returns,
+                self.send_artifact_transferred_response_to_client,
             );
             assert!(
                 self.send_job_ready_to_scheduler.is_empty(),
@@ -445,29 +445,29 @@ mod tests {
                 self.send_job_ready_to_scheduler,
             );
             assert!(
-                self.get_artifact_returns.is_empty(),
+                self.get_artifact.is_empty(),
                 "unused test fixture entries for Cache::get_artifact: {:?}",
-                self.get_artifact_returns,
+                self.get_artifact,
             );
             assert!(
-                self.got_artifact_returns.is_empty(),
+                self.got_artifact.is_empty(),
                 "unused test fixture entries for Cache::got_artifact: {:?}",
-                self.got_artifact_returns,
+                self.got_artifact,
             );
             assert!(
-                self.decrement_refcount_returns.is_empty(),
+                self.decrement_refcount.is_empty(),
                 "unused test fixture entries for Cache::decrement_refcount: {:?}",
-                self.decrement_refcount_returns,
+                self.decrement_refcount,
             );
             assert!(
-                self.client_disconnected_returns.is_empty(),
+                self.client_disconnected.is_empty(),
                 "unused test fixture entries for Cache::client_disconnected: {:?}",
-                self.client_disconnected_returns,
+                self.client_disconnected,
             );
             assert!(
-                self.read_artifact_returns.is_empty(),
+                self.read_artifact.is_empty(),
                 "unused test fixture entries for Cache::read_artifact: {:?}",
-                self.read_artifact_returns,
+                self.read_artifact,
             );
         }
     }
@@ -487,7 +487,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .send_message_to_manifest_reader_returns
+                .send_message_to_manifest_reader
                 .insert(ManifestReadRequest {
                     jid: jid.into(),
                     digest: digest.into(),
@@ -506,7 +506,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .send_transfer_artifact_to_client_returns
+                .send_transfer_artifact_to_client
                 .push((cid.into(), digest.into()));
             self
         }
@@ -521,7 +521,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .send_artifact_transferred_response_to_client_returns
+                .send_artifact_transferred_response_to_client
                 .push((cid.into(), digest.into(), result));
             self
         }
@@ -547,7 +547,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .get_artifact_returns
+                .get_artifact
                 .insert((jid.into(), digest.into()), result)
                 .assert_is_none();
             self
@@ -568,7 +568,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .got_artifact_returns
+                .got_artifact
                 .insert(
                     (digest.into(), file.map(Into::into)),
                     result.map(|iter| iter.into_iter().map(Into::into).collect()),
@@ -582,7 +582,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .decrement_refcount_returns
+                .decrement_refcount
                 .insert(digest.into());
             self
         }
@@ -592,7 +592,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .client_disconnected_returns
+                .client_disconnected
                 .insert(cid.into())
                 .assert_is_true();
             self
@@ -603,7 +603,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .read_artifact_returns
+                .read_artifact
                 .insert(digest.into(), result)
                 .assert_is_none();
             self
@@ -612,7 +612,7 @@ mod tests {
 
     #[derive(Default)]
     struct TestState {
-        inner: Option<TestStateInner>,
+        inner: Option<Mock>,
     }
 
     impl Deps for Rc<RefCell<TestState>> {
@@ -628,7 +628,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .send_message_to_manifest_reader_returns
+                .send_message_to_manifest_reader
                 .remove(&request)
                 .assert_is_true();
         }
@@ -642,7 +642,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .send_message_to_worker_artifact_fetcher_returns
+                .send_message_to_worker_artifact_fetcher
                 .remove(&(*sender, message))
                 .assert_is_true();
         }
@@ -657,7 +657,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .send_transfer_artifact_to_client_returns;
+                .send_transfer_artifact_to_client;
             let index = send_transfer_artifact_to_client
                 .iter()
                 .position(|e| e.0 == *sender && e.1 == digest)
@@ -678,7 +678,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .send_artifact_transferred_response_to_client_returns;
+                .send_artifact_transferred_response_to_client;
             let index = send_artifact_transferred_response_to_client
                 .iter()
                 .position(|e| e.0 == *sender && e.1 == digest && e.2 == result)
@@ -712,7 +712,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .get_artifact_returns
+                .get_artifact
                 .remove(&(jid, digest))
                 .unwrap()
         }
@@ -726,7 +726,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .got_artifact_returns
+                .got_artifact
                 .remove(&(digest.clone(), file))
                 .unwrap()
         }
@@ -737,7 +737,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .decrement_refcount_returns
+                .decrement_refcount
                 .remove(&digest);
             assert!(refcount_before > 0);
         }
@@ -747,7 +747,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .client_disconnected_returns
+                .client_disconnected
                 .remove(&cid)
                 .assert_is_true()
         }
@@ -761,7 +761,7 @@ mod tests {
                 .inner
                 .as_mut()
                 .unwrap()
-                .read_artifact_returns
+                .read_artifact
                 .remove(digest)
                 .unwrap()
         }
