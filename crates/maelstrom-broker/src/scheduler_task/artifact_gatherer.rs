@@ -134,67 +134,6 @@ where
         }
     }
 
-    fn start_artifact_acquisition_for_job(
-        cache: &mut CacheT,
-        client_sender: &mut DepsT::ClientSender,
-        deps: &mut DepsT,
-        digest: &Sha256Digest,
-        is_manifest: IsManifest,
-        jid: JobId,
-        job: &mut Job,
-    ) {
-        if job.acquired_artifacts.contains(digest) || job.missing_artifacts.contains_key(digest) {
-            return;
-        }
-        match cache.get_artifact(jid, digest.clone()) {
-            GetArtifact::Success => {
-                Self::complete_artifact_acquisition_for_job(
-                    cache,
-                    deps,
-                    digest,
-                    is_manifest,
-                    jid,
-                    job,
-                );
-            }
-            GetArtifact::Wait => {
-                job.missing_artifacts
-                    .insert(digest.clone(), is_manifest)
-                    .assert_is_none();
-            }
-            GetArtifact::Get => {
-                job.missing_artifacts
-                    .insert(digest.clone(), is_manifest)
-                    .assert_is_none();
-                deps.send_transfer_artifact_to_client(client_sender, digest.clone());
-            }
-        }
-    }
-
-    fn complete_artifact_acquisition_for_job(
-        cache: &mut CacheT,
-        deps: &mut DepsT,
-        digest: &Sha256Digest,
-        is_manifest: IsManifest,
-        jid: JobId,
-        job: &mut Job,
-    ) {
-        job.acquired_artifacts
-            .insert(digest.clone())
-            .assert_is_true();
-        if is_manifest.is_manifest() {
-            let manifest_stream = cache.read_artifact(digest);
-            deps.send_message_to_manifest_reader(ManifestReadRequest {
-                manifest_stream,
-                digest: digest.clone(),
-                jid,
-            });
-            job.manifests_being_read
-                .insert(digest.clone())
-                .assert_is_true();
-        }
-    }
-
     fn start_job(
         &mut self,
         jid: JobId,
@@ -213,7 +152,7 @@ where
                 &mut self.cache,
                 &mut client.sender,
                 &mut self.deps,
-                &digest,
+                digest,
                 is_manifest,
                 jid,
                 job,
@@ -225,6 +164,65 @@ where
         } else {
             StartJob::NotReady
         }
+    }
+
+    fn start_artifact_acquisition_for_job(
+        cache: &mut CacheT,
+        client_sender: &mut DepsT::ClientSender,
+        deps: &mut DepsT,
+        digest: Sha256Digest,
+        is_manifest: IsManifest,
+        jid: JobId,
+        job: &mut Job,
+    ) {
+        if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains_key(&digest) {
+            return;
+        }
+        match cache.get_artifact(jid, digest.clone()) {
+            GetArtifact::Success => {
+                Self::complete_artifact_acquisition_for_job(
+                    cache,
+                    deps,
+                    digest,
+                    is_manifest,
+                    jid,
+                    job,
+                );
+            }
+            GetArtifact::Wait => {
+                job.missing_artifacts
+                    .insert(digest, is_manifest)
+                    .assert_is_none();
+            }
+            GetArtifact::Get => {
+                deps.send_transfer_artifact_to_client(client_sender, digest.clone());
+                job.missing_artifacts
+                    .insert(digest, is_manifest)
+                    .assert_is_none();
+            }
+        }
+    }
+
+    fn complete_artifact_acquisition_for_job(
+        cache: &mut CacheT,
+        deps: &mut DepsT,
+        digest: Sha256Digest,
+        is_manifest: IsManifest,
+        jid: JobId,
+        job: &mut Job,
+    ) {
+        if is_manifest.is_manifest() {
+            let manifest_stream = cache.read_artifact(&digest);
+            deps.send_message_to_manifest_reader(ManifestReadRequest {
+                manifest_stream,
+                digest: digest.clone(),
+                jid,
+            });
+            job.manifests_being_read
+                .insert(digest.clone())
+                .assert_is_true();
+        }
+        job.acquired_artifacts.insert(digest).assert_is_true();
     }
 
     pub fn receive_artifact_transferred(
@@ -260,7 +258,7 @@ where
                     Self::complete_artifact_acquisition_for_job(
                         &mut self.cache,
                         &mut self.deps,
-                        &digest,
+                        digest.clone(),
                         is_manifest,
                         jid,
                         job,
@@ -286,7 +284,7 @@ where
             &mut self.cache,
             &mut client.sender,
             &mut self.deps,
-            &digest,
+            digest,
             IsManifest::NotManifest,
             jid,
             job,
@@ -321,7 +319,7 @@ where
         }
     }
 
-    fn complete_job(&mut self, jid: JobId) {
+    fn receive_job_completed(&mut self, jid: JobId) {
         let client = self.clients.get_mut(&jid.cid).unwrap();
         let job = client.jobs.remove(&jid.cjid).unwrap();
         for artifact in job.acquired_artifacts {
@@ -383,7 +381,7 @@ where
     }
 
     fn receive_job_completed(&mut self, jid: JobId) {
-        self.complete_job(jid)
+        self.receive_job_completed(jid)
     }
 
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
@@ -731,7 +729,7 @@ mod tests {
         }
 
         fn complete_job(&mut self, jid: impl Into<JobId>) {
-            self.sut.complete_job(jid.into());
+            self.sut.receive_job_completed(jid.into());
         }
     }
 
