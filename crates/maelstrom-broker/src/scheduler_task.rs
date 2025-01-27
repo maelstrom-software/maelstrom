@@ -260,7 +260,7 @@ where
                 .receive_job_request_from_client(&mut self.artifact_gatherer, cid, cjid, spec),
             Message::ArtifactTransferredFromClient(cid, digest, location) => self
                 .artifact_gatherer
-                .artifact_transferred(cid, digest, location),
+                .receive_artifact_transferred(cid, digest, location),
             Message::WorkerConnected(id, slots, sender) => {
                 self.scheduler.receive_worker_connected(id, slots, sender)
             }

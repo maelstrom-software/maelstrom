@@ -227,7 +227,7 @@ where
         }
     }
 
-    pub fn artifact_transferred(
+    pub fn receive_artifact_transferred(
         &mut self,
         cid: ClientId,
         digest: Sha256Digest,
@@ -705,7 +705,7 @@ mod tests {
             location: impl Into<ArtifactUploadLocation>,
         ) {
             self.sut
-                .artifact_transferred(cid.into(), digest.into(), location.into());
+                .receive_artifact_transferred(cid.into(), digest.into(), location.into());
         }
 
         fn client_disconnected(&mut self, cid: impl Into<ClientId>) {
