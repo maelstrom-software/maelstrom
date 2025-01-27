@@ -243,7 +243,6 @@ where
                     digest,
                     Err(err.to_string()),
                 );
-                Default::default()
             }
             Ok(jids) => {
                 self.deps.send_artifact_transferred_response_to_client(
