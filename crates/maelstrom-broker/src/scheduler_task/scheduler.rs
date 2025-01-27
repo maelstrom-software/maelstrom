@@ -1963,10 +1963,6 @@ mod tests2 {
             Self { mock, sut }
         }
 
-        fn expect(&mut self) -> Expect {
-            Expect { fixture: self }
-        }
-
         fn with_client(mut self, cid: ClientId) -> Self {
             self.expect()
                 .client_connected(cid)
@@ -1978,6 +1974,10 @@ mod tests2 {
         fn with_worker(mut self, wid: WorkerId, slots: usize) -> Self {
             self.receive_worker_connected(wid, slots, TestWorkerSender(wid));
             self
+        }
+
+        fn expect(&mut self) -> Expect {
+            Expect { fixture: self }
         }
 
         fn receive_client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
