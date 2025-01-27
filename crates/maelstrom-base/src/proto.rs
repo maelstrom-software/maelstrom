@@ -1,8 +1,8 @@
 //! Messages sent between various binaries.
 
 use crate::{
-    stats::BrokerStatistics, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
-    JobWorkerStatus, Sha256Digest,
+    stats::BrokerStatistics, ArtifactUploadLocation, ClientJobId, JobBrokerStatus, JobId,
+    JobOutcomeResult, JobSpec, JobWorkerStatus, Sha256Digest,
 };
 use bincode::Options;
 use serde::{Deserialize, Serialize};
@@ -44,12 +44,6 @@ pub enum BrokerToClient {
     JobStatusUpdate(ClientJobId, JobBrokerStatus),
     TransferArtifact(Sha256Digest),
     ArtifactTransferredResponse(Sha256Digest, Result<(), String>),
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum ArtifactUploadLocation {
-    TcpUpload,
-    Remote,
 }
 
 /// Message sent from a client to the broker. After sending the initial [`Hello`], a client will

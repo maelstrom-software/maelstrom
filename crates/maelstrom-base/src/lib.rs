@@ -707,6 +707,12 @@ impl MonitorId {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ArtifactUploadLocation {
+    TcpUpload,
+    Remote,
+}
+
 /// A SHA-256 digest.
 #[derive(
     Clone, Constructor, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,

@@ -2,8 +2,8 @@ use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver, 
 use crate::progress::{ProgressTracker, UploadProgressReader};
 use anyhow::{anyhow, Context as _, Result};
 use maelstrom_base::{
-    proto::{ArtifactPusherToBroker, ArtifactUploadLocation, BrokerToArtifactPusher, Hello},
-    Sha256Digest,
+    proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},
+    ArtifactUploadLocation, Sha256Digest,
 };
 use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net, net::AsRawFdExt as _};
 use slog::Logger;

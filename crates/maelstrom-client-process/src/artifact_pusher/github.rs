@@ -2,7 +2,7 @@ use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver, 
 use crate::progress::{ProgressTracker, UploadProgressReader};
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
-use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
+use maelstrom_base::{ArtifactUploadLocation, Sha256Digest};
 use maelstrom_github::{FileStreamBuilder, GitHubClient, SeekableStream};
 use maelstrom_util::async_fs::Fs;
 use std::time::Duration;

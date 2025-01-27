@@ -4,13 +4,13 @@
 use crate::scheduler_task::artifact_gatherer::StartJob;
 use enum_map::enum_map;
 use maelstrom_base::{
-    proto::{ArtifactUploadLocation, BrokerToMonitor, BrokerToWorker},
+    proto::{BrokerToMonitor, BrokerToWorker},
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
-    ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
-    JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
+    ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobBrokerStatus, JobId,
+    JobOutcomeResult, JobSpec, JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
     duration,

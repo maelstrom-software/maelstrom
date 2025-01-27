@@ -3,7 +3,7 @@ mod tcp;
 
 use crate::progress::ProgressTracker;
 use anyhow::Result;
-use maelstrom_base::{proto::ArtifactUploadLocation, Sha256Digest};
+use maelstrom_base::{ArtifactUploadLocation, Sha256Digest};
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr},
     r#async::Pool,

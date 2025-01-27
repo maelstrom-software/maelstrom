@@ -1,7 +1,6 @@
 use crate::{cache::SchedulerCache, scheduler_task::ManifestReadRequest};
 use maelstrom_base::{
-    proto::ArtifactUploadLocation, ArtifactType, ClientId, ClientJobId, JobId, NonEmpty,
-    Sha256Digest,
+    ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest,
 };
 use maelstrom_util::{
     cache::GetArtifact,
