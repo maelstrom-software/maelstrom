@@ -39,7 +39,7 @@ pub trait ArtifactGatherer {
     fn receive_client_disconnected(&mut self, cid: ClientId);
     fn start_job(&mut self, jid: JobId, layers: NonEmpty<(Sha256Digest, ArtifactType)>)
         -> StartJob;
-    fn complete_job(&mut self, jid: JobId);
+    fn receive_job_completed(&mut self, jid: JobId);
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64;
 }
 
@@ -448,7 +448,7 @@ where
         self.deps
             .send_job_response_to_client(&mut client.sender, jid.cjid, result);
         client.jobs.remove(&jid.cjid).assert_is_some();
-        artifact_gatherer.complete_job(jid);
+        artifact_gatherer.receive_job_completed(jid);
         client.num_completed_jobs += 1;
 
         if let Some(QueuedJob { jid, .. }) = self.queued_jobs.pop() {
@@ -1683,7 +1683,7 @@ mod tests2 {
             start_job.remove(index).2
         }
 
-        fn complete_job(&mut self, jid: JobId) {
+        fn receive_job_completed(&mut self, jid: JobId) {
             let complete_job = &mut self.borrow_mut().complete_job;
             let index = complete_job.iter().position(|e| *e == jid).expect(&format!(
                 "sending unexpected complete_job to artifact gatherer for job {jid}"

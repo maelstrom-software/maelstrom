@@ -382,7 +382,7 @@ where
         self.start_job(jid, layers)
     }
 
-    fn complete_job(&mut self, jid: JobId) {
+    fn receive_job_completed(&mut self, jid: JobId) {
         self.complete_job(jid)
     }
 
