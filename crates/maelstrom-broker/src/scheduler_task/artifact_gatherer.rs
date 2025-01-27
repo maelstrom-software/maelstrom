@@ -141,7 +141,7 @@ where
         let JobId { cid, cjid } = jid;
         let client = self.clients.get_mut(&cid).unwrap();
         let Entry::Vacant(job_entry) = client.jobs.entry(cjid) else {
-            panic!("job entry already exists for {jid:?}");
+            panic!("job entry already exists for {jid}");
         };
         let job = job_entry.insert(Default::default());
 
@@ -234,21 +234,24 @@ where
             .then(|| self.tcp_upload_landing_pad.remove(&digest))
             .flatten();
 
-        let client = self.clients.get_mut(&cid).unwrap();
         match self.cache.got_artifact(&digest, file) {
             Err(err) => {
-                self.deps.send_artifact_transferred_response_to_client(
-                    &mut client.sender,
-                    digest,
-                    Err(err.to_string()),
-                );
+                if let Some(client) = self.clients.get_mut(&cid) {
+                    self.deps.send_artifact_transferred_response_to_client(
+                        &mut client.sender,
+                        digest,
+                        Err(err.to_string()),
+                    );
+                }
             }
             Ok(jids) => {
-                self.deps.send_artifact_transferred_response_to_client(
-                    &mut client.sender,
-                    digest.clone(),
-                    Ok(()),
-                );
+                if let Some(client) = self.clients.get_mut(&cid) {
+                    self.deps.send_artifact_transferred_response_to_client(
+                        &mut client.sender,
+                        digest.clone(),
+                        Ok(()),
+                    );
+                }
                 let mut ready = Vec::new();
                 for jid in jids {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
@@ -362,7 +365,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Result;
+    use anyhow::{anyhow, Result};
     use std::{
         cell::RefCell,
         ops::{Deref, DerefMut},
@@ -523,7 +526,7 @@ mod tests {
                 .iter()
                 .position(|e| e.0 == sender.cid && e.1 == digest && e.2 == result)
                 .expect(&format!(
-                    "sending unexpected artifact_transferred_response to client {cid}: {digest}",
+                    "sending unexpected artifact_transferred_response to client {cid}: {digest} {result:?}",
                     cid = sender.cid,
                 ));
             let _ = vec.remove(index);
@@ -562,7 +565,7 @@ mod tests {
             self.borrow_mut()
                 .got_artifact
                 .remove(&(digest.clone(), file))
-                .unwrap()
+                .expect(&format!("sending unexpected got_artifact to cache: {digest}"))
         }
 
         fn decrement_refcount(&mut self, digest: &Sha256Digest) {
@@ -624,7 +627,7 @@ mod tests {
             let mut fixture = Self::default();
             fixture.connected_clients = cids.into_iter().map(Into::into).collect();
             for cid in fixture.connected_clients.clone() {
-                fixture.client_connected(cid);
+                fixture.receive_client_connected(cid);
             }
             fixture
         }
@@ -637,7 +640,7 @@ mod tests {
             Expect { fixture: self }
         }
 
-        fn client_connected(&mut self, cid: impl Into<ClientId>) {
+        fn receive_client_connected(&mut self, cid: impl Into<ClientId>) {
             let cid = cid.into();
             let sender = TestClientSender {
                 cid,
@@ -678,8 +681,12 @@ mod tests {
                 .receive_artifact_transferred(cid.into(), digest.into(), location.into());
         }
 
-        fn client_disconnected(&mut self, cid: impl Into<ClientId>) {
+        fn receive_client_disconnected(&mut self, cid: impl Into<ClientId>) {
             self.sut.receive_client_disconnected(cid.into());
+        }
+
+        fn receive_artifact_transferred(&mut self, cid: impl Into<ClientId>, digest: impl Into<Sha256Digest>, location: impl Into<ArtifactUploadLocation>) {
+            self.sut.receive_artifact_transferred(cid.into(), digest.into(), location.into());
         }
 
         fn receive_manifest_entry(
@@ -793,16 +800,12 @@ mod tests {
             self
         }
 
-        fn got_artifact<DigestT, JobIdIterT, JobIdT>(
+        fn got_artifact_success(
             self,
-            digest: DigestT,
+            digest: impl Into<Sha256Digest>,
             file: Option<&str>,
-            result: Result<JobIdIterT>,
+            result: impl IntoIterator<Item=impl Into<JobId>>,
         ) -> Self
-        where
-            Sha256Digest: From<DigestT>,
-            JobId: From<JobIdT>,
-            JobIdIterT: IntoIterator<Item = JobIdT>,
         {
             self.fixture
                 .mock
@@ -810,7 +813,26 @@ mod tests {
                 .got_artifact
                 .insert(
                     (digest.into(), file.map(Into::into)),
-                    result.map(|iter| iter.into_iter().map(Into::into).collect()),
+                    Ok(result.into_iter().map(Into::into).collect()),
+                )
+                .assert_is_none();
+            self
+        }
+
+        fn got_artifact_failure(
+            self,
+            digest: impl Into<Sha256Digest>,
+            file: Option<&str>,
+            error: impl ToString,
+        ) -> Self
+        {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .got_artifact
+                .insert(
+                    (digest.into(), file.map(Into::into)),
+                    Err(anyhow!(error.to_string())),
                 )
                 .assert_is_none();
             self
@@ -875,6 +897,91 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn duplicate_client_connected_panics() {
+        let mut fixture = Fixture::with_client(1);
+        fixture
+            .expect()
+            .client_sender_dropped(1)
+            .when()
+            .receive_client_connected(1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn unknown_client_disconnect_panics() {
+        let mut fixture = Fixture::with_client(1);
+        fixture.receive_client_disconnected(2);
+    }
+
+    #[test]
+    fn client_disconnect_no_jobs() {
+        let mut fixture = Fixture::with_client(1);
+        fixture
+            .expect()
+            .client_disconnected(1)
+            .client_sender_dropped(1)
+            .when()
+            .receive_client_disconnected(1);
+    }
+
+    #[test]
+    fn client_disconnect_jobs_with_some_artifacts() {
+        let mut fixture = Fixture::with_client(2);
+        fixture.receive_client_connected(1);
+        fixture
+            .expect()
+            .get_artifact((1, 1), 1, GetArtifact::Success)
+            .get_artifact((1, 1), 2, GetArtifact::Wait)
+            .get_artifact((1, 1), 3, GetArtifact::Get)
+            .get_artifact((1, 1), 4, GetArtifact::Success)
+            .read_artifact(4, 44)
+            .send_message_to_manifest_reader((1, 1), 4, 44)
+            .send_transfer_artifact_to_client(1, 3)
+            .when()
+            .start_job(
+                (1, 1),
+                [(1, Tar), (2, Tar), (3, Tar), (4, Manifest), (1, Tar)],
+                StartJob::NotReady,
+            );
+        fixture
+            .expect()
+            .get_artifact((1, 2), 1, GetArtifact::Success)
+            .when()
+            .start_job((1, 2), [(1, Tar)], StartJob::Ready);
+        fixture
+            .expect()
+            .client_disconnected(1)
+            .client_sender_dropped(1)
+            .decrement_refcount(1)
+            .decrement_refcount(1)
+            .decrement_refcount(4)
+            .when()
+            .receive_client_disconnected(1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn start_job_for_unknown_client_panics() {
+        let mut fixture = Fixture::with_client(2);
+        fixture
+            .start_job((1, 1), [(1, Tar)], StartJob::Ready);
+    }
+
+    #[test]
+    #[should_panic(expected="job entry already exists for 1.2")]
+    fn start_job_with_duplicate_jid_panics() {
+        let mut fixture = Fixture::with_client(1);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 1, GetArtifact::Success)
+            .when()
+            .start_job((1, 2), [(1, Tar)], StartJob::Ready);
+        fixture
+            .start_job((1, 2), [(1, Tar)], StartJob::Ready);
+    }
+
+    #[test]
     fn start_job_get_tar_artifact_success() {
         let mut fixture = Fixture::with_client(1);
         fixture
@@ -903,13 +1010,6 @@ mod tests {
             .send_transfer_artifact_to_client(1, 3)
             .when()
             .start_job((1, 2), [(3, Tar)], StartJob::NotReady);
-        fixture
-            .expect()
-            .got_artifact(3, None, Ok([(1, 2)]))
-            .send_artifact_transferred_response_to_client(1, 3, Ok(()))
-            .send_jobs_ready_to_scheduler([(1, 2)])
-            .when()
-            .artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
 
     #[test]
@@ -921,13 +1021,6 @@ mod tests {
             .send_transfer_artifact_to_client(1, 3)
             .when()
             .start_job((1, 2), [(3, Tar), (3, Tar)], StartJob::NotReady);
-        fixture
-            .expect()
-            .got_artifact(3, None, Ok([(1, 2)]))
-            .send_artifact_transferred_response_to_client(1, 3, Ok(()))
-            .send_jobs_ready_to_scheduler([(1, 2)])
-            .when()
-            .artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
 
     #[test]
@@ -1017,6 +1110,122 @@ mod tests {
     }
 
     #[test]
+    fn receive_artifact_transferred_success_from_unknown_client() {
+        let mut fixture = Fixture::with_client(1);
+        fixture
+            .expect()
+            .got_artifact_success(2, None, [] as [JobId;0])
+            .when()
+            .receive_artifact_transferred(2, 2, ArtifactUploadLocation::Remote);
+    }
+
+    #[test]
+    fn receive_artifact_transferred_success_not_tcp_no_jobs() {
+        let mut fixture = Fixture::with_client(1);
+        fixture
+            .expect()
+            .got_artifact_success(2, None, [] as [JobId;0])
+            .send_artifact_transferred_response_to_client(1, 2, Ok(()))
+            .when()
+            .receive_artifact_transferred(1, 2, ArtifactUploadLocation::Remote);
+    }
+
+    #[test]
+    fn receive_artifact_transferred_success_not_tcp_some_jobs_only_some_are_ready() {
+        let mut fixture = Fixture::with_client(1);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 5, GetArtifact::Get)
+            .send_transfer_artifact_to_client(1, 5)
+            .when()
+            .start_job((1, 2), [(5, Tar)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((1, 3), 5, GetArtifact::Wait)
+            .get_artifact((1, 3), 6, GetArtifact::Get)
+            .get_artifact((1, 3), 7, GetArtifact::Get)
+            .send_transfer_artifact_to_client(1, 6)
+            .send_transfer_artifact_to_client(1, 7)
+            .when()
+            .start_job((1, 3), [(5, Tar), (6, Tar), (7, Tar)], StartJob::NotReady);
+        fixture
+            .expect()
+            .got_artifact_success(5, None, [(1, 2), (1, 3)])
+            .send_artifact_transferred_response_to_client(1, 5, Ok(()))
+            .send_jobs_ready_to_scheduler([(1, 2)])
+            .when()
+            .receive_artifact_transferred(1, 5, ArtifactUploadLocation::Remote);
+        fixture
+            .expect()
+            .got_artifact_success(6, None, [(1, 3)])
+            .send_artifact_transferred_response_to_client(1, 6, Ok(()))
+            .when()
+            .receive_artifact_transferred(1, 6, ArtifactUploadLocation::Remote);
+        fixture
+            .expect()
+            .got_artifact_success(7, None, [(1, 3)])
+            .send_artifact_transferred_response_to_client(1, 7, Ok(()))
+            .send_jobs_ready_to_scheduler([(1, 3)])
+            .when()
+            .receive_artifact_transferred(1, 7, ArtifactUploadLocation::Remote);
+    }
+
+    #[test]
+    fn receive_artifact_transferred_failure_from_unknown_client() {
+        let mut fixture = Fixture::with_client(1);
+        fixture
+            .expect()
+            .got_artifact_failure(2, None, "error")
+            .when()
+            .receive_artifact_transferred(2, 2, ArtifactUploadLocation::Remote);
+    }
+
+    #[test]
+    fn receive_artifact_transferred_failure_not_tcp_no_jobs() {
+        let mut fixture = Fixture::with_client(1);
+        fixture
+            .expect()
+            .got_artifact_failure(2, None, "error")
+            .send_artifact_transferred_response_to_client(1, 2, Err("error".into()))
+            .when()
+            .receive_artifact_transferred(1, 2, ArtifactUploadLocation::Remote);
+    }
+
+    #[test]
+    fn receive_artifact_transferred_failure_not_tcp_only_fails_jobs_for_all_clients() {
+        // The idea here is that if the cache fails has a failure doing something internally, it
+        // should fail all the jobs: it's not a client-specific thing.
+        let mut fixture = Fixture::with_clients([1, 2]);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 5, GetArtifact::Get)
+            .send_transfer_artifact_to_client(1, 5)
+            .when()
+            .start_job((1, 2), [(5, Tar)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((1, 3), 5, GetArtifact::Wait)
+            .get_artifact((1, 3), 6, GetArtifact::Get)
+            .get_artifact((1, 3), 7, GetArtifact::Get)
+            .send_transfer_artifact_to_client(1, 6)
+            .send_transfer_artifact_to_client(1, 7)
+            .when()
+            .start_job((1, 3), [(5, Tar), (6, Tar), (7, Tar)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((2, 2), 5, GetArtifact::Get)
+            .send_transfer_artifact_to_client(2, 5)
+            .when()
+            .start_job((2, 2), [(5, Tar)], StartJob::NotReady);
+        fixture
+            .expect()
+            .got_artifact_failure(5, None, "error")
+            .send_artifact_transferred_response_to_client(1, 5, Err("error".into()))
+            .when()
+            .receive_artifact_transferred(1, 5, ArtifactUploadLocation::Remote);
+    }
+
+    #[test]
     fn manifest_read_for_job_entry_from_disconnected_client() {
         let mut fixture = Fixture::with_client(1);
         fixture
@@ -1032,7 +1241,7 @@ mod tests {
             .client_sender_dropped(1)
             .decrement_refcount(3)
             .when()
-            .client_disconnected(1);
+            .receive_client_disconnected(1);
         fixture.receive_manifest_entry(4, (1, 2));
     }
 
@@ -1052,7 +1261,7 @@ mod tests {
             .client_sender_dropped(1)
             .decrement_refcount(3)
             .when()
-            .client_disconnected(1);
+            .receive_client_disconnected(1);
         fixture.receive_finished_reading_manifest(3, (1, 2), Ok(()));
     }
 
@@ -1088,13 +1297,13 @@ mod tests {
         fixture.receive_finished_reading_manifest(3, (1, 2), Ok(()));
         fixture
             .expect()
-            .got_artifact(6, None, Ok([(1, 2)]))
+            .got_artifact_success(6, None, [(1, 2)])
             .send_artifact_transferred_response_to_client(1, 6, Ok(()))
             .when()
             .artifact_transferred(1, 6, ArtifactUploadLocation::Remote);
         fixture
             .expect()
-            .got_artifact(5, None, Ok([(1, 2)]))
+            .got_artifact_success(5, None, [(1, 2)])
             .send_artifact_transferred_response_to_client(1, 5, Ok(()))
             .send_jobs_ready_to_scheduler([(1, 2)])
             .when()
@@ -1117,7 +1326,7 @@ mod tests {
             .start_job((2, 2), [(3, Tar)], StartJob::NotReady);
         fixture
             .expect()
-            .got_artifact(3, None, Ok([(1, 2), (2, 2)]))
+            .got_artifact_success(3, None, [(1, 2), (2, 2)])
             .send_artifact_transferred_response_to_client(1, 3, Ok(()))
             .send_jobs_ready_to_scheduler([(1, 2), (2, 2)])
             .when()
@@ -1135,7 +1344,7 @@ mod tests {
             .start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
         fixture
             .expect()
-            .got_artifact(3, None, Ok([(1, 2)]))
+            .got_artifact_success(3, None, [(1, 2)])
             .send_artifact_transferred_response_to_client(1, 3, Ok(()))
             .read_artifact(3, 33)
             .send_message_to_manifest_reader((1, 2), 3, 33)
@@ -1209,64 +1418,5 @@ mod tests {
             .decrement_refcount(3)
             .when()
             .complete_job((1, 2));
-    }
-
-    #[test]
-    fn client_disconnect_no_jobs() {
-        let mut fixture = Fixture::with_client(1);
-        fixture
-            .expect()
-            .client_disconnected(1)
-            .client_sender_dropped(1)
-            .when()
-            .client_disconnected(1);
-    }
-
-    #[test]
-    fn client_disconnect_jobs_with_some_artifacts() {
-        let mut fixture = Fixture::default();
-        fixture.client_connected(1);
-        fixture
-            .expect()
-            .get_artifact((1, 1), 1, GetArtifact::Success)
-            .get_artifact((1, 1), 2, GetArtifact::Wait)
-            .get_artifact((1, 1), 3, GetArtifact::Get)
-            .get_artifact((1, 1), 4, GetArtifact::Success)
-            .read_artifact(4, 44)
-            .send_message_to_manifest_reader((1, 1), 4, 44)
-            .send_transfer_artifact_to_client(1, 3)
-            .when()
-            .start_job(
-                (1, 1),
-                [(1, Tar), (2, Tar), (3, Tar), (4, Manifest), (1, Tar)],
-                StartJob::NotReady,
-            );
-        fixture
-            .expect()
-            .get_artifact((1, 2), 1, GetArtifact::Success)
-            .when()
-            .start_job((1, 2), [(1, Tar)], StartJob::Ready);
-        fixture.client_connected(2);
-        fixture
-            .expect()
-            .get_artifact((2, 2), 1, GetArtifact::Success)
-            .when()
-            .start_job((2, 2), [(1, Tar)], StartJob::Ready);
-        fixture
-            .expect()
-            .client_disconnected(1)
-            .client_sender_dropped(1)
-            .decrement_refcount(1)
-            .decrement_refcount(1)
-            .decrement_refcount(4)
-            .when()
-            .client_disconnected(1);
-        fixture
-            .expect()
-            .client_disconnected(2)
-            .client_sender_dropped(2)
-            .decrement_refcount(1)
-            .when()
-            .client_disconnected(2);
     }
 }
