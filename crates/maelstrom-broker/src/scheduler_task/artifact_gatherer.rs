@@ -117,13 +117,13 @@ where
         }
     }
 
-    fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
+    pub fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
         self.clients
             .insert(cid, Client::new(sender))
             .assert_is_none();
     }
 
-    fn receive_client_disconnected(&mut self, cid: ClientId) {
+    pub fn receive_client_disconnected(&mut self, cid: ClientId) {
         self.cache.client_disconnected(cid);
 
         let client = self.clients.remove(&cid).unwrap();
@@ -134,7 +134,7 @@ where
         }
     }
 
-    fn start_job(
+    pub fn start_job(
         &mut self,
         jid: JobId,
         layers: NonEmpty<(Sha256Digest, ArtifactType)>,
@@ -322,7 +322,7 @@ where
         }
     }
 
-    fn receive_job_completed(&mut self, jid: JobId) {
+    pub fn receive_job_completed(&mut self, jid: JobId) {
         let client = self.clients.get_mut(&jid.cid).unwrap();
         let job = client.jobs.remove(&jid.cjid).unwrap();
         for artifact in job.acquired_artifacts {
@@ -345,7 +345,7 @@ where
         self.cache.decrement_refcount(&digest);
     }
 
-    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
+    pub fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
         self.clients
             .get(&cid)
             .unwrap()
@@ -357,38 +357,6 @@ where
 
     pub fn receive_got_artifact(&mut self, digest: Sha256Digest, file: CacheT::TempFile) {
         self.tcp_upload_landing_pad.insert(digest, file);
-    }
-}
-
-impl<CacheT, DepsT> super::scheduler::ArtifactGatherer for ArtifactGatherer<CacheT, DepsT>
-where
-    CacheT: SchedulerCache,
-    DepsT: Deps<ArtifactStream = CacheT::ArtifactStream>,
-{
-    type ClientSender = DepsT::ClientSender;
-
-    fn receive_client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
-        self.receive_client_connected(cid, sender)
-    }
-
-    fn receive_client_disconnected(&mut self, cid: ClientId) {
-        self.receive_client_disconnected(cid)
-    }
-
-    fn start_job(
-        &mut self,
-        jid: JobId,
-        layers: NonEmpty<(Sha256Digest, ArtifactType)>,
-    ) -> StartJob {
-        self.start_job(jid, layers)
-    }
-
-    fn receive_job_completed(&mut self, jid: JobId) {
-        self.receive_job_completed(jid)
-    }
-
-    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
-        self.get_waiting_for_artifacts_count(cid)
     }
 }
 

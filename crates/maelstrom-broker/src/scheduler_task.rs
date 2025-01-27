@@ -6,7 +6,7 @@ use artifact_gatherer::{ArtifactGatherer, Deps as ArtifactGathererDeps};
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
     proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker},
-    JobId, NonEmpty, Sha256Digest,
+    ArtifactType, ClientId, JobId, NonEmpty, Sha256Digest,
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
 use scheduler::{Message, Scheduler, SchedulerDeps};
@@ -199,6 +199,39 @@ type ArtifactGathererForCache<CacheT> = ArtifactGatherer<
         <CacheT as SchedulerCache>::ArtifactStream,
     >,
 >;
+
+impl<CacheT, DepsT> scheduler::ArtifactGatherer
+    for artifact_gatherer::ArtifactGatherer<CacheT, DepsT>
+where
+    CacheT: SchedulerCache,
+    DepsT: artifact_gatherer::Deps<ArtifactStream = CacheT::ArtifactStream>,
+{
+    type ClientSender = DepsT::ClientSender;
+
+    fn receive_client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
+        self.receive_client_connected(cid, sender)
+    }
+
+    fn receive_client_disconnected(&mut self, cid: ClientId) {
+        self.receive_client_disconnected(cid)
+    }
+
+    fn start_job(
+        &mut self,
+        jid: JobId,
+        layers: NonEmpty<(Sha256Digest, ArtifactType)>,
+    ) -> artifact_gatherer::StartJob {
+        self.start_job(jid, layers)
+    }
+
+    fn receive_job_completed(&mut self, jid: JobId) {
+        self.receive_job_completed(jid)
+    }
+
+    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
+        self.get_waiting_for_artifacts_count(cid)
+    }
+}
 
 pub struct SchedulerTask<CacheT: SchedulerCache> {
     artifact_gatherer: ArtifactGathererForCache<CacheT>,
