@@ -100,6 +100,7 @@ pub struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: Deps> {
     deps: DepsT,
     clients: HashMap<ClientId, Client<DepsT>>,
     tcp_upload_landing_pad: HashMap<Sha256Digest, CacheT::TempFile>,
+    manifests_being_read: HashMap<Sha256Digest, Vec<JobId>>,
 }
 
 impl<CacheT, DepsT> ArtifactGatherer<CacheT, DepsT>
@@ -113,6 +114,7 @@ where
             cache,
             clients: Default::default(),
             tcp_upload_landing_pad: Default::default(),
+            manifests_being_read: Default::default(),
         }
     }
 
@@ -155,6 +157,7 @@ where
                 is_manifest,
                 jid,
                 job,
+                &mut self.manifests_being_read,
             );
         }
 
@@ -173,6 +176,7 @@ where
         is_manifest: IsManifest,
         jid: JobId,
         job: &mut Job,
+        manifests_being_read: &mut HashMap<Sha256Digest, Vec<JobId>>,
     ) {
         if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains_key(&digest) {
             return;
@@ -186,6 +190,7 @@ where
                     is_manifest,
                     jid,
                     job,
+                    manifests_being_read,
                 );
             }
             GetArtifact::Wait => {
@@ -209,9 +214,17 @@ where
         is_manifest: IsManifest,
         jid: JobId,
         job: &mut Job,
+        manifests_being_read: &mut HashMap<Sha256Digest, Vec<JobId>>,
     ) {
         if is_manifest.is_manifest() {
-            Self::start_reading_manifest_for_job(cache, deps, &digest, jid, job);
+            Self::start_reading_manifest_for_job(
+                cache,
+                deps,
+                &digest,
+                jid,
+                job,
+                manifests_being_read,
+            );
         }
         job.acquired_artifacts.insert(digest).assert_is_true();
     }
@@ -222,16 +235,25 @@ where
         digest: &Sha256Digest,
         jid: JobId,
         job: &mut Job,
+        manifests_being_read: &mut HashMap<Sha256Digest, Vec<JobId>>,
     ) {
-        let manifest_stream = cache.read_artifact(&digest);
-        deps.send_message_to_manifest_reader(ManifestReadRequest {
-            manifest_stream,
-            digest: digest.clone(),
-            jid,
-        });
         job.manifests_being_read
             .insert(digest.clone())
             .assert_is_true();
+        match manifests_being_read.entry(digest.clone()) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().push(jid);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Default::default());
+                let manifest_stream = cache.read_artifact(&digest);
+                deps.send_message_to_manifest_reader(ManifestReadRequest {
+                    manifest_stream,
+                    digest: digest.clone(),
+                    jid,
+                });
+            }
+        }
     }
 
     pub fn receive_artifact_transferred(
@@ -274,6 +296,7 @@ where
                         is_manifest,
                         jid,
                         job,
+                        &mut self.manifests_being_read,
                     );
                     if job.have_all_artifacts() {
                         ready.push(jid);
@@ -303,6 +326,7 @@ where
             IsManifest::NotManifest,
             jid,
             job,
+            &mut self.manifests_being_read,
         );
     }
 
@@ -319,6 +343,23 @@ where
                     .send_job_failure_to_scheduler(jid, err.to_string());
                 return;
             }
+        }
+
+        let Entry::Occupied(mut entry) = self.manifests_being_read.entry(digest.clone()) else {
+            panic!("expected entry in manifests_being_read for {digest}");
+        };
+        let waiting = entry.get_mut();
+        if waiting.is_empty() {
+            entry.remove();
+        } else {
+            let next_jid = waiting.remove(0);
+            let manifest_stream = self.cache.read_artifact(&digest);
+            self.deps
+                .send_message_to_manifest_reader(ManifestReadRequest {
+                    manifest_stream,
+                    digest: digest.clone(),
+                    jid: next_jid,
+                });
         }
 
         let Some(client) = self.clients.get_mut(&jid.cid) else {
@@ -1432,5 +1473,51 @@ mod tests {
             .decrement_refcount(3)
             .when()
             .complete_job((1, 2));
+    }
+
+    #[test]
+    fn reading_multiple_manifests_simultaneously_and_successfully_with_all_in_cache() {
+        let mut fixture = Fixture::with_clients([1, 2]);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success)
+            .read_artifact(3, 103)
+            .send_message_to_manifest_reader((1, 2), 3, 103)
+            .when()
+            .start_job((1, 2), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
+        // We should block because somebody else is reading the same manifest.
+        fixture
+            .expect()
+            .get_artifact((2, 1), 3, GetArtifact::Success)
+            .when()
+            .start_job((2, 1), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
+        // But reading a new manifest should be just fine.
+        fixture
+            .expect()
+            .get_artifact((2, 2), 4, GetArtifact::Success)
+            .read_artifact(4, 104)
+            .send_message_to_manifest_reader((2, 2), 4, 104)
+            .when()
+            .start_job((2, 2), [(4, Manifest), (4, Manifest)], StartJob::NotReady);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 30, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(30, (1, 2));
+        fixture
+            .expect()
+            .get_artifact((1, 2), 31, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(31, (1, 2));
+
+        // When we finish reading, we should kick off the next.
+        fixture
+            .expect()
+            .send_jobs_ready_to_scheduler([(1, 2)])
+            .read_artifact(3, 203)
+            .send_message_to_manifest_reader((2, 1), 3, 203)
+            .when()
+            .receive_finished_reading_manifest(3, (1, 2), Ok(()));
     }
 }
