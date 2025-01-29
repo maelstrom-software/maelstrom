@@ -123,13 +123,13 @@ where
         }
     }
 
-    pub fn receive_client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
+    pub fn client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
         self.clients
             .insert(cid, Client::new(sender))
             .assert_is_none();
     }
 
-    pub fn receive_client_disconnected(&mut self, cid: ClientId) {
+    pub fn client_disconnected(&mut self, cid: ClientId) {
         self.cache.client_disconnected(cid);
 
         let client = self.clients.remove(&cid).unwrap();
@@ -374,7 +374,7 @@ where
         }
     }
 
-    pub fn receive_job_completed(&mut self, jid: JobId) {
+    pub fn job_completed(&mut self, jid: JobId) {
         let client = self.clients.get_mut(&jid.cid).unwrap();
         let job = client.jobs.remove(&jid.cjid).unwrap();
         for artifact in job.acquired_artifacts {
@@ -693,7 +693,7 @@ mod tests {
             let mut fixture = Self::default();
             fixture.connected_clients = cids.into_iter().map(Into::into).collect();
             for cid in fixture.connected_clients.clone() {
-                fixture.receive_client_connected(cid);
+                fixture.client_connected(cid);
             }
             fixture
         }
@@ -706,13 +706,13 @@ mod tests {
             Expect { fixture: self }
         }
 
-        fn receive_client_connected(&mut self, cid: impl Into<ClientId>) {
+        fn client_connected(&mut self, cid: impl Into<ClientId>) {
             let cid = cid.into();
             let sender = TestClientSender {
                 cid,
                 mock: self.mock.clone(),
             };
-            self.sut.receive_client_connected(cid, sender);
+            self.sut.client_connected(cid, sender);
         }
 
         #[track_caller]
@@ -747,8 +747,8 @@ mod tests {
                 .receive_artifact_transferred(cid.into(), digest.into(), location.into());
         }
 
-        fn receive_client_disconnected(&mut self, cid: impl Into<ClientId>) {
-            self.sut.receive_client_disconnected(cid.into());
+        fn client_disconnected(&mut self, cid: impl Into<ClientId>) {
+            self.sut.client_disconnected(cid.into());
         }
 
         fn receive_artifact_transferred(
@@ -779,8 +779,8 @@ mod tests {
                 .receive_finished_reading_manifest(digest.into(), result);
         }
 
-        fn complete_job(&mut self, jid: impl Into<JobId>) {
-            self.sut.receive_job_completed(jid.into());
+        fn job_completed(&mut self, jid: impl Into<JobId>) {
+            self.sut.job_completed(jid.into());
         }
     }
 
@@ -986,14 +986,14 @@ mod tests {
             .expect()
             .client_sender_dropped(1)
             .when()
-            .receive_client_connected(1);
+            .client_connected(1);
     }
 
     #[test]
     #[should_panic]
     fn unknown_client_disconnect_panics() {
         let mut fixture = Fixture::with_client(1);
-        fixture.receive_client_disconnected(2);
+        fixture.client_disconnected(2);
     }
 
     #[test]
@@ -1004,13 +1004,13 @@ mod tests {
             .client_disconnected(1)
             .client_sender_dropped(1)
             .when()
-            .receive_client_disconnected(1);
+            .client_disconnected(1);
     }
 
     #[test]
     fn client_disconnect_jobs_with_some_artifacts() {
         let mut fixture = Fixture::with_client(2);
-        fixture.receive_client_connected(1);
+        fixture.client_connected(1);
         fixture
             .expect()
             .get_artifact((1, 1), 1, GetArtifact::Success)
@@ -1039,7 +1039,7 @@ mod tests {
             .decrement_refcount(1)
             .decrement_refcount(4)
             .when()
-            .receive_client_disconnected(1);
+            .client_disconnected(1);
     }
 
     #[test]
@@ -1324,7 +1324,7 @@ mod tests {
             .client_sender_dropped(1)
             .decrement_refcount(3)
             .when()
-            .receive_client_disconnected(1);
+            .client_disconnected(1);
         fixture.receive_manifest_entry(3, 4);
     }
 
@@ -1344,7 +1344,7 @@ mod tests {
             .client_sender_dropped(1)
             .decrement_refcount(3)
             .when()
-            .receive_client_disconnected(1);
+            .client_disconnected(1);
         fixture.receive_finished_reading_manifest(3, Ok(()));
     }
 
@@ -1462,7 +1462,7 @@ mod tests {
             .expect()
             .decrement_refcount(3)
             .when()
-            .complete_job((1, 2));
+            .job_completed((1, 2));
     }
 
     #[test]
@@ -1479,7 +1479,7 @@ mod tests {
             .decrement_refcount(3)
             .decrement_refcount(4)
             .when()
-            .complete_job((1, 2));
+            .job_completed((1, 2));
     }
 
     #[test]
@@ -1494,7 +1494,7 @@ mod tests {
             .expect()
             .decrement_refcount(3)
             .when()
-            .complete_job((1, 2));
+            .job_completed((1, 2));
     }
 
     #[test]

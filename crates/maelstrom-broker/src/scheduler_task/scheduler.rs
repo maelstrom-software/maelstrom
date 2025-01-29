@@ -35,11 +35,11 @@ use std::{
 
 pub trait ArtifactGatherer {
     type ClientSender;
-    fn receive_client_connected(&mut self, cid: ClientId, sender: Self::ClientSender);
-    fn receive_client_disconnected(&mut self, cid: ClientId);
+    fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender);
+    fn client_disconnected(&mut self, cid: ClientId);
     fn start_job(&mut self, jid: JobId, layers: NonEmpty<(Sha256Digest, ArtifactType)>)
         -> StartJob;
-    fn receive_job_completed(&mut self, jid: JobId);
+    fn job_completed(&mut self, jid: JobId);
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64;
 }
 
@@ -334,7 +334,7 @@ where
         cid: ClientId,
         sender: DepsT::ClientSender,
     ) {
-        artifact_gatherer.receive_client_connected(cid, sender.clone());
+        artifact_gatherer.client_connected(cid, sender.clone());
         self.clients
             .0
             .insert(cid, Client::new(sender))
@@ -346,7 +346,7 @@ where
         artifact_gatherer: &mut ArtifactGathererT,
         cid: ClientId,
     ) {
-        artifact_gatherer.receive_client_disconnected(cid);
+        artifact_gatherer.client_disconnected(cid);
         self.clients.0.remove(&cid).assert_is_some();
 
         self.queued_jobs.retain(|qj| qj.jid.cid != cid);
@@ -450,7 +450,7 @@ where
         self.deps
             .send_job_response_to_client(&mut client.sender, jid.cjid, result);
         client.jobs.remove(&jid.cjid).assert_is_some();
-        artifact_gatherer.receive_job_completed(jid);
+        artifact_gatherer.job_completed(jid);
         client.num_completed_jobs += 1;
 
         if let Some(QueuedJob { jid, .. }) = self.queued_jobs.pop() {
@@ -1658,7 +1658,7 @@ mod tests2 {
     impl ArtifactGatherer for Rc<RefCell<Mock>> {
         type ClientSender = TestClientSender;
 
-        fn receive_client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
+        fn client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
             assert_eq!(sender.0, cid);
             let client_connected = &mut self.borrow_mut().client_connected;
             let index = client_connected
@@ -1670,7 +1670,7 @@ mod tests2 {
             client_connected.remove(index);
         }
 
-        fn receive_client_disconnected(&mut self, cid: ClientId) {
+        fn client_disconnected(&mut self, cid: ClientId) {
             let client_disconnected = &mut self.borrow_mut().client_disconnected;
             let index = client_disconnected
                 .iter()
@@ -1696,7 +1696,7 @@ mod tests2 {
             start_job.remove(index).2
         }
 
-        fn receive_job_completed(&mut self, jid: JobId) {
+        fn job_completed(&mut self, jid: JobId) {
             let complete_job = &mut self.borrow_mut().complete_job;
             let index = complete_job.iter().position(|e| *e == jid).expect(&format!(
                 "sending unexpected complete_job to artifact gatherer for job {jid}"

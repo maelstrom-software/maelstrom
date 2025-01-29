@@ -211,12 +211,12 @@ where
 {
     type ClientSender = DepsT::ClientSender;
 
-    fn receive_client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
-        self.receive_client_connected(cid, sender)
+    fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
+        self.client_connected(cid, sender)
     }
 
-    fn receive_client_disconnected(&mut self, cid: ClientId) {
-        self.receive_client_disconnected(cid)
+    fn client_disconnected(&mut self, cid: ClientId) {
+        self.client_disconnected(cid)
     }
 
     fn start_job(
@@ -227,8 +227,8 @@ where
         self.start_job(jid, layers)
     }
 
-    fn receive_job_completed(&mut self, jid: JobId) {
-        self.receive_job_completed(jid)
+    fn job_completed(&mut self, jid: JobId) {
+        self.job_completed(jid)
     }
 
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
