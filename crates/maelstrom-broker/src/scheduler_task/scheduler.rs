@@ -594,7 +594,7 @@ mod tests {
         cache::SchedulerCache,
         scheduler_task::{artifact_gatherer::Deps as ArtifactGathererDeps, ManifestReadRequest},
     };
-    use anyhow::Result;
+    use anyhow::{Error, Result};
     use enum_map::enum_map;
     use itertools::Itertools;
     use maelstrom_base::{
@@ -645,7 +645,7 @@ mod tests {
     struct TestState {
         messages: Vec<TestMessage>,
         get_artifact_returns: HashMap<(JobId, Sha256Digest), Vec<GetArtifact>>,
-        got_artifact_returns: HashMap<Sha256Digest, Vec<Result<Vec<JobId>>>>,
+        got_artifact_returns: HashMap<Sha256Digest, Vec<Result<Vec<JobId>, (Error, Vec<JobId>)>>>,
         #[allow(clippy::type_complexity)]
         get_artifact_for_worker_returns: HashMap<Sha256Digest, Vec<Option<(PathBuf, u64)>>>,
     }
@@ -672,7 +672,7 @@ mod tests {
             &mut self,
             digest: &Sha256Digest,
             file: Option<Self::TempFile>,
-        ) -> Result<Vec<JobId>> {
+        ) -> Result<Vec<JobId>, (Error, Vec<JobId>)> {
             self.borrow_mut()
                 .messages
                 .push(CacheGotArtifact(digest.clone(), file));
@@ -848,7 +848,7 @@ mod tests {
         #[allow(clippy::type_complexity)]
         fn new<const L: usize, const M: usize, const N: usize>(
             get_artifact_returns: [((JobId, Sha256Digest), Vec<GetArtifact>); L],
-            got_artifact_returns: [(Sha256Digest, Vec<Result<Vec<JobId>>>); M],
+            got_artifact_returns: [(Sha256Digest, Vec<Result<Vec<JobId>, (Error, Vec<JobId>)>>); M],
             get_artifact_for_worker_returns: [(Sha256Digest, Vec<Option<(PathBuf, u64)>>); N],
         ) -> Self {
             let result = Self::default();

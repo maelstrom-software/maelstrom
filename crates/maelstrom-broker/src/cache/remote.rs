@@ -1,5 +1,5 @@
 use crate::cache::{SchedulerCache, TempFileFactory};
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Error, Result};
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::{fs::TempFile, GetArtifact};
 use std::collections::{hash_map::Entry as HashEntry, HashMap, HashSet};
@@ -89,21 +89,21 @@ impl<ArtifactReaderT: RemoteArtifactReader> SchedulerCache for RemoteCache<Artif
         &mut self,
         digest: &Sha256Digest,
         file: Option<Self::TempFile>,
-    ) -> Result<Vec<JobId>> {
+    ) -> Result<Vec<JobId>, (Error, Vec<JobId>)> {
+        let jobs = if let Some(entry) = self.entries.get_mut(digest) {
+            if let Entry::Getting { jobs, .. } = mem::replace(entry, Entry::InCache) {
+                jobs
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
         if file.is_some() {
-            bail!("cache received uploaded file, but is remote");
+            Err((anyhow!("cache received uploaded file, but is remote"), jobs))
+        } else {
+            Ok(jobs)
         }
-
-        let Some(entry) = self.entries.get_mut(digest) else {
-            return Ok(vec![]);
-        };
-        let Entry::Getting { jobs, .. } = entry else {
-            return Ok(vec![]);
-        };
-
-        let jobs = mem::take(jobs);
-        *entry = Entry::InCache;
-        Ok(jobs)
     }
 
     fn decrement_refcount(&mut self, _digest: &Sha256Digest) {
@@ -237,11 +237,14 @@ mod tests {
 
         let err = cache
             .got_artifact(&digest![42], Some(PanicTempFile))
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
         assert!(
-            err.contains("cache received uploaded file, but is remote"),
-            "{err}"
+            err.0
+                .to_string()
+                .contains("cache received uploaded file, but is remote"),
+            "{}",
+            err.0,
         );
+        assert_eq!(err.1, vec![jid!(1, 1)]);
     }
 }

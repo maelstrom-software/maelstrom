@@ -3,7 +3,7 @@ pub mod local;
 mod remote;
 
 use crate::Config;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::GetArtifact;
 use slog::Logger;
@@ -33,7 +33,7 @@ pub trait SchedulerCache {
         &mut self,
         digest: &Sha256Digest,
         file: Option<Self::TempFile>,
-    ) -> Result<Vec<JobId>>;
+    ) -> Result<Vec<JobId>, (Error, Vec<JobId>)>;
 
     /// Decrement the refcount for the given artifact.
     fn decrement_refcount(&mut self, digest: &Sha256Digest);

@@ -279,13 +279,17 @@ where
             .flatten();
 
         match self.cache.got_artifact(&digest, file) {
-            Err(err) => {
+            Err((err, jobs)) => {
                 if let Some(client) = self.clients.get_mut(&cid) {
                     self.deps.send_artifact_transferred_response_to_client(
                         &mut client.sender,
                         digest,
                         Err(err.to_string()),
                     );
+                }
+                for jid in jobs {
+                    self.deps
+                        .send_job_failure_to_scheduler(jid, err.to_string());
                 }
             }
             Ok(jobs) => {
@@ -411,7 +415,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{anyhow, Result};
+    use anyhow::{anyhow, Error, Result};
     use std::{
         cell::RefCell,
         ops::{Deref, DerefMut},
@@ -428,10 +432,12 @@ mod tests {
         send_artifact_transferred_response_to_client:
             Vec<(ClientId, Sha256Digest, Result<(), String>)>,
         send_jobs_ready_to_scheduler: Vec<HashSet<JobId>>,
+        send_job_failure_to_scheduler: HashSet<(JobId, String)>,
         client_sender_dropped: HashSet<ClientId>,
         // Cache.
         get_artifact: HashMap<(JobId, Sha256Digest), GetArtifact>,
-        got_artifact: HashMap<(Sha256Digest, Option<String>), Result<Vec<JobId>>>,
+        got_artifact:
+            HashMap<(Sha256Digest, Option<String>), Result<Vec<JobId>, (Error, Vec<JobId>)>>,
         decrement_refcount: Vec<Sha256Digest>,
         client_disconnected: HashSet<ClientId>,
         read_artifact: HashMap<Sha256Digest, i32>,
@@ -463,6 +469,11 @@ mod tests {
                 self.send_jobs_ready_to_scheduler.is_empty(),
                 "unused mock entries for Deps::send_jobs_ready_to_scheduler: {:?}",
                 self.send_jobs_ready_to_scheduler,
+            );
+            assert!(
+                self.send_job_failure_to_scheduler.is_empty(),
+                "unused mock entries for Deps::send_job_failure_to_scheduler: {:?}",
+                self.send_job_failure_to_scheduler,
             );
             assert!(
                 self.client_sender_dropped.is_empty(),
@@ -588,7 +599,12 @@ mod tests {
         }
 
         fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
-            todo!("{jid} {err}");
+            assert!(
+                self.borrow_mut()
+                    .send_job_failure_to_scheduler
+                    .remove(&(jid, err.clone())),
+                "sending unexpected job_failure to scheduler: {jid} {err}",
+            );
         }
     }
 
@@ -609,7 +625,7 @@ mod tests {
             &mut self,
             digest: &Sha256Digest,
             file: Option<Self::TempFile>,
-        ) -> Result<Vec<JobId>> {
+        ) -> Result<Vec<JobId>, (Error, Vec<JobId>)> {
             self.borrow_mut()
                 .got_artifact
                 .remove(&(digest.clone(), file))
@@ -839,6 +855,16 @@ mod tests {
             self
         }
 
+        fn send_job_failure_to_scheduler(self, jid: impl Into<JobId>, err: impl ToString) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .send_job_failure_to_scheduler
+                .insert((jid.into(), err.to_string()))
+                .assert_is_true();
+            self
+        }
+
         fn get_artifact(
             self,
             jid: impl Into<JobId>,
@@ -858,7 +884,7 @@ mod tests {
             self,
             digest: impl Into<Sha256Digest>,
             file: Option<&str>,
-            result: impl IntoIterator<Item = impl Into<JobId>>,
+            jobs: impl IntoIterator<Item = impl Into<JobId>>,
         ) -> Self {
             self.fixture
                 .mock
@@ -866,7 +892,7 @@ mod tests {
                 .got_artifact
                 .insert(
                     (digest.into(), file.map(Into::into)),
-                    Ok(result.into_iter().map(Into::into).collect()),
+                    Ok(jobs.into_iter().map(Into::into).collect()),
                 )
                 .assert_is_none();
             self
@@ -877,6 +903,7 @@ mod tests {
             digest: impl Into<Sha256Digest>,
             file: Option<&str>,
             error: impl ToString,
+            jobs: impl IntoIterator<Item = impl Into<JobId>>,
         ) -> Self {
             self.fixture
                 .mock
@@ -884,7 +911,10 @@ mod tests {
                 .got_artifact
                 .insert(
                     (digest.into(), file.map(Into::into)),
-                    Err(anyhow!(error.to_string())),
+                    Err((
+                        anyhow!(error.to_string()),
+                        jobs.into_iter().map(Into::into).collect(),
+                    )),
                 )
                 .assert_is_none();
             self
@@ -1225,7 +1255,7 @@ mod tests {
         let mut fixture = Fixture::with_client(1);
         fixture
             .expect()
-            .got_artifact_failure(2, None, "error")
+            .got_artifact_failure(2, None, "error", [] as [JobId; 0])
             .when()
             .receive_artifact_transferred(2, 2, ArtifactUploadLocation::Remote);
     }
@@ -1235,7 +1265,7 @@ mod tests {
         let mut fixture = Fixture::with_client(1);
         fixture
             .expect()
-            .got_artifact_failure(2, None, "error")
+            .got_artifact_failure(2, None, "error", [] as [JobId; 0])
             .send_artifact_transferred_response_to_client(1, 2, Err("error".into()))
             .when()
             .receive_artifact_transferred(1, 2, ArtifactUploadLocation::Remote);
@@ -1269,8 +1299,11 @@ mod tests {
             .start_job((2, 2), [(5, Tar)], StartJob::NotReady);
         fixture
             .expect()
-            .got_artifact_failure(5, None, "error")
+            .got_artifact_failure(5, None, "error", [(1, 2), (1, 3), (2, 2)])
             .send_artifact_transferred_response_to_client(1, 5, Err("error".into()))
+            .send_job_failure_to_scheduler((1, 2), "error")
+            .send_job_failure_to_scheduler((1, 3), "error")
+            .send_job_failure_to_scheduler((2, 2), "error")
             .when()
             .receive_artifact_transferred(1, 5, ArtifactUploadLocation::Remote);
     }
