@@ -35,7 +35,7 @@ pub trait Deps {
         digest: Sha256Digest,
         result: Result<(), String>,
     );
-    fn send_jobs_ready_to_scheduler(&mut self, jids: NonEmpty<JobId>);
+    fn send_jobs_ready_to_scheduler(&mut self, jobs: NonEmpty<JobId>);
     fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String);
 }
 
@@ -288,7 +288,7 @@ where
                     );
                 }
             }
-            Ok(jids) => {
+            Ok(jobs) => {
                 if let Some(client) = self.clients.get_mut(&cid) {
                     self.deps.send_artifact_transferred_response_to_client(
                         &mut client.sender,
@@ -296,7 +296,7 @@ where
                         Ok(()),
                     );
                 }
-                let ready = jids.into_iter().filter(|jid| {
+                let ready = jobs.into_iter().filter(|jid| {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
                     let job = client.jobs.get_mut(&jid.cjid).unwrap();
                     let is_manifest = job.missing_artifacts.remove(&digest).unwrap();
