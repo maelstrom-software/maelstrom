@@ -126,13 +126,15 @@ pub enum Message<
     /// The stats heartbeat task has decided it's time to take another statistics sample.
     StatisticsHeartbeat,
 
-    /// Read a manifest and found the given digest as a dependency. The job which is responsible
-    /// for the reading is included.
-    GotManifestEntry(Sha256Digest, JobId),
+    /// Read a manifest and found the given digest as a dependency.
+    GotManifestEntry {
+        manifest_digest: Sha256Digest,
+        entry_digest: Sha256Digest,
+    },
 
     /// Finished reading the manifest either due to reaching EOF or an error and no more dependent
     /// digests messages will be sent.
-    FinishedReadingManifest(Sha256Digest, JobId, anyhow::Result<()>),
+    FinishedReadingManifest(Sha256Digest, anyhow::Result<()>),
 
     /// The ArtifactGatherer has determined that it has everything necessary to start the given
     /// job. This isn't used for every job, as there is a "fast path" in the situation where the
@@ -927,12 +929,16 @@ mod tests {
                 Message::StatisticsHeartbeat => self
                     .scheduler
                     .receive_statistics_heartbeat(&mut self.artifact_gatherer),
-                Message::GotManifestEntry(entry_digest, jid) => self
+                Message::GotManifestEntry {
+                    manifest_digest,
+                    entry_digest,
+                } => {
+                    self.artifact_gatherer
+                        .receive_manifest_entry(manifest_digest, entry_digest);
+                }
+                Message::FinishedReadingManifest(digest, result) => self
                     .artifact_gatherer
-                    .receive_manifest_entry(entry_digest, jid),
-                Message::FinishedReadingManifest(digest, jid, result) => self
-                    .artifact_gatherer
-                    .receive_finished_reading_manifest(digest, jid, result),
+                    .receive_finished_reading_manifest(digest, result),
                 Message::JobsReadyFromArtifactGatherer(ready) => {
                     self.scheduler
                         .receive_jobs_ready_from_artifact_gatherer(ready);

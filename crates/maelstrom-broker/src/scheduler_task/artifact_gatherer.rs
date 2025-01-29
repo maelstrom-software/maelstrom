@@ -95,12 +95,17 @@ pub enum StartJob {
     Ready,
 }
 
+struct ManifestBeingRead {
+    current: JobId,
+    waiting: Vec<JobId>,
+}
+
 pub struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: Deps> {
     cache: CacheT,
     deps: DepsT,
     clients: HashMap<ClientId, Client<DepsT>>,
     tcp_upload_landing_pad: HashMap<Sha256Digest, CacheT::TempFile>,
-    manifests_being_read: HashMap<Sha256Digest, Vec<JobId>>,
+    manifests_being_read: HashMap<Sha256Digest, ManifestBeingRead>,
 }
 
 impl<CacheT, DepsT> ArtifactGatherer<CacheT, DepsT>
@@ -168,6 +173,7 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn start_artifact_acquisition_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
@@ -176,7 +182,7 @@ where
         is_manifest: IsManifest,
         jid: JobId,
         job: &mut Job,
-        manifests_being_read: &mut HashMap<Sha256Digest, Vec<JobId>>,
+        manifests_being_read: &mut HashMap<Sha256Digest, ManifestBeingRead>,
     ) {
         if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains_key(&digest) {
             return;
@@ -214,7 +220,7 @@ where
         is_manifest: IsManifest,
         jid: JobId,
         job: &mut Job,
-        manifests_being_read: &mut HashMap<Sha256Digest, Vec<JobId>>,
+        manifests_being_read: &mut HashMap<Sha256Digest, ManifestBeingRead>,
     ) {
         if is_manifest.is_manifest() {
             Self::start_reading_manifest_for_job(
@@ -235,22 +241,24 @@ where
         digest: &Sha256Digest,
         jid: JobId,
         job: &mut Job,
-        manifests_being_read: &mut HashMap<Sha256Digest, Vec<JobId>>,
+        manifests_being_read: &mut HashMap<Sha256Digest, ManifestBeingRead>,
     ) {
         job.manifests_being_read
             .insert(digest.clone())
             .assert_is_true();
         match manifests_being_read.entry(digest.clone()) {
             Entry::Occupied(mut entry) => {
-                entry.get_mut().push(jid);
+                entry.get_mut().waiting.push(jid);
             }
             Entry::Vacant(entry) => {
-                entry.insert(Default::default());
-                let manifest_stream = cache.read_artifact(&digest);
+                entry.insert(ManifestBeingRead {
+                    current: jid,
+                    waiting: Default::default(),
+                });
+                let manifest_stream = cache.read_artifact(digest);
                 deps.send_message_to_manifest_reader(ManifestReadRequest {
                     manifest_stream,
                     digest: digest.clone(),
-                    jid,
                 });
             }
         }
@@ -309,7 +317,16 @@ where
         }
     }
 
-    pub fn receive_manifest_entry(&mut self, digest: Sha256Digest, jid: JobId) {
+    pub fn receive_manifest_entry(
+        &mut self,
+        manifest_digest: Sha256Digest,
+        entry_digest: Sha256Digest,
+    ) {
+        let jid = self
+            .manifests_being_read
+            .get(&manifest_digest)
+            .unwrap()
+            .current;
         let Some(client) = self.clients.get_mut(&jid.cid) else {
             // This indicates that the client isn't around anymore. Just ignore this message. When
             // the client disconnected, we canceled all of the outstanding requests. Ideally, we
@@ -322,7 +339,7 @@ where
             &mut self.cache,
             &mut client.sender,
             &mut self.deps,
-            digest,
+            entry_digest,
             IsManifest::NotManifest,
             jid,
             job,
@@ -333,45 +350,45 @@ where
     pub fn receive_finished_reading_manifest(
         &mut self,
         digest: Sha256Digest,
-        jid: JobId,
         result: anyhow::Result<()>,
     ) {
+        let Entry::Occupied(mut occupied_entry) = self.manifests_being_read.entry(digest.clone())
+        else {
+            panic!("expected entry in manifests_being_read for {digest}");
+        };
+        let entry = occupied_entry.get_mut();
+
         match result {
-            Ok(()) => {}
             Err(err) => {
                 self.deps
-                    .send_job_failure_to_scheduler(jid, err.to_string());
-                return;
+                    .send_job_failure_to_scheduler(entry.current, err.to_string());
+            }
+            Ok(()) => {
+                if let Some(client) = self.clients.get_mut(&entry.current.cid) {
+                    let job = client.jobs.get_mut(&entry.current.cjid).unwrap();
+                    job.manifests_being_read.remove(&digest).assert_is_true();
+                    if job.have_all_artifacts() {
+                        self.deps
+                            .send_jobs_ready_to_scheduler(NonEmpty::new(entry.current));
+                    }
+                } else {
+                    // This indicates that the client isn't around anymore. Just ignore this
+                    // message. When the client disconnected, we canceled all of the outstanding
+                    // requests.
+                }
             }
         }
 
-        let Entry::Occupied(mut entry) = self.manifests_being_read.entry(digest.clone()) else {
-            panic!("expected entry in manifests_being_read for {digest}");
-        };
-        let waiting = entry.get_mut();
-        if waiting.is_empty() {
-            entry.remove();
+        if entry.waiting.is_empty() {
+            occupied_entry.remove();
         } else {
-            let next_jid = waiting.remove(0);
+            entry.current = entry.waiting.remove(0);
             let manifest_stream = self.cache.read_artifact(&digest);
             self.deps
                 .send_message_to_manifest_reader(ManifestReadRequest {
                     manifest_stream,
                     digest: digest.clone(),
-                    jid: next_jid,
                 });
-        }
-
-        let Some(client) = self.clients.get_mut(&jid.cid) else {
-            // This indicates that the client isn't around anymore. Just ignore this message. When
-            // the client disconnected, we canceled all of the outstanding requests.
-            return;
-        };
-        let job = client.jobs.get_mut(&jid.cjid).unwrap();
-        job.manifests_being_read.remove(&digest).assert_is_true();
-
-        if job.have_all_artifacts() {
-            self.deps.send_jobs_ready_to_scheduler(NonEmpty::new(jid));
         }
     }
 
@@ -750,20 +767,20 @@ mod tests {
 
         fn receive_manifest_entry(
             &mut self,
-            digest: impl Into<Sha256Digest>,
-            jid: impl Into<JobId>,
+            manifest_digest: impl Into<Sha256Digest>,
+            entry_digest: impl Into<Sha256Digest>,
         ) {
-            self.sut.receive_manifest_entry(digest.into(), jid.into());
+            self.sut
+                .receive_manifest_entry(manifest_digest.into(), entry_digest.into());
         }
 
         fn receive_finished_reading_manifest(
             &mut self,
             digest: impl Into<Sha256Digest>,
-            jid: impl Into<JobId>,
             result: Result<()>,
         ) {
             self.sut
-                .receive_finished_reading_manifest(digest.into(), jid.into(), result);
+                .receive_finished_reading_manifest(digest.into(), result);
         }
 
         fn complete_job(&mut self, jid: impl Into<JobId>) {
@@ -788,7 +805,6 @@ mod tests {
 
         fn send_message_to_manifest_reader(
             self,
-            jid: impl Into<JobId>,
             digest: impl Into<Sha256Digest>,
             manifest_stream: i32,
         ) -> Self {
@@ -797,7 +813,6 @@ mod tests {
                 .borrow_mut()
                 .send_message_to_manifest_reader
                 .insert(ManifestReadRequest {
-                    jid: jid.into(),
                     digest: digest.into(),
                     manifest_stream,
                 })
@@ -993,7 +1008,7 @@ mod tests {
             .get_artifact((1, 1), 3, GetArtifact::Get)
             .get_artifact((1, 1), 4, GetArtifact::Success)
             .read_artifact(4, 44)
-            .send_message_to_manifest_reader((1, 1), 4, 44)
+            .send_message_to_manifest_reader(4, 44)
             .send_transfer_artifact_to_client(1, 3)
             .when()
             .start_job(
@@ -1105,7 +1120,7 @@ mod tests {
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
-            .send_message_to_manifest_reader((1, 2), 3, 33)
+            .send_message_to_manifest_reader(3, 33)
             .when()
             .start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
     }
@@ -1117,7 +1132,7 @@ mod tests {
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
-            .send_message_to_manifest_reader((1, 2), 3, 33)
+            .send_message_to_manifest_reader(3, 33)
             .when()
             .start_job((1, 2), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
     }
@@ -1287,7 +1302,7 @@ mod tests {
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
-            .send_message_to_manifest_reader((1, 2), 3, 33)
+            .send_message_to_manifest_reader(3, 33)
             .when()
             .start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
         fixture
@@ -1297,7 +1312,7 @@ mod tests {
             .decrement_refcount(3)
             .when()
             .receive_client_disconnected(1);
-        fixture.receive_manifest_entry(4, (1, 2));
+        fixture.receive_manifest_entry(3, 4);
     }
 
     #[test]
@@ -1307,7 +1322,7 @@ mod tests {
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
-            .send_message_to_manifest_reader((1, 2), 3, 33)
+            .send_message_to_manifest_reader(3, 33)
             .when()
             .start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
         fixture
@@ -1317,7 +1332,7 @@ mod tests {
             .decrement_refcount(3)
             .when()
             .receive_client_disconnected(1);
-        fixture.receive_finished_reading_manifest(3, (1, 2), Ok(()));
+        fixture.receive_finished_reading_manifest(3, Ok(()));
     }
 
     #[test]
@@ -1327,29 +1342,29 @@ mod tests {
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 33)
-            .send_message_to_manifest_reader((1, 2), 3, 33)
+            .send_message_to_manifest_reader(3, 33)
             .when()
             .start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
         fixture
             .expect()
             .get_artifact((1, 2), 4, GetArtifact::Success)
             .when()
-            .receive_manifest_entry(4, (1, 2));
-        fixture.receive_manifest_entry(4, (1, 2));
+            .receive_manifest_entry(3, 4);
+        fixture.receive_manifest_entry(3, 4);
         fixture
             .expect()
             .get_artifact((1, 2), 5, GetArtifact::Wait)
             .when()
-            .receive_manifest_entry(5, (1, 2));
-        fixture.receive_manifest_entry(5, (1, 2));
+            .receive_manifest_entry(3, 5);
+        fixture.receive_manifest_entry(3, 5);
         fixture
             .expect()
             .get_artifact((1, 2), 6, GetArtifact::Get)
             .send_transfer_artifact_to_client(1, 6)
             .when()
-            .receive_manifest_entry(6, (1, 2));
-        fixture.receive_manifest_entry(6, (1, 2));
-        fixture.receive_finished_reading_manifest(3, (1, 2), Ok(()));
+            .receive_manifest_entry(3, 6);
+        fixture.receive_manifest_entry(3, 6);
+        fixture.receive_finished_reading_manifest(3, Ok(()));
         fixture
             .expect()
             .got_artifact_success(6, None, [(1, 2)])
@@ -1402,7 +1417,7 @@ mod tests {
             .got_artifact_success(3, None, [(1, 2)])
             .send_artifact_transferred_response_to_client(1, 3, Ok(()))
             .read_artifact(3, 33)
-            .send_message_to_manifest_reader((1, 2), 3, 33)
+            .send_message_to_manifest_reader(3, 33)
             .when()
             .artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
     }
@@ -1415,17 +1430,17 @@ mod tests {
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .get_artifact((1, 2), 4, GetArtifact::Success)
             .read_artifact(3, 33)
-            .send_message_to_manifest_reader((1, 2), 3, 33)
+            .send_message_to_manifest_reader(3, 33)
             .read_artifact(4, 44)
-            .send_message_to_manifest_reader((1, 2), 4, 44)
+            .send_message_to_manifest_reader(4, 44)
             .when()
             .start_job((1, 2), [(3, Manifest), (4, Manifest)], StartJob::NotReady);
-        fixture.receive_finished_reading_manifest(3, (1, 2), Ok(()));
+        fixture.receive_finished_reading_manifest(3, Ok(()));
         fixture
             .expect()
             .send_jobs_ready_to_scheduler([(1, 2)])
             .when()
-            .receive_finished_reading_manifest(4, (1, 2), Ok(()));
+            .receive_finished_reading_manifest(4, Ok(()));
     }
 
     #[test]
@@ -1482,7 +1497,7 @@ mod tests {
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
             .read_artifact(3, 103)
-            .send_message_to_manifest_reader((1, 2), 3, 103)
+            .send_message_to_manifest_reader(3, 103)
             .when()
             .start_job((1, 2), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
         // We should block because somebody else is reading the same manifest.
@@ -1496,7 +1511,7 @@ mod tests {
             .expect()
             .get_artifact((2, 2), 4, GetArtifact::Success)
             .read_artifact(4, 104)
-            .send_message_to_manifest_reader((2, 2), 4, 104)
+            .send_message_to_manifest_reader(4, 104)
             .when()
             .start_job((2, 2), [(4, Manifest), (4, Manifest)], StartJob::NotReady);
 
@@ -1504,20 +1519,20 @@ mod tests {
             .expect()
             .get_artifact((1, 2), 30, GetArtifact::Success)
             .when()
-            .receive_manifest_entry(30, (1, 2));
+            .receive_manifest_entry(3, 30);
         fixture
             .expect()
             .get_artifact((1, 2), 31, GetArtifact::Success)
             .when()
-            .receive_manifest_entry(31, (1, 2));
+            .receive_manifest_entry(3, 31);
 
         // When we finish reading, we should kick off the next.
         fixture
             .expect()
             .send_jobs_ready_to_scheduler([(1, 2)])
             .read_artifact(3, 203)
-            .send_message_to_manifest_reader((2, 1), 3, 203)
+            .send_message_to_manifest_reader(3, 203)
             .when()
-            .receive_finished_reading_manifest(3, (1, 2), Ok(()));
+            .receive_finished_reading_manifest(3, Ok(()));
     }
 }

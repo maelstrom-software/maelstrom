@@ -17,7 +17,6 @@ use tokio::{io::AsyncRead, sync::mpsc as tokio_mpsc, task::JoinSet};
 pub struct ManifestReadRequest<ArtifactStreamT> {
     manifest_stream: ArtifactStreamT,
     digest: Sha256Digest,
-    jid: JobId,
 }
 
 #[derive(Debug)]
@@ -138,12 +137,17 @@ struct CacheManifestReader<ArtifactStreamT, TempFileT> {
 async fn read_manifest<ArtifactStreamT: AsyncRead + Unpin, TempFileT>(
     sender: SchedulerSender<TempFileT>,
     stream: ArtifactStreamT,
-    job_id: JobId,
+    manifest: Sha256Digest,
 ) -> anyhow::Result<()> {
     let mut reader = AsyncManifestReader::new(stream).await?;
     while let Some(entry) = reader.next().await? {
-        if let ManifestEntryData::File(ManifestFileData::Digest(digest)) = entry.data {
-            sender.send(Message::GotManifestEntry(digest, job_id)).ok();
+        if let ManifestEntryData::File(ManifestFileData::Digest(entry_digest)) = entry.data {
+            sender
+                .send(Message::GotManifestEntry {
+                    manifest_digest: manifest.clone(),
+                    entry_digest,
+                })
+                .ok();
         }
     }
     Ok(())
@@ -169,11 +173,10 @@ where
         while let Some(req) = self.receiver.recv().await {
             let sender = self.sender.clone();
             self.tasks.spawn(async move {
-                let result = read_manifest(sender.clone(), req.manifest_stream, req.jid).await;
+                let result =
+                    read_manifest(sender.clone(), req.manifest_stream, req.digest.clone()).await;
                 sender
-                    .send(Message::FinishedReadingManifest(
-                        req.digest, req.jid, result,
-                    ))
+                    .send(Message::FinishedReadingManifest(req.digest, result))
                     .ok();
             });
         }
@@ -323,12 +326,16 @@ where
             Message::StatisticsHeartbeat => self
                 .scheduler
                 .receive_statistics_heartbeat(&mut self.artifact_gatherer),
-            Message::GotManifestEntry(digest, jid) => {
-                self.artifact_gatherer.receive_manifest_entry(digest, jid)
+            Message::GotManifestEntry {
+                manifest_digest,
+                entry_digest,
+            } => {
+                self.artifact_gatherer
+                    .receive_manifest_entry(manifest_digest, entry_digest);
             }
-            Message::FinishedReadingManifest(digest, jid, result) => self
+            Message::FinishedReadingManifest(digest, result) => self
                 .artifact_gatherer
-                .receive_finished_reading_manifest(digest, jid, result),
+                .receive_finished_reading_manifest(digest, result),
             Message::JobsReadyFromArtifactGatherer(ready) => {
                 self.scheduler
                     .receive_jobs_ready_from_artifact_gatherer(ready);
