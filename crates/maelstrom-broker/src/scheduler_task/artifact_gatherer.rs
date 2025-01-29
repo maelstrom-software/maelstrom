@@ -211,17 +211,27 @@ where
         job: &mut Job,
     ) {
         if is_manifest.is_manifest() {
-            let manifest_stream = cache.read_artifact(&digest);
-            deps.send_message_to_manifest_reader(ManifestReadRequest {
-                manifest_stream,
-                digest: digest.clone(),
-                jid,
-            });
-            job.manifests_being_read
-                .insert(digest.clone())
-                .assert_is_true();
+            Self::start_reading_manifest_for_job(cache, deps, &digest, jid, job);
         }
         job.acquired_artifacts.insert(digest).assert_is_true();
+    }
+
+    fn start_reading_manifest_for_job(
+        cache: &mut CacheT,
+        deps: &mut DepsT,
+        digest: &Sha256Digest,
+        jid: JobId,
+        job: &mut Job,
+    ) {
+        let manifest_stream = cache.read_artifact(&digest);
+        deps.send_message_to_manifest_reader(ManifestReadRequest {
+            manifest_stream,
+            digest: digest.clone(),
+            jid,
+        });
+        job.manifests_being_read
+            .insert(digest.clone())
+            .assert_is_true();
     }
 
     pub fn receive_artifact_transferred(
@@ -565,7 +575,9 @@ mod tests {
             self.borrow_mut()
                 .got_artifact
                 .remove(&(digest.clone(), file))
-                .expect(&format!("sending unexpected got_artifact to cache: {digest}"))
+                .expect(&format!(
+                    "sending unexpected got_artifact to cache: {digest}"
+                ))
         }
 
         fn decrement_refcount(&mut self, digest: &Sha256Digest) {
@@ -685,8 +697,14 @@ mod tests {
             self.sut.receive_client_disconnected(cid.into());
         }
 
-        fn receive_artifact_transferred(&mut self, cid: impl Into<ClientId>, digest: impl Into<Sha256Digest>, location: impl Into<ArtifactUploadLocation>) {
-            self.sut.receive_artifact_transferred(cid.into(), digest.into(), location.into());
+        fn receive_artifact_transferred(
+            &mut self,
+            cid: impl Into<ClientId>,
+            digest: impl Into<Sha256Digest>,
+            location: impl Into<ArtifactUploadLocation>,
+        ) {
+            self.sut
+                .receive_artifact_transferred(cid.into(), digest.into(), location.into());
         }
 
         fn receive_manifest_entry(
@@ -804,9 +822,8 @@ mod tests {
             self,
             digest: impl Into<Sha256Digest>,
             file: Option<&str>,
-            result: impl IntoIterator<Item=impl Into<JobId>>,
-        ) -> Self
-        {
+            result: impl IntoIterator<Item = impl Into<JobId>>,
+        ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
@@ -824,8 +841,7 @@ mod tests {
             digest: impl Into<Sha256Digest>,
             file: Option<&str>,
             error: impl ToString,
-        ) -> Self
-        {
+        ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
@@ -964,12 +980,11 @@ mod tests {
     #[should_panic]
     fn start_job_for_unknown_client_panics() {
         let mut fixture = Fixture::with_client(2);
-        fixture
-            .start_job((1, 1), [(1, Tar)], StartJob::Ready);
+        fixture.start_job((1, 1), [(1, Tar)], StartJob::Ready);
     }
 
     #[test]
-    #[should_panic(expected="job entry already exists for 1.2")]
+    #[should_panic(expected = "job entry already exists for 1.2")]
     fn start_job_with_duplicate_jid_panics() {
         let mut fixture = Fixture::with_client(1);
         fixture
@@ -977,8 +992,7 @@ mod tests {
             .get_artifact((1, 2), 1, GetArtifact::Success)
             .when()
             .start_job((1, 2), [(1, Tar)], StartJob::Ready);
-        fixture
-            .start_job((1, 2), [(1, Tar)], StartJob::Ready);
+        fixture.start_job((1, 2), [(1, Tar)], StartJob::Ready);
     }
 
     #[test]
@@ -1114,7 +1128,7 @@ mod tests {
         let mut fixture = Fixture::with_client(1);
         fixture
             .expect()
-            .got_artifact_success(2, None, [] as [JobId;0])
+            .got_artifact_success(2, None, [] as [JobId; 0])
             .when()
             .receive_artifact_transferred(2, 2, ArtifactUploadLocation::Remote);
     }
@@ -1124,7 +1138,7 @@ mod tests {
         let mut fixture = Fixture::with_client(1);
         fixture
             .expect()
-            .got_artifact_success(2, None, [] as [JobId;0])
+            .got_artifact_success(2, None, [] as [JobId; 0])
             .send_artifact_transferred_response_to_client(1, 2, Ok(()))
             .when()
             .receive_artifact_transferred(1, 2, ArtifactUploadLocation::Remote);
