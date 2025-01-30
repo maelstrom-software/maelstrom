@@ -8,7 +8,7 @@ use maelstrom_util::{
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    num::NonZeroU32,
+    num::NonZeroUsize,
     path::PathBuf,
 };
 
@@ -97,13 +97,17 @@ struct ManifestBeingRead {
     entries: HashSet<Sha256Digest>,
 }
 
+struct ManifestReads {
+    being_read: HashMap<Sha256Digest, ManifestBeingRead>,
+    maximum_simultaneous: NonZeroUsize,
+}
+
 pub struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: Deps> {
     cache: CacheT,
     deps: DepsT,
     clients: HashMap<ClientId, Client<DepsT>>,
     tcp_upload_landing_pad: HashMap<Sha256Digest, CacheT::TempFile>,
-    manifests_being_read: HashMap<Sha256Digest, ManifestBeingRead>,
-    maximum_simultaneous_manifest_reads: NonZeroU32,
+    manifest_reads: ManifestReads,
 }
 
 impl<CacheT, DepsT> ArtifactGatherer<CacheT, DepsT>
@@ -114,15 +118,17 @@ where
     pub fn new(
         cache: CacheT,
         deps: DepsT,
-        maximum_simultaneous_manifest_reads: NonZeroU32,
+        maximum_simultaneous_manifest_reads: NonZeroUsize,
     ) -> Self {
         Self {
             deps,
             cache,
             clients: Default::default(),
             tcp_upload_landing_pad: Default::default(),
-            manifests_being_read: Default::default(),
-            maximum_simultaneous_manifest_reads,
+            manifest_reads: ManifestReads {
+                being_read: Default::default(),
+                maximum_simultaneous: maximum_simultaneous_manifest_reads,
+            },
         }
     }
 
@@ -144,7 +150,8 @@ where
             self.cache.decrement_refcount(&artifact);
         }
         for artifact in job.manifests_being_read {
-            self.manifests_being_read
+            self.manifest_reads
+                .being_read
                 .get_mut(&artifact)
                 .unwrap()
                 .jobs
@@ -170,7 +177,7 @@ where
             self.drop_job(JobId { cid, cjid }, job);
         }
 
-        for manifest_being_read in self.manifests_being_read.values_mut() {
+        for manifest_being_read in self.manifest_reads.being_read.values_mut() {
             manifest_being_read.jobs.retain(|jid| jid.cid != cid);
         }
     }
@@ -209,13 +216,9 @@ where
                 &mut client.sender,
                 &mut self.deps,
                 digest,
-                IsManifest::new(
-                    type_ == ArtifactType::Manifest,
-                    &mut self.manifests_being_read,
-                ),
+                IsManifest::new(type_ == ArtifactType::Manifest, &mut self.manifest_reads),
                 jid,
                 job,
-                self.maximum_simultaneous_manifest_reads,
             );
         }
 
@@ -234,16 +237,14 @@ where
     /// When we receive a new artifact, we must first make sure it's in cache and that we have a
     /// reference on it. Additionally, if it's a manifest, we must read the manifest and extract
     /// all artifacts it depends on, and then acquire references on them as well.
-    #[allow(clippy::too_many_arguments)]
     fn start_artifact_acquisition_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
         deps: &mut DepsT,
         digest: Sha256Digest,
-        is_manifest: IsManifest<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
+        is_manifest: IsManifest<&mut ManifestReads>,
         jid: JobId,
         job: &mut Job,
-        maximum_simultaneous_manifest_reads: NonZeroU32,
     ) {
         if job.artifacts_acquired.contains(&digest)
             || job.artifacts_being_acquired.contains_key(&digest)
@@ -263,7 +264,6 @@ where
                     is_manifest,
                     jid,
                     job,
-                    maximum_simultaneous_manifest_reads,
                 );
             }
             GetArtifact::Wait => {
@@ -282,24 +282,22 @@ where
 
     /// Given a newly-acquired artifact, check to see if it's a manifest, and if it is, start
     /// reading the manifest to incorporate the manifests dependencies as well.
-    #[allow(clippy::too_many_arguments)]
     fn potentially_start_reading_manifest_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
         deps: &mut DepsT,
         digest: &Sha256Digest,
-        is_manifest: IsManifest<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
+        is_manifest: IsManifest<&mut ManifestReads>,
         jid: JobId,
         job: &mut Job,
-        maximum_simultaneous_manifest_reads: NonZeroU32,
     ) {
-        let IsManifest::Manifest(manifests_being_read) = is_manifest else {
+        let IsManifest::Manifest(manifest_reads) = is_manifest else {
             return;
         };
         job.manifests_being_read
             .insert(digest.clone())
             .assert_is_true();
-        match manifests_being_read.entry(digest.clone()) {
+        match manifest_reads.being_read.entry(digest.clone()) {
             Entry::Occupied(mut entry) => {
                 let manifests_being_read = entry.get_mut();
                 manifests_being_read.jobs.insert(jid).assert_is_true();
@@ -312,7 +310,6 @@ where
                         IsManifest::NotManifest,
                         jid,
                         job,
-                        maximum_simultaneous_manifest_reads,
                     );
                 }
             }
@@ -322,8 +319,7 @@ where
                     entries: Default::default(),
                 });
                 assert!(
-                    u32::try_from(manifests_being_read.len()).unwrap()
-                        < maximum_simultaneous_manifest_reads.get()
+                    manifest_reads.being_read.len() <= manifest_reads.maximum_simultaneous.get()
                 );
                 let manifest_stream = cache.read_artifact(digest);
                 deps.send_message_to_manifest_reader(ManifestReadRequest {
@@ -392,10 +388,9 @@ where
                         &mut client.sender,
                         &mut self.deps,
                         &digest,
-                        is_manifest.map(|()| &mut self.manifests_being_read),
+                        is_manifest.map(|()| &mut self.manifest_reads),
                         *jid,
                         job,
-                        self.maximum_simultaneous_manifest_reads,
                     );
                     job.have_all_artifacts()
                 });
@@ -414,7 +409,11 @@ where
         manifest_digest: Sha256Digest,
         entry_digest: Sha256Digest,
     ) {
-        let manifest_being_read = self.manifests_being_read.get_mut(&manifest_digest).unwrap();
+        let manifest_being_read = self
+            .manifest_reads
+            .being_read
+            .get_mut(&manifest_digest)
+            .unwrap();
         if manifest_being_read.entries.insert(entry_digest.clone()) {
             for jid in &manifest_being_read.jobs {
                 let client = self.clients.get_mut(&jid.cid).unwrap();
@@ -427,7 +426,6 @@ where
                     IsManifest::NotManifest,
                     *jid,
                     job,
-                    self.maximum_simultaneous_manifest_reads,
                 );
             }
         }
@@ -440,7 +438,7 @@ where
         digest: Sha256Digest,
         result: anyhow::Result<()>,
     ) {
-        let manifest_being_read = self.manifests_being_read.remove(&digest).unwrap();
+        let manifest_being_read = self.manifest_reads.being_read.remove(&digest).unwrap();
         match result {
             Err(err) => {
                 for jid in &manifest_being_read.jobs {
