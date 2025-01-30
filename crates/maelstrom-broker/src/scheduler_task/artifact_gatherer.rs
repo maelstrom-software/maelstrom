@@ -204,7 +204,7 @@ where
                 IsManifest::from(type_ == ArtifactType::Manifest),
                 jid,
                 job,
-                &mut self.manifests_being_read,
+                Some(&mut self.manifests_being_read),
             );
         }
 
@@ -232,8 +232,9 @@ where
         is_manifest: IsManifest,
         jid: JobId,
         job: &mut Job,
-        manifests_being_read: &mut HashMap<Sha256Digest, ManifestBeingRead>,
+        manifests_being_read: Option<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
     ) {
+        assert!(!is_manifest.is_manifest() || manifests_being_read.is_some());
         if job.artifacts_acquired.contains(&digest)
             || job.artifacts_being_acquired.contains_key(&digest)
         {
@@ -246,6 +247,7 @@ where
                     .assert_is_true();
                 Self::potentially_start_reading_manifest_for_job(
                     cache,
+                    client_sender,
                     deps,
                     &digest,
                     is_manifest,
@@ -270,14 +272,16 @@ where
 
     /// Given a newly-acquired artifact, check to see if it's a manifest, and if it is, start
     /// reading the manifest to incorporate the manifests dependencies as well.
+    #[allow(clippy::too_many_arguments)]
     fn potentially_start_reading_manifest_for_job(
         cache: &mut CacheT,
+        client_sender: &mut DepsT::ClientSender,
         deps: &mut DepsT,
         digest: &Sha256Digest,
         is_manifest: IsManifest,
         jid: JobId,
         job: &mut Job,
-        manifests_being_read: &mut HashMap<Sha256Digest, ManifestBeingRead>,
+        manifests_being_read: Option<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
     ) {
         if !is_manifest.is_manifest() {
             return;
@@ -285,9 +289,22 @@ where
         job.manifests_being_read
             .insert(digest.clone())
             .assert_is_true();
-        match manifests_being_read.entry(digest.clone()) {
+        match manifests_being_read.unwrap().entry(digest.clone()) {
             Entry::Occupied(mut entry) => {
-                entry.get_mut().jobs.insert(jid).assert_is_true();
+                let manifests_being_read = entry.get_mut();
+                manifests_being_read.jobs.insert(jid).assert_is_true();
+                for digest in &manifests_being_read.entries {
+                    Self::start_artifact_acquisition_for_job(
+                        cache,
+                        client_sender,
+                        deps,
+                        digest.clone(),
+                        IsManifest::NotManifest,
+                        jid,
+                        job,
+                        None,
+                    );
+                }
             }
             Entry::Vacant(entry) => {
                 entry.insert(ManifestBeingRead {
@@ -358,12 +375,13 @@ where
                     job.artifacts_acquired.insert(digest_clone).assert_is_true();
                     Self::potentially_start_reading_manifest_for_job(
                         &mut self.cache,
+                        &mut client.sender,
                         &mut self.deps,
                         &digest,
                         is_manifest,
                         *jid,
                         job,
-                        &mut self.manifests_being_read,
+                        Some(&mut self.manifests_being_read),
                     );
                     job.have_all_artifacts()
                 });
@@ -374,21 +392,31 @@ where
         }
     }
 
-    /// Called when the manifest reader finds another entry in the manifest. Currently, we just
-    /// accumulate all entries for a given manifest until we finish reading all of them. Then, we
-    /// kick off the next steps. In theory, we could distribute the entry immediately to all jobs,
-    /// but then we'd have to deal with the situation where a job "jumped onto" a manifest as it
-    /// was being read.
+    /// Called when the manifest reader finds another entry in the manifest. We distribute the
+    /// entry to all of the currently waiting jobs, and also save it in a set for any jobs added in
+    /// the future.
     pub fn receive_manifest_entry(
         &mut self,
         manifest_digest: Sha256Digest,
         entry_digest: Sha256Digest,
     ) {
-        self.manifests_being_read
-            .get_mut(&manifest_digest)
-            .unwrap()
-            .entries
-            .insert(entry_digest);
+        let manifest_being_read = self.manifests_being_read.get_mut(&manifest_digest).unwrap();
+        if manifest_being_read.entries.insert(entry_digest.clone()) {
+            for jid in &manifest_being_read.jobs {
+                let client = self.clients.get_mut(&jid.cid).unwrap();
+                let job = client.jobs.get_mut(&jid.cjid).unwrap();
+                Self::start_artifact_acquisition_for_job(
+                    &mut self.cache,
+                    &mut client.sender,
+                    &mut self.deps,
+                    entry_digest.clone(),
+                    IsManifest::NotManifest,
+                    *jid,
+                    job,
+                    None,
+                );
+            }
+        }
     }
 
     /// Called when the manifest reader has finished reading the whole manifest, or has encountered
@@ -416,18 +444,6 @@ where
                     let client = self.clients.get_mut(&jid.cid).unwrap();
                     let job = client.jobs.get_mut(&jid.cjid).unwrap();
                     job.manifests_being_read.remove(&digest).assert_is_true();
-                    for digest in &manifest_being_read.entries {
-                        Self::start_artifact_acquisition_for_job(
-                            &mut self.cache,
-                            &mut client.sender,
-                            &mut self.deps,
-                            digest.clone(),
-                            IsManifest::NotManifest,
-                            *jid,
-                            job,
-                            &mut self.manifests_being_read,
-                        );
-                    }
                     job.have_all_artifacts()
                 });
                 if let Some(ready) = NonEmpty::collect(ready) {
@@ -1412,20 +1428,26 @@ mod tests {
             .send_message_to_manifest_reader(3, 33)
             .when()
             .start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
-        fixture.receive_manifest_entry(3, 4);
-        fixture.receive_manifest_entry(3, 4);
-        fixture.receive_manifest_entry(3, 5);
-        fixture.receive_manifest_entry(3, 5);
-        fixture.receive_manifest_entry(3, 6);
-        fixture.receive_manifest_entry(3, 6);
         fixture
             .expect()
             .get_artifact((1, 2), 4, GetArtifact::Success)
-            .get_artifact((1, 2), 5, GetArtifact::Wait)
-            .get_artifact((1, 2), 6, GetArtifact::Get)
-            .send_transfer_artifact_to_client(1, 6)
             .when()
-            .receive_finished_reading_manifest(3, Ok(()));
+            .receive_manifest_entry(3, 4);
+        fixture.receive_manifest_entry(3, 4);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 5, GetArtifact::Wait)
+            .when()
+            .receive_manifest_entry(3, 5);
+        fixture.receive_manifest_entry(3, 5);
+        fixture
+            .expect()
+            .send_transfer_artifact_to_client(1, 6)
+            .get_artifact((1, 2), 6, GetArtifact::Get)
+            .when()
+            .receive_manifest_entry(3, 6);
+        fixture.receive_manifest_entry(3, 6);
+        fixture.receive_finished_reading_manifest(3, Ok(()));
         fixture
             .expect()
             .got_artifact_success(6, None, [(1, 2)])
@@ -1557,13 +1579,8 @@ mod tests {
             .send_message_to_manifest_reader(3, 103)
             .when()
             .start_job((1, 2), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
-        // We should block because somebody else is reading the same manifest.
-        fixture
-            .expect()
-            .get_artifact((2, 1), 3, GetArtifact::Success)
-            .when()
-            .start_job((2, 1), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
-        // But reading a new manifest should be just fine.
+
+        // Other manifest should act independently.
         fixture
             .expect()
             .get_artifact((2, 2), 4, GetArtifact::Success)
@@ -1572,16 +1589,29 @@ mod tests {
             .when()
             .start_job((2, 2), [(4, Manifest), (4, Manifest)], StartJob::NotReady);
 
-        fixture.receive_manifest_entry(3, 30);
-        fixture.receive_manifest_entry(3, 31);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 30, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(3, 30);
+
+        fixture
+            .expect()
+            .get_artifact((2, 1), 3, GetArtifact::Success)
+            .get_artifact((2, 1), 30, GetArtifact::Success)
+            .when()
+            .start_job((2, 1), [(3, Manifest), (3, Manifest)], StartJob::NotReady);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 31, GetArtifact::Success)
+            .get_artifact((2, 1), 31, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(3, 31);
 
         // When we finish reading, we should continue with both jobs.
         fixture
             .expect()
-            .get_artifact((1, 2), 30, GetArtifact::Success)
-            .get_artifact((1, 2), 31, GetArtifact::Success)
-            .get_artifact((2, 1), 30, GetArtifact::Success)
-            .get_artifact((2, 1), 31, GetArtifact::Success)
             .send_jobs_ready_to_scheduler([(1, 2), (2, 1)])
             .when()
             .receive_finished_reading_manifest(3, Ok(()));
