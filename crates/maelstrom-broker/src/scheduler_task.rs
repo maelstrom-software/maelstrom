@@ -120,10 +120,10 @@ impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
             .send(Message::JobsReadyFromArtifactGatherer(jids));
     }
 
-    fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
+    fn send_jobs_failed_to_scheduler(&mut self, jobs: NonEmpty<JobId>, err: String) {
         let _ = self
             .task_sender
-            .send(Message::JobFailureFromArtifactGatherer(jid, err));
+            .send(Message::JobsFailedFromArtifactGatherer(jobs, err));
     }
 }
 
@@ -336,13 +336,13 @@ where
             Message::FinishedReadingManifest(digest, result) => self
                 .artifact_gatherer
                 .receive_finished_reading_manifest(digest, result),
-            Message::JobsReadyFromArtifactGatherer(ready) => {
+            Message::JobsReadyFromArtifactGatherer(jobs) => {
                 self.scheduler
-                    .receive_jobs_ready_from_artifact_gatherer(ready);
+                    .receive_jobs_ready_from_artifact_gatherer(jobs);
             }
-            Message::JobFailureFromArtifactGatherer(jid, err) => {
+            Message::JobsFailedFromArtifactGatherer(jobs, err) => {
                 self.scheduler
-                    .receive_job_failure_from_artifact_gatherer(jid, err);
+                    .receive_jobs_failed_from_artifact_gatherer(jobs, err);
             }
         })
         .await

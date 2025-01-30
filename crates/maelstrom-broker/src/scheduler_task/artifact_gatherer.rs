@@ -36,7 +36,7 @@ pub trait Deps {
         result: Result<(), String>,
     );
     fn send_jobs_ready_to_scheduler(&mut self, jobs: NonEmpty<JobId>);
-    fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String);
+    fn send_jobs_failed_to_scheduler(&mut self, jobs: NonEmpty<JobId>, err: String);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -298,12 +298,14 @@ where
                         Err(err.to_string()),
                     );
                 }
-                for jid in jobs {
-                    self.deps
-                        .send_job_failure_to_scheduler(jid, err.to_string());
+                for jid in &jobs {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
                     let job = client.jobs.remove(&jid.cjid).unwrap();
-                    self.drop_job(jid, job);
+                    self.drop_job(*jid, job);
+                }
+                if let Some(jobs) = NonEmpty::from_vec(jobs) {
+                    self.deps
+                        .send_jobs_failed_to_scheduler(jobs, err.to_string());
                 }
             }
             Ok(jobs) => {
@@ -357,13 +359,15 @@ where
 
         match result {
             Err(err) => {
-                for jid in manifest_being_read.jobs {
-                    self.deps
-                        .send_job_failure_to_scheduler(jid, err.to_string());
+                for jid in &manifest_being_read.jobs {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
                     let mut job = client.jobs.remove(&jid.cjid).unwrap();
                     job.manifests_being_read.remove(&digest).assert_is_true();
-                    self.drop_job(jid, job);
+                    self.drop_job(*jid, job);
+                }
+                if let Some(jobs) = NonEmpty::collect(manifest_being_read.jobs) {
+                    self.deps
+                        .send_jobs_failed_to_scheduler(jobs, err.to_string());
                 }
             }
             Ok(()) => {
@@ -450,7 +454,7 @@ mod tests {
         send_artifact_transferred_response_to_client:
             Vec<(ClientId, Sha256Digest, Result<(), String>)>,
         send_jobs_ready_to_scheduler: Vec<HashSet<JobId>>,
-        send_job_failure_to_scheduler: HashSet<(JobId, String)>,
+        send_jobs_failed_to_scheduler: Vec<(HashSet<JobId>, String)>,
         client_sender_dropped: HashSet<ClientId>,
         // Cache.
         get_artifact: HashMap<(JobId, Sha256Digest), GetArtifact>,
@@ -489,9 +493,9 @@ mod tests {
                 self.send_jobs_ready_to_scheduler,
             );
             assert!(
-                self.send_job_failure_to_scheduler.is_empty(),
+                self.send_jobs_failed_to_scheduler.is_empty(),
                 "unused mock entries for Deps::send_job_failure_to_scheduler: {:?}",
-                self.send_job_failure_to_scheduler,
+                self.send_jobs_failed_to_scheduler,
             );
             assert!(
                 self.client_sender_dropped.is_empty(),
@@ -607,22 +611,25 @@ mod tests {
             let _ = vec.remove(index);
         }
 
-        fn send_jobs_ready_to_scheduler(&mut self, ready: NonEmpty<JobId>) {
-            let ready = HashSet::from_iter(ready);
+        fn send_jobs_ready_to_scheduler(&mut self, jobs: NonEmpty<JobId>) {
+            let jobs = HashSet::from_iter(jobs);
             let vec = &mut self.borrow_mut().send_jobs_ready_to_scheduler;
-            let index = vec.iter().position(|e| e == &ready).expect(&format!(
-                "sending unexpected jobs_ready to scheduler: {ready:?}"
+            let index = vec.iter().position(|e| e == &jobs).expect(&format!(
+                "sending unexpected jobs_ready to scheduler: {jobs:?}"
             ));
             let _ = vec.remove(index);
         }
 
-        fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
-            assert!(
-                self.borrow_mut()
-                    .send_job_failure_to_scheduler
-                    .remove(&(jid, err.clone())),
-                "sending unexpected job_failure to scheduler: {jid} {err}",
-            );
+        fn send_jobs_failed_to_scheduler(&mut self, jobs: NonEmpty<JobId>, err: String) {
+            let jobs = HashSet::from_iter(jobs);
+            let vec = &mut self.borrow_mut().send_jobs_failed_to_scheduler;
+            let index = vec
+                .iter()
+                .position(|e| e.0 == jobs && e.1 == err)
+                .expect(&format!(
+                    "sending unexpected jobs_failed to scheduler: {jobs:?} {err}"
+                ));
+            let _ = vec.remove(index);
         }
     }
 
@@ -863,23 +870,26 @@ mod tests {
 
         fn send_jobs_ready_to_scheduler(
             self,
-            ready: impl IntoIterator<Item = impl Into<JobId>>,
+            jobs: impl IntoIterator<Item = impl Into<JobId>>,
         ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
                 .send_jobs_ready_to_scheduler
-                .push(ready.into_iter().map(Into::into).collect());
+                .push(jobs.into_iter().map(Into::into).collect());
             self
         }
 
-        fn send_job_failure_to_scheduler(self, jid: impl Into<JobId>, err: impl ToString) -> Self {
+        fn send_jobs_failed_to_scheduler(
+            self,
+            jobs: impl IntoIterator<Item = impl Into<JobId>>,
+            err: impl ToString,
+        ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
-                .send_job_failure_to_scheduler
-                .insert((jid.into(), err.to_string()))
-                .assert_is_true();
+                .send_jobs_failed_to_scheduler
+                .push((jobs.into_iter().map(Into::into).collect(), err.to_string()));
             self
         }
 
@@ -1319,9 +1329,7 @@ mod tests {
             .expect()
             .got_artifact_failure(5, None, "error", [(1, 2), (1, 3), (2, 2)])
             .send_artifact_transferred_response_to_client(1, 5, Err("error".into()))
-            .send_job_failure_to_scheduler((1, 2), "error")
-            .send_job_failure_to_scheduler((1, 3), "error")
-            .send_job_failure_to_scheduler((2, 2), "error")
+            .send_jobs_failed_to_scheduler([(1, 2), (1, 3), (2, 2)], "error")
             .when()
             .receive_artifact_transferred(1, 5, ArtifactUploadLocation::Remote);
     }

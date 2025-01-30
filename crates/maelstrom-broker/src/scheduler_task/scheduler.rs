@@ -142,7 +142,7 @@ pub enum Message<
     JobsReadyFromArtifactGatherer(NonEmpty<JobId>),
 
     /// The ArtifactGatherer has encountered an error gatherering artifacts for the given job.
-    JobFailureFromArtifactGatherer(JobId, String),
+    JobsFailedFromArtifactGatherer(NonEmpty<JobId>, String),
 }
 
 impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
@@ -528,8 +528,12 @@ where
         self.possibly_start_jobs(just_enqueued);
     }
 
-    pub fn receive_job_failure_from_artifact_gatherer(&mut self, jid: JobId, err: String) {
-        todo!("{jid} {err}");
+    pub fn receive_jobs_failed_from_artifact_gatherer(
+        &mut self,
+        jobs: NonEmpty<JobId>,
+        err: String,
+    ) {
+        todo!("{jobs:?} {err}");
     }
 
     fn sample_job_statistics_for_client(
@@ -806,12 +810,12 @@ mod tests {
             ));
         }
 
-        fn send_jobs_ready_to_scheduler(&mut self, ready: NonEmpty<JobId>) {
-            todo!("{ready:?}");
+        fn send_jobs_ready_to_scheduler(&mut self, jobs: NonEmpty<JobId>) {
+            todo!("{jobs:?}");
         }
 
-        fn send_job_failure_to_scheduler(&mut self, jid: JobId, err: String) {
-            todo!("{jid} {err}");
+        fn send_jobs_failed_to_scheduler(&mut self, jobs: NonEmpty<JobId>, err: String) {
+            todo!("{jobs:?} {err}");
         }
     }
 
@@ -943,9 +947,9 @@ mod tests {
                     self.scheduler
                         .receive_jobs_ready_from_artifact_gatherer(ready);
                 }
-                Message::JobFailureFromArtifactGatherer(jid, err) => {
+                Message::JobsFailedFromArtifactGatherer(jid, err) => {
                     self.scheduler
-                        .receive_job_failure_from_artifact_gatherer(jid, err);
+                        .receive_jobs_failed_from_artifact_gatherer(jid, err);
                 }
             }
         }
