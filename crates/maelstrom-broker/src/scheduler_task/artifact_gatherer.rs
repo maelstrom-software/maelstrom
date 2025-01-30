@@ -7,7 +7,7 @@ use maelstrom_util::{
     ext::{BoolExt as _, OptionExt as _},
 };
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     num::NonZeroUsize,
     path::PathBuf,
 };
@@ -92,14 +92,16 @@ pub enum StartJob {
     NotReady,
 }
 
-struct ManifestBeingRead {
+struct ManifestReadEntry {
     jobs: HashSet<JobId>,
     entries: HashSet<Sha256Digest>,
 }
 
 struct ManifestReads {
-    being_read: HashMap<Sha256Digest, ManifestBeingRead>,
-    maximum_simultaneous: NonZeroUsize,
+    entries: HashMap<Sha256Digest, ManifestReadEntry>,
+    waiting: VecDeque<Sha256Digest>,
+    in_progress: usize,
+    max_in_progress: NonZeroUsize,
 }
 
 pub struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: Deps> {
@@ -115,19 +117,17 @@ where
     CacheT: SchedulerCache,
     DepsT: Deps<ArtifactStream = CacheT::ArtifactStream>,
 {
-    pub fn new(
-        cache: CacheT,
-        deps: DepsT,
-        maximum_simultaneous_manifest_reads: NonZeroUsize,
-    ) -> Self {
+    pub fn new(cache: CacheT, deps: DepsT, max_simultaneous_manifest_reads: NonZeroUsize) -> Self {
         Self {
             deps,
             cache,
             clients: Default::default(),
             tcp_upload_landing_pad: Default::default(),
             manifest_reads: ManifestReads {
-                being_read: Default::default(),
-                maximum_simultaneous: maximum_simultaneous_manifest_reads,
+                entries: Default::default(),
+                waiting: Default::default(),
+                in_progress: 0,
+                max_in_progress: max_simultaneous_manifest_reads,
             },
         }
     }
@@ -151,7 +151,7 @@ where
         }
         for artifact in job.manifests_being_read {
             self.manifest_reads
-                .being_read
+                .entries
                 .get_mut(&artifact)
                 .unwrap()
                 .jobs
@@ -177,8 +177,8 @@ where
             self.drop_job(JobId { cid, cjid }, job);
         }
 
-        for manifest_being_read in self.manifest_reads.being_read.values_mut() {
-            manifest_being_read.jobs.retain(|jid| jid.cid != cid);
+        for entry in self.manifest_reads.entries.values_mut() {
+            entry.jobs.retain(|jid| jid.cid != cid);
         }
     }
 
@@ -297,11 +297,11 @@ where
         job.manifests_being_read
             .insert(digest.clone())
             .assert_is_true();
-        match manifest_reads.being_read.entry(digest.clone()) {
-            Entry::Occupied(mut entry) => {
-                let manifests_being_read = entry.get_mut();
-                manifests_being_read.jobs.insert(jid).assert_is_true();
-                for digest in &manifests_being_read.entries {
+        match manifest_reads.entries.entry(digest.clone()) {
+            Entry::Occupied(entry) => {
+                let entry = entry.into_mut();
+                entry.jobs.insert(jid).assert_is_true();
+                for digest in &entry.entries {
                     Self::start_artifact_acquisition_for_job(
                         cache,
                         client_sender,
@@ -314,20 +314,33 @@ where
                 }
             }
             Entry::Vacant(entry) => {
-                entry.insert(ManifestBeingRead {
+                entry.insert(ManifestReadEntry {
                     jobs: HashSet::from_iter([jid]),
                     entries: Default::default(),
                 });
-                assert!(
-                    manifest_reads.being_read.len() <= manifest_reads.maximum_simultaneous.get()
-                );
-                let manifest_stream = cache.read_artifact(digest);
-                deps.send_message_to_manifest_reader(ManifestReadRequest {
-                    manifest_stream,
-                    digest: digest.clone(),
-                });
+                if manifest_reads.in_progress == manifest_reads.max_in_progress.get() {
+                    manifest_reads.waiting.push_back(digest.clone());
+                } else {
+                    Self::start_manifest_reader(cache, deps, digest.clone(), manifest_reads);
+                }
             }
         }
+    }
+
+    /// Start up a manifest reader, keepting track of how many are pending.
+    fn start_manifest_reader(
+        cache: &mut CacheT,
+        deps: &mut DepsT,
+        digest: Sha256Digest,
+        manifest_reads: &mut ManifestReads,
+    ) {
+        assert!(manifest_reads.in_progress < manifest_reads.max_in_progress.get());
+        manifest_reads.in_progress += 1;
+        let manifest_stream = cache.read_artifact(&digest);
+        deps.send_message_to_manifest_reader(ManifestReadRequest {
+            manifest_stream,
+            digest,
+        });
     }
 
     /// Called when a client finishes an upload of an artifact. We must notify the cache, which
@@ -409,13 +422,13 @@ where
         manifest_digest: Sha256Digest,
         entry_digest: Sha256Digest,
     ) {
-        let manifest_being_read = self
+        let entry = self
             .manifest_reads
-            .being_read
+            .entries
             .get_mut(&manifest_digest)
             .unwrap();
-        if manifest_being_read.entries.insert(entry_digest.clone()) {
-            for jid in &manifest_being_read.jobs {
+        if entry.entries.insert(entry_digest.clone()) {
+            for jid in &entry.jobs {
                 let client = self.clients.get_mut(&jid.cid).unwrap();
                 let job = client.jobs.get_mut(&jid.cjid).unwrap();
                 Self::start_artifact_acquisition_for_job(
@@ -438,21 +451,23 @@ where
         digest: Sha256Digest,
         result: anyhow::Result<()>,
     ) {
-        let manifest_being_read = self.manifest_reads.being_read.remove(&digest).unwrap();
+        assert!(self.manifest_reads.in_progress > 0);
+        let entry = self.manifest_reads.entries.remove(&digest).unwrap();
+        self.manifest_reads.in_progress -= 1;
         match result {
             Err(err) => {
-                for jid in &manifest_being_read.jobs {
+                for jid in &entry.jobs {
                     let mut job = self.try_pop_job(*jid).unwrap();
                     job.manifests_being_read.remove(&digest).assert_is_true();
                     self.drop_job(*jid, job);
                 }
-                if let Some(jobs) = NonEmpty::collect(manifest_being_read.jobs) {
+                if let Some(jobs) = NonEmpty::collect(entry.jobs) {
                     self.deps
                         .send_jobs_failed_to_scheduler(jobs, err.to_string());
                 }
             }
             Ok(()) => {
-                let ready = manifest_being_read.jobs.into_iter().filter(|jid| {
+                let ready = entry.jobs.into_iter().filter(|jid| {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
                     let job = client.jobs.get_mut(&jid.cjid).unwrap();
                     job.manifests_being_read.remove(&digest).assert_is_true();
@@ -462,6 +477,14 @@ where
                     self.deps.send_jobs_ready_to_scheduler(ready);
                 }
             }
+        }
+        if let Some(digest) = self.manifest_reads.waiting.pop_front() {
+            Self::start_manifest_reader(
+                &mut self.cache,
+                &mut self.deps,
+                digest,
+                &mut self.manifest_reads,
+            );
         }
     }
 
@@ -758,18 +781,6 @@ mod tests {
         connected_clients: HashSet<ClientId>,
     }
 
-    impl Default for Fixture {
-        fn default() -> Self {
-            let mock = Rc::new(RefCell::new(Default::default()));
-            let sut = ArtifactGatherer::new(mock.clone(), mock.clone(), 3.try_into().unwrap());
-            Self {
-                mock,
-                sut,
-                connected_clients: Default::default(),
-            }
-        }
-    }
-
     impl Drop for Fixture {
         fn drop(&mut self) {
             for cid in &self.connected_clients {
@@ -783,17 +794,29 @@ mod tests {
     }
 
     impl Fixture {
-        fn with_clients(cids: impl IntoIterator<Item = impl Into<ClientId>>) -> Self {
-            let mut fixture = Self::default();
-            fixture.connected_clients = cids.into_iter().map(Into::into).collect();
-            for cid in fixture.connected_clients.clone() {
-                fixture.client_connected(cid);
-            }
-            fixture
+        fn new() -> Self {
+            Self::with_max_simultaneous_manifest_reads(100)
         }
 
-        fn with_client(cid: impl Into<ClientId>) -> Self {
-            Self::with_clients([cid])
+        fn with_max_simultaneous_manifest_reads(max_simultaneous_manifest_reads: usize) -> Self {
+            let mock = Rc::new(RefCell::new(Default::default()));
+            let sut = ArtifactGatherer::new(
+                mock.clone(),
+                mock.clone(),
+                max_simultaneous_manifest_reads.try_into().unwrap(),
+            );
+            Self {
+                mock,
+                sut,
+                connected_clients: Default::default(),
+            }
+        }
+
+        fn with_client(mut self, cid: impl Into<ClientId>) -> Self {
+            let cid = cid.into();
+            self.client_connected(cid);
+            self.connected_clients.insert(cid).assert_is_true();
+            self
         }
 
         fn expect(&mut self) -> Expect {
@@ -1077,7 +1100,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn duplicate_client_connected_panics() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .client_sender_dropped(1)
@@ -1088,13 +1111,13 @@ mod tests {
     #[test]
     #[should_panic]
     fn unknown_client_disconnect_panics() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture.client_disconnected(2);
     }
 
     #[test]
     fn client_disconnect_no_jobs() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .client_disconnected(1)
@@ -1105,7 +1128,7 @@ mod tests {
 
     #[test]
     fn client_disconnect_jobs_with_some_artifacts() {
-        let mut fixture = Fixture::with_client(2);
+        let mut fixture = Fixture::new().with_client(2);
         fixture.client_connected(1);
         fixture
             .expect()
@@ -1141,14 +1164,14 @@ mod tests {
     #[test]
     #[should_panic]
     fn start_job_for_unknown_client_panics() {
-        let mut fixture = Fixture::with_client(2);
+        let mut fixture = Fixture::new().with_client(2);
         fixture.start_job((1, 1), [(1, Tar)], StartJob::Ready);
     }
 
     #[test]
     #[should_panic(expected = "job entry already exists for 1.2")]
     fn start_job_with_duplicate_jid_panics() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 1, GetArtifact::Success)
@@ -1159,7 +1182,7 @@ mod tests {
 
     #[test]
     fn start_job_get_tar_artifact_success() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1169,7 +1192,7 @@ mod tests {
 
     #[test]
     fn start_job_duplicate_artifacts_get_tar_artifact_success() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1179,7 +1202,7 @@ mod tests {
 
     #[test]
     fn start_job_get_tar_artifact_get() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Get)
@@ -1190,7 +1213,7 @@ mod tests {
 
     #[test]
     fn start_job_duplicate_artifacts_get_tar_artifact_get() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Get)
@@ -1201,7 +1224,7 @@ mod tests {
 
     #[test]
     fn start_job_get_tar_artifact_wait() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Wait)
@@ -1211,7 +1234,7 @@ mod tests {
 
     #[test]
     fn start_job_duplicate_artifacts_get_tar_artifact_wait() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Wait)
@@ -1221,7 +1244,7 @@ mod tests {
 
     #[test]
     fn start_job_get_manifest_artifact_success() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1233,7 +1256,7 @@ mod tests {
 
     #[test]
     fn start_job_duplicate_artifacts_get_manifest_artifact_success() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1245,7 +1268,7 @@ mod tests {
 
     #[test]
     fn start_job_get_manifest_artifact_get() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Get)
@@ -1256,7 +1279,7 @@ mod tests {
 
     #[test]
     fn start_job_duplicate_artifacts_get_manifest_artifact_get() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Get)
@@ -1267,7 +1290,7 @@ mod tests {
 
     #[test]
     fn start_job_get_manifest_artifact_wait() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Wait)
@@ -1277,7 +1300,7 @@ mod tests {
 
     #[test]
     fn start_job_duplicate_artifacts_get_manifest_artifact_wait() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Wait)
@@ -1287,7 +1310,7 @@ mod tests {
 
     #[test]
     fn receive_artifact_transferred_success_not_tcp_no_jobs() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .got_artifact_success(2, None, [] as [JobId; 0])
@@ -1297,7 +1320,7 @@ mod tests {
 
     #[test]
     fn receive_artifact_transferred_success_not_tcp_some_jobs_only_some_are_ready() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 5, GetArtifact::Get)
@@ -1334,7 +1357,7 @@ mod tests {
 
     #[test]
     fn receive_artifact_transferred_failure_not_tcp_no_jobs() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .got_artifact_failure(2, None, "error", [] as [JobId; 0])
@@ -1353,7 +1376,7 @@ mod tests {
     fn receive_artifact_transferred_failure_not_tcp_only_fails_jobs_for_all_clients() {
         // The idea here is that if the cache fails has a failure doing something internally, it
         // should fail all the jobs: it's not a client-specific thing.
-        let mut fixture = Fixture::with_clients([1, 2]);
+        let mut fixture = Fixture::new().with_client(1).with_client(2);
         fixture
             .expect()
             .get_artifact((1, 2), 5, GetArtifact::Get)
@@ -1392,7 +1415,7 @@ mod tests {
 
     #[test]
     fn manifest_read_for_job_entry_from_disconnected_client() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1412,7 +1435,7 @@ mod tests {
 
     #[test]
     fn manifest_read_for_job_complete_from_disconnected_client() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1432,7 +1455,7 @@ mod tests {
 
     #[test]
     fn manifest_read_for_job_entry_various_cache_states() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1475,7 +1498,7 @@ mod tests {
 
     #[test]
     fn artifact_tranferred_ok_for_multiple_jobs() {
-        let mut fixture = Fixture::with_clients([1, 2]);
+        let mut fixture = Fixture::new().with_client(1).with_client(2);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Get)
@@ -1497,7 +1520,7 @@ mod tests {
 
     #[test]
     fn artifact_tranferred_ok_kicks_off_manifest_read() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Get)
@@ -1515,7 +1538,7 @@ mod tests {
 
     #[test]
     fn manifest_read_for_job_complete_tracks_count_for_job() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1536,7 +1559,7 @@ mod tests {
 
     #[test]
     fn complete_job_one_artifact() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1551,7 +1574,7 @@ mod tests {
 
     #[test]
     fn complete_job_two_artifacts() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1568,7 +1591,7 @@ mod tests {
 
     #[test]
     fn complete_job_duplicate_artifacts() {
-        let mut fixture = Fixture::with_client(1);
+        let mut fixture = Fixture::new().with_client(1);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1583,7 +1606,7 @@ mod tests {
 
     #[test]
     fn reading_multiple_manifests_simultaneously_and_successfully_with_all_in_cache() {
-        let mut fixture = Fixture::with_clients([1, 2]);
+        let mut fixture = Fixture::new().with_client(1).with_client(2);
         fixture
             .expect()
             .get_artifact((1, 2), 3, GetArtifact::Success)
@@ -1627,5 +1650,59 @@ mod tests {
             .send_jobs_ready_to_scheduler([(1, 2), (2, 1)])
             .when()
             .receive_finished_reading_manifest(3, Ok(()));
+    }
+
+    #[test]
+    fn simultaneous_manifest_reads_limited() {
+        let mut fixture = Fixture::with_max_simultaneous_manifest_reads(1).with_client(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 1), 3, GetArtifact::Success)
+            .get_artifact((1, 1), 4, GetArtifact::Success)
+            .read_artifact(3, 103)
+            .send_message_to_manifest_reader(3, 103)
+            .when()
+            .start_job((1, 1), [(3, Manifest), (4, Manifest)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 4, GetArtifact::Success)
+            .get_artifact((1, 2), 5, GetArtifact::Success)
+            .when()
+            .start_job((1, 2), [(4, Manifest), (5, Manifest)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((1, 1), 30, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(3, 30);
+        fixture
+            .expect()
+            .read_artifact(4, 104)
+            .send_message_to_manifest_reader(4, 104)
+            .when()
+            .receive_finished_reading_manifest(3, Ok(()));
+        fixture
+            .expect()
+            .get_artifact((1, 1), 40, GetArtifact::Success)
+            .get_artifact((1, 2), 40, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(4, 40);
+        fixture
+            .expect()
+            .read_artifact(5, 105)
+            .send_message_to_manifest_reader(5, 105)
+            .send_jobs_ready_to_scheduler([(1, 1)])
+            .when()
+            .receive_finished_reading_manifest(4, Ok(()));
+        fixture
+            .expect()
+            .get_artifact((1, 2), 50, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(5, 50);
+        fixture
+            .expect()
+            .send_jobs_ready_to_scheduler([(1, 2)])
+            .when()
+            .receive_finished_reading_manifest(5, Ok(()));
     }
 }
