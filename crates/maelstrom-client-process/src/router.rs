@@ -1,5 +1,5 @@
 use crate::artifact_pusher;
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, bail, Error, Result};
 use maelstrom_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
@@ -139,14 +139,8 @@ impl<DepsT: Deps> Router<DepsT> {
                 self.deps
                     .start_artifact_transfer_to_broker(digest, path.to_owned());
             }
-            Message::Broker(BrokerToClient::ArtifactTransferredResponse(digest, result)) => {
-                assert!(!self.standalone);
-                let path = self.artifacts.get(&digest).ok_or_else(|| {
-                    anyhow!("got request for unknown artifact with digest {digest}")
-                })?;
-                result.map_err(|err| {
-                    anyhow!("error transferring artifact: {}: {err}", path.display())
-                })?;
+            Message::Broker(BrokerToClient::GeneralError(err)) => {
+                bail!("received error from broker: {err}");
             }
             Message::LocalWorker(WorkerToBroker::JobResponse(jid, result)) => {
                 self.receive_job_response(jid.cjid, result);
@@ -491,17 +485,16 @@ mod tests {
         Broker(TransferArtifact(digest!(1))) => {
             StartArtifactTransferToBroker(digest!(1), path_buf!("bar")),
         };
-        Broker(ArtifactTransferredResponse(digest!(1), Ok(()))) => {}
     }
 
     script_test! {
         broker_transfer_artifact_known_clustered_error,
-        Fixture::new(false, Some("error transferring artifact: bar: test error".into())),
+        Fixture::new(false, Some("received error from broker: test error".into())),
         AddArtifact(path_buf!("bar"), digest!(1)) => {};
         Broker(TransferArtifact(digest!(1))) => {
             StartArtifactTransferToBroker(digest!(1), path_buf!("bar")),
         };
-        Broker(ArtifactTransferredResponse(digest!(1), Err("test error".into()))) => {}
+        Broker(GeneralError("test error".into())) => {}
     }
 
     script_test! {
@@ -512,7 +505,6 @@ mod tests {
         Broker(TransferArtifact(digest!(1))) => {
             StartArtifactTransferToBroker(digest!(1), path_buf!("bar")),
         };
-        Broker(ArtifactTransferredResponse(digest!(1), Ok(()))) => {}
     }
 
     script_test! {

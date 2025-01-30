@@ -105,13 +105,8 @@ impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
         let _ = sender.send(BrokerToClient::TransferArtifact(digest));
     }
 
-    fn send_artifact_transferred_response_to_client(
-        &mut self,
-        sender: &mut Self::ClientSender,
-        digest: Sha256Digest,
-        result: Result<(), String>,
-    ) {
-        let _ = sender.send(BrokerToClient::ArtifactTransferredResponse(digest, result));
+    fn send_general_error_to_client(&mut self, sender: &mut Self::ClientSender, error: String) {
+        let _ = sender.send(BrokerToClient::GeneralError(error));
     }
 
     fn send_jobs_ready_to_scheduler(&mut self, jids: NonEmpty<JobId>) {

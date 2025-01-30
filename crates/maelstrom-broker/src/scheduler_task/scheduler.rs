@@ -798,16 +798,10 @@ mod tests {
                 .push(ToClient(sender.0, BrokerToClient::TransferArtifact(digest)));
         }
 
-        fn send_artifact_transferred_response_to_client(
-            &mut self,
-            sender: &mut TestClientSender,
-            digest: Sha256Digest,
-            result: Result<(), String>,
-        ) {
-            self.borrow_mut().messages.push(ToClient(
-                sender.0,
-                BrokerToClient::ArtifactTransferredResponse(digest, result),
-            ));
+        fn send_general_error_to_client(&mut self, sender: &mut TestClientSender, error: String) {
+            self.borrow_mut()
+                .messages
+                .push(ToClient(sender.0, BrokerToClient::GeneralError(error)));
         }
 
         fn send_jobs_ready_to_scheduler(&mut self, jobs: NonEmpty<JobId>) {

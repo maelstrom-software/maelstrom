@@ -29,12 +29,7 @@ pub trait Deps {
         sender: &mut Self::ClientSender,
         digest: Sha256Digest,
     );
-    fn send_artifact_transferred_response_to_client(
-        &mut self,
-        sender: &mut Self::ClientSender,
-        digest: Sha256Digest,
-        result: Result<(), String>,
-    );
+    fn send_general_error_to_client(&mut self, sender: &mut Self::ClientSender, error: String);
     fn send_jobs_ready_to_scheduler(&mut self, jobs: NonEmpty<JobId>);
     fn send_jobs_failed_to_scheduler(&mut self, jobs: NonEmpty<JobId>, err: String);
 }
@@ -329,10 +324,9 @@ where
         match self.cache.got_artifact(&digest, file) {
             Err((err, jobs)) => {
                 let client = self.clients.get_mut(&cid).unwrap();
-                self.deps.send_artifact_transferred_response_to_client(
+                self.deps.send_general_error_to_client(
                     &mut client.sender,
-                    digest,
-                    Err(err.to_string()),
+                    format!("error incorporating artifact {digest} into cache: {err}"),
                 );
                 let jobs = jobs.into_iter().filter(|jid| {
                     // It's possible that the job failed for some other reason while we were
@@ -351,12 +345,6 @@ where
                 }
             }
             Ok(jobs) => {
-                let client = self.clients.get_mut(&cid).unwrap();
-                self.deps.send_artifact_transferred_response_to_client(
-                    &mut client.sender,
-                    digest.clone(),
-                    Ok(()),
-                );
                 let ready = jobs.into_iter().filter(|jid| {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
                     // It's possible that the job failed for some other reason while we were
@@ -512,8 +500,7 @@ mod tests {
         send_message_to_manifest_reader: HashSet<ManifestReadRequest<i32>>,
         send_message_to_worker_artifact_fetcher: HashSet<(i32, Option<(PathBuf, u64)>)>,
         send_transfer_artifact_to_client: Vec<(ClientId, Sha256Digest)>,
-        send_artifact_transferred_response_to_client:
-            Vec<(ClientId, Sha256Digest, Result<(), String>)>,
+        send_general_error_to_client: Vec<(ClientId, String)>,
         send_jobs_ready_to_scheduler: Vec<HashSet<JobId>>,
         send_jobs_failed_to_scheduler: Vec<(HashSet<JobId>, String)>,
         client_sender_dropped: HashSet<ClientId>,
@@ -544,9 +531,9 @@ mod tests {
                 self.send_transfer_artifact_to_client,
             );
             assert!(
-                self.send_artifact_transferred_response_to_client.is_empty(),
-                "unused mock entries for Deps::send_artifact_transferred_response_to_client: {:?}",
-                self.send_artifact_transferred_response_to_client,
+                self.send_general_error_to_client.is_empty(),
+                "unused mock entries for Deps::send_general_error_to_client: {:?}",
+                self.send_general_error_to_client,
             );
             assert!(
                 self.send_jobs_ready_to_scheduler.is_empty(),
@@ -653,20 +640,13 @@ mod tests {
             vec.remove(index);
         }
 
-        fn send_artifact_transferred_response_to_client(
-            &mut self,
-            sender: &mut Self::ClientSender,
-            digest: Sha256Digest,
-            result: Result<(), String>,
-        ) {
-            let vec = &mut self
-                .borrow_mut()
-                .send_artifact_transferred_response_to_client;
+        fn send_general_error_to_client(&mut self, sender: &mut Self::ClientSender, error: String) {
+            let vec = &mut self.borrow_mut().send_general_error_to_client;
             let index = vec
                 .iter()
-                .position(|e| e.0 == sender.cid && e.1 == digest && e.2 == result)
+                .position(|e| e.0 == sender.cid && e.1 == error)
                 .expect(&format!(
-                    "sending unexpected artifact_transferred_response to client {cid}: {digest} {result:?}",
+                    "sending unexpected general_error to client {cid}: {error}",
                     cid = sender.cid,
                 ));
             let _ = vec.remove(index);
@@ -915,17 +895,16 @@ mod tests {
             self
         }
 
-        fn send_artifact_transferred_response_to_client(
+        fn send_general_error_to_client(
             self,
             cid: impl Into<ClientId>,
-            digest: impl Into<Sha256Digest>,
-            result: Result<(), String>,
+            error: impl Into<String>,
         ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
-                .send_artifact_transferred_response_to_client
-                .push((cid.into(), digest.into(), result));
+                .send_general_error_to_client
+                .push((cid.into(), error.into()));
             self
         }
 
@@ -944,13 +923,13 @@ mod tests {
         fn send_jobs_failed_to_scheduler(
             self,
             jobs: impl IntoIterator<Item = impl Into<JobId>>,
-            err: impl ToString,
+            err: impl Into<String>,
         ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
                 .send_jobs_failed_to_scheduler
-                .push((jobs.into_iter().map(Into::into).collect(), err.to_string()));
+                .push((jobs.into_iter().map(Into::into).collect(), err.into()));
             self
         }
 
@@ -991,7 +970,7 @@ mod tests {
             self,
             digest: impl Into<Sha256Digest>,
             file: Option<&str>,
-            error: impl ToString,
+            error: impl Into<String>,
             jobs: impl IntoIterator<Item = impl Into<JobId>>,
         ) -> Self {
             self.fixture
@@ -1001,7 +980,7 @@ mod tests {
                 .insert(
                     (digest.into(), file.map(Into::into)),
                     Err((
-                        anyhow!(error.to_string()),
+                        anyhow!(error.into()),
                         jobs.into_iter().map(Into::into).collect(),
                     )),
                 )
@@ -1284,7 +1263,6 @@ mod tests {
         fixture
             .expect()
             .got_artifact_success(2, None, [] as [JobId; 0])
-            .send_artifact_transferred_response_to_client(1, 2, Ok(()))
             .when()
             .receive_artifact_transferred(1, 2, ArtifactUploadLocation::Remote);
     }
@@ -1310,20 +1288,17 @@ mod tests {
         fixture
             .expect()
             .got_artifact_success(5, None, [(1, 2), (1, 3)])
-            .send_artifact_transferred_response_to_client(1, 5, Ok(()))
             .send_jobs_ready_to_scheduler([(1, 2)])
             .when()
             .receive_artifact_transferred(1, 5, ArtifactUploadLocation::Remote);
         fixture
             .expect()
             .got_artifact_success(6, None, [(1, 3)])
-            .send_artifact_transferred_response_to_client(1, 6, Ok(()))
             .when()
             .receive_artifact_transferred(1, 6, ArtifactUploadLocation::Remote);
         fixture
             .expect()
             .got_artifact_success(7, None, [(1, 3)])
-            .send_artifact_transferred_response_to_client(1, 7, Ok(()))
             .send_jobs_ready_to_scheduler([(1, 3)])
             .when()
             .receive_artifact_transferred(1, 7, ArtifactUploadLocation::Remote);
@@ -1335,7 +1310,13 @@ mod tests {
         fixture
             .expect()
             .got_artifact_failure(2, None, "error", [] as [JobId; 0])
-            .send_artifact_transferred_response_to_client(1, 2, Err("error".into()))
+            .send_general_error_to_client(
+                1,
+                format!(
+                    "error incorporating artifact {} into cache: error",
+                    Sha256Digest::from(2)
+                ),
+            )
             .when()
             .receive_artifact_transferred(1, 2, ArtifactUploadLocation::Remote);
     }
@@ -1369,7 +1350,13 @@ mod tests {
         fixture
             .expect()
             .got_artifact_failure(5, None, "error", [(1, 2), (1, 3), (2, 2)])
-            .send_artifact_transferred_response_to_client(1, 5, Err("error".into()))
+            .send_general_error_to_client(
+                1,
+                format!(
+                    "error incorporating artifact {} into cache: error",
+                    Sha256Digest::from(5)
+                ),
+            )
             .send_jobs_failed_to_scheduler([(1, 2), (1, 3), (2, 2)], "error")
             .when()
             .receive_artifact_transferred(1, 5, ArtifactUploadLocation::Remote);
@@ -1442,13 +1429,11 @@ mod tests {
         fixture
             .expect()
             .got_artifact_success(6, None, [(1, 2)])
-            .send_artifact_transferred_response_to_client(1, 6, Ok(()))
             .when()
             .artifact_transferred(1, 6, ArtifactUploadLocation::Remote);
         fixture
             .expect()
             .got_artifact_success(5, None, [(1, 2)])
-            .send_artifact_transferred_response_to_client(1, 5, Ok(()))
             .send_jobs_ready_to_scheduler([(1, 2)])
             .when()
             .artifact_transferred(1, 5, ArtifactUploadLocation::Remote);
@@ -1471,7 +1456,6 @@ mod tests {
         fixture
             .expect()
             .got_artifact_success(3, None, [(1, 2), (2, 2)])
-            .send_artifact_transferred_response_to_client(1, 3, Ok(()))
             .send_jobs_ready_to_scheduler([(1, 2), (2, 2)])
             .when()
             .artifact_transferred(1, 3, ArtifactUploadLocation::Remote);
@@ -1489,7 +1473,6 @@ mod tests {
         fixture
             .expect()
             .got_artifact_success(3, None, [(1, 2)])
-            .send_artifact_transferred_response_to_client(1, 3, Ok(()))
             .read_artifact(3, 33)
             .send_message_to_manifest_reader(3, 33)
             .when()

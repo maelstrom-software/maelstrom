@@ -43,7 +43,7 @@ pub enum BrokerToClient {
     JobResponse(ClientJobId, JobOutcomeResult),
     JobStatusUpdate(ClientJobId, JobBrokerStatus),
     TransferArtifact(Sha256Digest),
-    ArtifactTransferredResponse(Sha256Digest, Result<(), String>),
+    GeneralError(String),
 }
 
 /// Message sent from a client to the broker. After sending the initial [`Hello`], a client will
