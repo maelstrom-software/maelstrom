@@ -63,14 +63,14 @@ impl IsManifest {
 
 #[derive(Default)]
 struct Job {
-    acquired_artifacts: HashSet<Sha256Digest>,
-    missing_artifacts: HashMap<Sha256Digest, IsManifest>,
+    artifacts_acquired: HashSet<Sha256Digest>,
+    artifacts_being_acquired: HashMap<Sha256Digest, IsManifest>,
     manifests_being_read: HashSet<Sha256Digest>,
 }
 
 impl Job {
     fn have_all_artifacts(&self) -> bool {
-        self.missing_artifacts.is_empty() && self.manifests_being_read.is_empty()
+        self.artifacts_being_acquired.is_empty() && self.manifests_being_read.is_empty()
     }
 }
 
@@ -91,8 +91,8 @@ impl<DepsT: Deps> Client<DepsT> {
 #[must_use]
 #[derive(Debug, PartialEq)]
 pub enum StartJob {
-    NotReady,
     Ready,
+    NotReady,
 }
 
 struct ManifestBeingRead {
@@ -123,8 +123,21 @@ where
         }
     }
 
+    /// Attempt to look up a job an remove it from its client. This function will panic if the
+    /// client doesn't exist. However, if the job doesn't exit, it will return `None`.
+    fn try_pop_job(&mut self, jid: JobId) -> Option<Job> {
+        self.clients
+            .get_mut(&jid.cid)
+            .unwrap()
+            .jobs
+            .remove(&jid.cjid)
+    }
+
+    /// Destroy a job, dropping any references it has and removing its `JobId` from
+    /// `manifests_being_read`. The `JobId` isn't removed from the cache, as the cache API doesn't
+    /// currently support that: it only suppors removing whole client connections.
     fn drop_job(&mut self, jid: JobId, job: Job) {
-        for artifact in job.acquired_artifacts {
+        for artifact in job.artifacts_acquired {
             self.cache.decrement_refcount(&artifact);
         }
         for artifact in job.manifests_being_read {
@@ -137,22 +150,21 @@ where
         }
     }
 
-    fn pop_job(&mut self, jid: JobId) -> Job {
-        self.clients.get_mut(&jid.cid).unwrap().jobs.remove(&jid.cjid).unwrap()
-    }
-
+    /// Accept a client sender for a newly-connected client.
     pub fn client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
         self.clients
             .insert(cid, Client::new(sender))
             .assert_is_none();
     }
 
+    /// Deal with a client being disconnected. Telling the cache the client disconnected guarantees
+    /// that the cache will no longer mention any `JobId`s from that client.
     pub fn client_disconnected(&mut self, cid: ClientId) {
         self.cache.client_disconnected(cid);
 
         let client = self.clients.remove(&cid).unwrap();
         for (cjid, job) in client.jobs {
-            self.drop_job(JobId::from((cid, cjid)), job);
+            self.drop_job(JobId { cid, cjid }, job);
         }
 
         for manifest_being_read in self.manifests_being_read.values_mut() {
@@ -160,14 +172,30 @@ where
         }
     }
 
+    /// Attempt to start a job. If the job can be started immediately, then [`StartJob::Ready`] is
+    /// returned, and the references for the job's artifacts are held by the [`ArtifactGatherer`]
+    /// on behalf of the job. When the job is done, [`Self::job_completed`] must be called to
+    /// release the references.
+    ///
+    /// If the job can't immediately be started, then [`StartJob::NotReady`] will be returned. The
+    /// [`ArtifactGatherer`] will then work with the cache and the manifest reader to determine all
+    /// of the artifacts the job needs and to read them into cache and acquire references on them.
+    /// When it is done, it will send a message back to the scheduler telling it that the job is
+    /// ready to run, or that there was an error and the job can't be run. These two messages are
+    /// [`crate::scheduler_task::scheduler::Message::JobsReadyFromArtifactGatherer`] and
+    /// [`crate::scheduler_task::scheduler::Message::JobsFailedFromArtifactGatherer`] respectively.
+    ///
+    /// In the case of the former, [`Self::job_completed`] must be called after the job has been
+    /// run to releae the references. In the case the lattter, [`Self::job_completed`] **must not**
+    /// be called, as the [`ArtifactGatherer`] will have already released any references the job
+    /// may have had, and will have erased any trace of the job from its state.
     pub fn start_job(
         &mut self,
         jid: JobId,
         layers: NonEmpty<(Sha256Digest, ArtifactType)>,
     ) -> StartJob {
-        let JobId { cid, cjid } = jid;
-        let client = self.clients.get_mut(&cid).unwrap();
-        let Entry::Vacant(job_entry) = client.jobs.entry(cjid) else {
+        let client = self.clients.get_mut(&jid.cid).unwrap();
+        let Entry::Vacant(job_entry) = client.jobs.entry(jid.cjid) else {
             panic!("job entry already exists for {jid}");
         };
         let job = job_entry.insert(Default::default());
@@ -192,6 +220,14 @@ where
         }
     }
 
+    /// Deal with a potentially new artifact dependency for a job.
+    ///
+    /// It's possible for a job to depend on a single artifact multiple different ways, so we must
+    /// deal with "duplicate" artifacts.
+    ///
+    /// When we receive a new artifact, we must first make sure it's in cache and that we have a
+    /// reference on it. Additionally, if it's a manifest, we must read the manifest and extract
+    /// all artifacts it depends on, and then acquire references on them as well.
     #[allow(clippy::too_many_arguments)]
     fn start_artifact_acquisition_for_job(
         cache: &mut CacheT,
@@ -203,15 +239,20 @@ where
         job: &mut Job,
         manifests_being_read: &mut HashMap<Sha256Digest, ManifestBeingRead>,
     ) {
-        if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains_key(&digest) {
+        if job.artifacts_acquired.contains(&digest)
+            || job.artifacts_being_acquired.contains_key(&digest)
+        {
             return;
         }
         match cache.get_artifact(jid, digest.clone()) {
             GetArtifact::Success => {
-                Self::complete_artifact_acquisition_for_job(
+                job.artifacts_acquired
+                    .insert(digest.clone())
+                    .assert_is_true();
+                Self::potentially_start_reading_manifest_for_job(
                     cache,
                     deps,
-                    digest,
+                    &digest,
                     is_manifest,
                     jid,
                     job,
@@ -219,49 +260,33 @@ where
                 );
             }
             GetArtifact::Wait => {
-                job.missing_artifacts
+                job.artifacts_being_acquired
                     .insert(digest, is_manifest)
                     .assert_is_none();
             }
             GetArtifact::Get => {
-                deps.send_transfer_artifact_to_client(client_sender, digest.clone());
-                job.missing_artifacts
-                    .insert(digest, is_manifest)
+                job.artifacts_being_acquired
+                    .insert(digest.clone(), is_manifest)
                     .assert_is_none();
+                deps.send_transfer_artifact_to_client(client_sender, digest);
             }
         }
     }
 
-    fn complete_artifact_acquisition_for_job(
+    /// Given a newly-acquired artifact, check to see if it's a manifest, and if it is, start
+    /// reading the manifest to incorporate the manifests dependencies as well.
+    fn potentially_start_reading_manifest_for_job(
         cache: &mut CacheT,
         deps: &mut DepsT,
-        digest: Sha256Digest,
+        digest: &Sha256Digest,
         is_manifest: IsManifest,
         jid: JobId,
         job: &mut Job,
         manifests_being_read: &mut HashMap<Sha256Digest, ManifestBeingRead>,
     ) {
-        if is_manifest.is_manifest() {
-            Self::start_reading_manifest_for_job(
-                cache,
-                deps,
-                &digest,
-                jid,
-                job,
-                manifests_being_read,
-            );
+        if !is_manifest.is_manifest() {
+            return;
         }
-        job.acquired_artifacts.insert(digest).assert_is_true();
-    }
-
-    fn start_reading_manifest_for_job(
-        cache: &mut CacheT,
-        deps: &mut DepsT,
-        digest: &Sha256Digest,
-        jid: JobId,
-        job: &mut Job,
-        manifests_being_read: &mut HashMap<Sha256Digest, ManifestBeingRead>,
-    ) {
         job.manifests_being_read
             .insert(digest.clone())
             .assert_is_true();
@@ -283,6 +308,9 @@ where
         }
     }
 
+    /// Called when a client finishes an upload of an artifact. We must notify the cache, which
+    /// will attempt to incorporate the artifact. Then, depending on whether the cache is
+    /// successful or not, we need to advance all affected jobs.
     pub fn receive_artifact_transferred(
         &mut self,
         cid: ClientId,
@@ -293,40 +321,57 @@ where
             .then(|| self.tcp_upload_landing_pad.remove(&digest))
             .flatten();
 
+        // We have to be careful with the jobs we get back from the cache. Currently, the cache
+        // doesn't provide us a way to remove jobs that are waiting on cache reads. We can remove
+        // a whole client, but not an individual job. This means that the jobs we get back from the
+        // cache may no longer exist, as we may have encountered a failure looking reading another
+        // artifact from cache or enumerating a manifest.
         match self.cache.got_artifact(&digest, file) {
             Err((err, jobs)) => {
-                if let Some(client) = self.clients.get_mut(&cid) {
-                    self.deps.send_artifact_transferred_response_to_client(
-                        &mut client.sender,
-                        digest,
-                        Err(err.to_string()),
-                    );
-                }
-                for jid in &jobs {
-                    let job = self.pop_job(*jid);
-                    self.drop_job(*jid, job);
-                }
-                if let Some(jobs) = NonEmpty::from_vec(jobs) {
+                let client = self.clients.get_mut(&cid).unwrap();
+                self.deps.send_artifact_transferred_response_to_client(
+                    &mut client.sender,
+                    digest,
+                    Err(err.to_string()),
+                );
+                let jobs = jobs.into_iter().filter(|jid| {
+                    // It's possible that the job failed for some other reason while we were
+                    // waiting on the cache. Until we update the cache's API to allow us to cancel
+                    // individual jobs, we have to deal with this.
+                    if let Some(job) = self.try_pop_job(*jid) {
+                        self.drop_job(*jid, job);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if let Some(jobs) = NonEmpty::collect(jobs) {
                     self.deps
                         .send_jobs_failed_to_scheduler(jobs, err.to_string());
                 }
             }
             Ok(jobs) => {
-                if let Some(client) = self.clients.get_mut(&cid) {
-                    self.deps.send_artifact_transferred_response_to_client(
-                        &mut client.sender,
-                        digest.clone(),
-                        Ok(()),
-                    );
-                }
+                let client = self.clients.get_mut(&cid).unwrap();
+                self.deps.send_artifact_transferred_response_to_client(
+                    &mut client.sender,
+                    digest.clone(),
+                    Ok(()),
+                );
                 let ready = jobs.into_iter().filter(|jid| {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
-                    let job = client.jobs.get_mut(&jid.cjid).unwrap();
-                    let is_manifest = job.missing_artifacts.remove(&digest).unwrap();
-                    Self::complete_artifact_acquisition_for_job(
+                    // It's possible that the job failed for some other reason while we were
+                    // waiting on the cache. Until we update the cache's API to allow us to cancel
+                    // individual jobs, we have to deal with this.
+                    let Some(job) = client.jobs.get_mut(&jid.cjid) else {
+                        return false;
+                    };
+                    let (digest_clone, is_manifest) =
+                        job.artifacts_being_acquired.remove_entry(&digest).unwrap();
+                    job.artifacts_acquired.insert(digest_clone).assert_is_true();
+                    Self::potentially_start_reading_manifest_for_job(
                         &mut self.cache,
                         &mut self.deps,
-                        digest.clone(),
+                        &digest,
                         is_manifest,
                         *jid,
                         job,
@@ -341,6 +386,11 @@ where
         }
     }
 
+    /// Called when the manifest reader finds another entry in the manifest. Currently, we just
+    /// accumulate all entries for a given manifest until we finish reading all of them. Then, we
+    /// kick off the next steps. In theory, we could distribute the entry immediately to all jobs,
+    /// but then we'd have to deal with the situation where a job "jumped onto" a manifest as it
+    /// was being read.
     pub fn receive_manifest_entry(
         &mut self,
         manifest_digest: Sha256Digest,
@@ -353,17 +403,18 @@ where
             .insert(entry_digest);
     }
 
+    /// Called when the manifest reader has finished reading the whole manifest, or has encountered
+    /// an error. We need to advance all jobs associated with the manifest.
     pub fn receive_finished_reading_manifest(
         &mut self,
         digest: Sha256Digest,
         result: anyhow::Result<()>,
     ) {
         let manifest_being_read = self.manifests_being_read.remove(&digest).unwrap();
-
         match result {
             Err(err) => {
                 for jid in &manifest_being_read.jobs {
-                    let mut job = self.pop_job(*jid);
+                    let mut job = self.try_pop_job(*jid).unwrap();
                     job.manifests_being_read.remove(&digest).assert_is_true();
                     self.drop_job(*jid, job);
                 }
@@ -398,11 +449,17 @@ where
         }
     }
 
+    /// Called by the scheduler when a job has completed. The [`ArtifactGatherer`] releases all
+    /// cache references for the job, and removes the job from its state.
     pub fn job_completed(&mut self, jid: JobId) {
-        let job = self.pop_job(jid);
+        let job = self.try_pop_job(jid).unwrap();
+        assert!(job.artifacts_being_acquired.is_empty());
+        assert!(job.manifests_being_read.is_empty());
         self.drop_job(jid, job);
     }
 
+    /// Called when the worker wants to read an artifact directly from the broker. We just call the
+    /// cache and for the information back to the artifact fetcher.
     pub fn receive_get_artifact_for_worker(
         &mut self,
         digest: Sha256Digest,
@@ -414,10 +471,14 @@ where
         );
     }
 
+    /// Called when the worker is done reading an artifact directly from the broker. We just
+    /// forward the call to the cache.
     pub fn receive_decrement_refcount_from_worker(&mut self, digest: Sha256Digest) {
         self.cache.decrement_refcount(&digest);
     }
 
+    /// Return the number of jobs waiting on at least one artifact or reading at least one
+    /// manifest, for a given client.
     pub fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
         self.clients
             .get(&cid)
@@ -428,6 +489,7 @@ where
             .count() as u64
     }
 
+    /// Called when the clien artifact fetcher is done uploading an artifact.
     pub fn receive_got_artifact(&mut self, digest: Sha256Digest, file: CacheT::TempFile) {
         self.tcp_upload_landing_pad.insert(digest, file);
     }
@@ -1217,16 +1279,6 @@ mod tests {
     }
 
     #[test]
-    fn receive_artifact_transferred_success_from_unknown_client() {
-        let mut fixture = Fixture::with_client(1);
-        fixture
-            .expect()
-            .got_artifact_success(2, None, [] as [JobId; 0])
-            .when()
-            .receive_artifact_transferred(2, 2, ArtifactUploadLocation::Remote);
-    }
-
-    #[test]
     fn receive_artifact_transferred_success_not_tcp_no_jobs() {
         let mut fixture = Fixture::with_client(1);
         fixture
@@ -1275,16 +1327,6 @@ mod tests {
             .send_jobs_ready_to_scheduler([(1, 3)])
             .when()
             .receive_artifact_transferred(1, 7, ArtifactUploadLocation::Remote);
-    }
-
-    #[test]
-    fn receive_artifact_transferred_failure_from_unknown_client() {
-        let mut fixture = Fixture::with_client(1);
-        fixture
-            .expect()
-            .got_artifact_failure(2, None, "error", [] as [JobId; 0])
-            .when()
-            .receive_artifact_transferred(2, 2, ArtifactUploadLocation::Remote);
     }
 
     #[test]
