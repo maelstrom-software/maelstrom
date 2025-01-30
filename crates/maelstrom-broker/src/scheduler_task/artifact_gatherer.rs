@@ -8,6 +8,7 @@ use maelstrom_util::{
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
+    num::NonZeroU32,
     path::PathBuf,
 };
 
@@ -102,6 +103,7 @@ pub struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: Deps> {
     clients: HashMap<ClientId, Client<DepsT>>,
     tcp_upload_landing_pad: HashMap<Sha256Digest, CacheT::TempFile>,
     manifests_being_read: HashMap<Sha256Digest, ManifestBeingRead>,
+    maximum_simultaneous_manifest_reads: NonZeroU32,
 }
 
 impl<CacheT, DepsT> ArtifactGatherer<CacheT, DepsT>
@@ -109,13 +111,18 @@ where
     CacheT: SchedulerCache,
     DepsT: Deps<ArtifactStream = CacheT::ArtifactStream>,
 {
-    pub fn new(cache: CacheT, deps: DepsT) -> Self {
+    pub fn new(
+        cache: CacheT,
+        deps: DepsT,
+        maximum_simultaneous_manifest_reads: NonZeroU32,
+    ) -> Self {
         Self {
             deps,
             cache,
             clients: Default::default(),
             tcp_upload_landing_pad: Default::default(),
             manifests_being_read: Default::default(),
+            maximum_simultaneous_manifest_reads,
         }
     }
 
@@ -208,6 +215,7 @@ where
                 ),
                 jid,
                 job,
+                self.maximum_simultaneous_manifest_reads,
             );
         }
 
@@ -226,6 +234,7 @@ where
     /// When we receive a new artifact, we must first make sure it's in cache and that we have a
     /// reference on it. Additionally, if it's a manifest, we must read the manifest and extract
     /// all artifacts it depends on, and then acquire references on them as well.
+    #[allow(clippy::too_many_arguments)]
     fn start_artifact_acquisition_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
@@ -234,6 +243,7 @@ where
         is_manifest: IsManifest<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
         jid: JobId,
         job: &mut Job,
+        maximum_simultaneous_manifest_reads: NonZeroU32,
     ) {
         if job.artifacts_acquired.contains(&digest)
             || job.artifacts_being_acquired.contains_key(&digest)
@@ -253,6 +263,7 @@ where
                     is_manifest,
                     jid,
                     job,
+                    maximum_simultaneous_manifest_reads,
                 );
             }
             GetArtifact::Wait => {
@@ -271,6 +282,7 @@ where
 
     /// Given a newly-acquired artifact, check to see if it's a manifest, and if it is, start
     /// reading the manifest to incorporate the manifests dependencies as well.
+    #[allow(clippy::too_many_arguments)]
     fn potentially_start_reading_manifest_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
@@ -279,6 +291,7 @@ where
         is_manifest: IsManifest<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
         jid: JobId,
         job: &mut Job,
+        maximum_simultaneous_manifest_reads: NonZeroU32,
     ) {
         let IsManifest::Manifest(manifests_being_read) = is_manifest else {
             return;
@@ -299,6 +312,7 @@ where
                         IsManifest::NotManifest,
                         jid,
                         job,
+                        maximum_simultaneous_manifest_reads,
                     );
                 }
             }
@@ -307,6 +321,10 @@ where
                     jobs: HashSet::from_iter([jid]),
                     entries: Default::default(),
                 });
+                assert!(
+                    u32::try_from(manifests_being_read.len()).unwrap()
+                        < maximum_simultaneous_manifest_reads.get()
+                );
                 let manifest_stream = cache.read_artifact(digest);
                 deps.send_message_to_manifest_reader(ManifestReadRequest {
                     manifest_stream,
@@ -377,6 +395,7 @@ where
                         is_manifest.map(|()| &mut self.manifests_being_read),
                         *jid,
                         job,
+                        self.maximum_simultaneous_manifest_reads,
                     );
                     job.have_all_artifacts()
                 });
@@ -408,6 +427,7 @@ where
                     IsManifest::NotManifest,
                     *jid,
                     job,
+                    self.maximum_simultaneous_manifest_reads,
                 );
             }
         }
@@ -743,7 +763,7 @@ mod tests {
     impl Default for Fixture {
         fn default() -> Self {
             let mock = Rc::new(RefCell::new(Default::default()));
-            let sut = ArtifactGatherer::new(mock.clone(), mock.clone());
+            let sut = ArtifactGatherer::new(mock.clone(), mock.clone(), 3.try_into().unwrap());
             Self {
                 mock,
                 sut,
