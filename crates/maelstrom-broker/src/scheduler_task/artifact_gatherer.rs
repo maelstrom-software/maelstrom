@@ -137,6 +137,10 @@ where
         }
     }
 
+    fn pop_job(&mut self, jid: JobId) -> Job {
+        self.clients.get_mut(&jid.cid).unwrap().jobs.remove(&jid.cjid).unwrap()
+    }
+
     pub fn client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
         self.clients
             .insert(cid, Client::new(sender))
@@ -299,8 +303,7 @@ where
                     );
                 }
                 for jid in &jobs {
-                    let client = self.clients.get_mut(&jid.cid).unwrap();
-                    let job = client.jobs.remove(&jid.cjid).unwrap();
+                    let job = self.pop_job(*jid);
                     self.drop_job(*jid, job);
                 }
                 if let Some(jobs) = NonEmpty::from_vec(jobs) {
@@ -360,8 +363,7 @@ where
         match result {
             Err(err) => {
                 for jid in &manifest_being_read.jobs {
-                    let client = self.clients.get_mut(&jid.cid).unwrap();
-                    let mut job = client.jobs.remove(&jid.cjid).unwrap();
+                    let mut job = self.pop_job(*jid);
                     job.manifests_being_read.remove(&digest).assert_is_true();
                     self.drop_job(*jid, job);
                 }
@@ -397,11 +399,8 @@ where
     }
 
     pub fn job_completed(&mut self, jid: JobId) {
-        let client = self.clients.get_mut(&jid.cid).unwrap();
-        let job = client.jobs.remove(&jid.cjid).unwrap();
-        for artifact in job.acquired_artifacts {
-            self.cache.decrement_refcount(&artifact);
-        }
+        let job = self.pop_job(jid);
+        self.drop_job(jid, job);
     }
 
     pub fn receive_get_artifact_for_worker(
