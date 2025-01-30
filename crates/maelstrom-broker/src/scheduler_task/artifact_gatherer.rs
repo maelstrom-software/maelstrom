@@ -96,7 +96,7 @@ pub enum StartJob {
 }
 
 struct ManifestBeingRead {
-    jobs: Vec<JobId>,
+    jobs: HashSet<JobId>,
     entries: HashSet<Sha256Digest>,
 }
 
@@ -123,6 +123,20 @@ where
         }
     }
 
+    fn drop_job(&mut self, jid: JobId, job: Job) {
+        for artifact in job.acquired_artifacts {
+            self.cache.decrement_refcount(&artifact);
+        }
+        for artifact in job.manifests_being_read {
+            self.manifests_being_read
+                .get_mut(&artifact)
+                .unwrap()
+                .jobs
+                .remove(&jid)
+                .assert_is_true();
+        }
+    }
+
     pub fn client_connected(&mut self, cid: ClientId, sender: DepsT::ClientSender) {
         self.clients
             .insert(cid, Client::new(sender))
@@ -133,10 +147,8 @@ where
         self.cache.client_disconnected(cid);
 
         let client = self.clients.remove(&cid).unwrap();
-        for job in client.jobs.into_values() {
-            for artifact in job.acquired_artifacts {
-                self.cache.decrement_refcount(&artifact);
-            }
+        for (cjid, job) in client.jobs {
+            self.drop_job(JobId::from((cid, cjid)), job);
         }
 
         for manifest_being_read in self.manifests_being_read.values_mut() {
@@ -157,13 +169,12 @@ where
         let job = job_entry.insert(Default::default());
 
         for (digest, type_) in layers {
-            let is_manifest = IsManifest::from(type_ == ArtifactType::Manifest);
             Self::start_artifact_acquisition_for_job(
                 &mut self.cache,
                 &mut client.sender,
                 &mut self.deps,
                 digest,
-                is_manifest,
+                IsManifest::from(type_ == ArtifactType::Manifest),
                 jid,
                 job,
                 &mut self.manifests_being_read,
@@ -252,11 +263,11 @@ where
             .assert_is_true();
         match manifests_being_read.entry(digest.clone()) {
             Entry::Occupied(mut entry) => {
-                entry.get_mut().jobs.push(jid);
+                entry.get_mut().jobs.insert(jid).assert_is_true();
             }
             Entry::Vacant(entry) => {
                 entry.insert(ManifestBeingRead {
-                    jobs: vec![jid],
+                    jobs: HashSet::from_iter([jid]),
                     entries: Default::default(),
                 });
                 let manifest_stream = cache.read_artifact(digest);
@@ -290,6 +301,9 @@ where
                 for jid in jobs {
                     self.deps
                         .send_job_failure_to_scheduler(jid, err.to_string());
+                    let client = self.clients.get_mut(&jid.cid).unwrap();
+                    let job = client.jobs.remove(&jid.cjid).unwrap();
+                    self.drop_job(jid, job);
                 }
             }
             Ok(jobs) => {
@@ -346,6 +360,10 @@ where
                 for jid in manifest_being_read.jobs {
                     self.deps
                         .send_job_failure_to_scheduler(jid, err.to_string());
+                    let client = self.clients.get_mut(&jid.cid).unwrap();
+                    let mut job = client.jobs.remove(&jid.cjid).unwrap();
+                    job.manifests_being_read.remove(&digest).assert_is_true();
+                    self.drop_job(jid, job);
                 }
             }
             Ok(()) => {
