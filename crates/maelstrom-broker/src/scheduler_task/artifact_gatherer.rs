@@ -35,31 +35,32 @@ pub trait Deps {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum IsManifest {
-    Manifest,
+enum IsManifest<T> {
     NotManifest,
+    Manifest(T),
 }
 
-impl From<bool> for IsManifest {
-    fn from(is_manifest: bool) -> Self {
+impl<T> IsManifest<T> {
+    fn new(is_manifest: bool, t: T) -> Self {
         if is_manifest {
-            Self::Manifest
+            Self::Manifest(t)
         } else {
             Self::NotManifest
         }
     }
-}
 
-impl IsManifest {
-    fn is_manifest(&self) -> bool {
-        self == &Self::Manifest
+    fn map<U>(self, f: impl FnOnce(T) -> U) -> IsManifest<U> {
+        match self {
+            Self::NotManifest => IsManifest::NotManifest,
+            Self::Manifest(t) => IsManifest::Manifest(f(t)),
+        }
     }
 }
 
 #[derive(Default)]
 struct Job {
     artifacts_acquired: HashSet<Sha256Digest>,
-    artifacts_being_acquired: HashMap<Sha256Digest, IsManifest>,
+    artifacts_being_acquired: HashMap<Sha256Digest, IsManifest<()>>,
     manifests_being_read: HashSet<Sha256Digest>,
 }
 
@@ -201,10 +202,12 @@ where
                 &mut client.sender,
                 &mut self.deps,
                 digest,
-                IsManifest::from(type_ == ArtifactType::Manifest),
+                IsManifest::new(
+                    type_ == ArtifactType::Manifest,
+                    &mut self.manifests_being_read,
+                ),
                 jid,
                 job,
-                Some(&mut self.manifests_being_read),
             );
         }
 
@@ -223,18 +226,15 @@ where
     /// When we receive a new artifact, we must first make sure it's in cache and that we have a
     /// reference on it. Additionally, if it's a manifest, we must read the manifest and extract
     /// all artifacts it depends on, and then acquire references on them as well.
-    #[allow(clippy::too_many_arguments)]
     fn start_artifact_acquisition_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
         deps: &mut DepsT,
         digest: Sha256Digest,
-        is_manifest: IsManifest,
+        is_manifest: IsManifest<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
         jid: JobId,
         job: &mut Job,
-        manifests_being_read: Option<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
     ) {
-        assert!(!is_manifest.is_manifest() || manifests_being_read.is_some());
         if job.artifacts_acquired.contains(&digest)
             || job.artifacts_being_acquired.contains_key(&digest)
         {
@@ -253,17 +253,16 @@ where
                     is_manifest,
                     jid,
                     job,
-                    manifests_being_read,
                 );
             }
             GetArtifact::Wait => {
                 job.artifacts_being_acquired
-                    .insert(digest, is_manifest)
+                    .insert(digest, is_manifest.map(drop))
                     .assert_is_none();
             }
             GetArtifact::Get => {
                 job.artifacts_being_acquired
-                    .insert(digest.clone(), is_manifest)
+                    .insert(digest.clone(), is_manifest.map(drop))
                     .assert_is_none();
                 deps.send_transfer_artifact_to_client(client_sender, digest);
             }
@@ -272,24 +271,22 @@ where
 
     /// Given a newly-acquired artifact, check to see if it's a manifest, and if it is, start
     /// reading the manifest to incorporate the manifests dependencies as well.
-    #[allow(clippy::too_many_arguments)]
     fn potentially_start_reading_manifest_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
         deps: &mut DepsT,
         digest: &Sha256Digest,
-        is_manifest: IsManifest,
+        is_manifest: IsManifest<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
         jid: JobId,
         job: &mut Job,
-        manifests_being_read: Option<&mut HashMap<Sha256Digest, ManifestBeingRead>>,
     ) {
-        if !is_manifest.is_manifest() {
+        let IsManifest::Manifest(manifests_being_read) = is_manifest else {
             return;
-        }
+        };
         job.manifests_being_read
             .insert(digest.clone())
             .assert_is_true();
-        match manifests_being_read.unwrap().entry(digest.clone()) {
+        match manifests_being_read.entry(digest.clone()) {
             Entry::Occupied(mut entry) => {
                 let manifests_being_read = entry.get_mut();
                 manifests_being_read.jobs.insert(jid).assert_is_true();
@@ -302,7 +299,6 @@ where
                         IsManifest::NotManifest,
                         jid,
                         job,
-                        None,
                     );
                 }
             }
@@ -378,10 +374,9 @@ where
                         &mut client.sender,
                         &mut self.deps,
                         &digest,
-                        is_manifest,
+                        is_manifest.map(|()| &mut self.manifests_being_read),
                         *jid,
                         job,
-                        Some(&mut self.manifests_being_read),
                     );
                     job.have_all_artifacts()
                 });
@@ -413,7 +408,6 @@ where
                     IsManifest::NotManifest,
                     *jid,
                     job,
-                    None,
                 );
             }
         }
