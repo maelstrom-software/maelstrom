@@ -14,7 +14,7 @@ use config::Config;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
 use maelstrom_github::GitHubClient;
 use maelstrom_util::config::common::ArtifactTransferStrategy;
-use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
+use scheduler_task::SchedulerTask;
 use slog::{error, info, Logger};
 use std::{
     net::{Ipv6Addr, SocketAddrV6},
@@ -52,9 +52,12 @@ async fn signal_handler(kind: SignalKind, log: Logger, signame: &'static str) {
     error!(log, "received {signame}")
 }
 
-async fn stats_heartbeat<TempFileT>(sender: SchedulerSender<TempFileT>) {
+async fn stats_heartbeat<TempFileT>(sender: scheduler_task::Sender<TempFileT>) {
     let mut interval = tokio::time::interval(BROKER_STATISTICS_INTERVAL);
-    while sender.send(SchedulerMessage::StatisticsHeartbeat).is_ok() {
+    while sender
+        .send(scheduler_task::Message::StatisticsHeartbeat)
+        .is_ok()
+    {
         interval.tick().await;
     }
 }
@@ -95,13 +98,13 @@ where
 
     join_set.spawn(http::listener_main(
         http_listener,
-        scheduler_task.scheduler_sender().clone(),
+        scheduler_task.scheduler_task_sender().clone(),
         id_vendor.clone(),
         log.clone(),
     ));
     join_set.spawn(connection::tcp_listener_main(
         listener,
-        scheduler_task.scheduler_sender().clone(),
+        scheduler_task.scheduler_task_sender().clone(),
         id_vendor.clone(),
         temp_file_factory,
         log.clone(),
@@ -109,7 +112,7 @@ where
     if let Ok(client) = github_client() {
         join_set.spawn(connection::github_acceptor_main(
             client,
-            scheduler_task.scheduler_sender().clone(),
+            scheduler_task.scheduler_task_sender().clone(),
             id_vendor,
             log.clone(),
             github_connection_tasks.clone(),
@@ -118,7 +121,9 @@ where
         info!(log, "not listening for GitHub connections");
     }
 
-    join_set.spawn(stats_heartbeat(scheduler_task.scheduler_sender().clone()));
+    join_set.spawn(stats_heartbeat(
+        scheduler_task.scheduler_task_sender().clone(),
+    ));
     join_set.spawn(scheduler_task.run());
     join_set.spawn(signal_handler(
         SignalKind::interrupt(),

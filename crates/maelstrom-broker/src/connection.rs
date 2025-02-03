@@ -1,9 +1,4 @@
-use crate::{
-    artifact_fetcher, artifact_pusher,
-    cache::TempFileFactory,
-    scheduler_task::{SchedulerMessage, SchedulerSender},
-    IdVendor,
-};
+use crate::{artifact_fetcher, artifact_pusher, cache::TempFileFactory, scheduler_task, IdVendor};
 use anyhow::Result;
 use futures::FutureExt as _;
 use maelstrom_base::{
@@ -41,7 +36,7 @@ use tokio::{
 ///
 /// # Arguments
 ///
-/// * `scheduler_sender` - The sender for sending messages to the sender. A "connected" message
+/// * `scheduler_task_sender` - The sender for sending messages to the sender. A "connected" message
 ///   will be sent using this sender which will include a newly-created FromSchedulerMessageT
 ///   sender that the scheduler can use to send messages back to this task. After that messages
 ///   read from `reader` will be sent to the scheduler over this sender. Finally, when it's time to
@@ -52,29 +47,29 @@ use tokio::{
 ///
 /// * `connected_msg_builder` - A closure used to build the "connected" scheduler message. It takes
 ///   the `id` and the newly-created FromSchedulerMessageT sender used to communicate with this
-///   task. This will be sent immediately to the scheduler on `scheduler_sender`
+///   task. This will be sent immediately to the scheduler on `scheduler_task_sender`
 ///
 /// * `disconnected_msg_builder` - A closure used to build the "disconnected" scheduler message. It
-///   takes the `id`. This will be sent on `scheduler_sender` right before this function returns to
+///   takes the `id`. This will be sent on `scheduler_task_sender` right before this function returns to
 ///   tell the scheduler that this client/worker has disconnected
 ///
 /// * `socket_reader_main` - An async closure that is called on a new task to read all of the
 ///   messages from the socket-like object and write them to the supplied scheduler sender. The
-///   scheduler sender will be a clone of `scheduler_sender`
+///   scheduler sender will be a clone of `scheduler_task_sender`
 ///
 /// * `socket_writer_main` - An async closure that is called on a new task to read all of the
 ///   messages from the supplied scheduler receiver and write them to the socket-like object. The
 ///   scheduler receiver will be a newly-created FromSchedulerMessageT receiver
 ///
 pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFutureT, TempFileT>(
-    scheduler_sender: SchedulerSender<TempFileT>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     id: IdT,
     connected_msg_builder: impl FnOnce(
         IdT,
         UnboundedSender<FromSchedulerMessageT>,
-    ) -> SchedulerMessage<TempFileT>,
-    disconnected_msg_builder: impl FnOnce(IdT) -> SchedulerMessage<TempFileT>,
-    socket_reader_main: impl FnOnce(SchedulerSender<TempFileT>) -> ReaderFutureT,
+    ) -> scheduler_task::Message<TempFileT>,
+    disconnected_msg_builder: impl FnOnce(IdT) -> scheduler_task::Message<TempFileT>,
+    socket_reader_main: impl FnOnce(scheduler_task::Sender<TempFileT>) -> ReaderFutureT,
     socket_writer_main: impl FnOnce(UnboundedReceiver<FromSchedulerMessageT>) -> WriterFutureT,
 ) where
     IdT: Copy + Send + 'static,
@@ -86,7 +81,7 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
 
     // Tell the scheduler that a client/worker has connected. This messages needs to be sent before
     // any messages from this client/worker.
-    if scheduler_sender
+    if scheduler_task_sender
         .send(connected_msg_builder(id, socket_sender))
         .is_err()
     {
@@ -97,7 +92,7 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
 
     // Spawn two tasks to read and write from the socket. Plumb the message queues appropriately.
     let mut join_set = JoinSet::new();
-    join_set.spawn(socket_reader_main(scheduler_sender.clone()));
+    join_set.spawn(socket_reader_main(scheduler_task_sender.clone()));
     join_set.spawn(socket_writer_main(socket_receiver));
 
     // Wait for one task to complete and then cancel the other one and wait for it.
@@ -106,12 +101,14 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
 
     // Tell the scheduler we're done. We do this after waiting for all tasks to complete, since we
     // need to ensure that all messages sent by the socket_reader arrive before this one.
-    scheduler_sender.send(disconnected_msg_builder(id)).ok();
+    scheduler_task_sender
+        .send(disconnected_msg_builder(id))
+        .ok();
 }
 
 async fn unassigned_tcp_connection_main<TempFileFactoryT>(
     socket: TcpStream,
-    scheduler_sender: SchedulerSender<TempFileFactoryT::TempFile>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileFactoryT::TempFile>,
     id_vendor: Arc<IdVendor>,
     temp_file_factory: TempFileFactoryT,
     log: Logger,
@@ -136,21 +133,21 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
             let log_clone2 = log.clone();
             debug!(log, "client connected");
             connection_main(
-                scheduler_sender,
+                scheduler_task_sender,
                 cid,
-                SchedulerMessage::ClientConnected,
-                SchedulerMessage::ClientDisconnected,
-                |scheduler_sender| async move {
+                scheduler_task::Message::ClientConnected,
+                scheduler_task::Message::ClientDisconnected,
+                |scheduler_task_sender| async move {
                     let _ = net::async_socket_reader(
                         read_stream,
-                        scheduler_sender,
+                        scheduler_task_sender,
                         |msg| match msg {
                             ClientToBroker::JobRequest(cjid, job_spec) => {
                                 assert!(!job_spec.must_be_run_locally());
-                                SchedulerMessage::JobRequestFromClient(cid, cjid, job_spec)
+                                scheduler_task::Message::JobRequestFromClient(cid, cjid, job_spec)
                             }
                             ClientToBroker::ArtifactTransferred(digest, location) => {
-                                SchedulerMessage::ArtifactTransferredFromClient(
+                                scheduler_task::Message::ArtifactTransferredFromClient(
                                     cid, digest, location,
                                 )
                             }
@@ -159,9 +156,13 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
                     )
                     .await;
                 },
-                |scheduler_receiver| async move {
-                    let _ = net::async_socket_writer(scheduler_receiver, write_stream, &log_clone2)
-                        .await;
+                |scheduler_task_receiver| async move {
+                    let _ = net::async_socket_writer(
+                        scheduler_task_receiver,
+                        write_stream,
+                        &log_clone2,
+                    )
+                    .await;
                 },
             )
             .await;
@@ -176,29 +177,33 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
             let log_clone = log.clone();
             let log_clone2 = log.clone();
             connection_main(
-                scheduler_sender,
+                scheduler_task_sender,
                 wid,
-                |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
-                SchedulerMessage::WorkerDisconnected,
-                |scheduler_sender| async move {
+                |id, sender| scheduler_task::Message::WorkerConnected(id, slots as usize, sender),
+                scheduler_task::Message::WorkerDisconnected,
+                |scheduler_task_sender| async move {
                     let _ = net::async_socket_reader(
                         read_stream,
-                        scheduler_sender,
+                        scheduler_task_sender,
                         |msg| match msg {
                             WorkerToBroker::JobResponse(jid, result) => {
-                                SchedulerMessage::JobResponseFromWorker(wid, jid, result)
+                                scheduler_task::Message::JobResponseFromWorker(wid, jid, result)
                             }
                             WorkerToBroker::JobStatusUpdate(jid, status) => {
-                                SchedulerMessage::JobStatusUpdateFromWorker(wid, jid, status)
+                                scheduler_task::Message::JobStatusUpdateFromWorker(wid, jid, status)
                             }
                         },
                         &log_clone,
                     )
                     .await;
                 },
-                |scheduler_receiver| async move {
-                    let _ = net::async_socket_writer(scheduler_receiver, write_stream, &log_clone2)
-                        .await;
+                |scheduler_task_receiver| async move {
+                    let _ = net::async_socket_writer(
+                        scheduler_task_receiver,
+                        write_stream,
+                        &log_clone2,
+                    )
+                    .await;
                 },
             )
             .await;
@@ -213,26 +218,30 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
             let log_clone2 = log.clone();
             debug!(log, "monitor connected");
             connection_main(
-                scheduler_sender,
+                scheduler_task_sender,
                 mid,
-                SchedulerMessage::MonitorConnected,
-                SchedulerMessage::MonitorDisconnected,
-                |scheduler_sender| async move {
+                scheduler_task::Message::MonitorConnected,
+                scheduler_task::Message::MonitorDisconnected,
+                |scheduler_task_sender| async move {
                     let _ = net::async_socket_reader(
                         read_stream,
-                        scheduler_sender,
+                        scheduler_task_sender,
                         |msg| match msg {
                             MonitorToBroker::StatisticsRequest => {
-                                SchedulerMessage::StatisticsRequestFromMonitor(mid)
+                                scheduler_task::Message::StatisticsRequestFromMonitor(mid)
                             }
                         },
                         &log_clone,
                     )
                     .await;
                 },
-                |scheduler_receiver| async move {
-                    let _ = net::async_socket_writer(scheduler_receiver, write_stream, &log_clone2)
-                        .await;
+                |scheduler_task_receiver| async move {
+                    let _ = net::async_socket_writer(
+                        scheduler_task_receiver,
+                        write_stream,
+                        &log_clone2,
+                    )
+                    .await;
                 },
             )
             .await;
@@ -243,7 +252,7 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
             let socket = socket.into_std().unwrap();
             socket.set_nonblocking(false).unwrap();
             thread::spawn(move || -> Result<()> {
-                artifact_fetcher::connection_main(socket, scheduler_sender, log)
+                artifact_fetcher::connection_main(socket, scheduler_task_sender, log)
             });
         }
         Ok(Hello::ArtifactPusher) => {
@@ -251,7 +260,12 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
             let socket = socket.into_std().unwrap();
             socket.set_nonblocking(false).unwrap();
             thread::spawn(move || -> Result<()> {
-                artifact_pusher::connection_main(socket, scheduler_sender, temp_file_factory, log)
+                artifact_pusher::connection_main(
+                    socket,
+                    scheduler_task_sender,
+                    temp_file_factory,
+                    log,
+                )
             });
         }
         Err(err) => {
@@ -262,7 +276,7 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
 
 pub async fn tcp_listener_main<TempFileFactoryT>(
     listener: TcpListener,
-    scheduler_sender: SchedulerSender<TempFileFactoryT::TempFile>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileFactoryT::TempFile>,
     id_vendor: Arc<IdVendor>,
     temp_file_factory: TempFileFactoryT,
     log: Logger,
@@ -277,7 +291,7 @@ pub async fn tcp_listener_main<TempFileFactoryT>(
                 debug!(log, "new connection");
                 task::spawn(unassigned_tcp_connection_main(
                     socket,
-                    scheduler_sender.clone(),
+                    scheduler_task_sender.clone(),
                     id_vendor.clone(),
                     temp_file_factory.clone(),
                     log,
@@ -293,7 +307,7 @@ pub async fn tcp_listener_main<TempFileFactoryT>(
 
 async fn unassigned_github_connection_main<TempFileT>(
     queue: GitHubQueue,
-    scheduler_sender: SchedulerSender<TempFileT>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
 ) where
@@ -314,31 +328,34 @@ async fn unassigned_github_connection_main<TempFileT>(
             let write_queue = Arc::new(tokio::sync::Mutex::new(write_queue));
             let write_queue_clone = write_queue.clone();
             connection_main(
-                scheduler_sender,
+                scheduler_task_sender,
                 wid,
-                |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
-                SchedulerMessage::WorkerDisconnected,
-                |scheduler_sender| async move {
+                |id, sender| scheduler_task::Message::WorkerConnected(id, slots as usize, sender),
+                scheduler_task::Message::WorkerDisconnected,
+                |scheduler_task_sender| async move {
                     let _ = net::github_queue_reader(
                         &mut read_queue,
-                        scheduler_sender,
+                        scheduler_task_sender,
                         |msg| match msg {
                             WorkerToBroker::JobResponse(jid, result) => {
-                                SchedulerMessage::JobResponseFromWorker(wid, jid, result)
+                                scheduler_task::Message::JobResponseFromWorker(wid, jid, result)
                             }
                             WorkerToBroker::JobStatusUpdate(jid, status) => {
-                                SchedulerMessage::JobStatusUpdateFromWorker(wid, jid, status)
+                                scheduler_task::Message::JobStatusUpdateFromWorker(wid, jid, status)
                             }
                         },
                         &log_clone,
                     )
                     .await;
                 },
-                |scheduler_receiver| async move {
+                |scheduler_task_receiver| async move {
                     let mut write_queue = write_queue_clone.lock().await;
-                    let _ =
-                        net::github_queue_writer(scheduler_receiver, &mut write_queue, &log_clone2)
-                            .await;
+                    let _ = net::github_queue_writer(
+                        scheduler_task_receiver,
+                        &mut write_queue,
+                        &log_clone2,
+                    )
+                    .await;
                 },
             )
             .await;
@@ -369,7 +386,7 @@ async fn unassigned_github_connection_main<TempFileT>(
 
 pub async fn github_acceptor_main<TempFileT>(
     client: Arc<GitHubClient>,
-    scheduler_sender: SchedulerSender<TempFileT>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
     tasks: Arc<Mutex<JoinSet<()>>>,
@@ -400,7 +417,7 @@ pub async fn github_acceptor_main<TempFileT>(
 
                 tasks.spawn(unassigned_github_connection_main(
                     queue,
-                    scheduler_sender.clone(),
+                    scheduler_task_sender.clone(),
                     id_vendor.clone(),
                     log,
                 ));

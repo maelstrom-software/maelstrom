@@ -1,4 +1,4 @@
-use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
+use crate::scheduler_task;
 use anyhow::{anyhow, Result};
 use maelstrom_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
@@ -18,13 +18,13 @@ use std::{
 fn get_file<'fs, TempFileT>(
     fs: &'fs Fs,
     digest: &Sha256Digest,
-    scheduler_sender: &SchedulerSender<TempFileT>,
+    scheduler_task_sender: &scheduler_task::Sender<TempFileT>,
 ) -> Result<(File<'fs>, u64)>
 where
     TempFileT: Send + Sync + 'static,
 {
     let (channel_sender, channel_receiver) = mpsc::channel();
-    scheduler_sender.send(SchedulerMessage::GetArtifactForWorker(
+    scheduler_task_sender.send(scheduler_task::Message::GetArtifactForWorker(
         digest.clone(),
         channel_sender,
     ))?;
@@ -37,7 +37,7 @@ where
 }
 
 fn send_artifact<TempFileT>(
-    scheduler_sender: &SchedulerSender<TempFileT>,
+    scheduler_task_sender: &scheduler_task::Sender<TempFileT>,
     file: File,
     mut socket: &mut impl io::Write,
     size: u64,
@@ -47,7 +47,7 @@ where
     TempFileT: Send + Sync + 'static,
 {
     let copied = io::copy(&mut file.take(size), &mut socket)?;
-    scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
+    scheduler_task_sender.send(scheduler_task::Message::DecrementRefcount(digest))?;
     if copied == size {
         Ok(())
     } else {
@@ -58,7 +58,7 @@ where
 fn handle_one_message<TempFileT>(
     msg: ArtifactFetcherToBroker,
     mut socket: &mut impl io::Write,
-    scheduler_sender: &SchedulerSender<TempFileT>,
+    scheduler_task_sender: &scheduler_task::Sender<TempFileT>,
     log: &mut Logger,
 ) -> Result<()>
 where
@@ -66,7 +66,7 @@ where
 {
     let ArtifactFetcherToBroker(digest) = msg;
     let fs = Fs::new();
-    let result = get_file(&fs, &digest, scheduler_sender);
+    let result = get_file(&fs, &digest, scheduler_task_sender);
     let msg = BrokerToArtifactFetcher(
         result
             .as_ref()
@@ -76,14 +76,14 @@ where
     net::write_message_to_socket(&mut socket, msg, log)?;
 
     let (f, size) = result?;
-    send_artifact(scheduler_sender, f, &mut socket, size, digest)?;
+    send_artifact(scheduler_task_sender, f, &mut socket, size, digest)?;
 
     Ok(())
 }
 
 fn connection_loop<TempFileT>(
     mut socket: TcpStream,
-    scheduler_sender: &SchedulerSender<TempFileT>,
+    scheduler_task_sender: &scheduler_task::Sender<TempFileT>,
     log: &mut Logger,
 ) -> Result<()>
 where
@@ -91,20 +91,20 @@ where
 {
     loop {
         let msg = net::read_message_from_socket(&mut socket, log)?;
-        handle_one_message(msg, &mut socket, scheduler_sender, log)?;
+        handle_one_message(msg, &mut socket, scheduler_task_sender, log)?;
     }
 }
 
 pub fn connection_main<TempFileT>(
     socket: TcpStream,
-    scheduler_sender: SchedulerSender<TempFileT>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     mut log: Logger,
 ) -> Result<()>
 where
     TempFileT: Send + Sync + 'static,
 {
     debug!(log, "artifact fetcher connected");
-    let err = connection_loop(socket, &scheduler_sender, &mut log).unwrap_err();
+    let err = connection_loop(socket, &scheduler_task_sender, &mut log).unwrap_err();
     debug!(log, "artifact fetcher disconnected"; "error" => %err);
     Err(err)
 }

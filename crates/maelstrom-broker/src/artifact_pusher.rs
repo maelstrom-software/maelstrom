@@ -1,7 +1,4 @@
-use crate::{
-    cache::TempFileFactory,
-    scheduler_task::{SchedulerMessage, SchedulerSender},
-};
+use crate::{cache::TempFileFactory, scheduler_task};
 use anyhow::Result;
 use maelstrom_base::proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
 use maelstrom_util::{
@@ -15,7 +12,7 @@ use std::{fs::File, io, net::TcpStream};
 fn handle_one_message<TempFileFactoryT: TempFileFactory>(
     msg: ArtifactPusherToBroker,
     socket: &mut TcpStream,
-    scheduler_sender: &SchedulerSender<TempFileFactoryT::TempFile>,
+    scheduler_task_sender: &scheduler_task::Sender<TempFileFactoryT::TempFile>,
     temp_file_factory: &TempFileFactoryT,
 ) -> Result<()>
 where
@@ -30,13 +27,13 @@ where
     assert_eq!(copied, size);
     let (_, actual_digest) = sha_reader.finalize();
     actual_digest.verify(&digest)?;
-    scheduler_sender.send(SchedulerMessage::GotArtifact(digest, temp_file))?;
+    scheduler_task_sender.send(scheduler_task::Message::GotArtifact(digest, temp_file))?;
     Ok(())
 }
 
 fn connection_loop<TempFileFactoryT: TempFileFactory>(
     mut socket: TcpStream,
-    scheduler_sender: &SchedulerSender<TempFileFactoryT::TempFile>,
+    scheduler_task_sender: &scheduler_task::Sender<TempFileFactoryT::TempFile>,
     temp_file_factory: &TempFileFactoryT,
     log: &Logger,
 ) -> Result<()>
@@ -45,7 +42,7 @@ where
 {
     loop {
         let msg = net::read_message_from_socket(&mut socket, log)?;
-        let result = handle_one_message(msg, &mut socket, scheduler_sender, temp_file_factory);
+        let result = handle_one_message(msg, &mut socket, scheduler_task_sender, temp_file_factory);
         let msg = BrokerToArtifactPusher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
         net::write_message_to_socket(&mut socket, msg, log)?;
         result?;
@@ -54,7 +51,7 @@ where
 
 pub fn connection_main<TempFileFactoryT: TempFileFactory>(
     socket: TcpStream,
-    scheduler_sender: SchedulerSender<TempFileFactoryT::TempFile>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileFactoryT::TempFile>,
     temp_file_factory: TempFileFactoryT,
     log: Logger,
 ) -> Result<()>
@@ -62,7 +59,8 @@ where
     TempFileFactoryT::TempFile: Send + Sync + 'static,
 {
     debug!(log, "artifact pusher connected");
-    let err = connection_loop(socket, &scheduler_sender, &temp_file_factory, &log).unwrap_err();
+    let err =
+        connection_loop(socket, &scheduler_task_sender, &temp_file_factory, &log).unwrap_err();
     debug!(log, "artifact pusher disconnected"; "error" => %err);
     Err(err)
 }

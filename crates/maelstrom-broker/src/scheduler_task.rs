@@ -12,7 +12,7 @@ use maelstrom_base::{
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
 use scheduler::Scheduler;
-use std::{path::PathBuf, sync::mpsc::Sender};
+use std::{path::PathBuf, sync::mpsc::Sender as SyncSender};
 use tokio::{
     io::AsyncRead,
     sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
@@ -131,13 +131,13 @@ where
 
 #[derive(Debug)]
 struct PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT> {
-    task_sender: SchedulerSender<TempFileT>,
+    task_sender: Sender<TempFileT>,
     manifest_reader_sender: UnboundedSender<ManifestReadRequest<ArtifactStreamT>>,
 }
 
 impl<TempFileT, ArtifactStreamT> PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT> {
     fn new(
-        task_sender: SchedulerSender<TempFileT>,
+        task_sender: Sender<TempFileT>,
         manifest_reader_sender: UnboundedSender<ManifestReadRequest<ArtifactStreamT>>,
     ) -> Self {
         Self {
@@ -151,7 +151,7 @@ impl<TempFileT, ArtifactStreamT> artifact_gatherer::Deps
     for PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT>
 {
     type ArtifactStream = ArtifactStreamT;
-    type WorkerArtifactFetcherSender = Sender<Option<(PathBuf, u64)>>;
+    type WorkerArtifactFetcherSender = SyncSender<Option<(PathBuf, u64)>>;
     type ClientSender = UnboundedSender<BrokerToClient>;
 
     fn send_read_request_to_manifest_reader(
@@ -221,11 +221,11 @@ pub struct ManifestReadRequest<ArtifactStreamT> {
 struct CacheManifestReader<ArtifactStreamT, TempFileT> {
     tasks: JoinSet<()>,
     receiver: UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
-    sender: SchedulerSender<TempFileT>,
+    sender: Sender<TempFileT>,
 }
 
 async fn read_manifest<ArtifactStreamT: AsyncRead + Unpin, TempFileT>(
-    sender: SchedulerSender<TempFileT>,
+    sender: Sender<TempFileT>,
     stream: ArtifactStreamT,
     manifest: Sha256Digest,
 ) -> anyhow::Result<()> {
@@ -250,7 +250,7 @@ where
 {
     fn new(
         receiver: UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
-        sender: SchedulerSender<TempFileT>,
+        sender: Sender<TempFileT>,
     ) -> Self {
         Self {
             tasks: JoinSet::new(),
@@ -291,7 +291,7 @@ pub enum Message<
     ClientSenderT = UnboundedSender<BrokerToClient>,
     WorkerSenderT = UnboundedSender<BrokerToWorker>,
     MonitorSenderT = UnboundedSender<BrokerToMonitor>,
-    WorkerArtifactFetcherSenderT = Sender<Option<(PathBuf, u64)>>,
+    WorkerArtifactFetcherSenderT = SyncSender<Option<(PathBuf, u64)>>,
 > {
     /// The given client connected, and messages can be sent to it on the given sender.
     ClientConnected(ClientId, ClientSenderT),
@@ -358,11 +358,8 @@ pub enum Message<
     JobsFailedFromArtifactGatherer(NonEmpty<JobId>, String),
 }
 
-/// The production scheduler message type.
-pub type SchedulerMessage<TempFileT> = Message<TempFileT>;
-
 /// This type is used often enough to warrant an alias.
-pub type SchedulerSender<TempFileT> = UnboundedSender<SchedulerMessage<TempFileT>>;
+pub type Sender<TempFileT> = UnboundedSender<Message<TempFileT>>;
 
 /*  ____       _              _       _          _____         _
  * / ___|  ___| |__   ___  __| |_   _| | ___ _ _|_   _|_ _ ___| | __
@@ -383,8 +380,8 @@ type ArtifactGathererForCache<CacheT> = ArtifactGatherer<
 pub struct SchedulerTask<CacheT: SchedulerCache> {
     artifact_gatherer: ArtifactGathererForCache<CacheT>,
     scheduler: Scheduler<ArtifactGathererForCache<CacheT>, PassThroughSchedulerDeps>,
-    sender: SchedulerSender<CacheT::TempFile>,
-    receiver: UnboundedReceiver<SchedulerMessage<CacheT::TempFile>>,
+    sender: Sender<CacheT::TempFile>,
+    receiver: UnboundedReceiver<Message<CacheT::TempFile>>,
 }
 
 impl<CacheT: SchedulerCache> SchedulerTask<CacheT>
@@ -413,7 +410,7 @@ where
         }
     }
 
-    pub fn scheduler_sender(&self) -> &SchedulerSender<CacheT::TempFile> {
+    pub fn scheduler_task_sender(&self) -> &Sender<CacheT::TempFile> {
         &self.sender
     }
 

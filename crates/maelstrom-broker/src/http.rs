@@ -6,11 +6,7 @@
 //! a tar file. The tar file is then embedded in this module as compile time.
 //!
 //! Second, it handles WebSockets. These are treated just like monitor connections.
-use crate::{
-    connection,
-    scheduler_task::{SchedulerMessage, SchedulerSender},
-    IdVendor,
-};
+use crate::{connection, scheduler_task, IdVendor};
 use anyhow::{Error, Result};
 use futures::{
     sink::SinkExt,
@@ -95,13 +91,13 @@ impl TarHandler {
     }
 }
 
-/// Looping reading from `scheduler_receiver` and writing to `socket`. If an error is encountered,
+/// Looping reading from `scheduler_task_receiver` and writing to `socket`. If an error is encountered,
 /// return immediately.
 async fn websocket_writer(
-    mut scheduler_receiver: UnboundedReceiver<BrokerToMonitor>,
+    mut scheduler_task_receiver: UnboundedReceiver<BrokerToMonitor>,
     mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
 ) {
-    while let Some(msg) = scheduler_receiver.recv().await {
+    while let Some(msg) = scheduler_task_receiver.recv().await {
         if socket
             .send(Message::binary(proto::serialize(&msg).unwrap()))
             .await
@@ -112,11 +108,11 @@ async fn websocket_writer(
     }
 }
 
-/// Looping reading from `socket` and writing to `scheduler_sender`. If an error is encountered,
+/// Looping reading from `socket` and writing to `scheduler_task_sender`. If an error is encountered,
 /// return immediately.
 async fn websocket_reader<TempFileT>(
     mut socket: SplitStream<WebSocketStream<Upgraded>>,
-    scheduler_sender: SchedulerSender<TempFileT>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     mid: MonitorId,
 ) {
     while let Some(Ok(Message::Binary(msg))) = socket.next().await {
@@ -125,8 +121,8 @@ async fn websocket_reader<TempFileT>(
         };
         match msg {
             MonitorToBroker::StatisticsRequest => {
-                if scheduler_sender
-                    .send(SchedulerMessage::StatisticsRequestFromMonitor(mid))
+                if scheduler_task_sender
+                    .send(scheduler_task::Message::StatisticsRequestFromMonitor(mid))
                     .is_err()
                 {
                     break;
@@ -139,7 +135,7 @@ async fn websocket_reader<TempFileT>(
 /// Task main loop for handing a websocket. This just calls into [connection::connection_main].
 async fn websocket_main<TempFileT>(
     websocket: HyperWebsocket,
-    scheduler_sender: SchedulerSender<TempFileT>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
 ) where
@@ -156,12 +152,12 @@ async fn websocket_main<TempFileT>(
         "http connection upgraded to websocket monitor connection"
     );
     connection::connection_main(
-        scheduler_sender,
+        scheduler_task_sender,
         id,
-        SchedulerMessage::MonitorConnected,
-        SchedulerMessage::MonitorDisconnected,
-        |scheduler_sender| websocket_reader(read_stream, scheduler_sender, id),
-        |scheduler_receiver| websocket_writer(scheduler_receiver, write_stream),
+        scheduler_task::Message::MonitorConnected,
+        scheduler_task::Message::MonitorDisconnected,
+        |scheduler_task_sender| websocket_reader(read_stream, scheduler_task_sender, id),
+        |scheduler_task_receiver| websocket_writer(scheduler_task_receiver, write_stream),
     )
     .await;
     debug!(log, "received websocket monitor disconnect")
@@ -169,7 +165,7 @@ async fn websocket_main<TempFileT>(
 
 struct Handler<TempFileT> {
     tar_handler: Arc<TarHandler>,
-    scheduler_sender: SchedulerSender<TempFileT>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
 }
@@ -192,7 +188,7 @@ where
                 let (response, websocket) = hyper_tungstenite::upgrade(&mut request, None)?;
                 tokio::spawn(websocket_main(
                     websocket,
-                    self.scheduler_sender.clone(),
+                    self.scheduler_task_sender.clone(),
                     self.id_vendor.clone(),
                     self.log.clone(),
                 ));
@@ -210,7 +206,7 @@ where
 
 pub async fn listener_main<TempFileT>(
     listener: TcpListener,
-    scheduler_sender: SchedulerSender<TempFileT>,
+    scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
 ) where
@@ -232,7 +228,7 @@ pub async fn listener_main<TempFileT>(
                         stream,
                         Handler {
                             tar_handler: tar_handler.clone(),
-                            scheduler_sender: scheduler_sender.clone(),
+                            scheduler_task_sender: scheduler_task_sender.clone(),
                             id_vendor: id_vendor.clone(),
                             log,
                         },
