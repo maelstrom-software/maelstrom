@@ -287,11 +287,11 @@ where
 /// If [`Scheduler`] weren't implement as an async state machine, these would be its methods.
 #[derive(Debug)]
 pub enum Message<
-    ClientSenderT,
-    WorkerSenderT,
-    MonitorSenderT,
-    WorkerArtifactFetcherSenderT,
     TempFileT,
+    ClientSenderT = UnboundedSender<BrokerToClient>,
+    WorkerSenderT = UnboundedSender<BrokerToWorker>,
+    MonitorSenderT = UnboundedSender<BrokerToMonitor>,
+    WorkerArtifactFetcherSenderT = Sender<Option<(PathBuf, u64)>>,
 > {
     /// The given client connected, and messages can be sent to it on the given sender.
     ClientConnected(ClientId, ClientSenderT),
@@ -359,13 +359,7 @@ pub enum Message<
 }
 
 /// The production scheduler message type.
-pub type SchedulerMessage<TempFileT> = Message<
-    UnboundedSender<BrokerToClient>,
-    UnboundedSender<BrokerToWorker>,
-    UnboundedSender<BrokerToMonitor>,
-    Sender<Option<(PathBuf, u64)>>,
-    TempFileT,
->;
+pub type SchedulerMessage<TempFileT> = Message<TempFileT>;
 
 /// This type is used often enough to warrant an alias.
 pub type SchedulerSender<TempFileT> = UnboundedSender<SchedulerMessage<TempFileT>>;

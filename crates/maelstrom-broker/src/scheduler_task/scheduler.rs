@@ -543,11 +543,11 @@ mod tests {
     use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
     type MessageM<DepsT, TempFileT> = Message<
+        TempFileT,
         <DepsT as Deps>::ClientSender,
         <DepsT as Deps>::WorkerSender,
         <DepsT as Deps>::MonitorSender,
         <DepsT as ArtifactGathererDeps>::WorkerArtifactFetcherSender,
-        TempFileT,
     >;
 
     #[derive(Clone, Debug, PartialEq)]
