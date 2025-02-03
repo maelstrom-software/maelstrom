@@ -23,6 +23,7 @@ derive_more.workspace = true
 fs2.workspace = true
 futures-lite.workspace = true
 futures.workspace = true
+get-size.workspace = true
 globset.workspace = true
 heck.workspace = true
 itertools.workspace = true

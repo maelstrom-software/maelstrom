@@ -1,6 +1,8 @@
 //! A binary min-heap implementation that provides some features necessary for us that are missing
 //! from [`std::collections::BinaryHeap`].
 
+use get_size::GetSize;
+
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
  * | '_ \| | | | '_ \| | |/ __|
@@ -37,7 +39,7 @@ pub struct Heap<DepsT: HeapDeps>(Vec<DepsT::Element>);
 /// An index value in [`Heap`]. These are provided to the client via [`HeapDeps::update_index`].
 /// The client then provides them back to the heap when calling [`Heap::sift_up`],
 /// [`Heap::sift_down`], and [`Heap::remove`].
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, GetSize, Ord, PartialEq, PartialOrd)]
 pub struct HeapIndex(usize);
 
 /// A client of the [`Heap`] must implement this trait.

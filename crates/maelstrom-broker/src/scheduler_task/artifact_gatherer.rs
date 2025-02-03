@@ -1,14 +1,17 @@
 use crate::{cache::SchedulerCache, scheduler_task::ManifestReadRequest};
+use get_size::GetSize;
 use maelstrom_base::{
     ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest,
 };
 use maelstrom_util::{
     cache::GetArtifact,
     ext::{BoolExt as _, OptionExt as _},
+    heap::{Heap, HeapDeps, HeapIndex},
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     num::NonZeroUsize,
+    ops::{Deref, DerefMut},
     path::PathBuf,
 };
 
@@ -97,11 +100,55 @@ struct ManifestReadEntry {
     entries: HashSet<Sha256Digest>,
 }
 
+#[derive(GetSize)]
+struct ManifestReadCacheEntry {
+    entries: HashSet<Sha256Digest>,
+    heap_index: HeapIndex,
+    last_read: u64,
+    size: usize,
+}
+
+#[derive(Default)]
+struct ManifestReadCacheMap(HashMap<Sha256Digest, ManifestReadCacheEntry>);
+
+impl HeapDeps for ManifestReadCacheMap {
+    type Element = Sha256Digest;
+
+    fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
+        let lhs = self.0.get(lhs).unwrap();
+        let rhs = self.0.get(rhs).unwrap();
+        lhs.last_read < rhs.last_read
+    }
+
+    fn update_index(&mut self, elem: &Self::Element, heap_index: HeapIndex) {
+        self.0.get_mut(elem).unwrap().heap_index = heap_index;
+    }
+}
+
+impl Deref for ManifestReadCacheMap {
+    type Target = HashMap<Sha256Digest, ManifestReadCacheEntry>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ManifestReadCacheMap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 struct ManifestReads {
     entries: HashMap<Sha256Digest, ManifestReadEntry>,
+    cache: ManifestReadCacheMap,
+    cache_heap: Heap<ManifestReadCacheMap>,
     waiting: VecDeque<Sha256Digest>,
     in_progress: usize,
     max_in_progress: NonZeroUsize,
+    next_read: u64,
+    cache_size: usize,
+    max_cache_size: usize,
 }
 
 pub struct ArtifactGatherer<CacheT: SchedulerCache, DepsT: Deps> {
@@ -117,7 +164,12 @@ where
     CacheT: SchedulerCache,
     DepsT: Deps<ArtifactStream = CacheT::ArtifactStream>,
 {
-    pub fn new(cache: CacheT, deps: DepsT, max_simultaneous_manifest_reads: NonZeroUsize) -> Self {
+    pub fn new(
+        cache: CacheT,
+        deps: DepsT,
+        max_cache_size: usize,
+        max_simultaneous_manifest_reads: NonZeroUsize,
+    ) -> Self {
         Self {
             deps,
             cache,
@@ -125,9 +177,14 @@ where
             tcp_upload_landing_pad: Default::default(),
             manifest_reads: ManifestReads {
                 entries: Default::default(),
+                cache: Default::default(),
+                cache_heap: Default::default(),
                 waiting: Default::default(),
                 in_progress: 0,
                 max_in_progress: max_simultaneous_manifest_reads,
+                next_read: 0,
+                cache_size: 0,
+                max_cache_size,
             },
         }
     }
@@ -211,7 +268,7 @@ where
         let job = job_entry.insert(Default::default());
 
         for (digest, type_) in layers {
-            Self::start_artifact_acquisition_for_job(
+            Self::start_acquiring_artifact_for_job(
                 &mut self.cache,
                 &mut client.sender,
                 &mut self.deps,
@@ -237,7 +294,7 @@ where
     /// When we receive a new artifact, we must first make sure it's in cache and that we have a
     /// reference on it. Additionally, if it's a manifest, we must read the manifest and extract
     /// all artifacts it depends on, and then acquire references on them as well.
-    fn start_artifact_acquisition_for_job(
+    fn start_acquiring_artifact_for_job(
         cache: &mut CacheT,
         client_sender: &mut DepsT::ClientSender,
         deps: &mut DepsT,
@@ -280,6 +337,27 @@ where
         }
     }
 
+    fn start_acquiring_manifest_entries_for_job<'a>(
+        cache: &mut CacheT,
+        client_sender: &mut DepsT::ClientSender,
+        deps: &mut DepsT,
+        digests: impl IntoIterator<Item = &'a Sha256Digest>,
+        jid: JobId,
+        job: &mut Job,
+    ) {
+        for digest in digests.into_iter() {
+            Self::start_acquiring_artifact_for_job(
+                cache,
+                client_sender,
+                deps,
+                digest.clone(),
+                IsManifest::NotManifest,
+                jid,
+                job,
+            );
+        }
+    }
+
     /// Given a newly-acquired artifact, check to see if it's a manifest, and if it is, start
     /// reading the manifest to incorporate the manifests dependencies as well.
     fn potentially_start_reading_manifest_for_job(
@@ -294,40 +372,120 @@ where
         let IsManifest::Manifest(manifest_reads) = is_manifest else {
             return;
         };
+
+        if Self::get_manifest_from_cache(
+            cache,
+            client_sender,
+            deps,
+            digest,
+            jid,
+            job,
+            manifest_reads,
+        ) {
+            return;
+        }
+
         job.manifests_being_read
             .insert(digest.clone())
             .assert_is_true();
+
         match manifest_reads.entries.entry(digest.clone()) {
             Entry::Occupied(entry) => {
                 let entry = entry.into_mut();
                 entry.jobs.insert(jid).assert_is_true();
-                for digest in &entry.entries {
-                    Self::start_artifact_acquisition_for_job(
-                        cache,
-                        client_sender,
-                        deps,
-                        digest.clone(),
-                        IsManifest::NotManifest,
-                        jid,
-                        job,
-                    );
-                }
+                Self::start_acquiring_manifest_entries_for_job(
+                    cache,
+                    client_sender,
+                    deps,
+                    &entry.entries,
+                    jid,
+                    job,
+                );
             }
             Entry::Vacant(entry) => {
                 entry.insert(ManifestReadEntry {
                     jobs: HashSet::from_iter([jid]),
                     entries: Default::default(),
                 });
-                if manifest_reads.in_progress == manifest_reads.max_in_progress.get() {
-                    manifest_reads.waiting.push_back(digest.clone());
-                } else {
-                    Self::start_manifest_reader(cache, deps, digest.clone(), manifest_reads);
-                }
+                Self::start_or_enqueue_manifest_read(cache, deps, digest, manifest_reads);
             }
         }
     }
 
-    /// Start up a manifest reader, keepting track of how many are pending.
+    #[must_use]
+    fn get_manifest_from_cache(
+        cache: &mut CacheT,
+        client_sender: &mut DepsT::ClientSender,
+        deps: &mut DepsT,
+        digest: &Sha256Digest,
+        jid: JobId,
+        job: &mut Job,
+        manifest_reads: &mut ManifestReads,
+    ) -> bool {
+        let Some(entry) = manifest_reads.cache.get_mut(digest) else {
+            return false;
+        };
+
+        entry.last_read = manifest_reads.next_read;
+        Self::start_acquiring_manifest_entries_for_job(
+            cache,
+            client_sender,
+            deps,
+            &entry.entries,
+            jid,
+            job,
+        );
+        manifest_reads.next_read += 1;
+        let heap_index = entry.heap_index;
+        manifest_reads
+            .cache_heap
+            .sift_down(&mut manifest_reads.cache, heap_index);
+
+        true
+    }
+
+    fn insert_manifest_into_cache(&mut self, digest: Sha256Digest, entries: HashSet<Sha256Digest>) {
+        let mut entry = ManifestReadCacheEntry {
+            entries,
+            heap_index: Default::default(),
+            last_read: self.manifest_reads.next_read,
+            size: 0,
+        };
+        entry.size = entry.get_size();
+        self.manifest_reads.next_read += 1;
+        self.manifest_reads.cache_size += entry.size;
+        self.manifest_reads
+            .cache
+            .insert(digest.clone(), entry)
+            .assert_is_none();
+        self.manifest_reads
+            .cache_heap
+            .push(&mut self.manifest_reads.cache, digest);
+        while self.manifest_reads.cache_size > self.manifest_reads.max_cache_size {
+            let digest = self
+                .manifest_reads
+                .cache_heap
+                .pop(&mut self.manifest_reads.cache)
+                .unwrap();
+            let entry = self.manifest_reads.cache.remove(&digest).unwrap();
+            self.manifest_reads.cache_size -= entry.size;
+        }
+    }
+
+    fn start_or_enqueue_manifest_read(
+        cache: &mut CacheT,
+        deps: &mut DepsT,
+        digest: &Sha256Digest,
+        manifest_reads: &mut ManifestReads,
+    ) {
+        if manifest_reads.in_progress == manifest_reads.max_in_progress.get() {
+            manifest_reads.waiting.push_back(digest.clone());
+        } else {
+            Self::start_manifest_reader(cache, deps, digest.clone(), manifest_reads);
+        }
+    }
+
+    /// Start up a manifest reader, keeping track of how many are pending.
     fn start_manifest_reader(
         cache: &mut CacheT,
         deps: &mut DepsT,
@@ -431,7 +589,7 @@ where
             for jid in &entry.jobs {
                 let client = self.clients.get_mut(&jid.cid).unwrap();
                 let job = client.jobs.get_mut(&jid.cjid).unwrap();
-                Self::start_artifact_acquisition_for_job(
+                Self::start_acquiring_artifact_for_job(
                     &mut self.cache,
                     &mut client.sender,
                     &mut self.deps,
@@ -452,22 +610,23 @@ where
         result: anyhow::Result<()>,
     ) {
         assert!(self.manifest_reads.in_progress > 0);
-        let entry = self.manifest_reads.entries.remove(&digest).unwrap();
+        let ManifestReadEntry { entries, jobs } =
+            self.manifest_reads.entries.remove(&digest).unwrap();
         self.manifest_reads.in_progress -= 1;
         match result {
             Err(err) => {
-                for jid in &entry.jobs {
+                for jid in &jobs {
                     let mut job = self.try_pop_job(*jid).unwrap();
                     job.manifests_being_read.remove(&digest).assert_is_true();
                     self.drop_job(*jid, job);
                 }
-                if let Some(jobs) = NonEmpty::collect(entry.jobs) {
+                if let Some(jobs) = NonEmpty::collect(jobs) {
                     self.deps
                         .send_jobs_failed_to_scheduler(jobs, err.to_string());
                 }
             }
             Ok(()) => {
-                let ready = entry.jobs.into_iter().filter(|jid| {
+                let ready = jobs.into_iter().filter(|jid| {
                     let client = self.clients.get_mut(&jid.cid).unwrap();
                     let job = client.jobs.get_mut(&jid.cjid).unwrap();
                     job.manifests_being_read.remove(&digest).assert_is_true();
@@ -476,6 +635,7 @@ where
                 if let Some(ready) = NonEmpty::collect(ready) {
                     self.deps.send_jobs_ready_to_scheduler(ready);
                 }
+                self.insert_manifest_into_cache(digest, entries);
             }
         }
         if let Some(digest) = self.manifest_reads.waiting.pop_front() {
@@ -803,7 +963,23 @@ mod tests {
             let sut = ArtifactGatherer::new(
                 mock.clone(),
                 mock.clone(),
+                1_000_000,
                 max_simultaneous_manifest_reads.try_into().unwrap(),
+            );
+            Self {
+                mock,
+                sut,
+                connected_clients: Default::default(),
+            }
+        }
+
+        fn with_max_cache_size(max_cache_size: usize) -> Self {
+            let mock = Rc::new(RefCell::new(Default::default()));
+            let sut = ArtifactGatherer::new(
+                mock.clone(),
+                mock.clone(),
+                max_cache_size,
+                100.try_into().unwrap(),
             );
             Self {
                 mock,
@@ -1704,5 +1880,229 @@ mod tests {
             .send_jobs_ready_to_scheduler([(1, 2)])
             .when()
             .receive_finished_reading_manifest(5, Ok(()));
+    }
+
+    #[test]
+    fn manifest_reads_are_cached() {
+        let mut fixture = Fixture::new().with_client(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 1), 3, GetArtifact::Success)
+            .get_artifact((1, 1), 4, GetArtifact::Success)
+            .read_artifact(3, 103)
+            .send_message_to_manifest_reader(3, 103)
+            .read_artifact(4, 104)
+            .send_message_to_manifest_reader(4, 104)
+            .when()
+            .start_job((1, 1), [(3, Manifest), (4, Manifest)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 4, GetArtifact::Success)
+            .get_artifact((1, 2), 5, GetArtifact::Success)
+            .read_artifact(5, 105)
+            .send_message_to_manifest_reader(5, 105)
+            .when()
+            .start_job((1, 2), [(4, Manifest), (5, Manifest)], StartJob::NotReady);
+
+        fixture
+            .expect()
+            .get_artifact((1, 1), 30, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(3, 30);
+        fixture.receive_finished_reading_manifest(3, Ok(()));
+
+        fixture
+            .expect()
+            .get_artifact((1, 1), 40, GetArtifact::Success)
+            .get_artifact((1, 2), 40, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(4, 40);
+        fixture
+            .expect()
+            .get_artifact((1, 1), 41, GetArtifact::Success)
+            .get_artifact((1, 2), 41, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(4, 41);
+        fixture
+            .expect()
+            .send_jobs_ready_to_scheduler([(1, 1)])
+            .when()
+            .receive_finished_reading_manifest(4, Ok(()));
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 50, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(5, 50);
+        fixture
+            .expect()
+            .send_jobs_ready_to_scheduler([(1, 2)])
+            .when()
+            .receive_finished_reading_manifest(5, Ok(()));
+
+        fixture
+            .expect()
+            .get_artifact((1, 3), 3, GetArtifact::Success)
+            .get_artifact((1, 3), 4, GetArtifact::Success)
+            .get_artifact((1, 3), 5, GetArtifact::Success)
+            .get_artifact((1, 3), 30, GetArtifact::Success)
+            .get_artifact((1, 3), 40, GetArtifact::Success)
+            .get_artifact((1, 3), 41, GetArtifact::Success)
+            .get_artifact((1, 3), 50, GetArtifact::Success)
+            .when()
+            .start_job(
+                (1, 3),
+                [(3, Manifest), (4, Manifest), (5, Manifest)],
+                StartJob::Ready,
+            );
+    }
+
+    #[test]
+    fn manifest_reads_max_cache_size_0() {
+        let mut fixture = Fixture::with_max_cache_size(0).with_client(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 1), 3, GetArtifact::Success)
+            .read_artifact(3, 103)
+            .send_message_to_manifest_reader(3, 103)
+            .when()
+            .start_job((1, 1), [(3, Manifest)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((1, 1), 30, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(3, 30);
+        fixture
+            .expect()
+            .get_artifact((1, 1), 31, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(3, 31);
+        fixture
+            .expect()
+            .send_jobs_ready_to_scheduler([(1, 1)])
+            .when()
+            .receive_finished_reading_manifest(3, Ok(()));
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 3, GetArtifact::Success)
+            .read_artifact(3, 103)
+            .send_message_to_manifest_reader(3, 103)
+            .when()
+            .start_job((1, 2), [(3, Manifest)], StartJob::NotReady);
+    }
+
+    #[test]
+    fn manifest_reads_cache_lru() {
+        let mut fixture = Fixture::with_max_cache_size(336).with_client(1);
+
+        fixture
+            .expect()
+            .get_artifact((1, 1), 3, GetArtifact::Success)
+            .read_artifact(3, 103)
+            .send_message_to_manifest_reader(3, 103)
+            .when()
+            .start_job((1, 1), [(3, Manifest)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((1, 1), 30, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(3, 30);
+        fixture
+            .expect()
+            .get_artifact((1, 1), 31, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(3, 31);
+        fixture
+            .expect()
+            .send_jobs_ready_to_scheduler([(1, 1)])
+            .when()
+            .receive_finished_reading_manifest(3, Ok(()));
+
+        assert_eq!(fixture.sut.manifest_reads.cache_size, 168);
+
+        fixture
+            .expect()
+            .get_artifact((1, 2), 4, GetArtifact::Success)
+            .read_artifact(4, 104)
+            .send_message_to_manifest_reader(4, 104)
+            .when()
+            .start_job((1, 2), [(4, Manifest)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 40, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(4, 40);
+        fixture
+            .expect()
+            .get_artifact((1, 2), 41, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(4, 41);
+        fixture
+            .expect()
+            .send_jobs_ready_to_scheduler([(1, 2)])
+            .when()
+            .receive_finished_reading_manifest(4, Ok(()));
+
+        assert_eq!(fixture.sut.manifest_reads.cache_size, 336);
+
+        fixture
+            .expect()
+            .get_artifact((1, 3), 3, GetArtifact::Success)
+            .get_artifact((1, 3), 30, GetArtifact::Success)
+            .get_artifact((1, 3), 31, GetArtifact::Success)
+            .when()
+            .start_job((1, 3), [(3, Manifest)], StartJob::Ready);
+
+        fixture
+            .expect()
+            .get_artifact((1, 4), 5, GetArtifact::Success)
+            .read_artifact(5, 105)
+            .send_message_to_manifest_reader(5, 105)
+            .when()
+            .start_job((1, 4), [(5, Manifest)], StartJob::NotReady);
+        fixture
+            .expect()
+            .get_artifact((1, 4), 50, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(5, 50);
+        fixture
+            .expect()
+            .get_artifact((1, 4), 51, GetArtifact::Success)
+            .when()
+            .receive_manifest_entry(5, 51);
+        fixture
+            .expect()
+            .send_jobs_ready_to_scheduler([(1, 4)])
+            .when()
+            .receive_finished_reading_manifest(5, Ok(()));
+
+        assert_eq!(fixture.sut.manifest_reads.cache_size, 336);
+
+        fixture
+            .expect()
+            .get_artifact((1, 5), 3, GetArtifact::Success)
+            .get_artifact((1, 5), 30, GetArtifact::Success)
+            .get_artifact((1, 5), 31, GetArtifact::Success)
+            .when()
+            .start_job((1, 5), [(3, Manifest)], StartJob::Ready);
+
+        fixture
+            .expect()
+            .get_artifact((1, 6), 5, GetArtifact::Success)
+            .get_artifact((1, 6), 50, GetArtifact::Success)
+            .get_artifact((1, 6), 51, GetArtifact::Success)
+            .when()
+            .start_job((1, 6), [(5, Manifest)], StartJob::Ready);
+
+        fixture
+            .expect()
+            .get_artifact((1, 7), 4, GetArtifact::Success)
+            .read_artifact(4, 104)
+            .send_message_to_manifest_reader(4, 104)
+            .when()
+            .start_job((1, 7), [(4, Manifest)], StartJob::NotReady);
     }
 }

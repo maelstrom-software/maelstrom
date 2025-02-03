@@ -836,7 +836,8 @@ mod tests {
                 artifact_gatherer: super::super::artifact_gatherer::ArtifactGatherer::new(
                     test_state.clone(),
                     test_state.clone(),
-                    1.try_into().unwrap(),
+                    1_000_000,
+                    10.try_into().unwrap(),
                 ),
                 scheduler: Scheduler::new(test_state.clone()),
             }

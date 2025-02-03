@@ -769,14 +769,14 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
         let entry = self
             .entries
             .get_mut(key)
-            .expect("Got decrement_ref_count in unexpected state");
+            .expect("got decrement_ref_count for key with no entry");
         let Entry::InUse {
             file_type,
             bytes_used,
             ref_count,
         } = entry
         else {
-            panic!("Got decrement_ref_count with existing zero reference count");
+            panic!("got decrement_ref_count with for key with zero reference count");
         };
         match NonZeroU32::new(ref_count.get() - 1) {
             Some(new_ref_count) => *ref_count = new_ref_count,

@@ -13,6 +13,7 @@ pub use nonempty::{nonempty, NonEmpty};
 
 use derive_more::{Constructor, Debug, Display, From, Into};
 use enumset::EnumSetType;
+use get_size::GetSize;
 use hex::{self, FromHexError};
 use maelstrom_macro::pocket_definition;
 use serde::{Deserialize, Serialize};
@@ -715,7 +716,7 @@ pub enum ArtifactUploadLocation {
 
 /// A SHA-256 digest.
 #[derive(
-    Clone, Constructor, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+    Clone, Constructor, Debug, Deserialize, Eq, GetSize, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
 pub struct Sha256Digest(#[debug("{self}")] [u8; 32]);
 

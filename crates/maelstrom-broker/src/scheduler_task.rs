@@ -255,6 +255,7 @@ where
             artifact_gatherer: ArtifactGatherer::new(
                 cache,
                 PassThroughArtifactGathererDeps::new(sender.clone(), manifest_reader_sender),
+                10_000_000,
                 16.try_into().unwrap(),
             ),
             scheduler: Scheduler::new(PassThroughSchedulerDeps),
