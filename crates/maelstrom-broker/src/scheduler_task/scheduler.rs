@@ -23,15 +23,6 @@ use std::{
     time::Duration,
 };
 
-/*              _     _ _
- *  _ __  _   _| |__ | (_) ___
- * | '_ \| | | | '_ \| | |/ __|
- * | |_) | |_| | |_) | | | (__
- * | .__/ \__,_|_.__/|_|_|\___|
- * |_|
- *  FIGLET: public
- */
-
 /// The dependencies for [`Scheduler`] on the [`ArtifactGatherer`]. These should be identical to
 /// the methods on [`crate::scheduler_task::artifact_gatherer::ArtifactGatherer`]. They are split
 /// out from [`Deps`] so they can be implemented separately.
@@ -76,32 +67,6 @@ pub trait Deps {
         statistics: BrokerStatistics,
     );
 }
-
-impl<ArtifactGathererT: ArtifactGatherer, DepsT: Deps> Scheduler<ArtifactGathererT, DepsT> {
-    /// Create a new scheduler with the given [`ArtifactGatherer`]. Note that [`SchedulerDeps`] are
-    /// passed in to `Self::receive_message`.
-    pub fn new(deps: DepsT) -> Self {
-        Scheduler {
-            deps,
-            clients: ClientMap(Default::default()),
-            workers: WorkerMap(Default::default()),
-            monitors: Default::default(),
-            queued_jobs: Default::default(),
-            worker_heap: Default::default(),
-            job_statistics: Default::default(),
-            _artifact_gatherer: Default::default(),
-        }
-    }
-}
-
-/*             _            _
- *  _ __  _ __(_)_   ____ _| |_ ___
- * | '_ \| '__| \ \ / / _` | __/ _ \
- * | |_) | |  | |\ V / (_| | ||  __/
- * | .__/|_|  |_| \_/ \__,_|\__\___|
- * |_|
- *  FIGLET: private
- */
 
 struct Job {
     spec: JobSpec,
@@ -227,6 +192,21 @@ where
     DepsT: Deps,
     ArtifactGathererT: ArtifactGatherer<ClientSender = DepsT::ClientSender>,
 {
+    /// Create a new scheduler with the given [`ArtifactGatherer`]. Note that [`SchedulerDeps`] are
+    /// passed in to `Self::receive_message`.
+    pub fn new(deps: DepsT) -> Self {
+        Scheduler {
+            deps,
+            clients: ClientMap(Default::default()),
+            workers: WorkerMap(Default::default()),
+            monitors: Default::default(),
+            queued_jobs: Default::default(),
+            worker_heap: Default::default(),
+            job_statistics: Default::default(),
+            _artifact_gatherer: Default::default(),
+        }
+    }
+
     fn possibly_start_jobs(&mut self, mut just_enqueued: HashSet<JobId>) {
         while !self.queued_jobs.is_empty() && !self.workers.0.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
