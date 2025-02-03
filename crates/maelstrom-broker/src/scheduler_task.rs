@@ -7,10 +7,11 @@ use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
     proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker},
     stats::BrokerStatistics,
-    ArtifactType, ClientId, JobId, JobSpec, NonEmpty, Sha256Digest,
+    ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobBrokerStatus, JobId,
+    JobOutcomeResult, JobSpec, JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
-use scheduler::{Message, Scheduler};
+use scheduler::Scheduler;
 use std::{path::PathBuf, sync::mpsc::Sender};
 use tokio::{
     io::AsyncRead,
@@ -45,8 +46,8 @@ impl scheduler::Deps for PassThroughSchedulerDeps {
     fn send_job_response_to_client(
         &mut self,
         sender: &mut Self::ClientSender,
-        cjid: maelstrom_base::ClientJobId,
-        result: maelstrom_base::JobOutcomeResult,
+        cjid: ClientJobId,
+        result: JobOutcomeResult,
     ) {
         let _ = sender.send(BrokerToClient::JobResponse(cjid, result));
     }
@@ -54,8 +55,8 @@ impl scheduler::Deps for PassThroughSchedulerDeps {
     fn send_job_status_update_to_client(
         &mut self,
         sender: &mut Self::ClientSender,
-        cjid: maelstrom_base::ClientJobId,
-        status: maelstrom_base::JobBrokerStatus,
+        cjid: ClientJobId,
+        status: JobBrokerStatus,
     ) {
         let _ = sender.send(BrokerToClient::JobStatusUpdate(cjid, status));
     }
@@ -82,8 +83,7 @@ impl scheduler::Deps for PassThroughSchedulerDeps {
     }
 }
 
-impl<CacheT, DepsT> scheduler::ArtifactGatherer
-    for ArtifactGatherer<CacheT, DepsT>
+impl<CacheT, DepsT> scheduler::ArtifactGatherer for ArtifactGatherer<CacheT, DepsT>
 where
     CacheT: SchedulerCache,
     DepsT: artifact_gatherer::Deps<ArtifactStream = CacheT::ArtifactStream>,
@@ -281,6 +281,82 @@ where
  *                             |___/
  *  FIGLET: Message
  */
+
+/// The incoming messages, or events, for [`Scheduler`].
+///
+/// If [`Scheduler`] weren't implement as an async state machine, these would be its methods.
+#[derive(Debug)]
+pub enum Message<
+    ClientSenderT,
+    WorkerSenderT,
+    MonitorSenderT,
+    WorkerArtifactFetcherSenderT,
+    TempFileT,
+> {
+    /// The given client connected, and messages can be sent to it on the given sender.
+    ClientConnected(ClientId, ClientSenderT),
+
+    /// The given client disconnected.
+    ClientDisconnected(ClientId),
+
+    /// The given client has sent us the given message.
+    JobRequestFromClient(ClientId, ClientJobId, JobSpec),
+    ArtifactTransferredFromClient(ClientId, Sha256Digest, ArtifactUploadLocation),
+
+    /// The given worker connected. It has the given number of slots and messages can be sent to it
+    /// on the given sender.
+    WorkerConnected(WorkerId, usize, WorkerSenderT),
+
+    /// The given worker disconnected.
+    WorkerDisconnected(WorkerId),
+
+    /// The given worker has sent us the given message.
+    JobResponseFromWorker(WorkerId, JobId, JobOutcomeResult),
+    JobStatusUpdateFromWorker(WorkerId, JobId, JobWorkerStatus),
+
+    /// The given monitor connected, and messages can be sent to it on the given sender.
+    MonitorConnected(MonitorId, MonitorSenderT),
+
+    /// The given monitor disconnected.
+    MonitorDisconnected(MonitorId),
+
+    /// The given client has sent us the given message.
+    StatisticsRequestFromMonitor(MonitorId),
+
+    /// An artifact has been pushed to us. The artifact has the given digest and length. It is
+    /// temporarily stored at the given path.
+    GotArtifact(Sha256Digest, TempFileT),
+
+    /// A worker has requested the given artifact be sent to it over the given sender. After the
+    /// contents are sent to the worker, the refcount needs to be decremented with a
+    /// [`Message::DecrementRefcount`] message.
+    GetArtifactForWorker(Sha256Digest, WorkerArtifactFetcherSenderT),
+
+    /// A worker has been sent an artifact, and we can now release the refcount that was keeping
+    /// the artifact from being removed while being transferred.
+    DecrementRefcount(Sha256Digest),
+
+    /// The stats heartbeat task has decided it's time to take another statistics sample.
+    StatisticsHeartbeat,
+
+    /// Read a manifest and found the given digest as a dependency.
+    GotManifestEntry {
+        manifest_digest: Sha256Digest,
+        entry_digest: Sha256Digest,
+    },
+
+    /// Finished reading the manifest either due to reaching EOF or an error and no more dependent
+    /// digests messages will be sent.
+    FinishedReadingManifest(Sha256Digest, anyhow::Result<()>),
+
+    /// The ArtifactGatherer has determined that it has everything necessary to start the given
+    /// job. This isn't used for every job, as there is a "fast path" in the situation where the
+    /// ArtifactGatherer has everything it needs when it first receives the JobRequest.
+    JobsReadyFromArtifactGatherer(NonEmpty<JobId>),
+
+    /// The ArtifactGatherer has encountered an error gatherering artifacts for the given job.
+    JobsFailedFromArtifactGatherer(NonEmpty<JobId>, String),
+}
 
 /// The production scheduler message type.
 pub type SchedulerMessage<TempFileT> = Message<
