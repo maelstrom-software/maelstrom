@@ -2,7 +2,7 @@ mod artifact_gatherer;
 mod scheduler;
 
 use crate::cache::SchedulerCache;
-use artifact_gatherer::{ArtifactGatherer, Deps as ArtifactGathererDeps};
+use artifact_gatherer::{ArtifactGatherer, StartJob};
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
     proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker},
@@ -10,7 +10,7 @@ use maelstrom_base::{
     ArtifactType, ClientId, JobId, JobSpec, NonEmpty, Sha256Digest,
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
-use scheduler::{Deps, Message, Scheduler};
+use scheduler::{Message, Scheduler};
 use std::{path::PathBuf, sync::mpsc::Sender};
 use tokio::{
     io::AsyncRead,
@@ -18,18 +18,26 @@ use tokio::{
     task::{self, JoinSet},
 };
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct ManifestReadRequest<ArtifactStreamT> {
-    manifest_stream: ArtifactStreamT,
-    digest: Sha256Digest,
-}
+/*  ____       _              _       _
+ * / ___|  ___| |__   ___  __| |_   _| | ___ _ __
+ * \___ \ / __| '_ \ / _ \/ _` | | | | |/ _ \ '__|
+ *  ___) | (__| | | |  __/ (_| | |_| | |  __/ |
+ * |____/ \___|_| |_|\___|\__,_|\__,_|_|\___|_|
+ *  ____                            _                 _
+ * |  _ \  ___ _ __   ___ _ __   __| | ___ _ __   ___(_) ___  ___
+ * | | | |/ _ \ '_ \ / _ \ '_ \ / _` |/ _ \ '_ \ / __| |/ _ \/ __|
+ * | |_| |  __/ |_) |  __/ | | | (_| |  __/ | | | (__| |  __/\__ \
+ * |____/ \___| .__/ \___|_| |_|\__,_|\___|_| |_|\___|_|\___||___/
+ *            |_|
+ *  FIGLET: Scheduler Dependencies
+ */
 
 #[derive(Debug)]
 pub struct PassThroughSchedulerDeps;
 
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.
-impl Deps for PassThroughSchedulerDeps {
+impl scheduler::Deps for PassThroughSchedulerDeps {
     type ClientSender = UnboundedSender<BrokerToClient>;
     type WorkerSender = UnboundedSender<BrokerToWorker>;
     type MonitorSender = UnboundedSender<BrokerToMonitor>;
@@ -74,6 +82,53 @@ impl Deps for PassThroughSchedulerDeps {
     }
 }
 
+impl<CacheT, DepsT> scheduler::ArtifactGatherer
+    for ArtifactGatherer<CacheT, DepsT>
+where
+    CacheT: SchedulerCache,
+    DepsT: artifact_gatherer::Deps<ArtifactStream = CacheT::ArtifactStream>,
+{
+    type ClientSender = DepsT::ClientSender;
+
+    fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
+        self.client_connected(cid, sender)
+    }
+
+    fn client_disconnected(&mut self, cid: ClientId) {
+        self.client_disconnected(cid)
+    }
+
+    fn start_job(
+        &mut self,
+        jid: JobId,
+        layers: NonEmpty<(Sha256Digest, ArtifactType)>,
+    ) -> StartJob {
+        self.start_job(jid, layers)
+    }
+
+    fn job_completed(&mut self, jid: JobId) {
+        self.job_completed(jid)
+    }
+
+    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
+        self.get_waiting_for_artifacts_count(cid)
+    }
+}
+
+/*     _         _ _   _  __            _    ____       _   _
+ *    / \   _ __(_) |_(_)/ _| __ _  ___| |_ / ___| __ _| |_| |__   ___ _ __ ___ _ __
+ *   / _ \ | '__| | __| | |_ / _` |/ __| __| |  _ / _` | __| '_ \ / _ \ '__/ _ \ '__|
+ *  / ___ \| |  | | |_| |  _| (_| | (__| |_| |_| | (_| | |_| | | |  __/ | |  __/ |
+ * /_/   \_\_|  |_|\__|_|_|  \__,_|\___|\__|\____|\__,_|\__|_| |_|\___|_|  \___|_|
+ *  ____                            _                 _
+ * |  _ \  ___ _ __   ___ _ __   __| | ___ _ __   ___(_) ___  ___
+ * | | | |/ _ \ '_ \ / _ \ '_ \ / _` |/ _ \ '_ \ / __| |/ _ \/ __|
+ * | |_| |  __/ |_) |  __/ | | | (_| |  __/ | | | (__| |  __/\__ \
+ * |____/ \___| .__/ \___|_| |_|\__,_|\___|_| |_|\___|_|\___||___/
+ *            |_|
+ *  FIGLET: AritifactGatherer Dependencies
+ */
+
 #[derive(Debug)]
 struct PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT> {
     task_sender: SchedulerSender<TempFileT>,
@@ -92,7 +147,7 @@ impl<TempFileT, ArtifactStreamT> PassThroughArtifactGathererDeps<TempFileT, Arti
     }
 }
 
-impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
+impl<TempFileT, ArtifactStreamT> artifact_gatherer::Deps
     for PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT>
 {
     type ArtifactStream = ArtifactStreamT;
@@ -141,6 +196,25 @@ impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
             .task_sender
             .send(Message::JobsFailedFromArtifactGatherer(jobs, err));
     }
+}
+
+/*   ____           _          __  __             _  __           _
+ *  / ___|__ _  ___| |__   ___|  \/  | __ _ _ __ (_)/ _| ___  ___| |_
+ * | |   / _` |/ __| '_ \ / _ \ |\/| |/ _` | '_ \| | |_ / _ \/ __| __|
+ * | |__| (_| | (__| | | |  __/ |  | | (_| | | | | |  _|  __/\__ \ |_
+ *  \____\__,_|\___|_| |_|\___|_|  |_|\__,_|_| |_|_|_|  \___||___/\__|
+ *  ____                _
+ * |  _ \ ___  __ _  __| | ___ _ __
+ * | |_) / _ \/ _` |/ _` |/ _ \ '__|
+ * |  _ <  __/ (_| | (_| |  __/ |
+ * |_| \_\___|\__,_|\__,_|\___|_|
+ *  FIGLET: CacheManifestReader
+ */
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct ManifestReadRequest<ArtifactStreamT> {
+    manifest_stream: ArtifactStreamT,
+    digest: Sha256Digest,
 }
 
 #[derive(Debug)]
@@ -199,6 +273,15 @@ where
     }
 }
 
+/*  __  __
+ * |  \/  | ___  ___ ___  __ _  __ _  ___
+ * | |\/| |/ _ \/ __/ __|/ _` |/ _` |/ _ \
+ * | |  | |  __/\__ \__ \ (_| | (_| |  __/
+ * |_|  |_|\___||___/___/\__,_|\__, |\___|
+ *                             |___/
+ *  FIGLET: Message
+ */
+
 /// The production scheduler message type.
 pub type SchedulerMessage<TempFileT> = Message<
     UnboundedSender<BrokerToClient>,
@@ -211,6 +294,14 @@ pub type SchedulerMessage<TempFileT> = Message<
 /// This type is used often enough to warrant an alias.
 pub type SchedulerSender<TempFileT> = UnboundedSender<SchedulerMessage<TempFileT>>;
 
+/*  ____       _              _       _          _____         _
+ * / ___|  ___| |__   ___  __| |_   _| | ___ _ _|_   _|_ _ ___| | __
+ * \___ \ / __| '_ \ / _ \/ _` | | | | |/ _ \ '__|| |/ _` / __| |/ /
+ *  ___) | (__| | | |  __/ (_| | |_| | |  __/ |   | | (_| \__ \   <
+ * |____/ \___|_| |_|\___|\__,_|\__,_|_|\___|_|   |_|\__,_|___/_|\_\
+ *  FIGLET: SchedulerTask
+ */
+
 type ArtifactGathererForCache<CacheT> = ArtifactGatherer<
     CacheT,
     PassThroughArtifactGathererDeps<
@@ -218,39 +309,6 @@ type ArtifactGathererForCache<CacheT> = ArtifactGatherer<
         <CacheT as SchedulerCache>::ArtifactStream,
     >,
 >;
-
-impl<CacheT, DepsT> scheduler::ArtifactGatherer
-    for artifact_gatherer::ArtifactGatherer<CacheT, DepsT>
-where
-    CacheT: SchedulerCache,
-    DepsT: artifact_gatherer::Deps<ArtifactStream = CacheT::ArtifactStream>,
-{
-    type ClientSender = DepsT::ClientSender;
-
-    fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender) {
-        self.client_connected(cid, sender)
-    }
-
-    fn client_disconnected(&mut self, cid: ClientId) {
-        self.client_disconnected(cid)
-    }
-
-    fn start_job(
-        &mut self,
-        jid: JobId,
-        layers: NonEmpty<(Sha256Digest, ArtifactType)>,
-    ) -> artifact_gatherer::StartJob {
-        self.start_job(jid, layers)
-    }
-
-    fn job_completed(&mut self, jid: JobId) {
-        self.job_completed(jid)
-    }
-
-    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
-        self.get_waiting_for_artifacts_count(cid)
-    }
-}
 
 pub struct SchedulerTask<CacheT: SchedulerCache> {
     artifact_gatherer: ArtifactGathererForCache<CacheT>,
