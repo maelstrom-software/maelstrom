@@ -44,7 +44,7 @@ pub trait ArtifactGatherer {
 
 /// The external dependencies for [`Scheduler`]. All of these methods must be asynchronous: they
 /// must not block the current thread.
-pub trait SchedulerDeps {
+pub trait Deps {
     type ClientSender: Clone;
     type WorkerSender;
     type MonitorSender;
@@ -150,9 +150,7 @@ pub enum Message<
     JobsFailedFromArtifactGatherer(NonEmpty<JobId>, String),
 }
 
-impl<ArtifactGathererT: ArtifactGatherer, DepsT: SchedulerDeps>
-    Scheduler<ArtifactGathererT, DepsT>
-{
+impl<ArtifactGathererT: ArtifactGatherer, DepsT: Deps> Scheduler<ArtifactGathererT, DepsT> {
     /// Create a new scheduler with the given [`ArtifactGatherer`]. Note that [`SchedulerDeps`] are
     /// passed in to `Self::receive_message`.
     pub fn new(deps: DepsT) -> Self {
@@ -188,13 +186,13 @@ impl Job {
     }
 }
 
-struct Client<DepsT: SchedulerDeps> {
+struct Client<DepsT: Deps> {
     sender: DepsT::ClientSender,
     jobs: HashMap<ClientJobId, Job>,
     num_completed_jobs: u64,
 }
 
-impl<DepsT: SchedulerDeps> Client<DepsT> {
+impl<DepsT: Deps> Client<DepsT> {
     fn new(sender: DepsT::ClientSender) -> Self {
         Client {
             sender,
@@ -204,22 +202,22 @@ impl<DepsT: SchedulerDeps> Client<DepsT> {
     }
 }
 
-struct ClientMap<DepsT: SchedulerDeps>(HashMap<ClientId, Client<DepsT>>);
+struct ClientMap<DepsT: Deps>(HashMap<ClientId, Client<DepsT>>);
 
-impl<DepsT: SchedulerDeps> ClientMap<DepsT> {
+impl<DepsT: Deps> ClientMap<DepsT> {
     fn job_from_jid(&self, jid: JobId) -> &Job {
         self.0.get(&jid.cid).unwrap().jobs.get(&jid.cjid).unwrap()
     }
 }
 
-struct Worker<DepsT: SchedulerDeps> {
+struct Worker<DepsT: Deps> {
     slots: usize,
     pending: HashSet<JobId>,
     heap_index: HeapIndex,
     sender: DepsT::WorkerSender,
 }
 
-impl<DepsT: SchedulerDeps> Worker<DepsT> {
+impl<DepsT: Deps> Worker<DepsT> {
     fn new(slots: usize, sender: DepsT::WorkerSender) -> Self {
         Worker {
             slots,
@@ -230,9 +228,9 @@ impl<DepsT: SchedulerDeps> Worker<DepsT> {
     }
 }
 
-struct WorkerMap<DepsT: SchedulerDeps>(HashMap<WorkerId, Worker<DepsT>>);
+struct WorkerMap<DepsT: Deps>(HashMap<WorkerId, Worker<DepsT>>);
 
-impl<DepsT: SchedulerDeps> HeapDeps for WorkerMap<DepsT> {
+impl<DepsT: Deps> HeapDeps for WorkerMap<DepsT> {
     type Element = WorkerId;
 
     fn is_element_less_than(&self, lhs_id: &WorkerId, rhs_id: &WorkerId) -> bool {
@@ -286,7 +284,7 @@ impl Ord for QueuedJob {
     }
 }
 
-pub struct Scheduler<ArtifactGathererT, DepsT: SchedulerDeps> {
+pub struct Scheduler<ArtifactGathererT, DepsT: Deps> {
     deps: DepsT,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
@@ -299,7 +297,7 @@ pub struct Scheduler<ArtifactGathererT, DepsT: SchedulerDeps> {
 
 impl<ArtifactGathererT, DepsT> Scheduler<ArtifactGathererT, DepsT>
 where
-    DepsT: SchedulerDeps,
+    DepsT: Deps,
     ArtifactGathererT: ArtifactGatherer<ClientSender = DepsT::ClientSender>,
 {
     fn possibly_start_jobs(&mut self, mut just_enqueued: HashSet<JobId>) {
@@ -614,9 +612,9 @@ mod tests {
     use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
     type MessageM<DepsT, TempFileT> = Message<
-        <DepsT as SchedulerDeps>::ClientSender,
-        <DepsT as SchedulerDeps>::WorkerSender,
-        <DepsT as SchedulerDeps>::MonitorSender,
+        <DepsT as Deps>::ClientSender,
+        <DepsT as Deps>::WorkerSender,
+        <DepsT as Deps>::MonitorSender,
         <DepsT as ArtifactGathererDeps>::WorkerArtifactFetcherSender,
         TempFileT,
     >;
@@ -717,7 +715,7 @@ mod tests {
         }
     }
 
-    impl SchedulerDeps for Rc<RefCell<TestState>> {
+    impl Deps for Rc<RefCell<TestState>> {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
         type MonitorSender = TestMonitorSender;
@@ -1756,7 +1754,7 @@ mod tests2 {
         }
     }
 
-    impl SchedulerDeps for Rc<RefCell<Mock>> {
+    impl Deps for Rc<RefCell<Mock>> {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
         type MonitorSender = TestMonitorSender;

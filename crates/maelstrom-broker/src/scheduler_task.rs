@@ -10,7 +10,7 @@ use maelstrom_base::{
     ArtifactType, ClientId, JobId, JobSpec, NonEmpty, Sha256Digest,
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
-use scheduler::{Message, Scheduler, SchedulerDeps};
+use scheduler::{Deps, Message, Scheduler};
 use std::{path::PathBuf, sync::mpsc as std_mpsc};
 use tokio::{io::AsyncRead, sync::mpsc as tokio_mpsc, task::JoinSet};
 
@@ -25,7 +25,7 @@ pub struct PassThroughSchedulerDeps;
 
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.
-impl SchedulerDeps for PassThroughSchedulerDeps {
+impl Deps for PassThroughSchedulerDeps {
     type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
     type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
     type MonitorSender = tokio_mpsc::UnboundedSender<BrokerToMonitor>;
