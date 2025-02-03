@@ -32,6 +32,9 @@ use std::{
  *  FIGLET: public
  */
 
+/// The dependencies for [`Scheduler`] on the [`ArtifactGatherer`]. These should be identical to
+/// the methods on [`crate::scheduler_task::artifact_gatherer::ArtifactGatherer`]. They are split
+/// out from [`Deps`] so they can be implemented separately.
 pub trait ArtifactGatherer {
     type ClientSender;
     fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender);
@@ -42,8 +45,8 @@ pub trait ArtifactGatherer {
     fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64;
 }
 
-/// The external dependencies for [`Scheduler`]. All of these methods must be asynchronous: they
-/// must not block the current thread.
+/// The external dependencies for [`Scheduler`] that aren't the [`ArtifactGatherer`]. All of these
+/// methods must be asynchronous: they must not block the current thread.
 pub trait Deps {
     type ClientSender: Clone;
     type WorkerSender;
