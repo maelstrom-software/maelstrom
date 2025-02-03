@@ -4,7 +4,6 @@
 use crate::scheduler_task::artifact_gatherer::StartJob;
 use enum_map::enum_map;
 use maelstrom_base::{
-    proto::BrokerToMonitor,
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
@@ -68,10 +67,10 @@ pub trait SchedulerDeps {
         spec: JobSpec,
     );
     fn send_cancel_job_to_worker(&mut self, sender: &mut Self::WorkerSender, jid: JobId);
-    fn send_message_to_monitor(
+    fn send_statistics_response_to_monitor(
         &mut self,
         sender: &mut Self::MonitorSender,
-        message: BrokerToMonitor,
+        statistics: BrokerStatistics,
     );
 }
 
@@ -499,14 +498,14 @@ where
 
     pub fn receive_statistics_request_from_monitor(&mut self, mid: MonitorId) {
         let worker_iter = self.workers.0.iter();
-        let resp = BrokerToMonitor::StatisticsResponse(BrokerStatistics {
+        let resp = BrokerStatistics {
             worker_statistics: worker_iter
                 .map(|(id, w)| (*id, WorkerStatistics { slots: w.slots }))
                 .collect(),
             job_statistics: self.job_statistics.clone(),
-        });
+        };
         self.deps
-            .send_message_to_monitor(self.monitors.get_mut(&mid).unwrap(), resp);
+            .send_statistics_response_to_monitor(self.monitors.get_mut(&mid).unwrap(), resp);
     }
 
     pub fn receive_jobs_ready_from_artifact_gatherer(&mut self, ready: NonEmpty<JobId>) {
@@ -604,7 +603,7 @@ mod tests {
     use maelstrom_base::{
         digest, job_spec,
         proto::{
-            BrokerToClient,
+            BrokerToClient, BrokerToMonitor,
             BrokerToWorker::{self, *},
         },
         tar_digest,
@@ -764,14 +763,15 @@ mod tests {
                 .push(ToWorker(sender.0, BrokerToWorker::CancelJob(jid)));
         }
 
-        fn send_message_to_monitor(
+        fn send_statistics_response_to_monitor(
             &mut self,
             sender: &mut TestMonitorSender,
-            message: BrokerToMonitor,
+            statistics: BrokerStatistics,
         ) {
-            self.borrow_mut()
-                .messages
-                .push(ToMonitor(sender.0, message));
+            self.borrow_mut().messages.push(ToMonitor(
+                sender.0,
+                BrokerToMonitor::StatisticsResponse(statistics),
+            ));
         }
     }
 
@@ -1658,7 +1658,7 @@ mod tests2 {
         send_job_status_update_to_client: Vec<(ClientId, ClientJobId, JobBrokerStatus)>,
         send_enqueue_job_to_worker: Vec<(WorkerId, JobId, JobSpec)>,
         send_cancel_job_to_worker: HashSet<(WorkerId, JobId)>,
-        send_message_to_monitor: Vec<(MonitorId, BrokerToMonitor)>,
+        send_statistics_response_to_monitor: Vec<(MonitorId, BrokerStatistics)>,
     }
 
     impl Mock {
@@ -1704,9 +1704,9 @@ mod tests2 {
                 self.send_cancel_job_to_worker,
             );
             assert!(
-                self.send_message_to_monitor.is_empty(),
-                "unused mock entries for Deps::send_message_to_monitor: {:?}",
-                self.send_message_to_monitor,
+                self.send_statistics_response_to_monitor.is_empty(),
+                "unused mock entries for Deps::send_statistics_response_to_monitor: {:?}",
+                self.send_statistics_response_to_monitor,
             );
         }
     }
@@ -1805,12 +1805,7 @@ mod tests2 {
             let spec_clone = spec.clone();
             let index = vec
                 .iter()
-                .position(move |e| {
-                    e == {
-                        let spec = spec_clone.clone();
-                        &(wid, jid, spec)
-                    }
-                })
+                .position(move |e| e == &(wid, jid, spec_clone.clone()))
                 .expect(&format!(
                     "sending unexpected enqueue_job to worker {wid}: {jid} {spec:?}"
                 ));
@@ -1827,19 +1822,21 @@ mod tests2 {
             );
         }
 
-        fn send_message_to_monitor(
+        fn send_statistics_response_to_monitor(
             &mut self,
             sender: &mut Self::MonitorSender,
-            message: BrokerToMonitor,
+            statistics: BrokerStatistics,
         ) {
-            let send_message_to_monitor = &mut self.borrow_mut().send_message_to_monitor;
-            let index = send_message_to_monitor
+            let vec = &mut self.borrow_mut().send_statistics_response_to_monitor;
+            let mid = sender.0;
+            let statistics_clone = statistics.clone();
+            let index = vec
                 .iter()
-                .position(|e| e.0 == sender.0 && e.1 == message)
+                .position(move |e| e == &(mid, statistics_clone.clone()))
                 .expect(&format!(
-                    "sending unexpected message to monitor {sender:?}: {message:#?}"
+                    "sending unexpected message to monitor {sender:?}: {statistics:#?}"
                 ));
-            send_message_to_monitor.remove(index);
+            vec.remove(index);
         }
     }
 

@@ -6,6 +6,7 @@ use artifact_gatherer::{ArtifactGatherer, Deps as ArtifactGathererDeps};
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
     proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker},
+    stats::BrokerStatistics,
     ArtifactType, ClientId, JobId, JobSpec, NonEmpty, Sha256Digest,
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
@@ -60,12 +61,12 @@ impl SchedulerDeps for PassThroughSchedulerDeps {
         let _ = sender.send(BrokerToWorker::CancelJob(jid));
     }
 
-    fn send_message_to_monitor(
+    fn send_statistics_response_to_monitor(
         &mut self,
         sender: &mut Self::MonitorSender,
-        message: BrokerToMonitor,
+        statistics: BrokerStatistics,
     ) {
-        let _ = sender.send(message);
+        let _ = sender.send(BrokerToMonitor::StatisticsResponse(statistics));
     }
 }
 
