@@ -1620,8 +1620,8 @@ mod tests {
 #[cfg(test)]
 mod tests2 {
     use super::*;
-    use maelstrom_base::{job_spec, nonempty, tar_digest};
-    use maelstrom_test::{cid, cjid, jid, mid, outcome, wid};
+    use maelstrom_base::{job_spec, tar_digest};
+    use maelstrom_test::{jid, outcome};
     use std::{
         cell::RefCell,
         ops::{Deref, DerefMut},
@@ -1637,28 +1637,63 @@ mod tests2 {
     #[derive(Debug)]
     struct TestMonitorSender(MonitorId);
 
-    macro_rules! client_sender {
-        [$n:expr] => { TestClientSender(cid![$n]) };
-    }
-
-    macro_rules! worker_sender {
-        [$n:expr] => { TestWorkerSender(wid![$n]) };
-    }
-
-    macro_rules! monitor_sender {
-        [$n:expr] => { TestMonitorSender(mid![$n]) };
-    }
-
     #[derive(Default)]
     struct Mock {
+        // ArtifactGatherer
         client_connected: Vec<ClientId>,
         client_disconnected: Vec<ClientId>,
         start_job: Vec<(JobId, NonEmpty<(Sha256Digest, ArtifactType)>, StartJob)>,
         complete_job: Vec<JobId>,
+        // Deps
         send_job_response_to_client: Vec<(ClientId, ClientJobId, JobOutcomeResult)>,
         send_job_status_update_to_client: Vec<(ClientId, ClientJobId, JobBrokerStatus)>,
         send_message_to_worker: Vec<(WorkerId, BrokerToWorker)>,
         send_message_to_monitor: Vec<(MonitorId, BrokerToMonitor)>,
+    }
+
+    impl Mock {
+        fn assert_is_empty(&self) {
+            assert!(
+                self.client_connected.is_empty(),
+                "unused mock entries for ArtifactGatherer::client_connected: {:?}",
+                self.client_connected,
+            );
+            assert!(
+                self.client_disconnected.is_empty(),
+                "unused mock entries for ArtifactGatherer::client_disconnected: {:?}",
+                self.client_disconnected,
+            );
+            assert!(
+                self.start_job.is_empty(),
+                "unused mock entries for ArtifactGatherer::start_job: {:?}",
+                self.start_job,
+            );
+            assert!(
+                self.complete_job.is_empty(),
+                "unused mock entries for ArtifactGatherer::complete_job: {:?}",
+                self.complete_job,
+            );
+            assert!(
+                self.send_job_response_to_client.is_empty(),
+                "unused mock entries for ArtifactGatherer::send_job_response_to_client: {:?}",
+                self.send_job_response_to_client,
+            );
+            assert!(
+                self.send_job_status_update_to_client.is_empty(),
+                "unused mock entries for Deps::send_job_status_update_to_client: {:?}",
+                self.send_job_status_update_to_client,
+            );
+            assert!(
+                self.send_message_to_worker.is_empty(),
+                "unused mock entries for Deps::send_message_to_worker: {:?}",
+                self.send_message_to_worker,
+            );
+            assert!(
+                self.send_message_to_monitor.is_empty(),
+                "unused mock entries for Deps::send_message_to_monitor: {:?}",
+                self.send_message_to_monitor,
+            );
+        }
     }
 
     impl ArtifactGatherer for Rc<RefCell<Mock>> {
@@ -1789,13 +1824,127 @@ mod tests2 {
         sut: Scheduler<Rc<RefCell<Mock>>, Rc<RefCell<Mock>>>,
     }
 
+    impl Fixture {
+        fn new() -> Self {
+            let mock = Rc::new(RefCell::new(Default::default()));
+            let sut = Scheduler::new(mock.clone());
+            Self { mock, sut }
+        }
+
+        fn with_client(mut self, cid: impl Into<ClientId>) -> Self {
+            let cid = cid.into();
+            self.expect()
+                .client_connected(cid)
+                .when()
+                .receive_client_connected(cid);
+            self
+        }
+
+        fn with_worker(mut self, wid: impl Into<WorkerId>, slots: usize) -> Self {
+            let wid = wid.into();
+            self.receive_worker_connected(wid, slots);
+            self
+        }
+
+        fn expect(&mut self) -> Expect {
+            Expect { fixture: self }
+        }
+
+        fn receive_client_connected(&mut self, cid: impl Into<ClientId>) {
+            let cid = cid.into();
+            self.sut
+                .receive_client_connected(&mut self.mock, cid, TestClientSender(cid));
+        }
+
+        fn receive_client_disconnected(&mut self, cid: impl Into<ClientId>) {
+            self.sut
+                .receive_client_disconnected(&mut self.mock, cid.into());
+        }
+
+        fn receive_job_request_from_client(
+            &mut self,
+            cid: impl Into<ClientId>,
+            cjid: impl Into<ClientJobId>,
+            spec: impl Into<JobSpec>,
+        ) {
+            self.sut.receive_job_request_from_client(
+                &mut self.mock,
+                cid.into(),
+                cjid.into(),
+                spec.into(),
+            );
+        }
+
+        fn receive_worker_connected(&mut self, wid: impl Into<WorkerId>, slots: usize) {
+            let wid = wid.into();
+            self.sut
+                .receive_worker_connected(wid, slots, TestWorkerSender(wid));
+        }
+
+        fn receive_worker_disconnected(&mut self, wid: impl Into<WorkerId>) {
+            self.sut.receive_worker_disconnected(wid.into());
+        }
+
+        fn receive_job_response_from_worker(
+            &mut self,
+            wid: impl Into<WorkerId>,
+            jid: impl Into<JobId>,
+            result: impl Into<JobOutcomeResult>,
+        ) {
+            self.sut.receive_job_response_from_worker(
+                &mut self.mock,
+                wid.into(),
+                jid.into(),
+                result.into(),
+            );
+        }
+
+        fn receive_job_status_update_from_worker(
+            &mut self,
+            wid: impl Into<WorkerId>,
+            jid: impl Into<JobId>,
+            status: impl Into<JobWorkerStatus>,
+        ) {
+            self.sut
+                .receive_job_status_update_from_worker(wid.into(), jid.into(), status.into());
+        }
+
+        fn receive_monitor_connected(&mut self, mid: impl Into<MonitorId>) {
+            let mid = mid.into();
+            self.sut
+                .receive_monitor_connected(mid, TestMonitorSender(mid));
+        }
+
+        fn receive_monitor_disconnected(&mut self, mid: impl Into<MonitorId>) {
+            self.sut.receive_monitor_disconnected(mid.into());
+        }
+
+        fn receive_statistics_request_from_monitor(&mut self, mid: impl Into<MonitorId>) {
+            self.sut.receive_statistics_request_from_monitor(mid.into());
+        }
+    }
+
     struct Expect<'a> {
         fixture: &'a mut Fixture,
     }
 
+    impl<'a> Drop for Expect<'a> {
+        fn drop(&mut self) {
+            self.fixture.mock.borrow().assert_is_empty();
+        }
+    }
+
     impl<'a> Expect<'a> {
-        fn client_connected(self, cid: ClientId) -> Self {
-            self.fixture.mock.borrow_mut().client_connected.push(cid);
+        fn when(self) -> When<'a> {
+            When { expect: self }
+        }
+
+        fn client_connected(self, cid: impl Into<ClientId>) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .client_connected
+                .push(cid.into());
             self
         }
 
@@ -1808,15 +1957,21 @@ mod tests2 {
 
         fn start_job(
             self,
-            jid: JobId,
-            layers: NonEmpty<(Sha256Digest, ArtifactType)>,
-            result: StartJob,
+            jid: impl Into<JobId>,
+            layers: impl IntoIterator<Item = (impl Into<Sha256Digest>, impl Into<ArtifactType>)>,
+            result: impl Into<StartJob>,
         ) -> Self {
+            let layers = NonEmpty::collect(
+                layers
+                    .into_iter()
+                    .map(|(digest, type_)| (digest.into(), type_.into())),
+            )
+            .unwrap();
             self.fixture
                 .mock
                 .borrow_mut()
                 .start_job
-                .push((jid, layers, result));
+                .push((jid.into(), layers, result.into()));
             self
         }
 
@@ -1852,8 +2007,8 @@ mod tests2 {
         }
         */
 
-        fn complete_job(self, jid: JobId) -> Self {
-            self.fixture.mock.borrow_mut().complete_job.push(jid);
+        fn complete_job(self, jid: impl Into<JobId>) -> Self {
+            self.fixture.mock.borrow_mut().complete_job.push(jid.into());
             self
         }
 
@@ -1877,38 +2032,42 @@ mod tests2 {
 
         fn send_job_response_to_client(
             self,
-            sender: TestClientSender,
-            cjid: ClientJobId,
-            result: JobOutcomeResult,
+            cid: impl Into<ClientId>,
+            cjid: impl Into<ClientJobId>,
+            result: impl Into<JobOutcomeResult>,
         ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
                 .send_job_response_to_client
-                .push((sender.0, cjid, result));
+                .push((cid.into(), cjid.into(), result.into()));
             self
         }
 
         fn send_job_status_update_to_client(
             self,
-            sender: TestClientSender,
-            cjid: ClientJobId,
-            status: JobBrokerStatus,
+            cid: impl Into<ClientId>,
+            cjid: impl Into<ClientJobId>,
+            status: impl Into<JobBrokerStatus>,
         ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
                 .send_job_status_update_to_client
-                .push((sender.0, cjid, status));
+                .push((cid.into(), cjid.into(), status.into()));
             self
         }
 
-        fn send_message_to_worker(self, sender: TestWorkerSender, message: BrokerToWorker) -> Self {
+        fn send_message_to_worker(
+            self,
+            wid: impl Into<WorkerId>,
+            message: impl Into<BrokerToWorker>,
+        ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
                 .send_message_to_worker
-                .push((sender.0, message));
+                .push((wid.into(), message.into()));
             self
         }
 
@@ -1936,131 +2095,23 @@ mod tests2 {
             todo!();
         }
         */
-
-        fn when(self) -> When<'a> {
-            let Expect { fixture } = self;
-            When { fixture }
-        }
     }
 
     struct When<'a> {
-        fixture: &'a mut Fixture,
+        expect: Expect<'a>,
     }
 
     impl<'a> Deref for When<'a> {
         type Target = Fixture;
 
         fn deref(&self) -> &Self::Target {
-            &self.fixture
+            &self.expect.fixture
         }
     }
 
     impl<'a> DerefMut for When<'a> {
         fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.fixture
-        }
-    }
-
-    impl<'a> Drop for When<'a> {
-        fn drop(&mut self) {
-            let mock = self.fixture.mock.borrow();
-            assert!(mock.client_connected.is_empty());
-            assert!(mock.client_disconnected.is_empty());
-            assert!(mock.start_job.is_empty());
-            assert!(mock.complete_job.is_empty());
-            assert!(mock.send_job_response_to_client.is_empty());
-            assert!(mock.send_job_status_update_to_client.is_empty());
-            assert!(mock.send_message_to_worker.is_empty());
-            assert!(mock.send_message_to_monitor.is_empty());
-        }
-    }
-
-    impl Fixture {
-        fn new() -> Self {
-            let mock = Rc::new(RefCell::new(Default::default()));
-            let sut = Scheduler::new(mock.clone());
-            Self { mock, sut }
-        }
-
-        fn with_client(mut self, cid: ClientId) -> Self {
-            self.expect()
-                .client_connected(cid)
-                .when()
-                .receive_client_connected(cid, TestClientSender(cid));
-            self
-        }
-
-        fn with_worker(mut self, wid: WorkerId, slots: usize) -> Self {
-            self.receive_worker_connected(wid, slots, TestWorkerSender(wid));
-            self
-        }
-
-        fn expect(&mut self) -> Expect {
-            Expect { fixture: self }
-        }
-
-        fn receive_client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
-            self.sut
-                .receive_client_connected(&mut self.mock, cid, sender);
-        }
-
-        fn receive_client_disconnected(&mut self, cid: ClientId) {
-            self.sut.receive_client_disconnected(&mut self.mock, cid);
-        }
-
-        fn receive_job_request_from_client(
-            &mut self,
-            cid: ClientId,
-            cjid: ClientJobId,
-            spec: JobSpec,
-        ) {
-            self.sut
-                .receive_job_request_from_client(&mut self.mock, cid, cjid, spec);
-        }
-
-        fn receive_worker_connected(
-            &mut self,
-            wid: WorkerId,
-            slots: usize,
-            sender: TestWorkerSender,
-        ) {
-            self.sut.receive_worker_connected(wid, slots, sender);
-        }
-
-        fn receive_worker_disconnected(&mut self, wid: WorkerId) {
-            self.sut.receive_worker_disconnected(wid);
-        }
-
-        fn receive_job_response_from_worker(
-            &mut self,
-            wid: WorkerId,
-            jid: JobId,
-            result: JobOutcomeResult,
-        ) {
-            self.sut
-                .receive_job_response_from_worker(&mut self.mock, wid, jid, result);
-        }
-
-        fn receive_job_status_update_from_worker(
-            &mut self,
-            wid: WorkerId,
-            jid: JobId,
-            status: JobWorkerStatus,
-        ) {
-            self.sut
-                .receive_job_status_update_from_worker(wid, jid, status);
-        }
-
-        fn receive_monitor_connected(&mut self, mid: MonitorId, sender: TestMonitorSender) {
-            self.sut.receive_monitor_connected(mid, sender);
-        }
-
-        fn receive_monitor_disconnected(&mut self, mid: MonitorId) {
-            self.sut.receive_monitor_disconnected(mid);
-        }
-
-        fn receive_statistics_request_from_monitor(&mut self, mid: MonitorId) {
-            self.sut.receive_statistics_request_from_monitor(mid);
+            &mut self.expect.fixture
         }
     }
 
@@ -2068,271 +2119,200 @@ mod tests2 {
     #[should_panic]
     fn message_from_unknown_client_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_job_request_from_client(
-            cid!(1),
-            cjid!(1),
-            job_spec!("test", [tar_digest!(1)]),
-        );
+        fixture.receive_job_request_from_client(1, 1, job_spec!("test", [tar_digest!(1)]));
     }
 
     #[test]
     #[should_panic]
     fn disconnect_from_unknown_client_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_client_disconnected(cid!(1));
+        fixture.receive_client_disconnected(1);
     }
 
     #[test]
     #[should_panic]
     fn connect_from_duplicate_client_panics() {
-        Fixture::new().with_client(cid!(1)).with_client(cid!(1));
+        Fixture::new().with_client(1).with_client(1);
     }
 
     #[test]
     #[should_panic]
     fn message_from_unknown_worker_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_job_status_update_from_worker(wid!(1), jid!(1), JobWorkerStatus::Executing);
+        fixture.receive_job_status_update_from_worker(1, (1, 1), JobWorkerStatus::Executing);
     }
 
     #[test]
     #[should_panic]
     fn disconnect_from_unknown_worker_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_worker_disconnected(wid!(1));
+        fixture.receive_worker_disconnected(1);
     }
 
     #[test]
     #[should_panic]
     fn connect_from_duplicate_worker_panics() {
-        Fixture::new()
-            .with_worker(wid!(1), 2)
-            .with_worker(wid!(1), 2);
+        Fixture::new().with_worker(1, 2).with_worker(1, 2);
     }
 
     #[test]
     #[should_panic]
     fn message_from_unknown_monitor_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_statistics_request_from_monitor(mid!(1));
+        fixture.receive_statistics_request_from_monitor(1);
     }
 
     #[test]
     #[should_panic]
     fn disconnect_from_unknown_monitor_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_monitor_disconnected(mid!(1));
+        fixture.receive_monitor_disconnected(1);
     }
 
     #[test]
     #[should_panic]
     fn connect_from_duplicate_monitor_panics() {
         let mut fixture = Fixture::new();
-        fixture.receive_monitor_connected(mid!(1), monitor_sender!(1));
-        fixture.receive_monitor_connected(mid!(1), monitor_sender!(1));
+        fixture.receive_monitor_connected(1);
+        fixture.receive_monitor_connected(1);
     }
 
     #[test]
     fn job_request_ready_worker_available() {
-        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
 
         let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
 
         fixture
             .expect()
-            .start_job(
-                jid!(1),
-                nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::Ready,
-            )
-            .send_message_to_worker(
-                worker_sender!(1),
-                BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
-            )
+            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
+            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()))
             .when()
-            .receive_job_request_from_client(cid!(1), cjid!(1), job_spec);
+            .receive_job_request_from_client(1, 1, job_spec);
     }
 
     #[test]
     fn job_request_ready_no_worker_available() {
-        let mut fixture = Fixture::new().with_client(cid!(1));
+        let mut fixture = Fixture::new().with_client(1);
         let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
 
         fixture
             .expect()
-            .start_job(
-                jid!(1),
-                nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::Ready,
-            )
-            .send_job_status_update_to_client(
-                client_sender!(1),
-                cjid!(1),
-                JobBrokerStatus::WaitingForWorker,
-            )
+            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
             .when()
-            .receive_job_request_from_client(cid!(1), cjid!(1), job_spec.clone());
+            .receive_job_request_from_client(1, 1, job_spec.clone());
 
         fixture
             .expect()
-            .send_message_to_worker(
-                worker_sender!(1),
-                BrokerToWorker::EnqueueJob(jid!(1), job_spec),
-            )
+            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec))
             .when()
-            .receive_worker_connected(wid!(1), 2, TestWorkerSender(wid!(1)));
+            .receive_worker_connected(1, 2);
     }
 
     #[test]
     fn job_request_not_ready_start_fetching_some() {
-        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
 
         fixture
             .expect()
-            .start_job(
-                jid!(1),
-                nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::NotReady,
-            )
-            .send_job_status_update_to_client(
-                client_sender!(1),
-                cjid!(1),
-                JobBrokerStatus::WaitingForLayers,
-            )
+            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForLayers)
             .when()
             .receive_job_request_from_client(
-                cid!(1),
-                cjid!(1),
+                1,
+                1,
                 job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
             );
     }
 
     #[test]
     fn job_request_not_ready_start_fetching_none() {
-        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
 
         fixture
             .expect()
-            .start_job(
-                jid!(1),
-                nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::NotReady,
-            )
-            .send_job_status_update_to_client(
-                client_sender!(1),
-                cjid!(1),
-                JobBrokerStatus::WaitingForLayers,
-            )
+            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForLayers)
             .when()
             .receive_job_request_from_client(
-                cid!(1),
-                cjid!(1),
+                1,
+                1,
                 job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
             );
     }
 
     #[test]
     fn worker_disconnected_with_outstanding_jobs_no_other_available_workers() {
-        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
         let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
 
         fixture
             .expect()
-            .start_job(
-                jid!(1),
-                nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::Ready,
-            )
-            .send_message_to_worker(
-                worker_sender!(1),
-                BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
-            )
+            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
+            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()))
             .when()
-            .receive_job_request_from_client(cid!(1), cjid!(1), job_spec.clone());
+            .receive_job_request_from_client(1, 1, job_spec.clone());
 
         fixture
             .expect()
-            .send_job_status_update_to_client(
-                client_sender!(1),
-                cjid!(1),
-                JobBrokerStatus::WaitingForWorker,
-            )
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
             .when()
-            .receive_worker_disconnected(wid!(1));
+            .receive_worker_disconnected(1);
 
         fixture
             .expect()
-            .send_message_to_worker(
-                worker_sender!(2),
-                BrokerToWorker::EnqueueJob(jid!(1), job_spec),
-            )
+            .send_message_to_worker(2, BrokerToWorker::EnqueueJob(jid!(1), job_spec))
             .when()
-            .receive_worker_connected(wid!(2), 2, TestWorkerSender(wid!(2)));
+            .receive_worker_connected(2, 2);
     }
 
     #[test]
     fn worker_disconnected_with_outstanding_jobs_with_other_available_workers() {
         let mut fixture = Fixture::new()
-            .with_client(cid!(1))
-            .with_worker(wid!(1), 2)
-            .with_worker(wid!(2), 2);
+            .with_client(1)
+            .with_worker(1, 2)
+            .with_worker(2, 2);
         let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
 
         fixture
             .expect()
-            .start_job(
-                jid!(1),
-                nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::Ready,
-            )
-            .send_message_to_worker(
-                worker_sender!(1),
-                BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
-            )
+            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
+            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()))
             .when()
-            .receive_job_request_from_client(cid!(1), cjid!(1), job_spec.clone());
+            .receive_job_request_from_client(1, 1, job_spec.clone());
 
         fixture
             .expect()
-            .send_message_to_worker(
-                worker_sender!(2),
-                BrokerToWorker::EnqueueJob(jid!(1), job_spec),
-            )
+            .send_message_to_worker(2, BrokerToWorker::EnqueueJob(jid!(1), job_spec))
             .when()
-            .receive_worker_disconnected(wid!(1));
+            .receive_worker_disconnected(1);
     }
 
     #[test]
     fn worker_response_with_no_other_available_jobs() {
-        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 2);
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
         let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
         let result = Ok(outcome!(1));
 
         fixture
             .expect()
-            .start_job(
-                jid!(1),
-                nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::Ready,
-            )
-            .send_message_to_worker(
-                worker_sender!(1),
-                BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()),
-            )
+            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
+            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()))
             .when()
-            .receive_job_request_from_client(cid!(1), cjid!(1), job_spec.clone());
+            .receive_job_request_from_client(1, 1, job_spec.clone());
 
         fixture
             .expect()
-            .complete_job(jid!(1))
-            .send_job_response_to_client(client_sender!(1), cjid!(1), result.clone())
+            .complete_job((1, 1))
+            .send_job_response_to_client(1, 1, result.clone())
             .when()
-            .receive_job_response_from_worker(wid!(1), jid!(1), result.clone());
+            .receive_job_response_from_worker(1, (1, 1), result.clone());
     }
 
     #[test]
     fn worker_response_with_other_available_jobs() {
-        let mut fixture = Fixture::new().with_client(cid!(1)).with_worker(wid!(1), 1);
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 1);
         let job_spec_1 = job_spec!("test_1", [tar_digest!(1), tar_digest!(2)]);
         let job_spec_2 = job_spec!("test_2", [tar_digest!(1)]);
         let job_spec_3 = job_spec!("test_3", [tar_digest!(2)]);
@@ -2340,48 +2320,37 @@ mod tests2 {
 
         fixture
             .expect()
-            .start_job(
-                jid!(1, 1),
-                nonempty![tar_digest!(1), tar_digest!(2)],
-                StartJob::Ready,
-            )
+            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
             .send_message_to_worker(
-                worker_sender!(1),
+                1,
                 BrokerToWorker::EnqueueJob(jid!(1, 1), job_spec_1.clone()),
             )
             .when()
-            .receive_job_request_from_client(cid!(1), cjid!(1), job_spec_1);
+            .receive_job_request_from_client(1, 1, job_spec_1);
 
         fixture
             .expect()
-            .start_job(jid!(1, 2), nonempty![tar_digest!(1)], StartJob::Ready)
+            .start_job((1, 2), [tar_digest!(1)], StartJob::Ready)
             .send_message_to_worker(
-                worker_sender!(1),
+                1,
                 BrokerToWorker::EnqueueJob(jid!(1, 2), job_spec_2.clone()),
             )
             .when()
-            .receive_job_request_from_client(cid!(1), cjid!(2), job_spec_2);
+            .receive_job_request_from_client(1, 2, job_spec_2);
 
         fixture
             .expect()
-            .start_job(jid!(1, 3), nonempty![tar_digest!(2)], StartJob::Ready)
-            .send_job_status_update_to_client(
-                client_sender!(1),
-                cjid!(3),
-                JobBrokerStatus::WaitingForWorker,
-            )
+            .start_job((1, 3), [tar_digest!(2)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 3, JobBrokerStatus::WaitingForWorker)
             .when()
-            .receive_job_request_from_client(cid!(1), cjid!(3), job_spec_3.clone());
+            .receive_job_request_from_client(1, 3, job_spec_3.clone());
 
         fixture
             .expect()
-            .complete_job(jid!(1, 1))
-            .send_job_response_to_client(client_sender!(1), cjid!(1), result_1.clone())
-            .send_message_to_worker(
-                worker_sender!(1),
-                BrokerToWorker::EnqueueJob(jid!(1, 3), job_spec_3),
-            )
+            .complete_job((1, 1))
+            .send_job_response_to_client(1, 1, result_1.clone())
+            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1, 3), job_spec_3))
             .when()
-            .receive_job_response_from_worker(wid!(1), jid!(1), result_1);
+            .receive_job_response_from_worker(1, (1, 1), result_1);
     }
 }
