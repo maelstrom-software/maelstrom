@@ -21,59 +21,65 @@ use tokio::{
     task::{self, JoinSet},
 };
 
-/// Main loop for a client or worker socket-like object (socket or websocket). There should be one
-/// of these for each connected client or worker socket. This function will run until the client or
-/// worker is closed. There is no error return since this function will always eventually run into
-/// an error, and we don't really care what that error is.
-/// Returns a person with the name given them
+/// Main loop for a client, worker, or monitor socket-like object (socket or websocket). There
+/// should be one of these for each connected client, worker, or monitor socket. This function will
+/// run until the client, worker, or monitor is closed. There is no error return since this
+/// function will always eventually run into an error, and we don't really care what that error is.
 ///
 /// # Type Arguments
 ///
-/// * `IdT` - The type of the ID used to identify this client or worker
+/// * `IdT` - The type of the ID used to identify this client, worker, or monitor
 ///
-/// * `FromSchedulerMessageT` - The type of the messages sent from the scheduler to this client or
-///   worker
+/// * `FromSchedulerMessageT` - The type of the messages sent from the scheduler to this client,
+///   worker, or monitor
 ///
 /// # Arguments
 ///
 /// * `scheduler_task_sender` - The sender for sending messages to the sender. A "connected" message
-///   will be sent using this sender which will include a newly-created FromSchedulerMessageT
-///   sender that the scheduler can use to send messages back to this task. After that messages
-///   read from `reader` will be sent to the scheduler over this sender. Finally, when it's time to
-///   disconnected, a "disconnected" message will be sent using this sender
+///   will be sent using this sender which will include a newly-created FromSchedulerTaskMessageT
+///   sender that the scheduler task can use to send messages back to this task. After that
+///   messages read from `reader` will be sent to the scheduler task over this sender. Finally,
+///   when it's time to disconnected, a "disconnected" message will be sent using this sender
 ///
 /// * `id` - The id for this client or worker. This will be used in the "connected" message and the
 ///   "disconnected" message
 ///
-/// * `connected_msg_builder` - A closure used to build the "connected" scheduler message. It takes
-///   the `id` and the newly-created FromSchedulerMessageT sender used to communicate with this
-///   task. This will be sent immediately to the scheduler on `scheduler_task_sender`
+/// * `connected_msg_builder` - A closure used to build the "connected" scheduler task message. It
+///   takes the `id` and the newly-created FromSchedulerTaskMessageT sender used to communicate
+///   with this task. This will be sent immediately to the scheduler task on
+///   `scheduler_task_sender`
 ///
-/// * `disconnected_msg_builder` - A closure used to build the "disconnected" scheduler message. It
-///   takes the `id`. This will be sent on `scheduler_task_sender` right before this function returns to
-///   tell the scheduler that this client/worker has disconnected
+/// * `disconnected_msg_builder` - A closure used to build the "disconnected" scheduler task
+///   message. It takes the `id`. This will be sent on `scheduler_task_sender` right before this
+///   function returns to tell the scheduler task that this client/worker/monitor has disconnected
 ///
 /// * `socket_reader_main` - An async closure that is called on a new task to read all of the
-///   messages from the socket-like object and write them to the supplied scheduler sender. The
-///   scheduler sender will be a clone of `scheduler_task_sender`
+///   messages from the socket-like object and write them to the supplied scheduler task sender.
+///   The scheduler task sender will be a clone of `scheduler_task_sender`
 ///
 /// * `socket_writer_main` - An async closure that is called on a new task to read all of the
-///   messages from the supplied scheduler receiver and write them to the socket-like object. The
-///   scheduler receiver will be a newly-created FromSchedulerMessageT receiver
+///   messages from the supplied scheduler task receiver and write them to the socket-like object.
+///   The scheduler task receiver will be a newly-created FromSchedulerTaskMessageT receiver
 ///
-pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFutureT, TempFileT>(
+pub async fn connection_main<
+    IdT,
+    FromSchedulerTaskMessageT,
+    ReaderFutureT,
+    WriterFutureT,
+    TempFileT,
+>(
     scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     id: IdT,
     connected_msg_builder: impl FnOnce(
         IdT,
-        UnboundedSender<FromSchedulerMessageT>,
+        UnboundedSender<FromSchedulerTaskMessageT>,
     ) -> scheduler_task::Message<TempFileT>,
     disconnected_msg_builder: impl FnOnce(IdT) -> scheduler_task::Message<TempFileT>,
     socket_reader_main: impl FnOnce(scheduler_task::Sender<TempFileT>) -> ReaderFutureT,
-    socket_writer_main: impl FnOnce(UnboundedReceiver<FromSchedulerMessageT>) -> WriterFutureT,
+    socket_writer_main: impl FnOnce(UnboundedReceiver<FromSchedulerTaskMessageT>) -> WriterFutureT,
 ) where
     IdT: Copy + Send + 'static,
-    FromSchedulerMessageT: Serialize + Send + 'static,
+    FromSchedulerTaskMessageT: Serialize + Send + 'static,
     ReaderFutureT: Future<Output = ()> + Send + 'static,
     WriterFutureT: Future<Output = ()> + Send + 'static,
 {
@@ -90,7 +96,7 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
         return;
     }
 
-    // Spawn two tasks to read and write from the socket. Plumb the message queues appropriately.
+    // Spawn two tasks to read and write from the socket.
     let mut join_set = JoinSet::new();
     join_set.spawn(socket_reader_main(scheduler_task_sender.clone()));
     join_set.spawn(socket_writer_main(socket_receiver));
@@ -101,9 +107,7 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
 
     // Tell the scheduler we're done. We do this after waiting for all tasks to complete, since we
     // need to ensure that all messages sent by the socket_reader arrive before this one.
-    scheduler_task_sender
-        .send(disconnected_msg_builder(id))
-        .ok();
+    let _ = scheduler_task_sender.send(disconnected_msg_builder(id));
 }
 
 async fn unassigned_tcp_connection_main<TempFileFactoryT>(
