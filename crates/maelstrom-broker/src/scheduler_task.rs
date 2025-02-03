@@ -11,8 +11,12 @@ use maelstrom_base::{
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
 use scheduler::{Deps, Message, Scheduler};
-use std::{path::PathBuf, sync::mpsc as std_mpsc};
-use tokio::{io::AsyncRead, sync::mpsc as tokio_mpsc, task::JoinSet};
+use std::{path::PathBuf, sync::mpsc::Sender};
+use tokio::{
+    io::AsyncRead,
+    sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
+    task::{self, JoinSet},
+};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct ManifestReadRequest<ArtifactStreamT> {
@@ -26,9 +30,9 @@ pub struct PassThroughSchedulerDeps;
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.
 impl Deps for PassThroughSchedulerDeps {
-    type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
-    type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
-    type MonitorSender = tokio_mpsc::UnboundedSender<BrokerToMonitor>;
+    type ClientSender = UnboundedSender<BrokerToClient>;
+    type WorkerSender = UnboundedSender<BrokerToWorker>;
+    type MonitorSender = UnboundedSender<BrokerToMonitor>;
 
     fn send_job_response_to_client(
         &mut self,
@@ -73,13 +77,13 @@ impl Deps for PassThroughSchedulerDeps {
 #[derive(Debug)]
 struct PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT> {
     task_sender: SchedulerSender<TempFileT>,
-    manifest_reader_sender: tokio_mpsc::UnboundedSender<ManifestReadRequest<ArtifactStreamT>>,
+    manifest_reader_sender: UnboundedSender<ManifestReadRequest<ArtifactStreamT>>,
 }
 
 impl<TempFileT, ArtifactStreamT> PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT> {
     fn new(
         task_sender: SchedulerSender<TempFileT>,
-        manifest_reader_sender: tokio_mpsc::UnboundedSender<ManifestReadRequest<ArtifactStreamT>>,
+        manifest_reader_sender: UnboundedSender<ManifestReadRequest<ArtifactStreamT>>,
     ) -> Self {
         Self {
             task_sender,
@@ -92,8 +96,8 @@ impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
     for PassThroughArtifactGathererDeps<TempFileT, ArtifactStreamT>
 {
     type ArtifactStream = ArtifactStreamT;
-    type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
-    type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
+    type WorkerArtifactFetcherSender = Sender<Option<(PathBuf, u64)>>;
+    type ClientSender = UnboundedSender<BrokerToClient>;
 
     fn send_read_request_to_manifest_reader(
         &mut self,
@@ -142,7 +146,7 @@ impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
 #[derive(Debug)]
 struct CacheManifestReader<ArtifactStreamT, TempFileT> {
     tasks: JoinSet<()>,
-    receiver: tokio_mpsc::UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
+    receiver: UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
     sender: SchedulerSender<TempFileT>,
 }
 
@@ -171,7 +175,7 @@ where
     TempFileT: Send + 'static,
 {
     fn new(
-        receiver: tokio_mpsc::UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
+        receiver: UnboundedReceiver<ManifestReadRequest<ArtifactStreamT>>,
         sender: SchedulerSender<TempFileT>,
     ) -> Self {
         Self {
@@ -197,15 +201,15 @@ where
 
 /// The production scheduler message type.
 pub type SchedulerMessage<TempFileT> = Message<
-    tokio_mpsc::UnboundedSender<BrokerToClient>,
-    tokio_mpsc::UnboundedSender<BrokerToWorker>,
-    tokio_mpsc::UnboundedSender<BrokerToMonitor>,
-    std_mpsc::Sender<Option<(PathBuf, u64)>>,
+    UnboundedSender<BrokerToClient>,
+    UnboundedSender<BrokerToWorker>,
+    UnboundedSender<BrokerToMonitor>,
+    Sender<Option<(PathBuf, u64)>>,
     TempFileT,
 >;
 
 /// This type is used often enough to warrant an alias.
-pub type SchedulerSender<TempFileT> = tokio_mpsc::UnboundedSender<SchedulerMessage<TempFileT>>;
+pub type SchedulerSender<TempFileT> = UnboundedSender<SchedulerMessage<TempFileT>>;
 
 type ArtifactGathererForCache<CacheT> = ArtifactGatherer<
     CacheT,
@@ -252,12 +256,12 @@ pub struct SchedulerTask<CacheT: SchedulerCache> {
     artifact_gatherer: ArtifactGathererForCache<CacheT>,
     scheduler: Scheduler<ArtifactGathererForCache<CacheT>, PassThroughSchedulerDeps>,
     sender: SchedulerSender<CacheT::TempFile>,
-    receiver: tokio_mpsc::UnboundedReceiver<SchedulerMessage<CacheT::TempFile>>,
+    receiver: UnboundedReceiver<SchedulerMessage<CacheT::TempFile>>,
 }
 
 impl<CacheT: SchedulerCache> SchedulerTask<CacheT>
 where
-    CacheT::ArtifactStream: tokio::io::AsyncRead + Unpin + Send + 'static,
+    CacheT::ArtifactStream: AsyncRead + Unpin + Send + 'static,
     CacheT::TempFile: Send + Sync + 'static,
 {
     pub fn new(cache: CacheT) -> Self {
@@ -266,7 +270,7 @@ where
         let (manifest_reader_sender, manifest_reader_receiver) = tokio_mpsc::unbounded_channel();
         let mut manifest_reader =
             CacheManifestReader::new(manifest_reader_receiver, sender.clone());
-        tokio::task::spawn(async move { manifest_reader.run().await });
+        task::spawn(async move { manifest_reader.run().await });
 
         SchedulerTask {
             artifact_gatherer: ArtifactGatherer::new(
@@ -290,12 +294,12 @@ where
     /// the receiver are closed, which will happen when the listener and all outstanding worker and
     /// client socket tasks terminate.
     ///
-    /// This function ignores any errors it encounters sending a message to an
-    /// [tokio_mpsc::UnboundedSender]. The rationale is that this indicates that the socket
-    /// connection has closed, and there are no more worker tasks to handle that connection. This
-    /// means that a disconnected message is on its way to notify the scheduler. It is best to just
-    /// ignore the error in that case. Besides, the [scheduler::SchedulerDeps] interface doesn't
-    /// give us a way to return an error, for precisely this reason.
+    /// This function ignores any errors it encounters sending a message to an [`UnboundedSender`].
+    /// The rationale is that this indicates that the socket connection has closed, and there are
+    /// no more worker tasks to handle that connection. This means that a disconnected message is
+    /// on its way to notify the scheduler. It is best to just ignore the error in that case.
+    /// Besides, the [`scheduler::Deps`] interface doesn't give us a way to return an error, for
+    /// precisely this reason.
     pub async fn run(mut self) {
         sync::channel_reader(self.receiver, |msg| match msg {
             Message::ClientConnected(id, sender) => {
