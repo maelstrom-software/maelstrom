@@ -4,7 +4,7 @@
 use crate::scheduler_task::artifact_gatherer::StartJob;
 use enum_map::enum_map;
 use maelstrom_base::{
-    proto::{BrokerToMonitor, BrokerToWorker},
+    proto::BrokerToMonitor,
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
@@ -61,7 +61,13 @@ pub trait SchedulerDeps {
         cjid: ClientJobId,
         status: JobBrokerStatus,
     );
-    fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker);
+    fn send_enqueue_job_to_worker(
+        &mut self,
+        sender: &mut Self::WorkerSender,
+        jid: JobId,
+        spec: JobSpec,
+    );
+    fn send_cancel_job_to_worker(&mut self, sender: &mut Self::WorkerSender, jid: JobId);
     fn send_message_to_monitor(
         &mut self,
         sender: &mut Self::MonitorSender,
@@ -308,10 +314,8 @@ where
 
             let jid = self.queued_jobs.pop().unwrap().jid;
             let job = self.clients.job_from_jid(jid);
-            self.deps.send_message_to_worker(
-                &mut worker.sender,
-                BrokerToWorker::EnqueueJob(jid, job.spec.clone()),
-            );
+            self.deps
+                .send_enqueue_job_to_worker(&mut worker.sender, jid, job.spec.clone());
             just_enqueued.remove(&jid);
 
             worker.pending.insert(jid).assert_is_true();
@@ -354,10 +358,8 @@ where
             worker.pending.retain(|jid| {
                 let retain = jid.cid != cid;
                 if !retain {
-                    self.deps.send_message_to_worker(
-                        &mut worker.sender,
-                        BrokerToWorker::CancelJob(*jid),
-                    );
+                    self.deps
+                        .send_cancel_job_to_worker(&mut worker.sender, *jid);
                 }
                 retain
             });
@@ -458,10 +460,8 @@ where
             // the queue and not have to update the worker's used slot count or position in the
             // workers list.
             let job = self.clients.job_from_jid(jid);
-            self.deps.send_message_to_worker(
-                &mut worker.sender,
-                BrokerToWorker::EnqueueJob(jid, job.spec.clone()),
-            );
+            self.deps
+                .send_enqueue_job_to_worker(&mut worker.sender, jid, job.spec.clone());
             worker.pending.insert(jid);
         } else {
             // Since there are no queued_requests, we're going to have to update the
@@ -747,12 +747,21 @@ mod tests {
             ));
         }
 
-        fn send_message_to_worker(
+        fn send_enqueue_job_to_worker(
             &mut self,
             sender: &mut TestWorkerSender,
-            message: BrokerToWorker,
+            jid: JobId,
+            spec: JobSpec,
         ) {
-            self.borrow_mut().messages.push(ToWorker(sender.0, message));
+            self.borrow_mut()
+                .messages
+                .push(ToWorker(sender.0, BrokerToWorker::EnqueueJob(jid, spec)));
+        }
+
+        fn send_cancel_job_to_worker(&mut self, sender: &mut TestWorkerSender, jid: JobId) {
+            self.borrow_mut()
+                .messages
+                .push(ToWorker(sender.0, BrokerToWorker::CancelJob(jid)));
         }
 
         fn send_message_to_monitor(
@@ -1621,7 +1630,7 @@ mod tests {
 mod tests2 {
     use super::*;
     use maelstrom_base::{job_spec, tar_digest};
-    use maelstrom_test::{jid, outcome};
+    use maelstrom_test::outcome;
     use std::{
         cell::RefCell,
         ops::{Deref, DerefMut},
@@ -1640,14 +1649,15 @@ mod tests2 {
     #[derive(Default)]
     struct Mock {
         // ArtifactGatherer
-        client_connected: Vec<ClientId>,
-        client_disconnected: Vec<ClientId>,
+        client_connected: HashSet<ClientId>,
+        client_disconnected: HashSet<ClientId>,
         start_job: Vec<(JobId, NonEmpty<(Sha256Digest, ArtifactType)>, StartJob)>,
-        complete_job: Vec<JobId>,
+        complete_job: HashSet<JobId>,
         // Deps
         send_job_response_to_client: Vec<(ClientId, ClientJobId, JobOutcomeResult)>,
         send_job_status_update_to_client: Vec<(ClientId, ClientJobId, JobBrokerStatus)>,
-        send_message_to_worker: Vec<(WorkerId, BrokerToWorker)>,
+        send_enqueue_job_to_worker: Vec<(WorkerId, JobId, JobSpec)>,
+        send_cancel_job_to_worker: HashSet<(WorkerId, JobId)>,
         send_message_to_monitor: Vec<(MonitorId, BrokerToMonitor)>,
     }
 
@@ -1684,9 +1694,14 @@ mod tests2 {
                 self.send_job_status_update_to_client,
             );
             assert!(
-                self.send_message_to_worker.is_empty(),
-                "unused mock entries for Deps::send_message_to_worker: {:?}",
-                self.send_message_to_worker,
+                self.send_enqueue_job_to_worker.is_empty(),
+                "unused mock entries for Deps::send_enqueue_job_to_worker: {:?}",
+                self.send_enqueue_job_to_worker,
+            );
+            assert!(
+                self.send_cancel_job_to_worker.is_empty(),
+                "unused mock entries for Deps::send_cancel_job_to_worker: {:?}",
+                self.send_cancel_job_to_worker,
             );
             assert!(
                 self.send_message_to_monitor.is_empty(),
@@ -1701,25 +1716,17 @@ mod tests2 {
 
         fn client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
             assert_eq!(sender.0, cid);
-            let client_connected = &mut self.borrow_mut().client_connected;
-            let index = client_connected
-                .iter()
-                .position(|e| *e == cid)
-                .expect(&format!(
-                    "sending unexpected client_connected to artifact gatherer for client {cid}"
-                ));
-            client_connected.remove(index);
+            assert!(
+                self.borrow_mut().client_connected.remove(&cid),
+                "sending unexpected client_connected to artifact gatherer for client {cid}",
+            );
         }
 
         fn client_disconnected(&mut self, cid: ClientId) {
-            let client_disconnected = &mut self.borrow_mut().client_disconnected;
-            let index = client_disconnected
-                .iter()
-                .position(|e| *e == cid)
-                .expect(&format!(
-                    "sending unexpected client_disconnected to artifact gatherer for client {cid}"
-                ));
-            client_disconnected.remove(index);
+            assert!(
+                self.borrow_mut().client_disconnected.remove(&cid),
+                "sending unexpected client_disconnected to artifact gatherer for client {cid}",
+            );
         }
 
         fn start_job(
@@ -1738,11 +1745,10 @@ mod tests2 {
         }
 
         fn job_completed(&mut self, jid: JobId) {
-            let complete_job = &mut self.borrow_mut().complete_job;
-            let index = complete_job.iter().position(|e| *e == jid).expect(&format!(
+            assert!(
+                self.borrow_mut().complete_job.remove(&jid),
                 "sending unexpected complete_job to artifact gatherer for job {jid}"
-            ));
-            complete_job.remove(index);
+            );
         }
 
         fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
@@ -1783,24 +1789,42 @@ mod tests2 {
                 .iter()
                 .position(|e| e.0 == sender.0 && e.1 == cjid && e.2 == status)
                 .expect(&format!(
-                    "sending unexpected message to client {sender:?}: {cjid} {status:?}"
+                    "sending unexpected job_status_update to client {sender:?}: {cjid} {status:?}"
                 ));
             send_job_status_update_to_client.remove(index);
         }
 
-        fn send_message_to_worker(
+        fn send_enqueue_job_to_worker(
             &mut self,
             sender: &mut Self::WorkerSender,
-            message: BrokerToWorker,
+            jid: JobId,
+            spec: JobSpec,
         ) {
-            let send_message_to_worker = &mut self.borrow_mut().send_message_to_worker;
-            let index = send_message_to_worker
+            let vec = &mut self.borrow_mut().send_enqueue_job_to_worker;
+            let wid = sender.0;
+            let spec_clone = spec.clone();
+            let index = vec
                 .iter()
-                .position(|e| e.0 == sender.0 && e.1 == message)
+                .position(move |e| {
+                    e == {
+                        let spec = spec_clone.clone();
+                        &(wid, jid, spec)
+                    }
+                })
                 .expect(&format!(
-                    "sending unexpected message to worker {sender:?}: {message:#?}"
+                    "sending unexpected enqueue_job to worker {wid}: {jid} {spec:?}"
                 ));
-            send_message_to_worker.remove(index);
+            vec.remove(index);
+        }
+
+        fn send_cancel_job_to_worker(&mut self, sender: &mut Self::WorkerSender, jid: JobId) {
+            let wid = sender.0;
+            assert!(
+                self.borrow_mut()
+                    .send_cancel_job_to_worker
+                    .remove(&(wid, jid)),
+                "sending unexpected cancel_job to worker {wid}: {jid}",
+            );
         }
 
         fn send_message_to_monitor(
@@ -1944,7 +1968,8 @@ mod tests2 {
                 .mock
                 .borrow_mut()
                 .client_connected
-                .push(cid.into());
+                .insert(cid.into())
+                .assert_is_true();
             self
         }
 
@@ -2008,7 +2033,12 @@ mod tests2 {
         */
 
         fn complete_job(self, jid: impl Into<JobId>) -> Self {
-            self.fixture.mock.borrow_mut().complete_job.push(jid.into());
+            self.fixture
+                .mock
+                .borrow_mut()
+                .complete_job
+                .insert(jid.into())
+                .assert_is_true();
             self
         }
 
@@ -2058,18 +2088,35 @@ mod tests2 {
             self
         }
 
-        fn send_message_to_worker(
+        fn send_enqueue_job_to_worker(
             self,
             wid: impl Into<WorkerId>,
-            message: impl Into<BrokerToWorker>,
+            jid: impl Into<JobId>,
+            spec: impl Into<JobSpec>,
         ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
-                .send_message_to_worker
-                .push((wid.into(), message.into()));
+                .send_enqueue_job_to_worker
+                .push((wid.into(), jid.into(), spec.into()));
             self
         }
+
+        /*
+        fn send_cancel_job_to_worker(
+            self,
+            wid: impl Into<WorkerId>,
+            jid: impl Into<JobId>,
+        ) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .send_cancel_job_to_worker
+                .insert((wid.into(), jid.into()))
+                .assert_is_true();
+            self
+        }
+        */
 
         /*
         fn send_message_to_monitor(
@@ -2186,7 +2233,7 @@ mod tests2 {
         fixture
             .expect()
             .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()))
+            .send_enqueue_job_to_worker(1, (1, 1), job_spec.clone())
             .when()
             .receive_job_request_from_client(1, 1, job_spec);
     }
@@ -2205,7 +2252,7 @@ mod tests2 {
 
         fixture
             .expect()
-            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec))
+            .send_enqueue_job_to_worker(1, (1, 1), job_spec)
             .when()
             .receive_worker_connected(1, 2);
     }
@@ -2250,7 +2297,7 @@ mod tests2 {
         fixture
             .expect()
             .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()))
+            .send_enqueue_job_to_worker(1, (1, 1), job_spec.clone())
             .when()
             .receive_job_request_from_client(1, 1, job_spec.clone());
 
@@ -2262,7 +2309,7 @@ mod tests2 {
 
         fixture
             .expect()
-            .send_message_to_worker(2, BrokerToWorker::EnqueueJob(jid!(1), job_spec))
+            .send_enqueue_job_to_worker(2, (1, 1), job_spec)
             .when()
             .receive_worker_connected(2, 2);
     }
@@ -2278,13 +2325,13 @@ mod tests2 {
         fixture
             .expect()
             .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()))
+            .send_enqueue_job_to_worker(1, (1, 1), job_spec.clone())
             .when()
             .receive_job_request_from_client(1, 1, job_spec.clone());
 
         fixture
             .expect()
-            .send_message_to_worker(2, BrokerToWorker::EnqueueJob(jid!(1), job_spec))
+            .send_enqueue_job_to_worker(2, (1, 1), job_spec)
             .when()
             .receive_worker_disconnected(1);
     }
@@ -2298,7 +2345,7 @@ mod tests2 {
         fixture
             .expect()
             .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1), job_spec.clone()))
+            .send_enqueue_job_to_worker(1, (1, 1), job_spec.clone())
             .when()
             .receive_job_request_from_client(1, 1, job_spec.clone());
 
@@ -2321,20 +2368,14 @@ mod tests2 {
         fixture
             .expect()
             .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_message_to_worker(
-                1,
-                BrokerToWorker::EnqueueJob(jid!(1, 1), job_spec_1.clone()),
-            )
+            .send_enqueue_job_to_worker(1, (1, 1), job_spec_1.clone())
             .when()
             .receive_job_request_from_client(1, 1, job_spec_1);
 
         fixture
             .expect()
             .start_job((1, 2), [tar_digest!(1)], StartJob::Ready)
-            .send_message_to_worker(
-                1,
-                BrokerToWorker::EnqueueJob(jid!(1, 2), job_spec_2.clone()),
-            )
+            .send_enqueue_job_to_worker(1, (1, 2), job_spec_2.clone())
             .when()
             .receive_job_request_from_client(1, 2, job_spec_2);
 
@@ -2349,7 +2390,7 @@ mod tests2 {
             .expect()
             .complete_job((1, 1))
             .send_job_response_to_client(1, 1, result_1.clone())
-            .send_message_to_worker(1, BrokerToWorker::EnqueueJob(jid!(1, 3), job_spec_3))
+            .send_enqueue_job_to_worker(1, (1, 3), job_spec_3)
             .when()
             .receive_job_response_from_worker(1, (1, 1), result_1);
     }
