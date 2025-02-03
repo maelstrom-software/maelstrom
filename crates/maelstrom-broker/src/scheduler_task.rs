@@ -87,9 +87,13 @@ impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
 
     fn send_read_request_to_manifest_reader(
         &mut self,
-        req: ManifestReadRequest<Self::ArtifactStream>,
+        manifest_stream: ArtifactStreamT,
+        manifest_digest: Sha256Digest,
     ) {
-        let _ = self.manifest_reader_sender.send(req);
+        let _ = self.manifest_reader_sender.send(ManifestReadRequest {
+            manifest_stream,
+            digest: manifest_digest,
+        });
     }
 
     fn send_response_to_worker_artifact_fetcher(

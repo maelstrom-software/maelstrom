@@ -773,9 +773,15 @@ mod tests {
 
         fn send_read_request_to_manifest_reader(
             &mut self,
-            req: ManifestReadRequest<TestArtifactStream>,
+            manifest_stream: Self::ArtifactStream,
+            manifest_digest: Sha256Digest,
         ) {
-            self.borrow_mut().messages.push(ReadManifest(req));
+            self.borrow_mut()
+                .messages
+                .push(ReadManifest(ManifestReadRequest {
+                    manifest_stream,
+                    digest: manifest_digest,
+                }));
         }
 
         fn send_response_to_worker_artifact_fetcher(

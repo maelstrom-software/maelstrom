@@ -1,4 +1,4 @@
-use crate::{cache::SchedulerCache, scheduler_task::ManifestReadRequest};
+use crate::cache::SchedulerCache;
 use get_size::GetSize;
 use maelstrom_base::{
     ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest,
@@ -21,7 +21,8 @@ pub trait Deps {
     type ClientSender;
     fn send_read_request_to_manifest_reader(
         &mut self,
-        request: ManifestReadRequest<Self::ArtifactStream>,
+        manifest_stream: Self::ArtifactStream,
+        manifest_digest: Sha256Digest,
     );
     fn send_response_to_worker_artifact_fetcher(
         &mut self,
@@ -495,10 +496,7 @@ where
         assert!(manifest_reads.in_progress < manifest_reads.max_in_progress.get());
         manifest_reads.in_progress += 1;
         let manifest_stream = cache.read_artifact(&digest);
-        deps.send_read_request_to_manifest_reader(ManifestReadRequest {
-            manifest_stream,
-            digest,
-        });
+        deps.send_read_request_to_manifest_reader(manifest_stream, digest);
     }
 
     /// Called when a client finishes an upload of an artifact. We must notify the cache, which
@@ -708,7 +706,7 @@ mod tests {
     #[derive(Default)]
     struct Mock {
         // Deps.
-        send_message_to_manifest_reader: HashSet<ManifestReadRequest<i32>>,
+        send_message_to_manifest_reader: HashSet<(i32, Sha256Digest)>,
         send_message_to_worker_artifact_fetcher: HashSet<(i32, Option<(PathBuf, u64)>)>,
         send_transfer_artifact_to_client: Vec<(ClientId, Sha256Digest)>,
         send_general_error_to_client: Vec<(ClientId, String)>,
@@ -814,13 +812,14 @@ mod tests {
 
         fn send_read_request_to_manifest_reader(
             &mut self,
-            request: ManifestReadRequest<Self::ArtifactStream>,
+            manifest_stream: Self::ArtifactStream,
+            manifest_digest: Sha256Digest,
         ) {
             assert!(
                 self.borrow_mut()
                     .send_message_to_manifest_reader
-                    .remove(&request),
-                "sending unexpected message to manifest reader: {request:#?}"
+                    .remove(&(manifest_stream, manifest_digest.clone())),
+                "sending unexpected message to manifest reader: {manifest_stream} {manifest_digest}"
             );
         }
 
@@ -1101,10 +1100,7 @@ mod tests {
                 .mock
                 .borrow_mut()
                 .send_message_to_manifest_reader
-                .insert(ManifestReadRequest {
-                    digest: digest.into(),
-                    manifest_stream,
-                })
+                .insert((manifest_stream, digest.into()))
                 .assert_is_true();
             self
         }
