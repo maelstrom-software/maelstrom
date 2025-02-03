@@ -19,11 +19,11 @@ pub trait Deps {
     type ArtifactStream;
     type WorkerArtifactFetcherSender;
     type ClientSender;
-    fn send_message_to_manifest_reader(
+    fn send_read_request_to_manifest_reader(
         &mut self,
         request: ManifestReadRequest<Self::ArtifactStream>,
     );
-    fn send_message_to_worker_artifact_fetcher(
+    fn send_response_to_worker_artifact_fetcher(
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
         message: Option<(PathBuf, u64)>,
@@ -495,7 +495,7 @@ where
         assert!(manifest_reads.in_progress < manifest_reads.max_in_progress.get());
         manifest_reads.in_progress += 1;
         let manifest_stream = cache.read_artifact(&digest);
-        deps.send_message_to_manifest_reader(ManifestReadRequest {
+        deps.send_read_request_to_manifest_reader(ManifestReadRequest {
             manifest_stream,
             digest,
         });
@@ -664,7 +664,7 @@ where
         digest: Sha256Digest,
         mut sender: DepsT::WorkerArtifactFetcherSender,
     ) {
-        self.deps.send_message_to_worker_artifact_fetcher(
+        self.deps.send_response_to_worker_artifact_fetcher(
             &mut sender,
             self.cache.get_artifact_for_worker(&digest),
         );
@@ -812,7 +812,7 @@ mod tests {
         type WorkerArtifactFetcherSender = i32;
         type ClientSender = TestClientSender;
 
-        fn send_message_to_manifest_reader(
+        fn send_read_request_to_manifest_reader(
             &mut self,
             request: ManifestReadRequest<Self::ArtifactStream>,
         ) {
@@ -824,7 +824,7 @@ mod tests {
             );
         }
 
-        fn send_message_to_worker_artifact_fetcher(
+        fn send_response_to_worker_artifact_fetcher(
             &mut self,
             sender: &mut Self::WorkerArtifactFetcherSender,
             message: Option<(PathBuf, u64)>,

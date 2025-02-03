@@ -85,11 +85,14 @@ impl<TempFileT, ArtifactStreamT> ArtifactGathererDeps
     type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
     type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
 
-    fn send_message_to_manifest_reader(&mut self, req: ManifestReadRequest<Self::ArtifactStream>) {
+    fn send_read_request_to_manifest_reader(
+        &mut self,
+        req: ManifestReadRequest<Self::ArtifactStream>,
+    ) {
         let _ = self.manifest_reader_sender.send(req);
     }
 
-    fn send_message_to_worker_artifact_fetcher(
+    fn send_response_to_worker_artifact_fetcher(
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
         message: Option<(PathBuf, u64)>,

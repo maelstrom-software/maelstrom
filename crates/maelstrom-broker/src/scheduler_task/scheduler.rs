@@ -771,14 +771,14 @@ mod tests {
         type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
         type ClientSender = TestClientSender;
 
-        fn send_message_to_manifest_reader(
+        fn send_read_request_to_manifest_reader(
             &mut self,
             req: ManifestReadRequest<TestArtifactStream>,
         ) {
             self.borrow_mut().messages.push(ReadManifest(req));
         }
 
-        fn send_message_to_worker_artifact_fetcher(
+        fn send_response_to_worker_artifact_fetcher(
             &mut self,
             sender: &mut TestWorkerArtifactFetcherSender,
             message: Option<(PathBuf, u64)>,
