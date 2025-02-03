@@ -5,8 +5,7 @@ use crate::scheduler_task::artifact_gatherer::StartJob;
 use enum_map::enum_map;
 use maelstrom_base::{
     stats::{
-        BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
-        WorkerStatistics,
+        BrokerStatistics, JobState, JobStatisticsSample, JobStatisticsTimeSeries, WorkerStatistics,
     },
     ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
     JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
@@ -466,48 +465,39 @@ where
         todo!("{jobs:?} {err}");
     }
 
-    fn sample_job_statistics_for_client(
-        &self,
-        artifact_gatherer: &mut ArtifactGathererT,
-        cid: ClientId,
-    ) -> JobStateCounts {
-        enum_map! {
-            JobState::WaitingForArtifacts => {
-                artifact_gatherer.get_waiting_for_artifacts_count(cid)
-            }
-            JobState::Pending => {
-                self
-                    .queued_jobs
-                    .iter()
-                    .filter(|QueuedJob { jid, .. }| jid.cid == cid)
-                    .count() as u64
-            }
-            JobState::Running => {
-                self
-                    .workers
-                    .values()
-                    .flat_map(|w| w.pending.iter())
-                    .filter(|jid| jid.cid == cid)
-                    .count() as u64
-            }
-            JobState::Complete => self.clients.get(&cid).unwrap().num_completed_jobs,
-        }
-    }
-
     pub fn receive_statistics_heartbeat(&mut self, artifact_gatherer: &mut ArtifactGathererT) {
-        let sample = JobStatisticsSample {
-            client_to_stats: self
-                .clients
-                .keys()
-                .map(|&cid| {
-                    (
-                        cid,
-                        self.sample_job_statistics_for_client(artifact_gatherer, cid),
-                    )
-                })
-                .collect(),
-        };
-        self.job_statistics.insert(sample);
+        let client_to_stats = self
+            .clients
+            .keys()
+            .map(|&cid| {
+                (
+                    cid,
+                    enum_map! {
+                        JobState::WaitingForArtifacts => {
+                            artifact_gatherer.get_waiting_for_artifacts_count(cid)
+                        }
+                        JobState::Pending => {
+                            self
+                                .queued_jobs
+                                .iter()
+                                .filter(|QueuedJob { jid, .. }| jid.cid == cid)
+                                .count() as u64
+                        }
+                        JobState::Running => {
+                            self
+                                .workers
+                                .values()
+                                .flat_map(|w| w.pending.iter())
+                                .filter(|jid| jid.cid == cid)
+                                .count() as u64
+                        }
+                        JobState::Complete => self.clients.get(&cid).unwrap().num_completed_jobs,
+                    },
+                )
+            })
+            .collect();
+        self.job_statistics
+            .insert(JobStatisticsSample { client_to_stats });
     }
 }
 
