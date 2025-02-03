@@ -20,6 +20,7 @@ use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap, HashSet},
     marker::PhantomData,
+    ops::{Deref, DerefMut},
     time::Duration,
 };
 
@@ -102,6 +103,19 @@ impl<DepsT: Deps> ClientMap<DepsT> {
     }
 }
 
+impl<DepsT: Deps> Deref for ClientMap<DepsT> {
+    type Target = HashMap<ClientId, Client<DepsT>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<DepsT: Deps> DerefMut for ClientMap<DepsT> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 struct Worker<DepsT: Deps> {
     slots: usize,
     pending: HashSet<JobId>,
@@ -135,6 +149,19 @@ impl<DepsT: Deps> HeapDeps for WorkerMap<DepsT> {
 
     fn update_index(&mut self, elem: &WorkerId, idx: HeapIndex) {
         self.0.get_mut(elem).unwrap().heap_index = idx;
+    }
+}
+
+impl<DepsT: Deps> Deref for WorkerMap<DepsT> {
+    type Target = HashMap<WorkerId, Worker<DepsT>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<DepsT: Deps> DerefMut for WorkerMap<DepsT> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -227,7 +254,7 @@ where
             self.worker_heap.sift_down(&mut self.workers, heap_index);
         }
         for jid in just_enqueued {
-            let client = self.clients.0.get_mut(&jid.cid).unwrap();
+            let client = self.clients.get_mut(&jid.cid).unwrap();
             self.deps.send_job_status_update_to_client(
                 &mut client.sender,
                 jid.cjid,
@@ -255,10 +282,10 @@ where
         cid: ClientId,
     ) {
         artifact_gatherer.client_disconnected(cid);
-        self.clients.0.remove(&cid).assert_is_some();
+        self.clients.remove(&cid).assert_is_some();
 
         self.queued_jobs.retain(|qj| qj.jid.cid != cid);
-        for worker in self.workers.0.values_mut() {
+        for worker in self.workers.values_mut() {
             worker.pending.retain(|jid| {
                 let retain = jid.cid != cid;
                 if !retain {
@@ -283,7 +310,7 @@ where
         let priority = spec.priority;
         let estimated_duration = spec.estimated_duration;
 
-        let client = self.clients.0.get_mut(&cid).unwrap();
+        let client = self.clients.get_mut(&cid).unwrap();
         let jid = JobId { cid, cjid };
         client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
 
@@ -310,7 +337,6 @@ where
         sender: DepsT::WorkerSender,
     ) {
         self.workers
-            .0
             .insert(id, Worker::new(slots, sender))
             .assert_is_none();
         self.worker_heap.push(&mut self.workers, id);
@@ -318,7 +344,7 @@ where
     }
 
     pub fn receive_worker_disconnected(&mut self, id: WorkerId) {
-        let mut worker = self.workers.0.remove(&id).unwrap();
+        let mut worker = self.workers.remove(&id).unwrap();
         self.worker_heap
             .remove(&mut self.workers, worker.heap_index);
 
@@ -343,7 +369,7 @@ where
         jid: JobId,
         result: JobOutcomeResult,
     ) {
-        let worker = self.workers.0.get_mut(&wid).unwrap();
+        let worker = self.workers.get_mut(&wid).unwrap();
 
         if !worker.pending.remove(&jid) {
             // This indicates that the client isn't around anymore. Just ignore this response from
@@ -352,7 +378,7 @@ where
             return;
         }
 
-        let client = self.clients.0.get_mut(&jid.cid).unwrap();
+        let client = self.clients.get_mut(&jid.cid).unwrap();
         self.deps
             .send_job_response_to_client(&mut client.sender, jid.cjid, result);
         client.jobs.remove(&jid.cjid).assert_is_some();
@@ -381,11 +407,11 @@ where
         jid: JobId,
         status: JobWorkerStatus,
     ) {
-        if !self.workers.0.get(&wid).unwrap().pending.contains(&jid) {
+        if !self.workers.get(&wid).unwrap().pending.contains(&jid) {
             // This indicates that the client isn't around anymore. Just ignore this status update.
             return;
         }
-        let client = self.clients.0.get_mut(&jid.cid).unwrap();
+        let client = self.clients.get_mut(&jid.cid).unwrap();
         self.deps.send_job_status_update_to_client(
             &mut client.sender,
             jid.cjid,
@@ -402,7 +428,7 @@ where
     }
 
     pub fn receive_statistics_request_from_monitor(&mut self, mid: MonitorId) {
-        let worker_iter = self.workers.0.iter();
+        let worker_iter = self.workers.iter();
         let resp = BrokerStatistics {
             worker_statistics: worker_iter
                 .map(|(id, w)| (*id, WorkerStatistics { slots: w.slots }))
@@ -416,7 +442,7 @@ where
     pub fn receive_jobs_ready_from_artifact_gatherer(&mut self, ready: NonEmpty<JobId>) {
         let just_enqueued = ready
             .into_iter()
-            .filter(|jid| match self.clients.0.get_mut(&jid.cid) {
+            .filter(|jid| match self.clients.get_mut(&jid.cid) {
                 None => false,
                 Some(client) => {
                     let job = client.jobs.get(&jid.cjid).unwrap();
@@ -459,13 +485,12 @@ where
             JobState::Running => {
                 self
                     .workers
-                    .0
                     .values()
                     .flat_map(|w| w.pending.iter())
                     .filter(|jid| jid.cid == cid)
                     .count() as u64
             }
-            JobState::Complete => self.clients.0.get(&cid).unwrap().num_completed_jobs,
+            JobState::Complete => self.clients.get(&cid).unwrap().num_completed_jobs,
         }
     }
 
@@ -473,7 +498,6 @@ where
         let sample = JobStatisticsSample {
             client_to_stats: self
                 .clients
-                .0
                 .keys()
                 .map(|&cid| {
                     (
