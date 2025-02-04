@@ -3468,6 +3468,7 @@ dependencies = [
  "maelstrom-web",
  "maplit",
  "ref-cast",
+ "rstest",
  "serde",
  "slog",
  "strum",

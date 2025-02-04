@@ -7,7 +7,7 @@ pub trait OptionExt<T> {
     fn assert_is_none(self);
     fn assert_is_some(self);
     fn expect_is_none(self, f: impl Fn(T) -> String);
-    fn expect_is_some(self, f: impl Fn() -> String);
+    fn expect_is_some(self, f: impl Fn() -> String) -> T;
 }
 
 impl<T> OptionExt<T> for Option<T> {
@@ -26,9 +26,12 @@ impl<T> OptionExt<T> for Option<T> {
         }
     }
     #[track_caller]
-    fn expect_is_some(self, f: impl Fn() -> String) {
-        if self.is_none() {
-            panic!("{}", f());
+    fn expect_is_some(self, f: impl Fn() -> String) -> T {
+        match self {
+            None => {
+                panic!("{}", f());
+            }
+            Some(val) => val,
         }
     }
 }

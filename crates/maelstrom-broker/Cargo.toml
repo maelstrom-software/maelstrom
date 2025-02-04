@@ -43,4 +43,5 @@ colored-diff.workspace = true
 itertools.workspace = true
 maplit.workspace = true
 maelstrom-test.workspace = true
+rstest.workspace = true
 strum.workspace = true

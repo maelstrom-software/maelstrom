@@ -221,7 +221,9 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         cid: ClientId,
     ) {
         artifact_gatherer.client_disconnected(cid);
-        self.clients.remove(&cid).assert_is_some();
+        self.clients.remove(&cid).expect_is_some(|| {
+            format!("received client_disconnected message for unknown client: {cid}")
+        });
 
         self.queued_jobs.retain(|qj| qj.jid.cid != cid);
         for worker in self.workers.values_mut() {
@@ -250,8 +252,14 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         let priority = spec.priority;
         let estimated_duration = spec.estimated_duration;
 
-        let client = self.clients.get_mut(&cid).unwrap();
-        client.jobs.insert(cjid, spec).assert_is_none();
+        let client = self
+            .clients
+            .get_mut(&cid)
+            .expect_is_some(|| format!("received job_request from unknown client: {cid}"));
+        client
+            .jobs
+            .insert(cjid, spec)
+            .expect_is_none(|_| format!("received job_request for duplicate job ID: {jid}"));
 
         match artifact_gatherer.start_job(jid, layers) {
             StartJob::Ready => {
@@ -320,13 +328,17 @@ impl<DepsT: Deps> Scheduler<DepsT> {
     ) {
         self.workers
             .insert(wid, Worker::new(slots, sender))
-            .assert_is_none();
+            .expect_is_none(|_| {
+                format!("received worker_connected message for duplicate worker: {wid}")
+            });
         self.worker_heap.push(&mut self.workers, wid);
         self.possibly_start_jobs(HashSet::default());
     }
 
-    pub fn receive_worker_disconnected(&mut self, id: WorkerId) {
-        let worker = self.workers.remove(&id).unwrap();
+    pub fn receive_worker_disconnected(&mut self, wid: WorkerId) {
+        let worker = self.workers.remove(&wid).expect_is_some(|| {
+            format!("received worker_disconnected message for unknown worker: {wid}")
+        });
         self.worker_heap
             .remove(&mut self.workers, worker.heap_index);
 
@@ -348,8 +360,10 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         jid: JobId,
         result: JobOutcomeResult,
     ) {
-        let worker = self.workers.get_mut(&wid).unwrap();
-
+        let worker = self
+            .workers
+            .get_mut(&wid)
+            .expect_is_some(|| format!("received job_response message from unknown worker: {wid}"));
         if !worker.pending.remove(&jid) {
             // This indicates that the client isn't around anymore. Just ignore this response from
             // the worker. When the client disconnected, we canceled all of the outstanding
@@ -384,10 +398,14 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         jid: JobId,
         status: JobWorkerStatus,
     ) {
-        if !self.workers.get(&wid).unwrap().pending.contains(&jid) {
+        let worker = self.workers.get_mut(&wid).expect_is_some(|| {
+            format!("received job_status_update message from unknown worker: {wid}")
+        });
+        if !worker.pending.contains(&jid) {
             // This indicates that the client isn't around anymore. Just ignore this status update.
             return;
         }
+
         let client = self.clients.get_mut(&jid.cid).unwrap();
         self.deps.send_job_status_update_to_client(
             &mut client.sender,
@@ -396,17 +414,24 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         );
     }
 
-    pub fn receive_monitor_connected(&mut self, id: MonitorId, sender: DepsT::MonitorSender) {
-        self.monitors.insert(id, sender).assert_is_none();
+    pub fn receive_monitor_connected(&mut self, mid: MonitorId, sender: DepsT::MonitorSender) {
+        self.monitors.insert(mid, sender).expect_is_none(|_| {
+            format!("received monitor_connected message for duplicate monitor: {mid}")
+        });
     }
 
-    pub fn receive_monitor_disconnected(&mut self, id: MonitorId) {
-        self.monitors.remove(&id).assert_is_some();
+    pub fn receive_monitor_disconnected(&mut self, mid: MonitorId) {
+        self.monitors.remove(&mid).expect_is_some(|| {
+            format!("received monitor_disconnected message for unknown monitor: {mid}")
+        });
     }
 
     pub fn receive_statistics_request_from_monitor(&mut self, mid: MonitorId) {
+        let sender = self.monitors.get_mut(&mid).expect_is_some(|| {
+            format!("received statistics_request message from unknown monitor: {mid}")
+        });
         self.deps.send_statistics_response_to_monitor(
-            self.monitors.get_mut(&mid).unwrap(),
+            sender,
             BrokerStatistics {
                 worker_statistics: self
                     .workers
@@ -427,6 +452,11 @@ impl<DepsT: Deps> Scheduler<DepsT> {
                 .collect(),
         });
     }
+
+    #[cfg(test)]
+    fn get_job_state_counts_for_client(&self, cid: ClientId) -> JobStateCounts {
+        self.clients.get(&cid).unwrap().counts.clone()
+    }
 }
 
 /*  _            _
@@ -440,1040 +470,11 @@ impl<DepsT: Deps> Scheduler<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        cache::SchedulerCache,
-        scheduler_task::{
-            artifact_gatherer::Deps as ArtifactGathererDeps,
-            ManifestReadRequest,
-            Message::{self, *},
-        },
-    };
-    use anyhow::{Error, Result};
     use enum_map::enum_map;
-    use itertools::Itertools;
-    use maelstrom_base::{
-        digest, job_spec,
-        proto::{
-            BrokerToClient, BrokerToMonitor,
-            BrokerToWorker::{self, *},
-        },
-        tar_digest,
-    };
-    use maelstrom_test::*;
-    use maelstrom_util::cache::{fs::test, GetArtifact};
+    use maelstrom_base::tar_digest;
+    use maelstrom_test::{outcome, spec};
     use maplit::hashmap;
-    use std::{cell::RefCell, path::PathBuf, rc::Rc};
-
-    type MessageM<DepsT, TempFileT> = Message<
-        TempFileT,
-        <DepsT as Deps>::ClientSender,
-        <DepsT as Deps>::WorkerSender,
-        <DepsT as Deps>::MonitorSender,
-        <DepsT as ArtifactGathererDeps>::WorkerArtifactFetcherSender,
-    >;
-
-    #[derive(Clone, Debug, PartialEq)]
-    enum TestMessage {
-        ToClient(ClientId, BrokerToClient),
-        ToWorker(WorkerId, BrokerToWorker),
-        ToMonitor(MonitorId, BrokerToMonitor),
-        ToWorkerArtifactFetcher(u32, Option<(PathBuf, u64)>),
-        CacheGetArtifact(JobId, Sha256Digest),
-        CacheGotArtifact(Sha256Digest, Option<test::TempFile>),
-        CacheDecrementRefcount(Sha256Digest),
-        CacheClientDisconnected(ClientId),
-        CacheGetArtifactForWorker(Sha256Digest),
-        CacheReadArtifact(Sha256Digest),
-        ReadManifest(ManifestReadRequest<TestArtifactStream>),
-    }
-
-    use TestMessage::*;
-
-    #[derive(Clone)]
-    struct TestClientSender(ClientId);
-    struct TestWorkerSender(WorkerId);
-    struct TestMonitorSender(MonitorId);
-    struct TestWorkerArtifactFetcherSender(u32);
-
-    #[derive(Default)]
-    struct TestState {
-        messages: Vec<TestMessage>,
-        get_artifact_returns: HashMap<(JobId, Sha256Digest), Vec<GetArtifact>>,
-        got_artifact_returns: HashMap<Sha256Digest, Vec<Result<Vec<JobId>, (Error, Vec<JobId>)>>>,
-        #[allow(clippy::type_complexity)]
-        get_artifact_for_worker_returns: HashMap<Sha256Digest, Vec<Option<(PathBuf, u64)>>>,
-    }
-
-    #[derive(Clone, Debug, PartialEq)]
-    struct TestArtifactStream(Sha256Digest);
-
-    impl SchedulerCache for Rc<RefCell<TestState>> {
-        type TempFile = test::TempFile;
-        type ArtifactStream = TestArtifactStream;
-
-        fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
-            self.borrow_mut()
-                .messages
-                .push(CacheGetArtifact(jid, digest.clone()));
-            self.borrow_mut()
-                .get_artifact_returns
-                .get_mut(&(jid, digest))
-                .unwrap()
-                .remove(0)
-        }
-
-        fn got_artifact(
-            &mut self,
-            digest: &Sha256Digest,
-            file: Option<Self::TempFile>,
-        ) -> Result<Vec<JobId>, (Error, Vec<JobId>)> {
-            self.borrow_mut()
-                .messages
-                .push(CacheGotArtifact(digest.clone(), file));
-            self.borrow_mut()
-                .got_artifact_returns
-                .get_mut(digest)
-                .unwrap()
-                .remove(0)
-        }
-
-        fn decrement_refcount(&mut self, digest: &Sha256Digest) {
-            self.borrow_mut()
-                .messages
-                .push(CacheDecrementRefcount(digest.clone()));
-        }
-
-        fn client_disconnected(&mut self, cid: ClientId) {
-            self.borrow_mut()
-                .messages
-                .push(CacheClientDisconnected(cid));
-        }
-
-        fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
-            self.borrow_mut()
-                .messages
-                .push(CacheGetArtifactForWorker(digest.clone()));
-            self.borrow_mut()
-                .get_artifact_for_worker_returns
-                .get_mut(digest)
-                .unwrap()
-                .remove(0)
-        }
-
-        fn read_artifact(&mut self, digest: &Sha256Digest) -> TestArtifactStream {
-            self.borrow_mut()
-                .messages
-                .push(CacheReadArtifact(digest.clone()));
-            TestArtifactStream(digest.clone())
-        }
-    }
-
-    impl Deps for Rc<RefCell<TestState>> {
-        type ClientSender = TestClientSender;
-        type WorkerSender = TestWorkerSender;
-        type MonitorSender = TestMonitorSender;
-
-        fn send_job_response_to_client(
-            &mut self,
-            sender: &mut Self::ClientSender,
-            cjid: ClientJobId,
-            result: JobOutcomeResult,
-        ) {
-            self.borrow_mut().messages.push(ToClient(
-                sender.0,
-                BrokerToClient::JobResponse(cjid, result),
-            ));
-        }
-
-        fn send_job_status_update_to_client(
-            &mut self,
-            sender: &mut Self::ClientSender,
-            cjid: ClientJobId,
-            status: JobBrokerStatus,
-        ) {
-            self.borrow_mut().messages.push(ToClient(
-                sender.0,
-                BrokerToClient::JobStatusUpdate(cjid, status),
-            ));
-        }
-
-        fn send_enqueue_job_to_worker(
-            &mut self,
-            sender: &mut TestWorkerSender,
-            jid: JobId,
-            spec: JobSpec,
-        ) {
-            self.borrow_mut()
-                .messages
-                .push(ToWorker(sender.0, BrokerToWorker::EnqueueJob(jid, spec)));
-        }
-
-        fn send_cancel_job_to_worker(&mut self, sender: &mut TestWorkerSender, jid: JobId) {
-            self.borrow_mut()
-                .messages
-                .push(ToWorker(sender.0, BrokerToWorker::CancelJob(jid)));
-        }
-
-        fn send_statistics_response_to_monitor(
-            &mut self,
-            sender: &mut TestMonitorSender,
-            statistics: BrokerStatistics,
-        ) {
-            self.borrow_mut().messages.push(ToMonitor(
-                sender.0,
-                BrokerToMonitor::StatisticsResponse(statistics),
-            ));
-        }
-    }
-
-    impl ArtifactGathererDeps for Rc<RefCell<TestState>> {
-        type ArtifactStream = TestArtifactStream;
-        type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
-        type ClientSender = TestClientSender;
-
-        fn send_read_request_to_manifest_reader(
-            &mut self,
-            manifest_stream: Self::ArtifactStream,
-            manifest_digest: Sha256Digest,
-        ) {
-            self.borrow_mut()
-                .messages
-                .push(ReadManifest(ManifestReadRequest {
-                    manifest_stream,
-                    digest: manifest_digest,
-                }));
-        }
-
-        fn send_response_to_worker_artifact_fetcher(
-            &mut self,
-            sender: &mut TestWorkerArtifactFetcherSender,
-            message: Option<(PathBuf, u64)>,
-        ) {
-            self.borrow_mut()
-                .messages
-                .push(ToWorkerArtifactFetcher(sender.0, message));
-        }
-
-        fn send_transfer_artifact_to_client(
-            &mut self,
-            sender: &mut TestClientSender,
-            digest: Sha256Digest,
-        ) {
-            self.borrow_mut()
-                .messages
-                .push(ToClient(sender.0, BrokerToClient::TransferArtifact(digest)));
-        }
-
-        fn send_general_error_to_client(&mut self, sender: &mut TestClientSender, error: String) {
-            self.borrow_mut()
-                .messages
-                .push(ToClient(sender.0, BrokerToClient::GeneralError(error)));
-        }
-
-        fn send_jobs_ready_to_scheduler(&mut self, jobs: NonEmpty<JobId>) {
-            todo!("{jobs:?}");
-        }
-
-        fn send_jobs_failed_to_scheduler(&mut self, jobs: NonEmpty<JobId>, err: String) {
-            todo!("{jobs:?} {err}");
-        }
-    }
-
-    struct Fixture {
-        test_state: Rc<RefCell<TestState>>,
-        artifact_gatherer: super::super::artifact_gatherer::ArtifactGatherer<
-            Rc<RefCell<TestState>>,
-            Rc<RefCell<TestState>>,
-        >,
-        scheduler: Scheduler<Rc<RefCell<TestState>>>,
-    }
-
-    impl Default for Fixture {
-        fn default() -> Self {
-            let test_state = Rc::new(RefCell::new(TestState::default()));
-            Fixture {
-                test_state: test_state.clone(),
-                artifact_gatherer: super::super::artifact_gatherer::ArtifactGatherer::new(
-                    test_state.clone(),
-                    test_state.clone(),
-                    1_000_000,
-                    10.try_into().unwrap(),
-                ),
-                scheduler: Scheduler::new(test_state.clone()),
-            }
-        }
-    }
-
-    impl Fixture {
-        #[allow(clippy::type_complexity)]
-        fn new<const L: usize, const M: usize, const N: usize>(
-            get_artifact_returns: [((JobId, Sha256Digest), Vec<GetArtifact>); L],
-            got_artifact_returns: [(Sha256Digest, Vec<Result<Vec<JobId>, (Error, Vec<JobId>)>>); M],
-            get_artifact_for_worker_returns: [(Sha256Digest, Vec<Option<(PathBuf, u64)>>); N],
-        ) -> Self {
-            let result = Self::default();
-            result.test_state.borrow_mut().get_artifact_returns =
-                HashMap::from(get_artifact_returns);
-            result.test_state.borrow_mut().got_artifact_returns =
-                HashMap::from(got_artifact_returns);
-            result
-                .test_state
-                .borrow_mut()
-                .get_artifact_for_worker_returns = HashMap::from(get_artifact_for_worker_returns);
-            result
-        }
-
-        fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
-            let messages = &mut self.test_state.borrow_mut().messages;
-            for perm in expected.clone().into_iter().permutations(expected.len()) {
-                if perm == *messages {
-                    messages.clear();
-                    return;
-                }
-            }
-            panic!(
-                "Expected messages didn't match actual messages in any order.\n{}",
-                colored_diff::PrettyDifference {
-                    expected: &format!("{:#?}", expected),
-                    actual: &format!("{:#?}", messages)
-                }
-            );
-        }
-
-        fn receive_message(&mut self, msg: MessageM<Rc<RefCell<TestState>>, test::TempFile>) {
-            match msg {
-                Message::ClientConnected(id, sender) => {
-                    self.scheduler
-                        .receive_client_connected(&mut self.artifact_gatherer, id, sender)
-                }
-                Message::ClientDisconnected(id) => self
-                    .scheduler
-                    .receive_client_disconnected(&mut self.artifact_gatherer, id),
-                Message::JobRequestFromClient(cid, cjid, spec) => self
-                    .scheduler
-                    .receive_job_request_from_client(&mut self.artifact_gatherer, cid, cjid, spec),
-                Message::ArtifactTransferredFromClient(cid, digest, location) => self
-                    .artifact_gatherer
-                    .receive_artifact_transferred(cid, digest, location),
-                Message::WorkerConnected(id, slots, sender) => {
-                    self.scheduler.receive_worker_connected(id, slots, sender)
-                }
-                Message::WorkerDisconnected(id) => self.scheduler.receive_worker_disconnected(id),
-                Message::JobResponseFromWorker(wid, jid, result) => {
-                    self.scheduler.receive_job_response_from_worker(
-                        &mut self.artifact_gatherer,
-                        wid,
-                        jid,
-                        result,
-                    )
-                }
-                Message::JobStatusUpdateFromWorker(wid, jid, status) => self
-                    .scheduler
-                    .receive_job_status_update_from_worker(wid, jid, status),
-                Message::MonitorConnected(id, sender) => {
-                    self.scheduler.receive_monitor_connected(id, sender)
-                }
-                Message::MonitorDisconnected(id) => self.scheduler.receive_monitor_disconnected(id),
-                Message::StatisticsRequestFromMonitor(mid) => {
-                    self.scheduler.receive_statistics_request_from_monitor(mid)
-                }
-                Message::GotArtifact(digest, file) => {
-                    self.artifact_gatherer.receive_got_artifact(digest, file)
-                }
-                Message::GetArtifactForWorker(digest, sender) => self
-                    .artifact_gatherer
-                    .receive_get_artifact_for_worker(digest, sender),
-                Message::DecrementRefcount(digest) => self
-                    .artifact_gatherer
-                    .receive_decrement_refcount_from_worker(digest),
-                Message::StatisticsHeartbeat => self.scheduler.receive_statistics_heartbeat(),
-                Message::GotManifestEntry {
-                    manifest_digest,
-                    entry_digest,
-                } => {
-                    self.artifact_gatherer
-                        .receive_manifest_entry(manifest_digest, entry_digest);
-                }
-                Message::FinishedReadingManifest(digest, result) => self
-                    .artifact_gatherer
-                    .receive_finished_reading_manifest(digest, result),
-                Message::JobsReadyFromArtifactGatherer(ready) => {
-                    self.scheduler
-                        .receive_jobs_ready_from_artifact_gatherer(ready);
-                }
-                Message::JobsFailedFromArtifactGatherer(jid, err) => {
-                    self.scheduler
-                        .receive_jobs_failed_from_artifact_gatherer(jid, err);
-                }
-            }
-        }
-    }
-
-    macro_rules! client_sender {
-        [$n:expr] => { TestClientSender(cid![$n]) };
-    }
-
-    macro_rules! worker_sender {
-        [$n:expr] => { TestWorkerSender(wid![$n]) };
-    }
-
-    macro_rules! monitor_sender {
-        [$n:expr] => { TestMonitorSender(mid![$n]) };
-    }
-
-    macro_rules! worker_artifact_fetcher_sender {
-        [$n:expr] => { TestWorkerArtifactFetcherSender($n) };
-    }
-
-    macro_rules! script_test {
-        ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
-            script_test!($test_name, Fixture::default(), $($in_msg => { $($out_msg,)* };)+);
-        };
-        ($test_name:ident, $fixture_expr:expr, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
-            #[test]
-            fn $test_name() {
-                let mut fixture = $fixture_expr;
-                $(
-                    fixture.receive_message($in_msg);
-                    fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
-                )+
-            }
-        };
-    }
-
-    script_test! {
-        response_from_known_worker_for_unknown_job_ignored,
-        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        JobResponseFromWorker(wid![1], jid![1], Ok(outcome![1])) => {};
-    }
-
-    script_test! {
-        response_from_worker_for_disconnected_client_ignored,
-        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        JobResponseFromWorker(wid![1], jid![1], Ok(outcome![1])) => {};
-    }
-
-    script_test! {
-        requests_go_to_workers_based_on_subscription_percentage,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-                ((jid![1, 5], digest![5]), vec![GetArtifact::Success]),
-                ((jid![1, 6], digest![6]), vec![GetArtifact::Success]),
-                ((jid![1, 7], digest![7]), vec![GetArtifact::Success]),
-                ((jid![1, 8], digest![8]), vec![GetArtifact::Success]),
-                ((jid![1, 9], digest![9]), vec![GetArtifact::Success]),
-                ((jid![1, 10], digest![10]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        WorkerConnected(wid![2], 2, worker_sender![2]) => {};
-        WorkerConnected(wid![3], 3, worker_sender![3]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        // 0/2 0/2 0/3
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-
-        // 1/2 0/2 0/3
-        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
-            CacheGetArtifact(jid![1, 2], digest![2]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(2))),
-        };
-
-        // 1/2 1/2 0/3
-        JobRequestFromClient(cid![1], cjid![3], spec!(3)) => {
-            CacheGetArtifact(jid![1, 3], digest![3]),
-            ToWorker(wid![3], EnqueueJob(jid![1, 3], spec!(3))),
-        };
-
-        // 1/2 1/2 1/3
-        JobRequestFromClient(cid![1], cjid![4], spec!(4)) => {
-            CacheGetArtifact(jid![1, 4], digest![4]),
-            ToWorker(wid![3], EnqueueJob(jid![1, 4], spec!(4))),
-        };
-
-        // 1/2 1/2 2/3
-        JobRequestFromClient(cid![1], cjid![5], spec!(5)) => {
-            CacheGetArtifact(jid![1, 5], digest![5]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 5], spec!(5))),
-        };
-
-        // 2/2 1/2 2/3
-        JobRequestFromClient(cid![1], cjid![6], spec!(6)) => {
-            CacheGetArtifact(jid![1, 6], digest![6]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 6], spec!(6))),
-        };
-
-        // 2/2 2/2 2/3
-        JobRequestFromClient(cid![1], cjid![7], spec!(7)) => {
-            CacheGetArtifact(jid![1, 7], digest![7]),
-            ToWorker(wid![3], EnqueueJob(jid![1, 7], spec!(7))),
-        };
-
-        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
-            CacheDecrementRefcount(digest![1]),
-        };
-        JobRequestFromClient(cid![1], cjid![8], spec!(8)) => {
-            CacheGetArtifact(jid![1, 8], digest![8]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 8], spec!(8))),
-        };
-
-        JobResponseFromWorker(wid![2], jid![1, 2], Ok(outcome![2])) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
-            CacheDecrementRefcount(digest![2]),
-        };
-        JobRequestFromClient(cid![1], cjid![9], spec!(9)) => {
-            CacheGetArtifact(jid![1, 9], digest![9]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 9], spec!(9))),
-        };
-
-        JobResponseFromWorker(wid![3], jid![1, 3], Ok(outcome![3])) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![3], Ok(outcome![3]))),
-            CacheDecrementRefcount(digest![3]),
-        };
-        JobRequestFromClient(cid![1], cjid![10], spec!(10)) => {
-            CacheGetArtifact(jid![1, 10], digest![10]),
-            ToWorker(wid![3], EnqueueJob(jid![1, 10], spec!(10))),
-        };
-    }
-
-    script_test! {
-        requests_start_queuing_at_2x_workers_slot_count,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-                ((jid![1, 5], digest![5]), vec![GetArtifact::Success]),
-                ((jid![1, 6], digest![6]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        // 0/1 0/1
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-
-        // 1/1 0/1
-        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
-            CacheGetArtifact(jid![1, 2], digest![2]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(2))),
-        };
-
-        // 1/1 1/1
-        JobRequestFromClient(cid![1], cjid![3], spec!(3)) => {
-            CacheGetArtifact(jid![1, 3], digest![3]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 3], spec!(3))),
-        };
-
-        // 2/1 1/1
-        JobRequestFromClient(cid![1], cjid![4], spec!(4)) => {
-            CacheGetArtifact(jid![1, 4], digest![4]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 4], spec!(4))),
-        };
-
-        // 2/1 2/1
-        JobRequestFromClient(cid![1], cjid![5], spec!(5)) => {
-            CacheGetArtifact(jid![1, 5], digest![5]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![5], JobBrokerStatus::WaitingForWorker)),
-        };
-        JobRequestFromClient(cid![1], cjid![6], spec!(6)) => {
-            CacheGetArtifact(jid![1, 6], digest![6]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![6], JobBrokerStatus::WaitingForWorker)),
-        };
-
-        // 2/2 1/2
-        JobResponseFromWorker(wid![2], jid![1, 2], Ok(outcome![2])) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
-            CacheDecrementRefcount(digest![2]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 5], spec!(5))),
-        };
-
-        // 1/2 2/2
-        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
-            CacheDecrementRefcount(digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 6], spec!(6))),
-        };
-    }
-
-    script_test! {
-        requests_get_removed_from_workers_pending_map,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-
-        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
-            CacheGetArtifact(jid![1, 2], digest![2]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec!(2))),
-        };
-
-        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
-            CacheDecrementRefcount(digest![1]),
-        };
-
-        JobResponseFromWorker(wid![1], jid![1, 2], Ok(outcome![1])) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![1]))),
-            CacheDecrementRefcount(digest![2]),
-        };
-
-        WorkerDisconnected(wid![1]) => {};
-        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
-    }
-
-    script_test! {
-        client_disconnects_with_outstanding_work_1,
-        {
-            Fixture::new([
-                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid!(1, 1), digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelJob(jid![1, 1])),
-            CacheDecrementRefcount(digest![1]),
-            CacheClientDisconnected(cid![1]),
-        };
-    }
-
-    script_test! {
-        client_disconnects_with_outstanding_work_2,
-        {
-            Fixture::new([
-                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success]),
-                ((jid!(2, 1), digest![2]), vec![GetArtifact::Success]),
-                ((jid!(1, 2), digest![3]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-        ClientConnected(cid![2], client_sender![2]) => {};
-
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid!(1, 1), digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-
-        JobRequestFromClient(cid![2], cjid![1], spec!(2)) => {
-            CacheGetArtifact(jid!(2, 1), digest![2]),
-            ToWorker(wid![2], EnqueueJob(jid![2, 1], spec!(2))),
-        };
-
-        ClientDisconnected(cid![2]) => {
-            ToWorker(wid![2], CancelJob(jid![2, 1])),
-            CacheDecrementRefcount(digest![2]),
-            CacheClientDisconnected(cid![2]),
-        };
-
-        JobRequestFromClient(cid![1], cjid![2], spec!(3)) => {
-            CacheGetArtifact(jid!(1, 2), digest![3]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(3))),
-        };
-    }
-
-    script_test! {
-        client_disconnects_with_outstanding_work_3,
-        {
-            Fixture::new([
-                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success]),
-                ((jid!(1, 2), digest![2]), vec![GetArtifact::Success]),
-                ((jid!(1, 3), digest![3]), vec![GetArtifact::Success]),
-                ((jid!(2, 1), digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid!(1, 1), digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-
-        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
-            CacheGetArtifact(jid!(1, 2), digest![2]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec!(2))),
-        };
-
-        ClientConnected(cid![2], client_sender![2]) => {};
-        JobRequestFromClient(cid![2], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid!(2, 1), digest![1]),
-            ToClient(cid![2], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForWorker)),
-        };
-        JobRequestFromClient(cid![1], cjid![3], spec!(3)) => {
-            CacheGetArtifact(jid!(1, 3), digest![3]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![3], JobBrokerStatus::WaitingForWorker)),
-        };
-
-        ClientDisconnected(cid![2]) => {
-            CacheDecrementRefcount(digest![1]),
-            CacheClientDisconnected(cid![2]),
-        };
-
-        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
-            CacheDecrementRefcount(digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 3], spec!(3))),
-        };
-    }
-
-    script_test! {
-        client_disconnects_with_outstanding_work_4,
-        {
-            Fixture::new([
-                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success]),
-                ((jid!(1, 2), digest![2]), vec![GetArtifact::Success]),
-                ((jid!(2, 1), digest![1]), vec![GetArtifact::Success]),
-                ((jid!(2, 2), digest![2]), vec![GetArtifact::Success]),
-                ((jid!(2, 3), digest![3]), vec![GetArtifact::Success]),
-                ((jid!(2, 4), digest![4]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-        ClientConnected(cid![2], client_sender![2]) => {};
-
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid!(1, 1), digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-
-        JobRequestFromClient(cid![2], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid!(2, 1), digest![1]),
-            ToWorker(wid![2], EnqueueJob(jid![2, 1], spec!(1))),
-        };
-
-        JobRequestFromClient(cid![2], cjid![2], spec!(2)) => {
-            CacheGetArtifact(jid!(2, 2), digest![2]),
-            ToWorker(wid![1], EnqueueJob(jid![2, 2], spec!(2))),
-        };
-
-        JobRequestFromClient(cid![2], cjid![3], spec!(3)) => {
-            CacheGetArtifact(jid!(2, 3), digest![3]),
-            ToWorker(wid![2], EnqueueJob(jid![2, 3], spec!(3))),
-        };
-
-        JobRequestFromClient(cid![2], cjid![4], spec!(4)) => {
-            CacheGetArtifact(jid!(2, 4), digest![4]),
-            ToClient(cid![2], BrokerToClient::JobStatusUpdate(cjid![4], JobBrokerStatus::WaitingForWorker)),
-        };
-        JobRequestFromClient(cid![1], cjid![2], spec!(2)) => {
-            CacheGetArtifact(jid!(1, 2), digest![2]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForWorker)),
-        };
-
-        ClientDisconnected(cid![2]) => {
-            CacheDecrementRefcount(digest![1]),
-            CacheDecrementRefcount(digest![2]),
-            CacheDecrementRefcount(digest![3]),
-            CacheDecrementRefcount(digest![4]),
-
-            ToWorker(wid![2], CancelJob(jid![2, 1])),
-            ToWorker(wid![1], CancelJob(jid![2, 2])),
-            ToWorker(wid![2], CancelJob(jid![2, 3])),
-
-            ToWorker(wid![2], EnqueueJob(jid![1, 2], spec!(2))),
-
-            CacheClientDisconnected(cid![2]),
-        };
-    }
-
-    script_test! {
-        request_with_layers,
-        {
-            Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
-                ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
-            ], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        ClientConnected(cid![1], client_sender![1]) => {};
-
-        JobRequestFromClient(cid![1], cjid![2], job_spec!("1", [tar_digest!(42), tar_digest!(43), tar_digest!(44)])) => {
-            CacheGetArtifact(jid![1, 2], digest![42]),
-            CacheGetArtifact(jid![1, 2], digest![43]),
-            CacheGetArtifact(jid![1, 2], digest![44]),
-            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![2], JobBrokerStatus::WaitingForLayers)),
-        };
-
-        ClientDisconnected(cid![1]) => {
-            CacheClientDisconnected(cid![1]),
-            CacheDecrementRefcount(digest![42]),
-        }
-    }
-
-    script_test! {
-        get_artifact_for_worker_tar,
-        {
-            Fixture::new([], [], [
-                (
-                    digest![42],
-                    vec![Some(("/a/good/path".into(), 42))],
-                ),
-            ])
-        },
-        GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
-            CacheGetArtifactForWorker(digest![42]),
-            ToWorkerArtifactFetcher(1, Some(("/a/good/path".into(), 42))),
-        }
-    }
-
-    script_test! {
-        get_artifact_for_worker_manifest,
-        {
-            Fixture::new([], [], [
-                (
-                    digest![42],
-                    vec![Some(("/a/good/path".into(), 42))]
-                ),
-            ])
-        },
-        GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
-            CacheGetArtifactForWorker(digest![42]),
-            ToWorkerArtifactFetcher(1, Some(("/a/good/path".into(), 42)))
-        }
-    }
-
-    script_test! {
-        decrement_refcount,
-        DecrementRefcount(digest![42]) => {
-            CacheDecrementRefcount(digest![42]),
-        }
-    }
-
-    script_test! {
-        job_statistics_waiting_for_artifacts,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![42]), vec![GetArtifact::Wait]),
-            ], [], [])
-        },
-        ClientConnected(cid![1], client_sender![1]) => {};
-        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        MonitorConnected(mid![1], monitor_sender![1]) => {};
-        JobRequestFromClient(cid![1], cjid![1], job_spec!("1", [tar_digest!(42)])) => {
-            CacheGetArtifact(jid![1, 1], digest![42]),
-            ToClient(
-                cid![1],
-                BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForLayers)
-            ),
-        };
-        StatisticsHeartbeat => {};
-        StatisticsRequestFromMonitor(mid![1]) => {
-            ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
-                worker_statistics: hashmap! {
-                    wid![1] => WorkerStatistics { slots: 2 }
-                },
-                job_statistics: [JobStatisticsSample {
-                    client_to_stats: hashmap! {
-                        cid![1] => enum_map! {
-                            JobState::WaitingForArtifacts => 1,
-                            JobState::Pending => 0,
-                            JobState::Running => 0,
-                            JobState::Complete => 0,
-                        }
-                    }
-                }].into_iter().collect()
-            }))
-        }
-    }
-
-    script_test! {
-        job_statistics_pending,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        ClientConnected(cid![1], client_sender![1]) => {};
-        MonitorConnected(mid![1], monitor_sender![1]) => {};
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToClient(cid![1], BrokerToClient::JobStatusUpdate(cjid![1], JobBrokerStatus::WaitingForWorker)),
-        };
-        StatisticsHeartbeat => {};
-        StatisticsRequestFromMonitor(mid![1]) => {
-            ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
-                worker_statistics: hashmap!{},
-                job_statistics: [JobStatisticsSample {
-                    client_to_stats: hashmap! {
-                        cid![1] => enum_map! {
-                            JobState::WaitingForArtifacts => 0,
-                            JobState::Pending => 1,
-                            JobState::Running => 0,
-                            JobState::Complete => 0,
-                        }
-                    }
-                }].into_iter().collect()
-            }))
-        }
-    }
-
-    script_test! {
-        job_statistics_running,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        ClientConnected(cid![1], client_sender![1]) => {};
-        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        MonitorConnected(mid![1], monitor_sender![1]) => {};
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-        StatisticsHeartbeat => {};
-        StatisticsRequestFromMonitor(mid![1]) => {
-            ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
-                worker_statistics: hashmap! {
-                    wid![1] => WorkerStatistics { slots: 2 }
-                },
-                job_statistics: [JobStatisticsSample {
-                    client_to_stats: hashmap! {
-                        cid![1] => enum_map! {
-                            JobState::WaitingForArtifacts => 0,
-                            JobState::Pending => 0,
-                            JobState::Running => 1,
-                            JobState::Complete => 0,
-                        }
-                    }
-                }].into_iter().collect()
-            }))
-        }
-    }
-
-    script_test! {
-        job_statistics_completed,
-        {
-            Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        ClientConnected(cid![1], client_sender![1]) => {};
-        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        MonitorConnected(mid![1], monitor_sender![1]) => {};
-        JobRequestFromClient(cid![1], cjid![1], spec!(1)) => {
-            CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec!(1))),
-        };
-        JobResponseFromWorker(wid![1], jid![1, 1], Ok(outcome![1])) => {
-            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
-            CacheDecrementRefcount(digest![1]),
-        };
-        StatisticsHeartbeat => {};
-        StatisticsRequestFromMonitor(mid![1]) => {
-            ToMonitor(mid![1], BrokerToMonitor::StatisticsResponse(BrokerStatistics {
-                worker_statistics: hashmap! {
-                    wid![1] => WorkerStatistics { slots: 2 }
-                },
-                job_statistics: [JobStatisticsSample {
-                    client_to_stats: hashmap! {
-                        cid![1] => enum_map! {
-                            JobState::WaitingForArtifacts => 0,
-                            JobState::Pending => 0,
-                            JobState::Running => 0,
-                            JobState::Complete => 1,
-                        }
-                    }
-                }].into_iter().collect()
-            }))
-        }
-    }
-
-    script_test! {
-        forward_job_status_update,
-        {
-            Fixture::new([
-                ((jid![1, 3], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
-        },
-        ClientConnected(cid![1], client_sender![1]) => {};
-        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
-        JobRequestFromClient(cid![1], cjid![3], spec!(1)) => {
-            CacheGetArtifact(jid![1, 3], digest![1]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 3], spec!(1))),
-        };
-        JobStatusUpdateFromWorker(wid![2], jid![1, 3], JobWorkerStatus::WaitingForLayers) => {
-            ToClient(
-                cid![1],
-                BrokerToClient::JobStatusUpdate(
-                    cjid![3],
-                    JobBrokerStatus::AtWorker(wid![2], JobWorkerStatus::WaitingForLayers)
-                )
-            )
-        };
-        JobStatusUpdateFromWorker(wid![2], jid![1, 3], JobWorkerStatus::WaitingToExecute) => {
-            ToClient(
-                cid![1],
-                BrokerToClient::JobStatusUpdate(
-                    cjid![3],
-                    JobBrokerStatus::AtWorker(wid![2], JobWorkerStatus::WaitingToExecute)
-                )
-            )
-        };
-        JobStatusUpdateFromWorker(wid![2], jid![1, 3], JobWorkerStatus::Executing) => {
-            ToClient(
-                cid![1],
-                BrokerToClient::JobStatusUpdate(
-                    cjid![3],
-                    JobBrokerStatus::AtWorker(wid![2], JobWorkerStatus::Executing)
-                )
-            )
-        };
-    }
-
-    script_test! {
-        drop_unknown_job_status_update,
-        {
-            Fixture::new([], [], [])
-        },
-        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
-        JobStatusUpdateFromWorker(wid![1], jid![2, 3], JobWorkerStatus::WaitingForLayers) => {};
-        JobStatusUpdateFromWorker(wid![1], jid![2, 3], JobWorkerStatus::WaitingToExecute) => {};
-        JobStatusUpdateFromWorker(wid![1], jid![2, 3], JobWorkerStatus::Executing) => {};
-    }
-}
-
-#[cfg(test)]
-mod tests2 {
-    use super::*;
-    use maelstrom_base::{job_spec, tar_digest};
-    use maelstrom_test::outcome;
+    use rstest::rstest;
     use std::{
         cell::RefCell,
         ops::{Deref, DerefMut},
@@ -1523,59 +524,6 @@ mod tests2 {
         );
     }
 
-    #[derive(derive_more::Debug)]
-    struct TestClientSender {
-        cid: ClientId,
-        #[debug(skip)]
-        mock: Rc<RefCell<Mock>>,
-        is_clone: bool,
-    }
-
-    impl Clone for TestClientSender {
-        fn clone(&self) -> Self {
-            let cid = self.cid;
-            let mock = self.mock.clone();
-            assert!(
-                mock.borrow_mut().client_sender_clone.remove(&cid),
-                "unexpected cloning client sender for: {cid}",
-            );
-            Self {
-                cid,
-                mock,
-                is_clone: true,
-            }
-        }
-    }
-
-    impl Drop for TestClientSender {
-        fn drop(&mut self) {
-            let cid = self.cid;
-            let mut mock = self.mock.borrow_mut();
-            if !self.is_clone && mock.check_drops {
-                assert!(
-                    mock.client_sender_drop.remove(&cid),
-                    "unexpected dropping client sender for: {cid}",
-                );
-            }
-        }
-    }
-
-    impl TestClientSender {
-        fn new(cid: ClientId, mock: Rc<RefCell<Mock>>) -> Self {
-            Self {
-                cid,
-                mock,
-                is_clone: false,
-            }
-        }
-    }
-
-    #[derive(Debug)]
-    struct TestWorkerSender(WorkerId);
-
-    #[derive(Debug)]
-    struct TestMonitorSender(MonitorId);
-
     #[derive(Derivative)]
     #[derivative(Default)]
     struct Mock {
@@ -1595,6 +543,8 @@ mod tests2 {
         check_drops: bool,
         client_sender_clone: HashSet<ClientId>,
         client_sender_drop: HashSet<ClientId>,
+        worker_sender_drop: HashSet<WorkerId>,
+        monitor_sender_drop: HashSet<MonitorId>,
     }
 
     impl Mock {
@@ -1653,6 +603,16 @@ mod tests2 {
                 self.client_sender_drop.is_empty(),
                 "unused mock entries for ClientSender::drop: {:?}",
                 self.client_sender_drop,
+            );
+            assert!(
+                self.worker_sender_drop.is_empty(),
+                "unused mock entries for WorkerSender::drop: {:?}",
+                self.worker_sender_drop,
+            );
+            assert!(
+                self.monitor_sender_drop.is_empty(),
+                "unused mock entries for MonitorSender::drop: {:?}",
+                self.monitor_sender_drop,
             );
         }
     }
@@ -1742,8 +702,8 @@ mod tests2 {
             jid: JobId,
             spec: JobSpec,
         ) {
+            let wid = sender.wid;
             let vec = &mut self.borrow_mut().send_enqueue_job_to_worker;
-            let wid = sender.0;
             let spec_clone = spec.clone();
             let index = vec
                 .iter()
@@ -1755,7 +715,7 @@ mod tests2 {
         }
 
         fn send_cancel_job_to_worker(&mut self, sender: &mut Self::WorkerSender, jid: JobId) {
-            let wid = sender.0;
+            let wid = sender.wid;
             assert!(
                 self.borrow_mut()
                     .send_cancel_job_to_worker
@@ -1770,7 +730,7 @@ mod tests2 {
             statistics: BrokerStatistics,
         ) {
             let vec = &mut self.borrow_mut().send_statistics_response_to_monitor;
-            let mid = sender.0;
+            let mid = sender.mid;
             let statistics_clone = statistics.clone();
             let index = vec
                 .iter()
@@ -1779,6 +739,94 @@ mod tests2 {
                     "sending unexpected message to monitor {sender:?}: {statistics:#?}"
                 ));
             vec.remove(index);
+        }
+    }
+
+    #[derive(derive_more::Debug)]
+    struct TestClientSender {
+        cid: ClientId,
+        #[debug(skip)]
+        mock: Rc<RefCell<Mock>>,
+        #[debug(skip)]
+        is_clone: bool,
+    }
+
+    impl Clone for TestClientSender {
+        fn clone(&self) -> Self {
+            let cid = self.cid;
+            let mock = self.mock.clone();
+            assert!(
+                mock.borrow_mut().client_sender_clone.remove(&cid),
+                "unexpected clone of client sender for: {cid}",
+            );
+            Self {
+                cid,
+                mock,
+                is_clone: true,
+            }
+        }
+    }
+
+    impl Drop for TestClientSender {
+        fn drop(&mut self) {
+            let cid = self.cid;
+            let mut mock = self.mock.borrow_mut();
+            if !self.is_clone && mock.check_drops {
+                assert!(
+                    mock.client_sender_drop.remove(&cid),
+                    "unexpected drop of client sender for: {cid}",
+                );
+            }
+        }
+    }
+
+    impl TestClientSender {
+        fn new(cid: ClientId, mock: Rc<RefCell<Mock>>) -> Self {
+            Self {
+                cid,
+                mock,
+                is_clone: false,
+            }
+        }
+    }
+
+    #[derive(Constructor, derive_more::Debug)]
+    struct TestWorkerSender {
+        wid: WorkerId,
+        #[debug(skip)]
+        mock: Rc<RefCell<Mock>>,
+    }
+
+    impl Drop for TestWorkerSender {
+        fn drop(&mut self) {
+            let wid = self.wid;
+            let mut mock = self.mock.borrow_mut();
+            if mock.check_drops {
+                assert!(
+                    mock.worker_sender_drop.remove(&wid),
+                    "unexpected drop of worker sender for: {wid}",
+                );
+            }
+        }
+    }
+
+    #[derive(Constructor, derive_more::Debug)]
+    struct TestMonitorSender {
+        mid: MonitorId,
+        #[debug(skip)]
+        mock: Rc<RefCell<Mock>>,
+    }
+
+    impl Drop for TestMonitorSender {
+        fn drop(&mut self) {
+            let mid = self.mid;
+            let mut mock = self.mock.borrow_mut();
+            if mock.check_drops {
+                assert!(
+                    mock.monitor_sender_drop.remove(&mid),
+                    "unexpected drop of monitor sender for: {mid}",
+                );
+            }
         }
     }
 
@@ -1816,6 +864,16 @@ mod tests2 {
             self
         }
 
+        #[track_caller]
+        fn assert_job_state_counts_for_client(
+            &self,
+            cid: impl Into<ClientId>,
+            expected: JobStateCounts,
+        ) {
+            let actual = self.sut.get_job_state_counts_for_client(cid.into());
+            assert_eq!(actual, expected);
+        }
+
         fn expect(&mut self) -> Expect {
             Expect { fixture: self }
         }
@@ -1839,20 +897,39 @@ mod tests2 {
             &mut self,
             cid: impl Into<ClientId>,
             cjid: impl Into<ClientJobId>,
-            spec: impl Into<JobSpec>,
+            spec: JobSpec,
         ) {
-            self.sut.receive_job_request_from_client(
-                &mut self.mock,
-                cid.into(),
-                cjid.into(),
-                spec.into(),
+            self.sut
+                .receive_job_request_from_client(&mut self.mock, cid.into(), cjid.into(), spec);
+        }
+
+        fn receive_jobs_ready_from_artifact_gatherer(
+            &mut self,
+            ready: impl IntoIterator<Item = impl Into<JobId>>,
+        ) {
+            self.sut.receive_jobs_ready_from_artifact_gatherer(
+                NonEmpty::collect(ready.into_iter().map(Into::into)).unwrap(),
+            );
+        }
+
+        fn receive_jobs_failed_from_artifact_gatherer(
+            &mut self,
+            jobs: impl IntoIterator<Item = impl Into<JobId>>,
+            err: impl Into<String>,
+        ) {
+            self.sut.receive_jobs_failed_from_artifact_gatherer(
+                NonEmpty::collect(jobs.into_iter().map(Into::into)).unwrap(),
+                err.into(),
             );
         }
 
         fn receive_worker_connected(&mut self, wid: impl Into<WorkerId>, slots: usize) {
             let wid = wid.into();
-            self.sut
-                .receive_worker_connected(wid, slots, TestWorkerSender(wid));
+            self.sut.receive_worker_connected(
+                wid,
+                slots,
+                TestWorkerSender::new(wid, self.mock.clone()),
+            );
         }
 
         fn receive_worker_disconnected(&mut self, wid: impl Into<WorkerId>) {
@@ -1886,7 +963,7 @@ mod tests2 {
         fn receive_monitor_connected(&mut self, mid: impl Into<MonitorId>) {
             let mid = mid.into();
             self.sut
-                .receive_monitor_connected(mid, TestMonitorSender(mid));
+                .receive_monitor_connected(mid, TestMonitorSender::new(mid, self.mock.clone()));
         }
 
         fn receive_monitor_disconnected(&mut self, mid: impl Into<MonitorId>) {
@@ -1895,6 +972,10 @@ mod tests2 {
 
         fn receive_statistics_request_from_monitor(&mut self, mid: impl Into<MonitorId>) {
             self.sut.receive_statistics_request_from_monitor(mid.into());
+        }
+
+        pub fn receive_statistics_heartbeat(&mut self) {
+            self.sut.receive_statistics_heartbeat();
         }
     }
 
@@ -1953,38 +1034,6 @@ mod tests2 {
             self
         }
 
-        /*
-        fn artifact_transferred(
-            self,
-            digest: Sha256Digest,
-            file: Option<String>,
-            result: Result<HashSet<JobId>>,
-        ) -> Self {
-            todo!();
-        }
-        */
-
-        /*
-        fn manifest_read_for_job_entry(
-            self,
-            digest: Sha256Digest,
-            jid: JobId,
-            job_ready: bool,
-        ) -> Self {
-            todo!();
-        }
-
-        fn manifest_read_for_job_complete(
-            self,
-            digest: Sha256Digest,
-            jid: JobId,
-            result: anyhow::Result<()>,
-            job_ready: bool,
-        ) -> Self {
-            todo!();
-        }
-        */
-
         fn complete_job(self, jid: impl Into<JobId>) -> Self {
             self.fixture
                 .mock
@@ -1994,20 +1043,6 @@ mod tests2 {
                 .assert_is_true();
             self
         }
-
-        /*
-        fn get_artifact_for_worker(
-            self,
-            digest: Sha256Digest,
-            result: Option<(PathBuf, u64)>,
-        ) -> Self {
-            todo!();
-        }
-
-        fn receive_decrement_refcount(self, digest: Sha256Digest) -> Self {
-            todo!();
-        }
-        */
 
         fn send_job_response_to_client(
             self,
@@ -2041,17 +1076,16 @@ mod tests2 {
             self,
             wid: impl Into<WorkerId>,
             jid: impl Into<JobId>,
-            spec: impl Into<JobSpec>,
+            spec: JobSpec,
         ) -> Self {
             self.fixture
                 .mock
                 .borrow_mut()
                 .send_enqueue_job_to_worker
-                .push((wid.into(), jid.into(), spec.into()));
+                .push((wid.into(), jid.into(), spec));
             self
         }
 
-        /*
         fn send_cancel_job_to_worker(
             self,
             wid: impl Into<WorkerId>,
@@ -2065,32 +1099,6 @@ mod tests2 {
                 .assert_is_true();
             self
         }
-        */
-
-        /*
-        fn send_message_to_monitor(
-            self,
-            sender: TestMonitorSender,
-            message: BrokerToMonitor,
-        ) -> Self {
-            self.fixture
-                .mock
-                .borrow_mut()
-                .send_message_to_monitor
-                .push((sender.0, message));
-            self
-        }
-        */
-
-        /*
-        fn send_message_to_worker_artifact_fetcher(
-            self,
-            sender: TestWorkerArtifactFetcherSender,
-            message: Option<(PathBuf, u64)>,
-        ) -> Self {
-            todo!();
-        }
-        */
 
         fn client_sender_clone(self, cid: impl Into<ClientId>) -> Self {
             self.fixture
@@ -2109,6 +1117,39 @@ mod tests2 {
                 .client_sender_drop
                 .insert(cid.into())
                 .assert_is_true();
+            self
+        }
+
+        fn worker_sender_drop(self, wid: impl Into<WorkerId>) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .worker_sender_drop
+                .insert(wid.into())
+                .assert_is_true();
+            self
+        }
+
+        fn monitor_sender_drop(self, mid: impl Into<MonitorId>) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .monitor_sender_drop
+                .insert(mid.into())
+                .assert_is_true();
+            self
+        }
+
+        fn send_statistics_response_to_monitor(
+            self,
+            mid: impl Into<MonitorId>,
+            statistics: BrokerStatistics,
+        ) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .send_statistics_response_to_monitor
+                .push((mid.into(), statistics));
             self
         }
     }
@@ -2132,6 +1173,14 @@ mod tests2 {
     }
 
     #[test]
+    #[should_panic(expected = "received client_connected message for duplicate client: 1")]
+    fn receive_client_connected_for_duplicate_client() {
+        let fixture = Fixture::new().with_client(1);
+        fixture.mock.borrow_mut().check_drops = false;
+        fixture.with_client(1);
+    }
+
+    #[test]
     fn receive_client_connected_forwards_to_artifact_gatherer() {
         let mut fixture = Fixture::new();
         fixture
@@ -2143,11 +1192,14 @@ mod tests2 {
     }
 
     #[test]
-    #[should_panic(expected = "received client_connected message for duplicate client: 1")]
-    fn receive_client_connected_for_duplicate_client() {
-        let fixture = Fixture::new().with_client(1);
-        fixture.mock.borrow_mut().check_drops = false;
-        fixture.with_client(1);
+    #[should_panic(expected = "received client_disconnected message for unknown client: 1")]
+    fn receive_client_disconnected_for_unknown_client() {
+        let mut fixture = Fixture::new();
+        fixture
+            .expect()
+            .client_disconnected(1)
+            .when()
+            .receive_client_disconnected(1);
     }
 
     #[test]
@@ -2162,235 +1214,990 @@ mod tests2 {
     }
 
     #[test]
-    #[should_panic]
-    fn message_from_unknown_client_panics() {
+    fn receive_client_disconnected_clears_queued_jobs() {
+        let mut fixture = Fixture::new().with_client(1).with_client(2);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture
+            .expect()
+            .start_job((2, 1), [tar_digest!(2)], StartJob::Ready)
+            .send_job_status_update_to_client(2, 1, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(2, 1, spec!(2));
+        fixture
+            .expect()
+            .start_job((2, 2), [tar_digest!(3)], StartJob::Ready)
+            .send_job_status_update_to_client(2, 2, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(2, 2, spec!(3));
+
+        fixture
+            .expect()
+            .client_disconnected(1)
+            .client_sender_drop(1)
+            .when()
+            .receive_client_disconnected(1);
+
+        fixture
+            .expect()
+            .send_enqueue_job_to_worker(1, (2, 1), spec!(2))
+            .send_enqueue_job_to_worker(1, (2, 2), spec!(3))
+            .when()
+            .receive_worker_connected(1, 1);
+    }
+
+    #[test]
+    fn receive_client_disconnected_reorders_workers() {
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 1);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 1), spec!(1))
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture
+            .expect()
+            .start_job((1, 2), [tar_digest!(2)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 2), spec!(2))
+            .when()
+            .receive_job_request_from_client(1, 2, spec!(2));
+
+        let mut fixture = fixture.with_client(2).with_worker(2, 1);
+
+        fixture
+            .expect()
+            .start_job((2, 1), [tar_digest!(3)], StartJob::Ready)
+            .send_enqueue_job_to_worker(2, (2, 1), spec!(3))
+            .when()
+            .receive_job_request_from_client(2, 1, spec!(3));
+        fixture
+            .expect()
+            .start_job((2, 2), [tar_digest!(4)], StartJob::Ready)
+            .send_enqueue_job_to_worker(2, (2, 2), spec!(4))
+            .when()
+            .receive_job_request_from_client(2, 2, spec!(4));
+
+        fixture
+            .expect()
+            .start_job((2, 3), [tar_digest!(5)], StartJob::Ready)
+            .send_job_status_update_to_client(2, 3, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(2, 3, spec!(5));
+        fixture
+            .expect()
+            .start_job((2, 4), [tar_digest!(6)], StartJob::Ready)
+            .send_job_status_update_to_client(2, 4, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(2, 4, spec!(6));
+
+        fixture
+            .expect()
+            .client_disconnected(1)
+            .client_sender_drop(1)
+            .send_cancel_job_to_worker(1, (1, 1))
+            .send_cancel_job_to_worker(1, (1, 2))
+            .send_enqueue_job_to_worker(1, (2, 3), spec!(5))
+            .send_enqueue_job_to_worker(1, (2, 4), spec!(6))
+            .when()
+            .receive_client_disconnected(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "received job_request from unknown client: 1")]
+    fn receive_job_request_from_client_from_unknown_client() {
         let mut fixture = Fixture::new();
-        fixture.receive_job_request_from_client(1, 1, job_spec!("test", [tar_digest!(1)]));
+        fixture.receive_job_request_from_client(1, 1, spec!(1));
     }
 
     #[test]
-    #[should_panic]
-    fn disconnect_from_unknown_client_panics() {
+    #[should_panic(expected = "received job_request for duplicate job ID: 1.1")]
+    fn receive_job_request_for_duplicate_jid() {
+        let mut fixture = Fixture::new().with_client(1);
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture.receive_job_request_from_client(1, 1, spec!(1));
+    }
+
+    #[test]
+    fn receive_job_request_not_ready_from_artifact_gatherer() {
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 1);
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForLayers)
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::WaitingForArtifacts => 1,
+                _ => 0,
+            },
+        );
+    }
+
+    #[test]
+    fn receive_job_request_worker_available() {
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 1);
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 1), spec!(1))
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 1,
+                _ => 0,
+            },
+        );
+    }
+
+    #[test]
+    fn receive_job_request_no_worker_available() {
+        let mut fixture = Fixture::new().with_client(1);
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Pending => 1,
+                _ => 0,
+            },
+        );
+    }
+
+    #[test]
+    fn receive_jobs_ready_from_artifact_gatherer_ignores_disconnected_clients() {
         let mut fixture = Fixture::new();
-        fixture.receive_client_disconnected(1);
+        fixture.receive_jobs_ready_from_artifact_gatherer([(1, 2), (2, 1)]);
     }
 
     #[test]
-    #[should_panic]
-    fn connect_from_duplicate_client_panics() {
-        Fixture::new().with_client(1).with_client(1);
+    fn receive_jobs_ready_from_artifact_gatherer_batches() {
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 1);
+        let job_spec_1 = spec!(1, priority: 1);
+        let job_spec_2 = spec!(2, priority: 2);
+        let job_spec_3 = spec!(3, priority: 3);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForLayers)
+            .when()
+            .receive_job_request_from_client(1, 1, job_spec_1.clone());
+        fixture
+            .expect()
+            .start_job((1, 2), [tar_digest!(2)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 2, JobBrokerStatus::WaitingForLayers)
+            .when()
+            .receive_job_request_from_client(1, 2, job_spec_2.clone());
+        fixture
+            .expect()
+            .start_job((1, 3), [tar_digest!(3)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 3, JobBrokerStatus::WaitingForLayers)
+            .when()
+            .receive_job_request_from_client(1, 3, job_spec_3.clone());
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::WaitingForArtifacts => 3,
+                _ => 0,
+            },
+        );
+
+        fixture
+            .expect()
+            .send_enqueue_job_to_worker(1, (1, 3), job_spec_3)
+            .send_enqueue_job_to_worker(1, (1, 2), job_spec_2)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_jobs_ready_from_artifact_gatherer([(1, 1), (1, 2), (1, 3)]);
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 2,
+                JobState::Pending => 1,
+                _ => 0,
+            },
+        );
     }
 
     #[test]
-    #[should_panic]
-    fn message_from_unknown_worker_panics() {
+    fn receive_jobs_failed_from_artifact_gatherer_ignores_disconnected_clients() {
         let mut fixture = Fixture::new();
-        fixture.receive_job_status_update_from_worker(1, (1, 1), JobWorkerStatus::Executing);
+        fixture.receive_jobs_failed_from_artifact_gatherer([(2, 1), (1, 1)], "foo");
     }
 
     #[test]
-    #[should_panic]
-    fn disconnect_from_unknown_worker_panics() {
+    fn receive_jobs_failed_from_artifact_gatherer() {
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 1);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForLayers)
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture
+            .expect()
+            .start_job((1, 2), [tar_digest!(2)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 2, JobBrokerStatus::WaitingForLayers)
+            .when()
+            .receive_job_request_from_client(1, 2, spec!(2));
+        fixture
+            .expect()
+            .start_job((1, 3), [tar_digest!(3)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 3, JobBrokerStatus::WaitingForLayers)
+            .when()
+            .receive_job_request_from_client(1, 3, spec!(3));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::WaitingForArtifacts => 3,
+                _ => 0,
+            },
+        );
+
+        fixture
+            .expect()
+            .send_job_response_to_client(1, 1, Err(JobError::System("error".into())))
+            .send_job_response_to_client(1, 2, Err(JobError::System("error".into())))
+            .send_job_response_to_client(1, 3, Err(JobError::System("error".into())))
+            .when()
+            .receive_jobs_failed_from_artifact_gatherer([(1, 1), (1, 2), (1, 3)], "error");
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Complete => 3,
+                _ => 0,
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "received worker_connected message for duplicate worker: 1")]
+    fn receive_worker_connected_for_duplicate_worker() {
+        let mut fixture = Fixture::new().with_worker(1, 1);
+        fixture.mock.borrow_mut().check_drops = false;
+        fixture.receive_worker_connected(1, 1);
+    }
+
+    #[test]
+    fn receive_worker_connected() {
+        let mut fixture = Fixture::new().with_client(1);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture
+            .expect()
+            .start_job((1, 2), [tar_digest!(2)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 2, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 2, spec!(2));
+        fixture
+            .expect()
+            .start_job((1, 3), [tar_digest!(3)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 3, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 3, spec!(3));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Pending => 3,
+                _ => 0,
+            },
+        );
+
+        fixture
+            .expect()
+            .send_enqueue_job_to_worker(1, (1, 1), spec!(1))
+            .send_enqueue_job_to_worker(1, (1, 2), spec!(2))
+            .send_enqueue_job_to_worker(1, (1, 3), spec!(3))
+            .when()
+            .receive_worker_connected(1, 2);
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 3,
+                _ => 0,
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "received worker_disconnected message for unknown worker: 1")]
+    fn receive_worker_disconnected_for_unknown_worker() {
         let mut fixture = Fixture::new();
         fixture.receive_worker_disconnected(1);
     }
 
     #[test]
-    #[should_panic]
-    fn connect_from_duplicate_worker_panics() {
-        Fixture::new().with_worker(1, 2).with_worker(1, 2);
+    fn receive_worker_disconnected_with_outstanding_jobs_no_other_available_workers() {
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 1), spec!(1))
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 1,
+                _ => 0,
+            },
+        );
+
+        fixture
+            .expect()
+            .worker_sender_drop(1)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_worker_disconnected(1);
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Pending => 1,
+                _ => 0,
+            },
+        );
     }
 
     #[test]
-    #[should_panic]
-    fn message_from_unknown_monitor_panics() {
+    fn receive_worker_disconnected_with_outstanding_jobs_with_other_available_workers() {
+        let mut fixture = Fixture::new()
+            .with_client(1)
+            .with_worker(1, 2)
+            .with_worker(2, 2);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 1), spec!(1))
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 1,
+                _ => 0,
+            },
+        );
+
+        fixture
+            .expect()
+            .send_enqueue_job_to_worker(2, (1, 1), spec!(1))
+            .worker_sender_drop(1)
+            .when()
+            .receive_worker_disconnected(1);
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 1,
+                _ => 0,
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "received job_response message from unknown worker: 1")]
+    fn receive_job_response_from_worker_for_unknown_worker() {
         let mut fixture = Fixture::new();
-        fixture.receive_statistics_request_from_monitor(1);
+        fixture.receive_job_response_from_worker(1, (1, 1), Ok(outcome!(1)));
     }
 
     #[test]
-    #[should_panic]
-    fn disconnect_from_unknown_monitor_panics() {
+    fn receive_job_response_from_worker_for_unknown_job() {
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 1);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 1), spec!(1))
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture
+            .expect()
+            .start_job((1, 2), [tar_digest!(2)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 2), spec!(2))
+            .when()
+            .receive_job_request_from_client(1, 2, spec!(2));
+        fixture
+            .expect()
+            .start_job((1, 3), [tar_digest!(3)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 3, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 3, spec!(3));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 2,
+                JobState::Pending => 1,
+                _ => 0,
+            },
+        );
+
+        fixture.receive_job_response_from_worker(1, (2, 1), Ok(outcome!(1)));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 2,
+                JobState::Pending => 1,
+                _ => 0,
+            },
+        );
+    }
+
+    #[test]
+    fn receive_job_response_from_worker() {
+        let mut fixture = Fixture::new().with_client(1).with_worker(1, 1);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 1), spec!(1))
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture
+            .expect()
+            .start_job((1, 2), [tar_digest!(2)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 2), spec!(2))
+            .when()
+            .receive_job_request_from_client(1, 2, spec!(2));
+        fixture
+            .expect()
+            .start_job((1, 3), [tar_digest!(3)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 3, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 3, spec!(3));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 2,
+                JobState::Pending => 1,
+                _ => 0,
+            },
+        );
+
+        fixture
+            .expect()
+            .complete_job((1, 1))
+            .send_job_response_to_client(1, 1, Ok(outcome!(1)))
+            .send_enqueue_job_to_worker(1, (1, 3), spec!(3))
+            .when()
+            .receive_job_response_from_worker(1, (1, 1), Ok(outcome!(1)));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 2,
+                JobState::Complete => 1,
+                _ => 0,
+            },
+        );
+
+        fixture
+            .expect()
+            .complete_job((1, 2))
+            .send_job_response_to_client(1, 2, Ok(outcome!(1)))
+            .when()
+            .receive_job_response_from_worker(1, (1, 2), Ok(outcome!(1)));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 1,
+                JobState::Complete => 2,
+                _ => 0,
+            },
+        );
+
+        fixture
+            .expect()
+            .complete_job((1, 3))
+            .send_job_response_to_client(1, 3, Ok(outcome!(1)))
+            .when()
+            .receive_job_response_from_worker(1, (1, 3), Ok(outcome!(1)));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Complete => 3,
+                _ => 0,
+            },
+        );
+    }
+
+    #[rstest]
+    #[case("1")]
+    #[case("2")]
+    fn receive_job_response_from_worker_reprioritizes_worker(#[case] wid: u32) {
+        let mut fixture = Fixture::new()
+            .with_client(1)
+            .with_worker(1, 1)
+            .with_worker(2, 1);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 1), spec!(1))
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture
+            .expect()
+            .start_job((1, 2), [tar_digest!(2)], StartJob::Ready)
+            .send_enqueue_job_to_worker(2, (1, 2), spec!(2))
+            .when()
+            .receive_job_request_from_client(1, 2, spec!(2));
+        fixture
+            .expect()
+            .start_job((1, 3), [tar_digest!(3)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 3), spec!(3))
+            .when()
+            .receive_job_request_from_client(1, 3, spec!(3));
+        fixture
+            .expect()
+            .start_job((1, 4), [tar_digest!(4)], StartJob::Ready)
+            .send_enqueue_job_to_worker(2, (1, 4), spec!(4))
+            .when()
+            .receive_job_request_from_client(1, 4, spec!(4));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Running => 4,
+                _ => 0,
+            },
+        );
+
+        let cjid = wid;
+        fixture
+            .expect()
+            .complete_job((1, cjid))
+            .send_job_response_to_client(1, cjid, Ok(outcome!(1)))
+            .when()
+            .receive_job_response_from_worker(wid, (1, cjid), Ok(outcome!(1)));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Complete => 1,
+                JobState::Running => 3,
+                _ => 0,
+            },
+        );
+
+        fixture
+            .expect()
+            .start_job((1, 5), [tar_digest!(5)], StartJob::Ready)
+            .send_enqueue_job_to_worker(wid, (1, 5), spec!(5))
+            .when()
+            .receive_job_request_from_client(1, 5, spec!(5));
+        fixture.assert_job_state_counts_for_client(
+            1,
+            enum_map! {
+                JobState::Complete => 1,
+                JobState::Running => 4,
+                _ => 0,
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "received job_status_update message from unknown worker: 1")]
+    fn receive_job_status_update_from_worker_for_unknown_worker() {
+        let mut fixture = Fixture::new();
+        fixture.receive_job_status_update_from_worker(1, (1, 1), JobWorkerStatus::Executing);
+    }
+
+    #[test]
+    fn receive_job_status_update_from_worker_for_unknown_job() {
+        let mut fixture = Fixture::new().with_worker(1, 1);
+        fixture.receive_job_status_update_from_worker(1, (1, 1), JobWorkerStatus::WaitingToExecute);
+    }
+
+    #[test]
+    fn receive_job_status_update_from_worker() {
+        let mut fixture = Fixture::new().with_client(1).with_worker(2, 1);
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(2, (1, 1), spec!(1))
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture
+            .expect()
+            .send_job_status_update_to_client(
+                1,
+                1,
+                JobBrokerStatus::AtWorker(2.into(), JobWorkerStatus::WaitingToExecute),
+            )
+            .when()
+            .receive_job_status_update_from_worker(2, (1, 1), JobWorkerStatus::WaitingToExecute);
+    }
+
+    #[test]
+    #[should_panic(expected = "received monitor_connected message for duplicate monitor: 1")]
+    fn receive_monitor_connected_for_duplicate_monitor() {
+        let mut fixture = Fixture::new();
+        fixture.receive_monitor_connected(1);
+        fixture.mock.borrow_mut().check_drops = false;
+        fixture.receive_monitor_connected(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "received monitor_disconnected message for unknown monitor: 1")]
+    fn receive_monitor_disconnected_for_unknown_monitor() {
         let mut fixture = Fixture::new();
         fixture.receive_monitor_disconnected(1);
     }
 
     #[test]
-    #[should_panic]
-    fn connect_from_duplicate_monitor_panics() {
+    fn receive_monitor_disconnected_drops_sender() {
         let mut fixture = Fixture::new();
         fixture.receive_monitor_connected(1);
+        fixture
+            .expect()
+            .monitor_sender_drop(1)
+            .when()
+            .receive_monitor_disconnected(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "received statistics_request message from unknown monitor: 1")]
+    fn receive_statistics_request_from_monitor_for_unknown_monitor() {
+        let mut fixture = Fixture::new();
+        fixture.receive_statistics_request_from_monitor(1);
+    }
+
+    #[test]
+    fn receive_statistics_request_from_monitor_after_some_heartbeats() {
+        let mut fixture = Fixture::new().with_worker(10, 1).with_client(1);
         fixture.receive_monitor_connected(1);
-    }
-
-    #[test]
-    fn job_request_ready_worker_available() {
-        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
-
-        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
 
         fixture
             .expect()
-            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_enqueue_job_to_worker(1, (1, 1), job_spec.clone())
-            .when()
-            .receive_job_request_from_client(1, 1, job_spec);
-    }
-
-    #[test]
-    fn job_request_ready_no_worker_available() {
-        let mut fixture = Fixture::new().with_client(1);
-        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
-
-        fixture
-            .expect()
-            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
-            .when()
-            .receive_job_request_from_client(1, 1, job_spec.clone());
-
-        fixture
-            .expect()
-            .send_enqueue_job_to_worker(1, (1, 1), job_spec)
-            .when()
-            .receive_worker_connected(1, 2);
-    }
-
-    #[test]
-    fn job_request_not_ready_start_fetching_some() {
-        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
-
-        fixture
-            .expect()
-            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::NotReady)
-            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForLayers)
-            .when()
-            .receive_job_request_from_client(
+            .send_statistics_response_to_monitor(
                 1,
+                BrokerStatistics {
+                    worker_statistics: hashmap! {
+                        10.into() => WorkerStatistics { slots: 1 },
+                    },
+                    job_statistics: Default::default(),
+                },
+            )
+            .when()
+            .receive_statistics_request_from_monitor(1);
+
+        fixture.receive_statistics_heartbeat();
+        fixture
+            .expect()
+            .send_statistics_response_to_monitor(
                 1,
-                job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
-            );
+                BrokerStatistics {
+                    worker_statistics: hashmap! {
+                        10.into() => WorkerStatistics { slots: 1 },
+                    },
+                    job_statistics: JobStatisticsTimeSeries::from_iter([JobStatisticsSample {
+                        client_to_stats: hashmap! {
+                            1.into() => enum_map! { _ => 0 },
+                        },
+                    }]),
+                },
+            )
+            .when()
+            .receive_statistics_request_from_monitor(1);
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(10, (1, 1), spec!(1))
+            .when()
+            .receive_job_request_from_client(1, 1, spec!(1));
+        fixture
+            .expect()
+            .start_job((1, 2), [tar_digest!(2)], StartJob::NotReady)
+            .send_job_status_update_to_client(1, 2, JobBrokerStatus::WaitingForLayers)
+            .when()
+            .receive_job_request_from_client(1, 2, spec!(2));
+        fixture
+            .expect()
+            .start_job((1, 3), [tar_digest!(3)], StartJob::Ready)
+            .send_enqueue_job_to_worker(10, (1, 3), spec!(3))
+            .when()
+            .receive_job_request_from_client(1, 3, spec!(3));
+        fixture
+            .expect()
+            .start_job((1, 4), [tar_digest!(4)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 4, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 4, spec!(4));
+        fixture
+            .expect()
+            .start_job((1, 5), [tar_digest!(5)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 5, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 5, spec!(5));
+        fixture
+            .expect()
+            .send_job_response_to_client(1, 1, Ok(outcome!(1)))
+            .complete_job((1, 1))
+            .send_enqueue_job_to_worker(10, (1, 4), spec!(4))
+            .when()
+            .receive_job_response_from_worker(10, (1, 1), Ok(outcome!(1)));
+
+        fixture.receive_statistics_heartbeat();
+        fixture
+            .expect()
+            .send_statistics_response_to_monitor(
+                1,
+                BrokerStatistics {
+                    worker_statistics: hashmap! {
+                        10.into() => WorkerStatistics { slots: 1 },
+                    },
+                    job_statistics: JobStatisticsTimeSeries::from_iter([
+                        JobStatisticsSample {
+                            client_to_stats: hashmap! {
+                                1.into() => enum_map! { _ => 0 },
+                            },
+                        },
+                        JobStatisticsSample {
+                            client_to_stats: hashmap! {
+                                1.into() => enum_map! {
+                                    JobState::WaitingForArtifacts => 1,
+                                    JobState::Pending => 1,
+                                    JobState::Running => 2,
+                                    JobState::Complete => 1,
+                                },
+                            },
+                        },
+                    ]),
+                },
+            )
+            .when()
+            .receive_statistics_request_from_monitor(1);
     }
 
     #[test]
-    fn job_request_not_ready_start_fetching_none() {
-        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
-
-        fixture
-            .expect()
-            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::NotReady)
-            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForLayers)
-            .when()
-            .receive_job_request_from_client(
-                1,
-                1,
-                job_spec!("test", [tar_digest!(1), tar_digest!(2)]),
-            );
-    }
-
-    #[test]
-    fn worker_disconnected_with_outstanding_jobs_no_other_available_workers() {
-        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
-        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
-
-        fixture
-            .expect()
-            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_enqueue_job_to_worker(1, (1, 1), job_spec.clone())
-            .when()
-            .receive_job_request_from_client(1, 1, job_spec.clone());
-
-        fixture
-            .expect()
-            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
-            .when()
-            .receive_worker_disconnected(1);
-
-        fixture
-            .expect()
-            .send_enqueue_job_to_worker(2, (1, 1), job_spec)
-            .when()
-            .receive_worker_connected(2, 2);
-    }
-
-    #[test]
-    fn worker_disconnected_with_outstanding_jobs_with_other_available_workers() {
+    fn requests_go_to_workers_based_on_subscription_percentage() {
         let mut fixture = Fixture::new()
             .with_client(1)
             .with_worker(1, 2)
-            .with_worker(2, 2);
-        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
+            .with_worker(2, 2)
+            .with_worker(3, 3);
 
+        // 0/2 0/2 0/3
         fixture
             .expect()
-            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_enqueue_job_to_worker(1, (1, 1), job_spec.clone())
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 1), spec!(1))
             .when()
-            .receive_job_request_from_client(1, 1, job_spec.clone());
+            .receive_job_request_from_client(1, 1, spec!(1));
 
+        // 1/2 0/2 0/3
         fixture
             .expect()
-            .send_enqueue_job_to_worker(2, (1, 1), job_spec)
+            .start_job((1, 2), [tar_digest!(2)], StartJob::Ready)
+            .send_enqueue_job_to_worker(2, (1, 2), spec!(2))
             .when()
-            .receive_worker_disconnected(1);
-    }
+            .receive_job_request_from_client(1, 2, spec!(2));
 
-    #[test]
-    fn worker_response_with_no_other_available_jobs() {
-        let mut fixture = Fixture::new().with_client(1).with_worker(1, 2);
-        let job_spec = job_spec!("test", [tar_digest!(1), tar_digest!(2)]);
-        let result = Ok(outcome!(1));
-
+        // 1/2 1/2 0/3
         fixture
             .expect()
-            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_enqueue_job_to_worker(1, (1, 1), job_spec.clone())
+            .start_job((1, 3), [tar_digest!(3)], StartJob::Ready)
+            .send_enqueue_job_to_worker(3, (1, 3), spec!(3))
             .when()
-            .receive_job_request_from_client(1, 1, job_spec.clone());
+            .receive_job_request_from_client(1, 3, spec!(3));
+
+        // 1/2 1/2 1/3
+        fixture
+            .expect()
+            .start_job((1, 4), [tar_digest!(4)], StartJob::Ready)
+            .send_enqueue_job_to_worker(3, (1, 4), spec!(4))
+            .when()
+            .receive_job_request_from_client(1, 4, spec!(4));
+
+        // 1/2 1/2 2/3
+        fixture
+            .expect()
+            .start_job((1, 5), [tar_digest!(5)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 5), spec!(5))
+            .when()
+            .receive_job_request_from_client(1, 5, spec!(5));
+
+        // 2/2 1/2 2/3
+        fixture
+            .expect()
+            .start_job((1, 6), [tar_digest!(6)], StartJob::Ready)
+            .send_enqueue_job_to_worker(2, (1, 6), spec!(6))
+            .when()
+            .receive_job_request_from_client(1, 6, spec!(6));
+
+        // 2/2 2/2 2/3
+        fixture
+            .expect()
+            .start_job((1, 7), [tar_digest!(7)], StartJob::Ready)
+            .send_enqueue_job_to_worker(3, (1, 7), spec!(7))
+            .when()
+            .receive_job_request_from_client(1, 7, spec!(7));
 
         fixture
             .expect()
+            .send_job_response_to_client(1, 1, Ok(outcome!(1)))
             .complete_job((1, 1))
-            .send_job_response_to_client(1, 1, result.clone())
             .when()
-            .receive_job_response_from_worker(1, (1, 1), result.clone());
-    }
-
-    #[test]
-    fn worker_response_with_other_available_jobs() {
-        let mut fixture = Fixture::new().with_client(1).with_worker(1, 1);
-        let job_spec_1 = job_spec!("test_1", [tar_digest!(1), tar_digest!(2)]);
-        let job_spec_2 = job_spec!("test_2", [tar_digest!(1)]);
-        let job_spec_3 = job_spec!("test_3", [tar_digest!(2)]);
-        let result_1 = Ok(outcome!(1));
+            .receive_job_response_from_worker(1, (1, 1), Ok(outcome!(1)));
+        // 1/2 2/2 3/3
+        fixture
+            .expect()
+            .start_job((1, 8), [tar_digest!(8)], StartJob::Ready)
+            .send_enqueue_job_to_worker(1, (1, 8), spec!(8))
+            .when()
+            .receive_job_request_from_client(1, 8, spec!(8));
 
         fixture
             .expect()
-            .start_job((1, 1), [tar_digest!(1), tar_digest!(2)], StartJob::Ready)
-            .send_enqueue_job_to_worker(1, (1, 1), job_spec_1.clone())
+            .send_job_response_to_client(1, 2, Ok(outcome!(2)))
+            .complete_job((1, 2))
             .when()
-            .receive_job_request_from_client(1, 1, job_spec_1);
+            .receive_job_response_from_worker(2, (1, 2), Ok(outcome!(2)));
+        // 2/2 1/2 3/3
+        fixture
+            .expect()
+            .start_job((1, 9), [tar_digest!(9)], StartJob::Ready)
+            .send_enqueue_job_to_worker(2, (1, 9), spec!(9))
+            .when()
+            .receive_job_request_from_client(1, 9, spec!(9));
 
+        fixture
+            .expect()
+            .send_job_response_to_client(1, 3, Ok(outcome!(3)))
+            .complete_job((1, 3))
+            .when()
+            .receive_job_response_from_worker(3, (1, 3), Ok(outcome!(3)));
+        // 2/2 2/2 2/3
+        fixture
+            .expect()
+            .start_job((1, 10), [tar_digest!(10)], StartJob::Ready)
+            .send_enqueue_job_to_worker(3, (1, 10), spec!(10))
+            .when()
+            .receive_job_request_from_client(1, 10, spec!(10));
+    }
+
+    #[test]
+    fn priority_and_estimated_duration_have_priority() {
+        let mut fixture = Fixture::new().with_client(1);
+
+        let spec_0_none = spec!(1);
+        let spec_0_1 = spec!(1, estimated_duration: Duration::from_secs(1));
+        let spec_0_2 = spec!(1, estimated_duration: Duration::from_secs(2));
+        let spec_1_none = spec!(1, priority: 1);
+        let spec_1_1 = spec!(1, priority: 1, estimated_duration: Duration::from_secs(1));
+        let spec_1_2 = spec!(1, priority: 1, estimated_duration: Duration::from_secs(2));
+        let spec_2_none = spec!(1, priority: 2);
+        let spec_2_1 = spec!(1, priority: 2, estimated_duration: Duration::from_secs(1));
+        let spec_2_2 = spec!(1, priority: 2, estimated_duration: Duration::from_secs(2));
+
+        fixture
+            .expect()
+            .start_job((1, 1), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 1, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 1, spec_0_none.clone());
         fixture
             .expect()
             .start_job((1, 2), [tar_digest!(1)], StartJob::Ready)
-            .send_enqueue_job_to_worker(1, (1, 2), job_spec_2.clone())
+            .send_job_status_update_to_client(1, 2, JobBrokerStatus::WaitingForWorker)
             .when()
-            .receive_job_request_from_client(1, 2, job_spec_2);
-
+            .receive_job_request_from_client(1, 2, spec_0_1.clone());
         fixture
             .expect()
-            .start_job((1, 3), [tar_digest!(2)], StartJob::Ready)
+            .start_job((1, 3), [tar_digest!(1)], StartJob::Ready)
             .send_job_status_update_to_client(1, 3, JobBrokerStatus::WaitingForWorker)
             .when()
-            .receive_job_request_from_client(1, 3, job_spec_3.clone());
+            .receive_job_request_from_client(1, 3, spec_0_2.clone());
+        fixture
+            .expect()
+            .start_job((1, 4), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 4, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 4, spec_1_none.clone());
+        fixture
+            .expect()
+            .start_job((1, 5), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 5, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 5, spec_1_1.clone());
+        fixture
+            .expect()
+            .start_job((1, 6), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 6, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 6, spec_1_2.clone());
+        fixture
+            .expect()
+            .start_job((1, 7), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 7, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 7, spec_2_none.clone());
+        fixture
+            .expect()
+            .start_job((1, 8), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 8, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 8, spec_2_1.clone());
+        fixture
+            .expect()
+            .start_job((1, 9), [tar_digest!(1)], StartJob::Ready)
+            .send_job_status_update_to_client(1, 9, JobBrokerStatus::WaitingForWorker)
+            .when()
+            .receive_job_request_from_client(1, 9, spec_2_2.clone());
 
         fixture
             .expect()
-            .complete_job((1, 1))
-            .send_job_response_to_client(1, 1, result_1.clone())
-            .send_enqueue_job_to_worker(1, (1, 3), job_spec_3)
+            .send_enqueue_job_to_worker(1, (1, 7), spec_2_none)
+            .send_enqueue_job_to_worker(1, (1, 9), spec_2_2)
             .when()
-            .receive_job_response_from_worker(1, (1, 1), result_1);
+            .receive_worker_connected(1, 1);
+        fixture
+            .expect()
+            .send_enqueue_job_to_worker(2, (1, 4), spec_1_none)
+            .send_enqueue_job_to_worker(2, (1, 8), spec_2_1)
+            .when()
+            .receive_worker_connected(2, 1);
+        fixture
+            .expect()
+            .send_enqueue_job_to_worker(3, (1, 5), spec_1_1)
+            .send_enqueue_job_to_worker(3, (1, 6), spec_1_2)
+            .when()
+            .receive_worker_connected(3, 1);
+        fixture
+            .expect()
+            .send_enqueue_job_to_worker(4, (1, 1), spec_0_none)
+            .send_enqueue_job_to_worker(4, (1, 3), spec_0_2)
+            .when()
+            .receive_worker_connected(4, 1);
+        fixture
+            .expect()
+            .send_enqueue_job_to_worker(5, (1, 2), spec_0_1)
+            .when()
+            .receive_worker_connected(5, 1);
     }
 }
