@@ -299,11 +299,8 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         let mut just_enqueued = HashSet::new();
         for jid in worker.pending.drain() {
             let spec = self.clients.job_spec_from_jid(jid);
-            self.queued_jobs.push(QueuedJob::new(
-                jid,
-                spec.priority,
-                spec.estimated_duration,
-            ));
+            self.queued_jobs
+                .push(QueuedJob::new(jid, spec.priority, spec.estimated_duration));
             just_enqueued.insert(jid);
         }
 

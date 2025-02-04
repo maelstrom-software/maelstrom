@@ -9,7 +9,7 @@ use crate::{
 };
 use anyhow::{bail, Error, Result};
 use bytesize::ByteSize;
-use derive_more::Debug;
+use derive_more::{Debug, Deref, DerefMut};
 use fs::{FileType, Fs, Metadata};
 use maelstrom_base::{JobId, Sha256Digest};
 use slog::{debug, info, warn, Logger};
@@ -21,7 +21,6 @@ use std::{
     iter::IntoIterator,
     mem,
     num::NonZeroU32,
-    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     result,
     str::FromStr as _,
@@ -219,25 +218,12 @@ enum Entry<GetStrategyT: GetStrategy> {
 
 /// An implementation of the "newtype" pattern so that we can implement [`HeapDeps`] on a
 /// [`HashMap`].
+#[derive(Deref, DerefMut)]
 struct Map<KeyT: Key, GetStrategyT: GetStrategy>(HashMap<KeyT, Entry<GetStrategyT>>);
 
 impl<KeyT: Key, GetStrategyT: GetStrategy> Default for Map<KeyT, GetStrategyT> {
     fn default() -> Self {
         Self(HashMap::default())
-    }
-}
-
-impl<KeyT: Key, GetStrategyT: GetStrategy> Deref for Map<KeyT, GetStrategyT> {
-    type Target = HashMap<KeyT, Entry<GetStrategyT>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<KeyT: Key, GetStrategyT: GetStrategy> DerefMut for Map<KeyT, GetStrategyT> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 

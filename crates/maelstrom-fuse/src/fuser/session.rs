@@ -5,13 +5,9 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
-use crate::fuser::channel::Channel;
-use crate::fuser::ll::fuse_abi as abi;
-use crate::fuser::request::Request;
-use crate::fuser::Filesystem;
+use crate::fuser::{channel::Channel, ll::fuse_abi as abi, request::Request, Filesystem};
 use libc::{EAGAIN, ECONNABORTED, EINTR, ENODEV, ENOENT};
-use std::sync::Arc;
-use std::{io, ops::DerefMut};
+use std::{io, ops::DerefMut as _, sync::Arc};
 use tokio::io::{unix::AsyncFd, Interest};
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,

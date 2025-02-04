@@ -1,4 +1,5 @@
 use crate::cache::SchedulerCache;
+use derive_more::{Deref, DerefMut};
 use get_size::GetSize;
 use maelstrom_base::{
     ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest,
@@ -11,7 +12,6 @@ use maelstrom_util::{
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     num::NonZeroUsize,
-    ops::{Deref, DerefMut},
     path::PathBuf,
 };
 
@@ -109,7 +109,7 @@ struct ManifestReadCacheEntry {
     size: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Deref, DerefMut)]
 struct ManifestReadCacheMap(HashMap<Sha256Digest, ManifestReadCacheEntry>);
 
 impl HeapDeps for ManifestReadCacheMap {
@@ -123,20 +123,6 @@ impl HeapDeps for ManifestReadCacheMap {
 
     fn update_index(&mut self, elem: &Self::Element, heap_index: HeapIndex) {
         self.0.get_mut(elem).unwrap().heap_index = heap_index;
-    }
-}
-
-impl Deref for ManifestReadCacheMap {
-    type Target = HashMap<Sha256Digest, ManifestReadCacheEntry>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ManifestReadCacheMap {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
