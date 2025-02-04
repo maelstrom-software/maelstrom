@@ -67,14 +67,9 @@ pub trait Deps {
     );
 }
 
-#[derive(Constructor)]
-struct Job {
-    spec: JobSpec,
-}
-
 struct Client<DepsT: Deps> {
     sender: DepsT::ClientSender,
-    jobs: HashMap<ClientJobId, Job>,
+    jobs: HashMap<ClientJobId, JobSpec>,
     num_completed_jobs: u64,
 }
 
@@ -92,7 +87,7 @@ impl<DepsT: Deps> Client<DepsT> {
 struct ClientMap<DepsT: Deps>(HashMap<ClientId, Client<DepsT>>);
 
 impl<DepsT: Deps> ClientMap<DepsT> {
-    fn job_from_jid(&self, jid: JobId) -> &Job {
+    fn job_spec_from_jid(&self, jid: JobId) -> &JobSpec {
         self.get(&jid.cid).unwrap().jobs.get(&jid.cjid).unwrap()
     }
 }
@@ -198,9 +193,9 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             }
 
             let jid = self.queued_jobs.pop().unwrap().jid;
-            let job = self.clients.job_from_jid(jid);
+            let spec = self.clients.job_spec_from_jid(jid);
             self.deps
-                .send_enqueue_job_to_worker(&mut worker.sender, jid, job.spec.clone());
+                .send_enqueue_job_to_worker(&mut worker.sender, jid, spec.clone());
             just_enqueued.remove(&jid);
 
             worker.pending.insert(jid).assert_is_true();
@@ -265,7 +260,7 @@ impl<DepsT: Deps> Scheduler<DepsT> {
 
         let client = self.clients.get_mut(&cid).unwrap();
         let jid = JobId { cid, cjid };
-        client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
+        client.jobs.insert(cjid, spec).assert_is_none();
 
         match artifact_gatherer.start_job(jid, layers) {
             StartJob::Ready => {
@@ -303,11 +298,11 @@ impl<DepsT: Deps> Scheduler<DepsT> {
 
         let mut just_enqueued = HashSet::new();
         for jid in worker.pending.drain() {
-            let job = self.clients.job_from_jid(jid);
+            let spec = self.clients.job_spec_from_jid(jid);
             self.queued_jobs.push(QueuedJob::new(
                 jid,
-                job.spec.priority,
-                job.spec.estimated_duration,
+                spec.priority,
+                spec.estimated_duration,
             ));
             just_enqueued.insert(jid);
         }
@@ -342,9 +337,9 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             // If there are any queued_requests, we can just pop one off of the front of
             // the queue and not have to update the worker's used slot count or position in the
             // workers list.
-            let job = self.clients.job_from_jid(jid);
+            let spec = self.clients.job_spec_from_jid(jid);
             self.deps
-                .send_enqueue_job_to_worker(&mut worker.sender, jid, job.spec.clone());
+                .send_enqueue_job_to_worker(&mut worker.sender, jid, spec.clone());
             worker.pending.insert(jid);
         } else {
             // Since there are no queued_requests, we're going to have to update the
@@ -398,11 +393,11 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             .filter(|jid| match self.clients.get_mut(&jid.cid) {
                 None => false,
                 Some(client) => {
-                    let job = client.jobs.get(&jid.cjid).unwrap();
+                    let spec = client.jobs.get(&jid.cjid).unwrap();
                     self.queued_jobs.push(QueuedJob::new(
                         *jid,
-                        job.spec.priority,
-                        job.spec.estimated_duration,
+                        spec.priority,
+                        spec.estimated_duration,
                     ));
                     true
                 }
