@@ -6,7 +6,8 @@ use derive_more::{Constructor, Deref, DerefMut};
 use enum_map::enum_map;
 use maelstrom_base::{
     stats::{
-        BrokerStatistics, JobState, JobStatisticsSample, JobStatisticsTimeSeries, WorkerStatistics,
+        BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
+        WorkerStatistics,
     },
     ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
     JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
@@ -73,15 +74,15 @@ pub trait Deps {
 struct Client<DepsT: Deps> {
     sender: DepsT::ClientSender,
     jobs: HashMap<ClientJobId, JobSpec>,
-    num_completed_jobs: u64,
+    counts: JobStateCounts,
 }
 
 impl<DepsT: Deps> Client<DepsT> {
     fn new(sender: DepsT::ClientSender) -> Self {
         Client {
             sender,
-            jobs: HashMap::default(),
-            num_completed_jobs: 0,
+            jobs: Default::default(),
+            counts: Default::default(),
         }
     }
 }
@@ -355,7 +356,7 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         self.deps
             .send_job_response_to_client(&mut client.sender, jid.cjid, result);
         client.jobs.remove(&jid.cjid).assert_is_some();
-        client.num_completed_jobs += 1;
+        client.counts[JobState::Complete] += 1;
 
         if let Some(QueuedJob { jid, .. }) = self.queued_jobs.pop() {
             // If there are any queued_requests, we can just pop one off of the front of
@@ -416,8 +417,8 @@ impl<DepsT: Deps> Scheduler<DepsT> {
     pub fn receive_statistics_heartbeat(&mut self, artifact_gatherer: &mut impl ArtifactGatherer) {
         let client_to_stats = self
             .clients
-            .keys()
-            .map(|&cid| {
+            .iter()
+            .map(|(&cid, client)| {
                 (
                     cid,
                     enum_map! {
@@ -439,7 +440,7 @@ impl<DepsT: Deps> Scheduler<DepsT> {
                                 .filter(|jid| jid.cid == cid)
                                 .count() as u64
                         }
-                        JobState::Complete => self.clients.get(&cid).unwrap().num_completed_jobs,
+                        JobState::Complete => client.counts[JobState::Complete],
                     },
                 )
             })
