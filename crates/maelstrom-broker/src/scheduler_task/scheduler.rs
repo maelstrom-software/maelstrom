@@ -86,14 +86,7 @@ impl<DepsT: Deps> Client<DepsT> {
     }
 }
 
-#[derive(Deref, DerefMut)]
-struct ClientMap<DepsT: Deps>(HashMap<ClientId, Client<DepsT>>);
-
-impl<DepsT: Deps> ClientMap<DepsT> {
-    fn job_spec_from_jid(&self, jid: JobId) -> &JobSpec {
-        self.get(&jid.cid).unwrap().jobs.get(&jid.cjid).unwrap()
-    }
-}
+type ClientMap<DepsT> = HashMap<ClientId, Client<DepsT>>;
 
 struct Worker<DepsT: Deps> {
     slots: usize,
@@ -177,13 +170,26 @@ impl<DepsT: Deps> Scheduler<DepsT> {
     pub fn new(deps: DepsT) -> Self {
         Scheduler {
             deps,
-            clients: ClientMap(Default::default()),
+            clients: Default::default(),
             workers: WorkerMap(Default::default()),
             worker_heap: Default::default(),
             monitors: Default::default(),
             queued_jobs: Default::default(),
             job_statistics: Default::default(),
         }
+    }
+
+    fn start_job(
+        clients: &mut ClientMap<DepsT>,
+        deps: &mut DepsT,
+        jid: JobId,
+        worker: &mut Worker<DepsT>,
+    ) {
+        let client = clients.get_mut(&jid.cid).unwrap();
+        let spec = client.jobs.get(&jid.cjid).unwrap();
+        client.counts[JobState::Running] += 1;
+        deps.send_enqueue_job_to_worker(&mut worker.sender, jid, spec.clone());
+        worker.pending.insert(jid).assert_is_true();
     }
 
     fn possibly_start_jobs(&mut self, mut just_enqueued: HashSet<JobId>) {
@@ -195,11 +201,8 @@ impl<DepsT: Deps> Scheduler<DepsT> {
                 break;
             }
 
-            let jid = self.queued_jobs.pop().unwrap().jid;
-            let spec = self.clients.job_spec_from_jid(jid);
-            self.deps
-                .send_enqueue_job_to_worker(&mut worker.sender, jid, spec.clone());
-            worker.pending.insert(jid).assert_is_true();
+            let QueuedJob { jid, .. } = self.queued_jobs.pop().unwrap();
+            Self::start_job(&mut self.clients, &mut self.deps, jid, worker);
             let heap_index = worker.heap_index;
             self.worker_heap.sift_down(&mut self.workers, heap_index);
             just_enqueued.remove(&jid);
@@ -332,7 +335,10 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             .remove(&mut self.workers, worker.heap_index);
 
         for jid in &worker.pending {
-            let spec = self.clients.job_spec_from_jid(*jid);
+            let client = self.clients.get_mut(&jid.cid).unwrap();
+            let spec = client.jobs.get(&jid.cjid).unwrap();
+            client.counts[JobState::Running] =
+                client.counts[JobState::Running].checked_sub(1).unwrap();
             self.queued_jobs
                 .push(QueuedJob::new(*jid, spec.priority, spec.estimated_duration));
         }
@@ -360,16 +366,14 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         self.deps
             .send_job_response_to_client(&mut client.sender, jid.cjid, result);
         client.jobs.remove(&jid.cjid).assert_is_some();
+        client.counts[JobState::Running] = client.counts[JobState::Running].checked_sub(1).unwrap();
         client.counts[JobState::Complete] += 1;
 
         if let Some(QueuedJob { jid, .. }) = self.queued_jobs.pop() {
             // If there are any queued_requests, we can just pop one off of the front of
             // the queue and not have to update the worker's used slot count or position in the
             // workers list.
-            let spec = self.clients.job_spec_from_jid(jid);
-            self.deps
-                .send_enqueue_job_to_worker(&mut worker.sender, jid, spec.clone());
-            worker.pending.insert(jid);
+            Self::start_job(&mut self.clients, &mut self.deps, jid, worker);
         } else {
             // Since there are no queued_jobs, we're going to have to update the worker's position
             // in the workers list.
@@ -435,14 +439,8 @@ impl<DepsT: Deps> Scheduler<DepsT> {
                                 .filter(|QueuedJob { jid, .. }| jid.cid == cid)
                                 .count() as u64
                         }
-                        JobState::Running => {
-                            self
-                                .workers
-                                .values()
-                                .flat_map(|w| w.pending.iter())
-                                .filter(|jid| jid.cid == cid)
-                                .count() as u64
-                        }
+                        JobState::Running =>
+                            client.counts[JobState::Running],
                         JobState::Complete => client.counts[JobState::Complete],
                     },
                 )
