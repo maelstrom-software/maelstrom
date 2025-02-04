@@ -3,7 +3,6 @@
 
 use crate::scheduler_task::artifact_gatherer::StartJob;
 use derive_more::{Constructor, Deref, DerefMut};
-use enum_map::enum_map;
 use maelstrom_base::{
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
@@ -187,9 +186,10 @@ impl<DepsT: Deps> Scheduler<DepsT> {
     ) {
         let client = clients.get_mut(&jid.cid).unwrap();
         let spec = client.jobs.get(&jid.cjid).unwrap();
+        client.counts[JobState::Pending] -= 1;
         client.counts[JobState::Running] += 1;
-        deps.send_enqueue_job_to_worker(&mut worker.sender, jid, spec.clone());
         worker.pending.insert(jid).assert_is_true();
+        deps.send_enqueue_job_to_worker(&mut worker.sender, jid, spec.clone());
     }
 
     fn possibly_start_jobs(&mut self, mut just_enqueued: HashSet<JobId>) {
@@ -272,6 +272,7 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             StartJob::Ready => {
                 self.queued_jobs
                     .push(QueuedJob::new(jid, priority, estimated_duration));
+                client.counts[JobState::Pending] += 1;
                 self.possibly_start_jobs(HashSet::from_iter([jid]));
             }
             StartJob::NotReady => {
@@ -291,16 +292,14 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             .filter(|jid| match self.clients.get_mut(&jid.cid) {
                 None => false,
                 Some(client) => {
-                    client.counts[JobState::WaitingForArtifacts] = client.counts
-                        [JobState::WaitingForArtifacts]
-                        .checked_sub(1)
-                        .unwrap();
                     let spec = client.jobs.get(&jid.cjid).unwrap();
                     self.queued_jobs.push(QueuedJob::new(
                         *jid,
                         spec.priority,
                         spec.estimated_duration,
                     ));
+                    client.counts[JobState::WaitingForArtifacts] -= 1;
+                    client.counts[JobState::Pending] += 1;
                     true
                 }
             })
@@ -337,10 +336,10 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         for jid in &worker.pending {
             let client = self.clients.get_mut(&jid.cid).unwrap();
             let spec = client.jobs.get(&jid.cjid).unwrap();
-            client.counts[JobState::Running] =
-                client.counts[JobState::Running].checked_sub(1).unwrap();
             self.queued_jobs
                 .push(QueuedJob::new(*jid, spec.priority, spec.estimated_duration));
+            client.counts[JobState::Running] -= 1;
+            client.counts[JobState::Pending] += 1;
         }
         self.possibly_start_jobs(worker.pending);
     }
@@ -366,7 +365,7 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         self.deps
             .send_job_response_to_client(&mut client.sender, jid.cjid, result);
         client.jobs.remove(&jid.cjid).assert_is_some();
-        client.counts[JobState::Running] = client.counts[JobState::Running].checked_sub(1).unwrap();
+        client.counts[JobState::Running] -= 1;
         client.counts[JobState::Complete] += 1;
 
         if let Some(QueuedJob { jid, .. }) = self.queued_jobs.pop() {
@@ -423,31 +422,13 @@ impl<DepsT: Deps> Scheduler<DepsT> {
     }
 
     pub fn receive_statistics_heartbeat(&mut self) {
-        let client_to_stats = self
-            .clients
-            .iter()
-            .map(|(&cid, client)| {
-                (
-                    cid,
-                    enum_map! {
-                        JobState::WaitingForArtifacts =>
-                            client.counts[JobState::WaitingForArtifacts],
-                        JobState::Pending => {
-                            self
-                                .queued_jobs
-                                .iter()
-                                .filter(|QueuedJob { jid, .. }| jid.cid == cid)
-                                .count() as u64
-                        }
-                        JobState::Running =>
-                            client.counts[JobState::Running],
-                        JobState::Complete => client.counts[JobState::Complete],
-                    },
-                )
-            })
-            .collect();
-        self.job_statistics
-            .insert(JobStatisticsSample { client_to_stats });
+        self.job_statistics.insert(JobStatisticsSample {
+            client_to_stats: self
+                .clients
+                .iter()
+                .map(|(&cid, client)| (cid, client.counts))
+                .collect(),
+        });
     }
 }
 
