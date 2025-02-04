@@ -2,6 +2,7 @@
 //! workers.
 
 use crate::scheduler_task::artifact_gatherer::StartJob;
+use derive_more::{Constructor, Deref, DerefMut};
 use enum_map::enum_map;
 use maelstrom_base::{
     stats::{
@@ -18,7 +19,6 @@ use maelstrom_util::{
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap, HashSet},
-    ops::{Deref, DerefMut},
     time::Duration,
 };
 
@@ -67,14 +67,9 @@ pub trait Deps {
     );
 }
 
+#[derive(Constructor)]
 struct Job {
     spec: JobSpec,
-}
-
-impl Job {
-    fn new(spec: JobSpec) -> Self {
-        Job { spec }
-    }
 }
 
 struct Client<DepsT: Deps> {
@@ -93,32 +88,20 @@ impl<DepsT: Deps> Client<DepsT> {
     }
 }
 
+#[derive(Deref, DerefMut)]
 struct ClientMap<DepsT: Deps>(HashMap<ClientId, Client<DepsT>>);
 
 impl<DepsT: Deps> ClientMap<DepsT> {
     fn job_from_jid(&self, jid: JobId) -> &Job {
-        self.0.get(&jid.cid).unwrap().jobs.get(&jid.cjid).unwrap()
-    }
-}
-
-impl<DepsT: Deps> Deref for ClientMap<DepsT> {
-    type Target = HashMap<ClientId, Client<DepsT>>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<DepsT: Deps> DerefMut for ClientMap<DepsT> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        self.get(&jid.cid).unwrap().jobs.get(&jid.cjid).unwrap()
     }
 }
 
 struct Worker<DepsT: Deps> {
     slots: usize,
+    sender: DepsT::WorkerSender,
     pending: HashSet<JobId>,
     heap_index: HeapIndex,
-    sender: DepsT::WorkerSender,
 }
 
 impl<DepsT: Deps> Worker<DepsT> {
@@ -132,50 +115,39 @@ impl<DepsT: Deps> Worker<DepsT> {
     }
 }
 
+#[derive(Deref, DerefMut)]
 struct WorkerMap<DepsT: Deps>(HashMap<WorkerId, Worker<DepsT>>);
 
 impl<DepsT: Deps> HeapDeps for WorkerMap<DepsT> {
     type Element = WorkerId;
 
     fn is_element_less_than(&self, lhs_id: &WorkerId, rhs_id: &WorkerId) -> bool {
-        let lhs_worker = self.0.get(lhs_id).unwrap();
-        let rhs_worker = self.0.get(rhs_id).unwrap();
+        let lhs_worker = self.get(lhs_id).unwrap();
+        let rhs_worker = self.get(rhs_id).unwrap();
         let lhs = (lhs_worker.pending.len() * rhs_worker.slots, *lhs_id);
         let rhs = (rhs_worker.pending.len() * lhs_worker.slots, *rhs_id);
         lhs.cmp(&rhs) == Ordering::Less
     }
 
     fn update_index(&mut self, elem: &WorkerId, idx: HeapIndex) {
-        self.0.get_mut(elem).unwrap().heap_index = idx;
+        self.get_mut(elem).unwrap().heap_index = idx;
     }
 }
 
-impl<DepsT: Deps> Deref for WorkerMap<DepsT> {
-    type Target = HashMap<WorkerId, Worker<DepsT>>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<DepsT: Deps> DerefMut for WorkerMap<DepsT> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
+#[derive(Constructor, Debug)]
 struct QueuedJob {
     jid: JobId,
     priority: i8,
     estimated_duration: Option<Duration>,
 }
 
-impl QueuedJob {
-    fn new(jid: JobId, priority: i8, estimated_duration: Option<Duration>) -> Self {
-        Self {
-            jid,
-            priority,
-            estimated_duration,
-        }
+impl Eq for QueuedJob {}
+
+impl Ord for QueuedJob {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.priority
+            .cmp(&other.priority)
+            .then_with(|| duration::cmp(&self.estimated_duration, &other.estimated_duration))
     }
 }
 
@@ -191,23 +163,13 @@ impl PartialOrd for QueuedJob {
     }
 }
 
-impl Eq for QueuedJob {}
-
-impl Ord for QueuedJob {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.priority
-            .cmp(&other.priority)
-            .then_with(|| duration::cmp(&self.estimated_duration, &other.estimated_duration))
-    }
-}
-
 pub struct Scheduler<DepsT: Deps> {
     deps: DepsT,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
+    worker_heap: Heap<WorkerMap<DepsT>>,
     monitors: HashMap<MonitorId, DepsT::MonitorSender>,
     queued_jobs: BinaryHeap<QueuedJob>,
-    worker_heap: Heap<WorkerMap<DepsT>>,
     job_statistics: JobStatisticsTimeSeries,
 }
 
@@ -219,17 +181,17 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             deps,
             clients: ClientMap(Default::default()),
             workers: WorkerMap(Default::default()),
+            worker_heap: Default::default(),
             monitors: Default::default(),
             queued_jobs: Default::default(),
-            worker_heap: Default::default(),
             job_statistics: Default::default(),
         }
     }
 
     fn possibly_start_jobs(&mut self, mut just_enqueued: HashSet<JobId>) {
-        while !self.queued_jobs.is_empty() && !self.workers.0.is_empty() {
+        while !self.queued_jobs.is_empty() && !self.workers.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
-            let worker = self.workers.0.get_mut(wid).unwrap();
+            let worker = self.workers.get_mut(wid).unwrap();
 
             if worker.pending.len() == 2 * worker.slots {
                 break;
@@ -263,7 +225,6 @@ impl<DepsT: Deps> Scheduler<DepsT> {
     ) {
         artifact_gatherer.client_connected(cid, sender.clone());
         self.clients
-            .0
             .insert(cid, Client::new(sender))
             .assert_is_none();
     }
@@ -1546,6 +1507,49 @@ mod tests2 {
         ops::{Deref, DerefMut},
         rc::Rc,
     };
+
+    #[test]
+    fn queued_job_ordering() {
+        let jid_1 = (1, 1).into();
+        let jid_2 = (1, 2).into();
+        let duration_none = None;
+        let duration_1 = Some(Duration::from_secs(1));
+        let duration_2 = Some(Duration::from_secs(2));
+        let priority_1 = 1;
+        let priority_2 = 2;
+        assert!(
+            QueuedJob::new(jid_1, priority_2, duration_1)
+                > QueuedJob::new(jid_2, priority_1, duration_2)
+        );
+        assert!(
+            QueuedJob::new(jid_1, priority_1, duration_2)
+                > QueuedJob::new(jid_2, priority_1, duration_1)
+        );
+        assert!(
+            QueuedJob::new(jid_1, priority_1, duration_none)
+                > QueuedJob::new(jid_2, priority_1, duration_2)
+        );
+        assert!(
+            !(QueuedJob::new(jid_1, priority_1, duration_none)
+                > QueuedJob::new(jid_2, priority_1, duration_none))
+        );
+        assert!(
+            !(QueuedJob::new(jid_1, priority_1, duration_none)
+                < QueuedJob::new(jid_2, priority_1, duration_none))
+        );
+        assert_eq!(
+            QueuedJob::new(jid_1, priority_1, duration_none),
+            QueuedJob::new(jid_2, priority_1, duration_none),
+        );
+        assert_ne!(
+            QueuedJob::new(jid_1, priority_1, duration_none),
+            QueuedJob::new(jid_1, priority_2, duration_none),
+        );
+        assert_ne!(
+            QueuedJob::new(jid_1, priority_1, duration_1),
+            QueuedJob::new(jid_1, priority_1, duration_2),
+        );
+    }
 
     #[derive(Clone, Debug)]
     struct TestClientSender(ClientId);
