@@ -89,25 +89,13 @@ macro_rules! manifest_digest {
 
 /// An absolute job ID that includes a [`ClientId`] for disambiguation.
 #[derive(
-    Copy, Clone, Debug, Deserialize, Display, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+    Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
 #[display("{cid}.{cjid}")]
+#[from(forward)]
 pub struct JobId {
     pub cid: ClientId,
     pub cjid: ClientJobId,
-}
-
-impl<ClientIdT, ClientJobIdT> From<(ClientIdT, ClientJobIdT)> for JobId
-where
-    ClientId: From<ClientIdT>,
-    ClientJobId: From<ClientJobIdT>,
-{
-    fn from((cid, cjid): (ClientIdT, ClientJobIdT)) -> Self {
-        Self {
-            cid: ClientId::from(cid),
-            cjid: ClientJobId::from(cjid),
-        }
-    }
 }
 
 #[pocket_definition(export)]
