@@ -227,7 +227,9 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         artifact_gatherer.client_connected(cid, sender.clone());
         self.clients
             .insert(cid, Client::new(sender))
-            .assert_is_none();
+            .expect_is_none(|_| {
+                format!("received client_connected message for duplicate client: {cid}")
+            });
     }
 
     pub fn receive_client_disconnected(
@@ -1487,6 +1489,7 @@ mod tests {
 #[cfg(test)]
 mod tests2 {
     use super::*;
+    use derivative::Derivative;
     use maelstrom_base::{job_spec, tar_digest};
     use maelstrom_test::outcome;
     use std::{
@@ -1538,8 +1541,52 @@ mod tests2 {
         );
     }
 
-    #[derive(Clone, Debug)]
-    struct TestClientSender(ClientId);
+    #[derive(derive_more::Debug)]
+    struct TestClientSender {
+        cid: ClientId,
+        #[debug(skip)]
+        mock: Rc<RefCell<Mock>>,
+        is_clone: bool,
+    }
+
+    impl Clone for TestClientSender {
+        fn clone(&self) -> Self {
+            let cid = self.cid;
+            let mock = self.mock.clone();
+            assert!(
+                mock.borrow_mut().client_sender_clone.remove(&cid),
+                "unexpected cloning client sender for: {cid}",
+            );
+            Self {
+                cid,
+                mock,
+                is_clone: true,
+            }
+        }
+    }
+
+    impl Drop for TestClientSender {
+        fn drop(&mut self) {
+            let cid = self.cid;
+            let mut mock = self.mock.borrow_mut();
+            if !self.is_clone && mock.check_drops {
+                assert!(
+                    mock.client_sender_drop.remove(&cid),
+                    "unexpected dropping client sender for: {cid}",
+                );
+            }
+        }
+    }
+
+    impl TestClientSender {
+        fn new(cid: ClientId, mock: Rc<RefCell<Mock>>) -> Self {
+            Self {
+                cid,
+                mock,
+                is_clone: false,
+            }
+        }
+    }
 
     #[derive(Debug)]
     struct TestWorkerSender(WorkerId);
@@ -1547,7 +1594,8 @@ mod tests2 {
     #[derive(Debug)]
     struct TestMonitorSender(MonitorId);
 
-    #[derive(Default)]
+    #[derive(Derivative)]
+    #[derivative(Default)]
     struct Mock {
         // ArtifactGatherer
         client_connected: HashSet<ClientId>,
@@ -1560,6 +1608,11 @@ mod tests2 {
         send_enqueue_job_to_worker: Vec<(WorkerId, JobId, JobSpec)>,
         send_cancel_job_to_worker: HashSet<(WorkerId, JobId)>,
         send_statistics_response_to_monitor: Vec<(MonitorId, BrokerStatistics)>,
+        // Drops
+        #[derivative(Default(value = "true"))]
+        check_drops: bool,
+        client_sender_clone: HashSet<ClientId>,
+        client_sender_drop: HashSet<ClientId>,
     }
 
     impl Mock {
@@ -1609,6 +1662,16 @@ mod tests2 {
                 "unused mock entries for Deps::send_statistics_response_to_monitor: {:?}",
                 self.send_statistics_response_to_monitor,
             );
+            assert!(
+                self.client_sender_clone.is_empty(),
+                "unused mock entries for ClientSender::clone: {:?}",
+                self.client_sender_clone,
+            );
+            assert!(
+                self.client_sender_drop.is_empty(),
+                "unused mock entries for ClientSender::drop: {:?}",
+                self.client_sender_drop,
+            );
         }
     }
 
@@ -1616,7 +1679,7 @@ mod tests2 {
         type ClientSender = TestClientSender;
 
         fn client_connected(&mut self, cid: ClientId, sender: TestClientSender) {
-            assert_eq!(sender.0, cid);
+            assert_eq!(sender.cid, cid);
             assert!(
                 self.borrow_mut().client_connected.remove(&cid),
                 "sending unexpected client_connected to artifact gatherer for client {cid}",
@@ -1667,7 +1730,7 @@ mod tests2 {
             let send_job_response_to_client = &mut self.borrow_mut().send_job_response_to_client;
             let index = send_job_response_to_client
                 .iter()
-                .position(|e| e.0 == sender.0 && e.1 == cjid && e.2 == result)
+                .position(|e| e.0 == sender.cid && e.1 == cjid && e.2 == result)
                 .expect(&format!(
                     "sending unexpected job_response to client {sender:?}: {cjid} {result:?}"
                 ));
@@ -1684,7 +1747,7 @@ mod tests2 {
                 &mut self.borrow_mut().send_job_status_update_to_client;
             let index = send_job_status_update_to_client
                 .iter()
-                .position(|e| e.0 == sender.0 && e.1 == cjid && e.2 == status)
+                .position(|e| e.0 == sender.cid && e.1 == cjid && e.2 == status)
                 .expect(&format!(
                     "sending unexpected job_status_update to client {sender:?}: {cjid} {status:?}"
                 ));
@@ -1742,6 +1805,12 @@ mod tests2 {
         sut: Scheduler<Rc<RefCell<Mock>>>,
     }
 
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.mock.borrow_mut().check_drops = false;
+        }
+    }
+
     impl Fixture {
         fn new() -> Self {
             let mock = Rc::new(RefCell::new(Default::default()));
@@ -1752,6 +1821,7 @@ mod tests2 {
         fn with_client(mut self, cid: impl Into<ClientId>) -> Self {
             let cid = cid.into();
             self.expect()
+                .client_sender_clone(cid)
                 .client_connected(cid)
                 .when()
                 .receive_client_connected(cid);
@@ -1770,8 +1840,12 @@ mod tests2 {
 
         fn receive_client_connected(&mut self, cid: impl Into<ClientId>) {
             let cid = cid.into();
-            self.sut
-                .receive_client_connected(&mut self.mock, cid, TestClientSender(cid));
+            let mock = self.mock.clone();
+            self.sut.receive_client_connected(
+                &mut self.mock,
+                cid,
+                TestClientSender::new(cid, mock),
+            );
         }
 
         fn receive_client_disconnected(&mut self, cid: impl Into<ClientId>) {
@@ -1867,12 +1941,15 @@ mod tests2 {
             self
         }
 
-        /*
-        fn client_disconnected(self, cid: ClientId) -> Self {
-            self.fixture.mock.borrow_mut().client_disconnected.push(cid);
+        fn client_disconnected(self, cid: impl Into<ClientId>) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .client_disconnected
+                .insert(cid.into())
+                .assert_is_true();
             self
         }
-        */
 
         fn start_job(
             self,
@@ -2032,6 +2109,26 @@ mod tests2 {
             todo!();
         }
         */
+
+        fn client_sender_clone(self, cid: impl Into<ClientId>) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .client_sender_clone
+                .insert(cid.into())
+                .assert_is_true();
+            self
+        }
+
+        fn client_sender_drop(self, cid: impl Into<ClientId>) -> Self {
+            self.fixture
+                .mock
+                .borrow_mut()
+                .client_sender_drop
+                .insert(cid.into())
+                .assert_is_true();
+            self
+        }
     }
 
     struct When<'a> {
@@ -2050,6 +2147,36 @@ mod tests2 {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.expect.fixture
         }
+    }
+
+    #[test]
+    fn receive_client_connected_forwards_to_artifact_gatherer() {
+        let mut fixture = Fixture::new();
+        fixture
+            .expect()
+            .client_sender_clone(1)
+            .client_connected(1)
+            .when()
+            .receive_client_connected(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "received client_connected message for duplicate client: 1")]
+    fn receive_client_connected_for_duplicate_client() {
+        let fixture = Fixture::new().with_client(1);
+        fixture.mock.borrow_mut().check_drops = false;
+        fixture.with_client(1);
+    }
+
+    #[test]
+    fn receive_client_disconnected_forwards_to_artifact_gatherer_and_drops_sender() {
+        let mut fixture = Fixture::new().with_client(1);
+        fixture
+            .expect()
+            .client_disconnected(1)
+            .client_sender_drop(1)
+            .when()
+            .receive_client_disconnected(1);
     }
 
     #[test]

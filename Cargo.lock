@@ -3445,6 +3445,7 @@ dependencies = [
  "bytesize",
  "clap",
  "colored-diff",
+ "derivative",
  "derive_more",
  "enum-map",
  "futures",

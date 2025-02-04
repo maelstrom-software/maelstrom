@@ -39,6 +39,7 @@ xdg.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 colored-diff.workspace = true
+derivative.workspace = true
 itertools.workspace = true
 maplit.workspace = true
 maelstrom-test.workspace = true

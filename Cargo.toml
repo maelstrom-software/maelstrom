@@ -62,6 +62,7 @@ console_error_panic_hook = "0.1.7"
 countio = { version = "0.2", features = ["tokio"] }
 crossterm = { version = "0.28.0", default-features = false }
 darling = "0.20"
+derivative = "2.2.0"
 derive_more = { version = "1", features = ["add", "add_assign", "constructor", "debug", "deref", "deref_mut", "display", "from", "into"] }
 eframe = "0.26"
 egui = "0.26"
