@@ -9,6 +9,10 @@ pub fn cmp(lhs: &Option<Duration>, rhs: &Option<Duration>) -> Ordering {
     }
 }
 
+pub fn partial_cmp(lhs: &Option<Duration>, rhs: &Option<Duration>) -> Option<Ordering> {
+    Some(cmp(lhs, rhs))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

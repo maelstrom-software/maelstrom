@@ -2,6 +2,7 @@
 //! workers.
 
 use crate::scheduler_task::artifact_gatherer::StartJob;
+use derivative::Derivative;
 use derive_more::{Constructor, Deref, DerefMut};
 use maelstrom_base::{
     stats::{
@@ -124,33 +125,15 @@ impl<DepsT: Deps> HeapDeps for WorkerMap<DepsT> {
     }
 }
 
-#[derive(Constructor, Debug)]
+#[derive(Constructor, Debug, Derivative, Eq)]
+#[derivative(Ord, PartialEq, PartialOrd)]
 struct QueuedJob {
+    #[derivative(Ord = "ignore", PartialEq = "ignore", PartialOrd = "ignore")]
     jid: JobId,
     priority: i8,
+    #[derivative(Ord(compare_with = "duration::cmp"))]
+    #[derivative(PartialOrd(compare_with = "duration::partial_cmp"))]
     estimated_duration: Option<Duration>,
-}
-
-impl Eq for QueuedJob {}
-
-impl Ord for QueuedJob {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.priority
-            .cmp(&other.priority)
-            .then_with(|| duration::cmp(&self.estimated_duration, &other.estimated_duration))
-    }
-}
-
-impl PartialEq for QueuedJob {
-    fn eq(&self, other: &Self) -> bool {
-        self.priority.eq(&other.priority) && self.estimated_duration.eq(&other.estimated_duration)
-    }
-}
-
-impl PartialOrd for QueuedJob {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 pub struct Scheduler<DepsT: Deps> {
@@ -1489,7 +1472,6 @@ mod tests {
 #[cfg(test)]
 mod tests2 {
     use super::*;
-    use derivative::Derivative;
     use maelstrom_base::{job_spec, tar_digest};
     use maelstrom_test::outcome;
     use std::{
