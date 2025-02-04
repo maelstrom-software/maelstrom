@@ -379,7 +379,7 @@ type ArtifactGathererForCache<CacheT> = ArtifactGatherer<
 
 pub struct SchedulerTask<CacheT: SchedulerCache> {
     artifact_gatherer: ArtifactGathererForCache<CacheT>,
-    scheduler: Scheduler<ArtifactGathererForCache<CacheT>, PassThroughSchedulerDeps>,
+    scheduler: Scheduler<PassThroughSchedulerDeps>,
     sender: Sender<CacheT::TempFile>,
     receiver: UnboundedReceiver<Message<CacheT::TempFile>>,
 }

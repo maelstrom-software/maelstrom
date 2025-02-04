@@ -18,7 +18,6 @@ use maelstrom_util::{
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap, HashSet},
-    marker::PhantomData,
     ops::{Deref, DerefMut},
     time::Duration,
 };
@@ -202,7 +201,7 @@ impl Ord for QueuedJob {
     }
 }
 
-pub struct Scheduler<ArtifactGathererT, DepsT: Deps> {
+pub struct Scheduler<DepsT: Deps> {
     deps: DepsT,
     clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
@@ -210,16 +209,11 @@ pub struct Scheduler<ArtifactGathererT, DepsT: Deps> {
     queued_jobs: BinaryHeap<QueuedJob>,
     worker_heap: Heap<WorkerMap<DepsT>>,
     job_statistics: JobStatisticsTimeSeries,
-    _artifact_gatherer: PhantomData<ArtifactGathererT>,
 }
 
-impl<ArtifactGathererT, DepsT> Scheduler<ArtifactGathererT, DepsT>
-where
-    DepsT: Deps,
-    ArtifactGathererT: ArtifactGatherer<ClientSender = DepsT::ClientSender>,
-{
-    /// Create a new scheduler with the given [`ArtifactGatherer`]. Note that [`SchedulerDeps`] are
-    /// passed in to `Self::receive_message`.
+impl<DepsT: Deps> Scheduler<DepsT> {
+    /// Create a new scheduler with the given [`Deps`]. Note that [`ArtifactGatherer`] is passed
+    /// directly into some methods.
     pub fn new(deps: DepsT) -> Self {
         Scheduler {
             deps,
@@ -229,7 +223,6 @@ where
             queued_jobs: Default::default(),
             worker_heap: Default::default(),
             job_statistics: Default::default(),
-            _artifact_gatherer: Default::default(),
         }
     }
 
@@ -264,7 +257,7 @@ where
 
     pub fn receive_client_connected(
         &mut self,
-        artifact_gatherer: &mut ArtifactGathererT,
+        artifact_gatherer: &mut impl ArtifactGatherer<ClientSender = DepsT::ClientSender>,
         cid: ClientId,
         sender: DepsT::ClientSender,
     ) {
@@ -277,7 +270,7 @@ where
 
     pub fn receive_client_disconnected(
         &mut self,
-        artifact_gatherer: &mut ArtifactGathererT,
+        artifact_gatherer: &mut impl ArtifactGatherer,
         cid: ClientId,
     ) {
         artifact_gatherer.client_disconnected(cid);
@@ -300,7 +293,7 @@ where
 
     pub fn receive_job_request_from_client(
         &mut self,
-        artifact_gatherer: &mut ArtifactGathererT,
+        artifact_gatherer: &mut impl ArtifactGatherer,
         cid: ClientId,
         cjid: ClientJobId,
         spec: JobSpec,
@@ -363,7 +356,7 @@ where
 
     pub fn receive_job_response_from_worker(
         &mut self,
-        artifact_gatherer: &mut ArtifactGathererT,
+        artifact_gatherer: &mut impl ArtifactGatherer,
         wid: WorkerId,
         jid: JobId,
         result: JobOutcomeResult,
@@ -465,7 +458,7 @@ where
         todo!("{jobs:?} {err}");
     }
 
-    pub fn receive_statistics_heartbeat(&mut self, artifact_gatherer: &mut ArtifactGathererT) {
+    pub fn receive_statistics_heartbeat(&mut self, artifact_gatherer: &mut impl ArtifactGatherer) {
         let client_to_stats = self
             .clients
             .keys()
@@ -757,13 +750,7 @@ mod tests {
             Rc<RefCell<TestState>>,
             Rc<RefCell<TestState>>,
         >,
-        scheduler: Scheduler<
-            super::super::artifact_gatherer::ArtifactGatherer<
-                Rc<RefCell<TestState>>,
-                Rc<RefCell<TestState>>,
-            >,
-            Rc<RefCell<TestState>>,
-        >,
+        scheduler: Scheduler<Rc<RefCell<TestState>>>,
     }
 
     impl Default for Fixture {
@@ -1765,7 +1752,7 @@ mod tests2 {
 
     struct Fixture {
         mock: Rc<RefCell<Mock>>,
-        sut: Scheduler<Rc<RefCell<Mock>>, Rc<RefCell<Mock>>>,
+        sut: Scheduler<Rc<RefCell<Mock>>>,
     }
 
     impl Fixture {
