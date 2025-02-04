@@ -22,9 +22,12 @@ use std::{
     time::Duration,
 };
 
-/// The dependencies for [`Scheduler`] on the [`ArtifactGatherer`]. These should be identical to
-/// the methods on [`crate::scheduler_task::artifact_gatherer::ArtifactGatherer`]. They are split
-/// out from [`Deps`] so they can be implemented separately.
+/// The dependencies for [`Scheduler`] on the
+/// [`crate::scheduler_task::artifact_gatherer::ArtifactGatherer`]. This trait's methods should be
+/// idential to those on the underlying struct.
+///
+/// These dependencies are split out from [`Deps`] so they can be implemented separately, and also
+/// so that the underlying `ArtifactGatherer` can be accessed independently by the scheduler task.
 pub trait ArtifactGatherer {
     type ClientSender;
     fn client_connected(&mut self, cid: ClientId, sender: Self::ClientSender);
@@ -196,12 +199,12 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             let spec = self.clients.job_spec_from_jid(jid);
             self.deps
                 .send_enqueue_job_to_worker(&mut worker.sender, jid, spec.clone());
-            just_enqueued.remove(&jid);
-
             worker.pending.insert(jid).assert_is_true();
             let heap_index = worker.heap_index;
             self.worker_heap.sift_down(&mut self.workers, heap_index);
+            just_enqueued.remove(&jid);
         }
+
         for jid in just_enqueued {
             let client = self.clients.get_mut(&jid.cid).unwrap();
             self.deps.send_job_status_update_to_client(
@@ -235,12 +238,12 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         self.queued_jobs.retain(|qj| qj.jid.cid != cid);
         for worker in self.workers.values_mut() {
             worker.pending.retain(|jid| {
-                let retain = jid.cid != cid;
-                if !retain {
+                let cancel = jid.cid == cid;
+                if cancel {
                     self.deps
                         .send_cancel_job_to_worker(&mut worker.sender, *jid);
                 }
-                retain
+                !cancel
             });
         }
         self.worker_heap.rebuild(&mut self.workers);
@@ -254,12 +257,12 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         cjid: ClientJobId,
         spec: JobSpec,
     ) {
+        let jid = JobId { cid, cjid };
         let layers = spec.layers.clone();
         let priority = spec.priority;
         let estimated_duration = spec.estimated_duration;
 
         let client = self.clients.get_mut(&cid).unwrap();
-        let jid = JobId { cid, cjid };
         client.jobs.insert(cjid, spec).assert_is_none();
 
         match artifact_gatherer.start_job(jid, layers) {
@@ -278,33 +281,57 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         }
     }
 
+    pub fn receive_jobs_ready_from_artifact_gatherer(&mut self, ready: NonEmpty<JobId>) {
+        let just_enqueued = ready
+            .into_iter()
+            .filter(|jid| match self.clients.get_mut(&jid.cid) {
+                None => false,
+                Some(client) => {
+                    let spec = client.jobs.get(&jid.cjid).unwrap();
+                    self.queued_jobs.push(QueuedJob::new(
+                        *jid,
+                        spec.priority,
+                        spec.estimated_duration,
+                    ));
+                    true
+                }
+            })
+            .collect();
+        self.possibly_start_jobs(just_enqueued);
+    }
+
+    pub fn receive_jobs_failed_from_artifact_gatherer(
+        &mut self,
+        jobs: NonEmpty<JobId>,
+        err: String,
+    ) {
+        todo!("{jobs:?} {err}");
+    }
+
     pub fn receive_worker_connected(
         &mut self,
-        id: WorkerId,
+        wid: WorkerId,
         slots: usize,
         sender: DepsT::WorkerSender,
     ) {
         self.workers
-            .insert(id, Worker::new(slots, sender))
+            .insert(wid, Worker::new(slots, sender))
             .assert_is_none();
-        self.worker_heap.push(&mut self.workers, id);
+        self.worker_heap.push(&mut self.workers, wid);
         self.possibly_start_jobs(HashSet::default());
     }
 
     pub fn receive_worker_disconnected(&mut self, id: WorkerId) {
-        let mut worker = self.workers.remove(&id).unwrap();
+        let worker = self.workers.remove(&id).unwrap();
         self.worker_heap
             .remove(&mut self.workers, worker.heap_index);
 
-        let mut just_enqueued = HashSet::new();
-        for jid in worker.pending.drain() {
-            let spec = self.clients.job_spec_from_jid(jid);
+        for jid in &worker.pending {
+            let spec = self.clients.job_spec_from_jid(*jid);
             self.queued_jobs
-                .push(QueuedJob::new(jid, spec.priority, spec.estimated_duration));
-            just_enqueued.insert(jid);
+                .push(QueuedJob::new(*jid, spec.priority, spec.estimated_duration));
         }
-
-        self.possibly_start_jobs(just_enqueued);
+        self.possibly_start_jobs(worker.pending);
     }
 
     pub fn receive_job_response_from_worker(
@@ -323,11 +350,11 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             return;
         }
 
+        artifact_gatherer.job_completed(jid);
         let client = self.clients.get_mut(&jid.cid).unwrap();
         self.deps
             .send_job_response_to_client(&mut client.sender, jid.cjid, result);
         client.jobs.remove(&jid.cjid).assert_is_some();
-        artifact_gatherer.job_completed(jid);
         client.num_completed_jobs += 1;
 
         if let Some(QueuedJob { jid, .. }) = self.queued_jobs.pop() {
@@ -339,8 +366,8 @@ impl<DepsT: Deps> Scheduler<DepsT> {
                 .send_enqueue_job_to_worker(&mut worker.sender, jid, spec.clone());
             worker.pending.insert(jid);
         } else {
-            // Since there are no queued_requests, we're going to have to update the
-            // worker's position in the workers list.
+            // Since there are no queued_jobs, we're going to have to update the worker's position
+            // in the workers list.
             let heap_index = worker.heap_index;
             self.worker_heap.sift_up(&mut self.workers, heap_index);
         }
@@ -369,46 +396,21 @@ impl<DepsT: Deps> Scheduler<DepsT> {
     }
 
     pub fn receive_monitor_disconnected(&mut self, id: MonitorId) {
-        self.monitors.remove(&id).unwrap();
+        self.monitors.remove(&id).assert_is_some();
     }
 
     pub fn receive_statistics_request_from_monitor(&mut self, mid: MonitorId) {
-        let worker_iter = self.workers.iter();
-        let resp = BrokerStatistics {
-            worker_statistics: worker_iter
-                .map(|(id, w)| (*id, WorkerStatistics { slots: w.slots }))
-                .collect(),
-            job_statistics: self.job_statistics.clone(),
-        };
-        self.deps
-            .send_statistics_response_to_monitor(self.monitors.get_mut(&mid).unwrap(), resp);
-    }
-
-    pub fn receive_jobs_ready_from_artifact_gatherer(&mut self, ready: NonEmpty<JobId>) {
-        let just_enqueued = ready
-            .into_iter()
-            .filter(|jid| match self.clients.get_mut(&jid.cid) {
-                None => false,
-                Some(client) => {
-                    let spec = client.jobs.get(&jid.cjid).unwrap();
-                    self.queued_jobs.push(QueuedJob::new(
-                        *jid,
-                        spec.priority,
-                        spec.estimated_duration,
-                    ));
-                    true
-                }
-            })
-            .collect();
-        self.possibly_start_jobs(just_enqueued);
-    }
-
-    pub fn receive_jobs_failed_from_artifact_gatherer(
-        &mut self,
-        jobs: NonEmpty<JobId>,
-        err: String,
-    ) {
-        todo!("{jobs:?} {err}");
+        self.deps.send_statistics_response_to_monitor(
+            self.monitors.get_mut(&mid).unwrap(),
+            BrokerStatistics {
+                worker_statistics: self
+                    .workers
+                    .iter()
+                    .map(|(wid, Worker { slots, .. })| (*wid, WorkerStatistics { slots: *slots }))
+                    .collect(),
+                job_statistics: self.job_statistics.clone(),
+            },
+        );
     }
 
     pub fn receive_statistics_heartbeat(&mut self, artifact_gatherer: &mut impl ArtifactGatherer) {
