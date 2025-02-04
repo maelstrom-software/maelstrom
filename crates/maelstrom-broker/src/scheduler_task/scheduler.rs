@@ -8,8 +8,8 @@ use maelstrom_base::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
-    ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobId, JobOutcomeResult, JobSpec,
-    JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
+    ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobError, JobId, JobOutcomeResult,
+    JobSpec, JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
     duration,
@@ -312,7 +312,19 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         jobs: NonEmpty<JobId>,
         err: String,
     ) {
-        todo!("{jobs:?} {err}");
+        for jid in jobs {
+            let Some(client) = self.clients.get_mut(&jid.cid) else {
+                continue;
+            };
+            self.deps.send_job_response_to_client(
+                &mut client.sender,
+                jid.cjid,
+                Err(JobError::System(err.clone())),
+            );
+            client.jobs.remove(&jid.cjid).assert_is_some();
+            client.counts[JobState::WaitingForArtifacts] -= 1;
+            client.counts[JobState::Complete] += 1;
+        }
     }
 
     pub fn receive_worker_connected(
