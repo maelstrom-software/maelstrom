@@ -36,7 +36,6 @@ pub trait ArtifactGatherer {
     fn start_job(&mut self, jid: JobId, layers: NonEmpty<(Sha256Digest, ArtifactType)>)
         -> StartJob;
     fn job_completed(&mut self, jid: JobId);
-    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64;
 }
 
 /// The external dependencies for [`Scheduler`] that aren't the [`ArtifactGatherer`]. All of these
@@ -273,6 +272,7 @@ impl<DepsT: Deps> Scheduler<DepsT> {
                 self.possibly_start_jobs(HashSet::from_iter([jid]));
             }
             StartJob::NotReady => {
+                client.counts[JobState::WaitingForArtifacts] += 1;
                 self.deps.send_job_status_update_to_client(
                     &mut client.sender,
                     jid.cjid,
@@ -288,6 +288,10 @@ impl<DepsT: Deps> Scheduler<DepsT> {
             .filter(|jid| match self.clients.get_mut(&jid.cid) {
                 None => false,
                 Some(client) => {
+                    client.counts[JobState::WaitingForArtifacts] = client.counts
+                        [JobState::WaitingForArtifacts]
+                        .checked_sub(1)
+                        .unwrap();
                     let spec = client.jobs.get(&jid.cjid).unwrap();
                     self.queued_jobs.push(QueuedJob::new(
                         *jid,
@@ -414,7 +418,7 @@ impl<DepsT: Deps> Scheduler<DepsT> {
         );
     }
 
-    pub fn receive_statistics_heartbeat(&mut self, artifact_gatherer: &mut impl ArtifactGatherer) {
+    pub fn receive_statistics_heartbeat(&mut self) {
         let client_to_stats = self
             .clients
             .iter()
@@ -422,9 +426,8 @@ impl<DepsT: Deps> Scheduler<DepsT> {
                 (
                     cid,
                     enum_map! {
-                        JobState::WaitingForArtifacts => {
-                            artifact_gatherer.get_waiting_for_artifacts_count(cid)
-                        }
+                        JobState::WaitingForArtifacts =>
+                            client.counts[JobState::WaitingForArtifacts],
                         JobState::Pending => {
                             self
                                 .queued_jobs
@@ -807,9 +810,7 @@ mod tests {
                 Message::DecrementRefcount(digest) => self
                     .artifact_gatherer
                     .receive_decrement_refcount_from_worker(digest),
-                Message::StatisticsHeartbeat => self
-                    .scheduler
-                    .receive_statistics_heartbeat(&mut self.artifact_gatherer),
+                Message::StatisticsHeartbeat => self.scheduler.receive_statistics_heartbeat(),
                 Message::GotManifestEntry {
                     manifest_digest,
                     entry_digest,
@@ -1659,10 +1660,6 @@ mod tests2 {
                 "sending unexpected complete_job to artifact gatherer for job {jid}"
             );
         }
-
-        fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
-            todo!("{cid:?}");
-        }
     }
 
     impl Deps for Rc<RefCell<Mock>> {
@@ -1958,10 +1955,6 @@ mod tests2 {
         }
 
         fn receive_decrement_refcount(self, digest: Sha256Digest) -> Self {
-            todo!();
-        }
-
-        fn get_waiting_for_artifacts_count(&self, cid: ClientId, count: u64) -> Self {
             todo!();
         }
         */

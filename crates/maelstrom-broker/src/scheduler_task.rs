@@ -109,10 +109,6 @@ where
     fn job_completed(&mut self, jid: JobId) {
         self.job_completed(jid)
     }
-
-    fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
-        self.get_waiting_for_artifacts_count(cid)
-    }
 }
 
 /*     _         _ _   _  __            _    ____       _   _
@@ -466,9 +462,7 @@ where
             Message::DecrementRefcount(digest) => self
                 .artifact_gatherer
                 .receive_decrement_refcount_from_worker(digest),
-            Message::StatisticsHeartbeat => self
-                .scheduler
-                .receive_statistics_heartbeat(&mut self.artifact_gatherer),
+            Message::StatisticsHeartbeat => self.scheduler.receive_statistics_heartbeat(),
             Message::GotManifestEntry {
                 manifest_digest,
                 entry_digest,

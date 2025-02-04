@@ -660,18 +660,6 @@ where
         self.cache.decrement_refcount(&digest);
     }
 
-    /// Return the number of jobs waiting on at least one artifact or reading at least one
-    /// manifest, for a given client.
-    pub fn get_waiting_for_artifacts_count(&self, cid: ClientId) -> u64 {
-        self.clients
-            .get(&cid)
-            .unwrap()
-            .jobs
-            .values()
-            .filter(|job| !job.have_all_artifacts())
-            .count() as u64
-    }
-
     /// Called when the clien artifact fetcher is done uploading an artifact.
     pub fn receive_got_artifact(&mut self, digest: Sha256Digest, file: CacheT::TempFile) {
         self.tcp_upload_landing_pad.insert(digest, file);
