@@ -9,7 +9,8 @@ use std::fmt::{self, Debug, Formatter};
 #[derive(Clone, Eq, Deserialize)]
 #[serde(from = "RingBufferDeserProxy<T>")]
 pub struct RingBuffer<T, const N: usize> {
-    buf: Vec<T>,
+    buf: Vec<Option<T>>,
+    length: usize,
     cursor: usize,
 }
 
@@ -34,10 +35,13 @@ where
 impl<T, const N: usize> Default for RingBuffer<T, N> {
     fn default() -> Self {
         assert!(N > 0, "capacity must not be zero");
-
-        let mut buf = vec![];
-        buf.reserve_exact(N);
-        Self { buf, cursor: 0 }
+        let mut buf = Vec::new();
+        buf.resize_with(N, || None);
+        Self {
+            buf,
+            length: 0,
+            cursor: 0,
+        }
     }
 }
 
@@ -53,20 +57,21 @@ impl<T, const N: usize> FromIterator<T> for RingBuffer<T, N> {
 
 impl<T, const N: usize> RingBuffer<T, N> {
     pub fn push(&mut self, element: T) {
-        if self.buf.len() < N {
-            self.buf.push(element);
+        if self.length < N {
+            self.buf[self.length] = Some(element);
+            self.length += 1;
         } else {
-            self.buf[self.cursor] = element;
+            self.buf[self.cursor] = Some(element);
             self.cursor = (self.cursor + 1) % N;
         }
     }
 
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.length
     }
 
     pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
+        self.length == 0
     }
 
     pub fn iter(&self) -> RingBufferIter<'_, T, N> {
@@ -99,7 +104,13 @@ impl<'a, T, const N: usize> Iterator for RingBufferIter<'a, T, N> {
             self.ring_buffer.len()
         };
         (self.offset < upper_bound).then(|| {
-            let result = self.ring_buffer.buf.get(self.offset).unwrap();
+            let result = self
+                .ring_buffer
+                .buf
+                .get(self.offset)
+                .unwrap()
+                .as_ref()
+                .unwrap();
             self.offset += 1;
             result
         })
@@ -147,9 +158,7 @@ struct RingBufferDeserProxy<T> {
 
 impl<T, const N: usize> From<RingBufferDeserProxy<T>> for RingBuffer<T, N> {
     fn from(proxy: RingBufferDeserProxy<T>) -> Self {
-        let mut buf = proxy.elements;
-        buf.reserve_exact(N - buf.len());
-        Self { cursor: 0, buf }
+        Self::from_iter(proxy.elements)
     }
 }
 
