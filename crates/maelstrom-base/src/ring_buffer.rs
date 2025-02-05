@@ -90,39 +90,38 @@ impl<T, const N: usize> RingBuffer<T, N> {
     }
 
     pub fn iter(&self) -> RingBufferIter<'_, T, N> {
-        RingBufferIter {
-            ring_buffer: self,
-            looped: false,
-            offset: self.cursor,
+        RingBufferIter { buf: self, idx: 0 }
+    }
+
+    pub fn get(&self, i: usize) -> Option<&T> {
+        if i >= self.length {
+            None
+        } else {
+            let i = if self.cursor < N - i {
+                self.cursor + i
+            } else {
+                self.cursor - (N - i)
+            };
+            Some(unsafe { self.buf[i].assume_init_ref() })
         }
     }
 }
 
 #[derive(Clone)]
 pub struct RingBufferIter<'a, T, const N: usize> {
-    ring_buffer: &'a RingBuffer<T, N>,
-    looped: bool,
-    offset: usize,
+    buf: &'a RingBuffer<T, N>,
+    idx: usize,
 }
 
 impl<'a, T, const N: usize> Iterator for RingBufferIter<'a, T, N> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.looped && self.offset == self.ring_buffer.len() {
-            self.looped = true;
-            self.offset = 0;
+        let result = self.buf.get(self.idx);
+        if result.is_some() {
+            self.idx += 1;
         }
-        let upper_bound = if self.looped {
-            self.ring_buffer.cursor
-        } else {
-            self.ring_buffer.len()
-        };
-        (self.offset < upper_bound).then(|| {
-            let result = unsafe { self.ring_buffer.buf[self.offset].assume_init_ref() };
-            self.offset += 1;
-            result
-        })
+        result
     }
 }
 
