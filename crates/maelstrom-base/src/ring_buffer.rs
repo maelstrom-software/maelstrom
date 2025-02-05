@@ -4,44 +4,58 @@ use serde::{
     ser::{SerializeSeq as _, SerializeStruct as _},
     Deserialize, Serialize, Serializer,
 };
-use std::fmt::{self, Debug, Formatter};
+use std::{
+    fmt::{self, Debug, Formatter},
+    mem::MaybeUninit,
+};
 
-#[derive(Clone, Eq, Deserialize)]
+#[derive(Deserialize)]
 #[serde(from = "RingBufferDeserProxy<T>")]
 pub struct RingBuffer<T, const N: usize> {
-    buf: Vec<Option<T>>,
+    buf: [MaybeUninit<T>; N],
     length: usize,
     cursor: usize,
-}
-
-impl<T, const N: usize> PartialEq for RingBuffer<T, N>
-where
-    T: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
-    }
-}
-
-impl<T, const N: usize> Debug for RingBuffer<T, N>
-where
-    T: Debug,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.iter()).finish()
-    }
 }
 
 impl<T, const N: usize> Default for RingBuffer<T, N> {
     fn default() -> Self {
         assert!(N > 0, "capacity must not be zero");
-        let mut buf = Vec::new();
-        buf.resize_with(N, || None);
         Self {
-            buf,
+            buf: [const { MaybeUninit::uninit() }; N],
             length: 0,
             cursor: 0,
         }
+    }
+}
+
+impl<T: Clone, const N: usize> Clone for RingBuffer<T, N> {
+    fn clone(&self) -> Self {
+        Self::from_iter(self.iter().cloned())
+    }
+}
+
+impl<T, const N: usize> Drop for RingBuffer<T, N> {
+    fn drop(&mut self) {
+        for elem in &mut self.buf[self.cursor..self.length] {
+            unsafe { elem.assume_init_drop() };
+        }
+        for elem in &mut self.buf[0..self.cursor] {
+            unsafe { elem.assume_init_drop() };
+        }
+    }
+}
+
+impl<T: PartialEq, const N: usize> PartialEq for RingBuffer<T, N> {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+impl<T: Eq, const N: usize> Eq for RingBuffer<T, N> {}
+
+impl<T: Debug, const N: usize> Debug for RingBuffer<T, N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
     }
 }
 
@@ -58,10 +72,11 @@ impl<T, const N: usize> FromIterator<T> for RingBuffer<T, N> {
 impl<T, const N: usize> RingBuffer<T, N> {
     pub fn push(&mut self, element: T) {
         if self.length < N {
-            self.buf[self.length] = Some(element);
+            self.buf[self.length].write(element);
             self.length += 1;
         } else {
-            self.buf[self.cursor] = Some(element);
+            let old = unsafe { self.buf[self.cursor].assume_init_mut() };
+            *old = element;
             self.cursor = (self.cursor + 1) % N;
         }
     }
@@ -104,13 +119,7 @@ impl<'a, T, const N: usize> Iterator for RingBufferIter<'a, T, N> {
             self.ring_buffer.len()
         };
         (self.offset < upper_bound).then(|| {
-            let result = self
-                .ring_buffer
-                .buf
-                .get(self.offset)
-                .unwrap()
-                .as_ref()
-                .unwrap();
+            let result = unsafe { self.ring_buffer.buf[self.offset].assume_init_ref() };
             self.offset += 1;
             result
         })
@@ -165,6 +174,7 @@ impl<T, const N: usize> From<RingBufferDeserProxy<T>> for RingBuffer<T, N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, mem, rc::Rc};
 
     #[track_caller]
     fn insert_test<const N: usize>() {
@@ -331,5 +341,47 @@ mod tests {
         assert_eq!(r, RingBuffer::<_, 3>::from_iter([1, 2, 3]));
         r.push(4);
         assert_eq!(r, RingBuffer::<_, 3>::from_iter([2, 3, 4]));
+    }
+
+    #[track_caller]
+    fn drop_test(count: i32) {
+        struct TestStruct {
+            value: i32,
+            drop_log: Rc<RefCell<Vec<i32>>>,
+        }
+
+        impl Drop for TestStruct {
+            fn drop(&mut self) {
+                self.drop_log.borrow_mut().push(self.value);
+            }
+        }
+
+        let log = Rc::new(RefCell::new(Vec::<_>::new()));
+        let mut r = RingBuffer::<_, 2>::default();
+        for i in 1..=count {
+            r.push(TestStruct {
+                value: i,
+                drop_log: log.clone(),
+            });
+        }
+        log.borrow_mut().clear();
+        mem::drop(r);
+
+        let expected = match count {
+            0 => vec![],
+            1 => vec![1],
+            n => vec![n - 1, n],
+        };
+        assert_eq!(*log.borrow(), expected);
+    }
+
+    #[test]
+    fn drop() {
+        drop_test(0);
+        drop_test(1);
+        drop_test(2);
+        drop_test(3);
+        drop_test(4);
+        drop_test(5);
     }
 }
