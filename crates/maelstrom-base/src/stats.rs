@@ -79,17 +79,9 @@ pub const CAPACITY: usize = 1024;
 
 /// Time-series of job statistics.
 /// It is implemented with a ring buffer. The entries are ordered by time
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Default, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct JobStatisticsTimeSeries {
-    entries: RingBuffer<JobStatisticsSample>,
-}
-
-impl Default for JobStatisticsTimeSeries {
-    fn default() -> Self {
-        Self {
-            entries: RingBuffer::new(CAPACITY),
-        }
-    }
+    entries: RingBuffer<JobStatisticsSample, CAPACITY>,
 }
 
 impl FromIterator<JobStatisticsSample> for JobStatisticsTimeSeries {
@@ -114,7 +106,7 @@ impl JobStatisticsTimeSeries {
         self.entries.insert(entry);
     }
 
-    pub fn iter(&self) -> RingBufferIter<'_, JobStatisticsSample> {
+    pub fn iter(&self) -> RingBufferIter<'_, JobStatisticsSample, CAPACITY> {
         self.entries.iter()
     }
 

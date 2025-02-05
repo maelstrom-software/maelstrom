@@ -8,13 +8,13 @@ use std::fmt;
 
 #[derive(Clone, Eq, Deserialize)]
 #[serde(from = "RingBufferDeserProxy<T>")]
-pub struct RingBuffer<T> {
+pub struct RingBuffer<T, const N: usize> {
     buf: Vec<T>,
     cursor: usize,
     capacity: usize,
 }
 
-impl<T> PartialEq for RingBuffer<T>
+impl<T, const N: usize> PartialEq for RingBuffer<T, N>
 where
     T: PartialEq,
 {
@@ -23,7 +23,7 @@ where
     }
 }
 
-impl<T> fmt::Debug for RingBuffer<T>
+impl<T, const N: usize> fmt::Debug for RingBuffer<T, N>
 where
     T: fmt::Debug,
 {
@@ -35,21 +35,21 @@ where
     }
 }
 
-impl<T> RingBuffer<T> {
-    /// Create a `RingBuffer` that contains capacity many elements
-    /// panics if `capacity` is zero
-    pub fn new(capacity: usize) -> Self {
-        assert!(capacity > 0, "capacity must not be zero");
+impl<T, const N: usize> Default for RingBuffer<T, N> {
+    fn default() -> Self {
+        assert!(N > 0, "capacity must not be zero");
 
         let mut buf = vec![];
-        buf.reserve_exact(capacity);
+        buf.reserve_exact(N);
         Self {
             buf,
             cursor: 0,
-            capacity,
+            capacity: N,
         }
     }
+}
 
+impl<T, const N: usize> RingBuffer<T, N> {
     pub fn capacity(&self) -> usize {
         self.capacity
     }
@@ -71,7 +71,7 @@ impl<T> RingBuffer<T> {
         self.buf.is_empty()
     }
 
-    pub fn iter(&self) -> RingBufferIter<'_, T> {
+    pub fn iter(&self) -> RingBufferIter<'_, T, N> {
         RingBufferIter {
             ring_buffer: self,
             looped: false,
@@ -81,13 +81,13 @@ impl<T> RingBuffer<T> {
 }
 
 #[derive(Clone)]
-pub struct RingBufferIter<'a, T> {
-    ring_buffer: &'a RingBuffer<T>,
+pub struct RingBufferIter<'a, T, const N: usize> {
+    ring_buffer: &'a RingBuffer<T, N>,
     looped: bool,
     offset: usize,
 }
 
-impl<'a, T> Iterator for RingBufferIter<'a, T> {
+impl<'a, T, const N: usize> Iterator for RingBufferIter<'a, T, N> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -108,9 +108,9 @@ impl<'a, T> Iterator for RingBufferIter<'a, T> {
     }
 }
 
-struct RingBufferElements<'a, T>(&'a RingBuffer<T>);
+struct RingBufferElements<'a, T, const N: usize>(&'a RingBuffer<T, N>);
 
-impl<T> Serialize for RingBufferElements<'_, T>
+impl<T, const N: usize> Serialize for RingBufferElements<'_, T, N>
 where
     T: Serialize,
 {
@@ -126,7 +126,7 @@ where
     }
 }
 
-impl<T> Serialize for RingBuffer<T>
+impl<T, const N: usize> Serialize for RingBuffer<T, N>
 where
     T: Serialize,
 {
@@ -148,7 +148,7 @@ struct RingBufferDeserProxy<T> {
     elements: Vec<T>,
 }
 
-impl<T> From<RingBufferDeserProxy<T>> for RingBuffer<T> {
+impl<T, const N: usize> From<RingBufferDeserProxy<T>> for RingBuffer<T, N> {
     fn from(proxy: RingBufferDeserProxy<T>) -> Self {
         let mut buf = proxy.elements;
         let capacity = proxy.capacity;
@@ -165,49 +165,50 @@ impl<T> From<RingBufferDeserProxy<T>> for RingBuffer<T> {
 mod tests {
     use super::*;
 
-    fn insert_test(capacity: usize) {
-        let mut r = RingBuffer::new(capacity);
-        for i in 0..capacity {
-            r.insert(i);
+    #[track_caller]
+    fn insert_test<const N: usize>() {
+        let mut r = RingBuffer::<usize, N>::default();
 
-            let expected_len = i + 1;
-            assert_eq!(r.len(), expected_len);
+        for i in 0..N {
+            assert_eq!(r.len(), i);
+            r.insert(i);
         }
+        assert_eq!(r.len(), N);
+        assert_eq!(Vec::from_iter(r.iter().copied()), Vec::from_iter(0..N),);
 
-        assert_eq!(r.len(), capacity);
-        assert_eq!(
-            Vec::from_iter(r.iter().copied()),
-            Vec::from_iter(0..capacity)
-        );
-
-        for i in capacity..=(capacity * 2) {
+        for i in N..=(N * 2) {
             r.insert(i);
-
-            assert_eq!(r.len(), capacity);
-
-            let sequence_len = i + 1;
+            assert_eq!(r.len(), N);
             assert_eq!(
                 Vec::from_iter(r.iter().copied()),
-                Vec::from_iter((0..sequence_len).skip(sequence_len - capacity))
+                Vec::from_iter(i - N + 1..=i),
             );
         }
     }
 
-    #[test]
-    fn insert_and_iter() {
-        for i in 1..=100 {
-            insert_test(i);
-        }
+    macro_rules! insert_test {
+        ($name:ident, $n:expr) => {
+            #[test]
+            fn $name() {
+                insert_test::<$n>();
+            }
+        };
     }
+
+    insert_test!(insert_test_1, 1);
+    insert_test!(insert_test_2, 2);
+    insert_test!(insert_test_3, 3);
+    insert_test!(insert_test_10, 10);
+    insert_test!(insert_test_100, 100);
 
     #[test]
     fn equal_with_different_cursor() {
-        let mut r1 = RingBuffer::new(3);
+        let mut r1 = RingBuffer::<usize, 3>::default();
         r1.insert(1);
         r1.insert(2);
         r1.insert(3);
 
-        let mut r2 = RingBuffer::new(3);
+        let mut r2 = RingBuffer::<usize, 3>::default();
         r2.insert(1);
         r2.insert(1);
         r2.insert(2);
@@ -218,10 +219,10 @@ mod tests {
 
     #[test]
     fn not_equal_with_different_elements() {
-        let mut r1 = RingBuffer::new(4);
+        let mut r1 = RingBuffer::<usize, 4>::default();
         r1.insert(1);
 
-        let mut r2 = RingBuffer::new(4);
+        let mut r2 = RingBuffer::<usize, 4>::default();
         r2.insert(2);
 
         assert_ne!(r1, r2);
@@ -229,29 +230,18 @@ mod tests {
 
     #[test]
     fn equal_with_same_elements() {
-        let mut r1 = RingBuffer::new(3);
+        let mut r1 = RingBuffer::<usize, 3>::default();
         r1.insert(1);
 
-        let mut r2 = RingBuffer::new(3);
+        let mut r2 = RingBuffer::<usize, 3>::default();
         r2.insert(1);
 
         assert_eq!(r1, r2);
     }
 
     #[test]
-    fn not_equal_with_different_capacities() {
-        let mut r1 = RingBuffer::new(4);
-        r1.insert(1);
-
-        let mut r2 = RingBuffer::new(3);
-        r2.insert(1);
-
-        assert_ne!(r1, r2);
-    }
-
-    #[test]
     fn debug_fmt() {
-        let mut r = RingBuffer::new(3);
+        let mut r = RingBuffer::<usize, 3>::default();
         for i in 0..4 {
             r.insert(i);
         }
@@ -265,7 +255,7 @@ mod tests {
     fn serialize_deserialize_half_empty() {
         use serde_test::{assert_tokens, Token};
 
-        let mut r = RingBuffer::new(5);
+        let mut r = RingBuffer::<i32, 5>::default();
 
         r.insert(1);
         r.insert(2);
@@ -295,7 +285,7 @@ mod tests {
     fn serialize_deserialize_full() {
         use serde_test::{assert_tokens, Token};
 
-        let mut r = RingBuffer::new(5);
+        let mut r = RingBuffer::<i32, 5>::default();
 
         for i in 1..=5 {
             r.insert(i);
