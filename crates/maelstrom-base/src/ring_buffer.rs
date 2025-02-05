@@ -4,7 +4,7 @@ use serde::{
     ser::{SerializeSeq as _, SerializeStruct as _},
     Deserialize, Serialize, Serializer,
 };
-use std::fmt;
+use std::fmt::{self, Debug, Formatter};
 
 #[derive(Clone, Eq, Deserialize)]
 #[serde(from = "RingBufferDeserProxy<T>")]
@@ -22,15 +22,12 @@ where
     }
 }
 
-impl<T, const N: usize> fmt::Debug for RingBuffer<T, N>
+impl<T, const N: usize> Debug for RingBuffer<T, N>
 where
-    T: fmt::Debug,
+    T: Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RingBuffer")
-            .field("capacity", &N)
-            .field("elements", &Vec::from_iter(self.iter()))
-            .finish()
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
     }
 }
 
@@ -236,14 +233,19 @@ mod tests {
 
     #[test]
     fn debug_fmt() {
-        let mut r = RingBuffer::<usize, 3>::default();
-        for i in 0..4 {
-            r.push(i);
-        }
         assert_eq!(
-            format!("{r:?}"),
-            "RingBuffer { capacity: 3, elements: [1, 2, 3] }"
-        )
+            format!("{:?}", RingBuffer::<_, 2>::from_iter::<[usize; 0]>([])),
+            "[]",
+        );
+        assert_eq!(format!("{:?}", RingBuffer::<_, 2>::from_iter([1])), "[1]");
+        assert_eq!(
+            format!("{:?}", RingBuffer::<_, 2>::from_iter([1, 2])),
+            "[1, 2]",
+        );
+        assert_eq!(
+            format!("{:?}", RingBuffer::<_, 2>::from_iter([1, 2, 3])),
+            "[2, 3]",
+        );
     }
 
     #[test]
