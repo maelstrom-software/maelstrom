@@ -91,7 +91,7 @@ impl FromIterator<JobStatisticsSample> for JobStatisticsTimeSeries {
     {
         let mut s = Self::default();
         for e in iter {
-            s.entries.insert(e);
+            s.entries.push(e);
         }
         s
     }
@@ -103,7 +103,7 @@ impl JobStatisticsTimeSeries {
     }
 
     pub fn insert(&mut self, entry: JobStatisticsSample) {
-        self.entries.insert(entry);
+        self.entries.push(entry);
     }
 
     pub fn iter(&self) -> RingBufferIter<'_, JobStatisticsSample, CAPACITY> {

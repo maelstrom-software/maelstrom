@@ -54,7 +54,7 @@ impl<T, const N: usize> RingBuffer<T, N> {
         self.capacity
     }
 
-    pub fn insert(&mut self, element: T) {
+    pub fn push(&mut self, element: T) {
         if self.buf.len() < self.capacity() {
             self.buf.push(element);
         } else {
@@ -171,13 +171,13 @@ mod tests {
 
         for i in 0..N {
             assert_eq!(r.len(), i);
-            r.insert(i);
+            r.push(i);
         }
         assert_eq!(r.len(), N);
         assert_eq!(Vec::from_iter(r.iter().copied()), Vec::from_iter(0..N),);
 
         for i in N..=(N * 2) {
-            r.insert(i);
+            r.push(i);
             assert_eq!(r.len(), N);
             assert_eq!(
                 Vec::from_iter(r.iter().copied()),
@@ -204,15 +204,15 @@ mod tests {
     #[test]
     fn equal_with_different_cursor() {
         let mut r1 = RingBuffer::<usize, 3>::default();
-        r1.insert(1);
-        r1.insert(2);
-        r1.insert(3);
+        r1.push(1);
+        r1.push(2);
+        r1.push(3);
 
         let mut r2 = RingBuffer::<usize, 3>::default();
-        r2.insert(1);
-        r2.insert(1);
-        r2.insert(2);
-        r2.insert(3);
+        r2.push(1);
+        r2.push(1);
+        r2.push(2);
+        r2.push(3);
 
         assert_eq!(r1, r2);
     }
@@ -220,10 +220,10 @@ mod tests {
     #[test]
     fn not_equal_with_different_elements() {
         let mut r1 = RingBuffer::<usize, 4>::default();
-        r1.insert(1);
+        r1.push(1);
 
         let mut r2 = RingBuffer::<usize, 4>::default();
-        r2.insert(2);
+        r2.push(2);
 
         assert_ne!(r1, r2);
     }
@@ -231,10 +231,10 @@ mod tests {
     #[test]
     fn equal_with_same_elements() {
         let mut r1 = RingBuffer::<usize, 3>::default();
-        r1.insert(1);
+        r1.push(1);
 
         let mut r2 = RingBuffer::<usize, 3>::default();
-        r2.insert(1);
+        r2.push(1);
 
         assert_eq!(r1, r2);
     }
@@ -243,7 +243,7 @@ mod tests {
     fn debug_fmt() {
         let mut r = RingBuffer::<usize, 3>::default();
         for i in 0..4 {
-            r.insert(i);
+            r.push(i);
         }
         assert_eq!(
             format!("{r:?}"),
@@ -257,9 +257,9 @@ mod tests {
 
         let mut r = RingBuffer::<i32, 5>::default();
 
-        r.insert(1);
-        r.insert(2);
-        r.insert(3);
+        r.push(1);
+        r.push(2);
+        r.push(3);
 
         assert_tokens(
             &r,
@@ -288,7 +288,7 @@ mod tests {
         let mut r = RingBuffer::<i32, 5>::default();
 
         for i in 1..=5 {
-            r.insert(i);
+            r.push(i);
         }
 
         assert_tokens(
