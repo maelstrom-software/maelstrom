@@ -49,6 +49,16 @@ impl<T, const N: usize> Default for RingBuffer<T, N> {
     }
 }
 
+impl<T, const N: usize> FromIterator<T> for RingBuffer<T, N> {
+    fn from_iter<IterT: IntoIterator<Item = T>>(iter: IterT) -> Self {
+        let mut result = Self::default();
+        for item in iter.into_iter() {
+            result.push(item)
+        }
+        result
+    }
+}
+
 impl<T, const N: usize> RingBuffer<T, N> {
     pub fn capacity(&self) -> usize {
         self.capacity
@@ -311,5 +321,19 @@ mod tests {
                 Token::StructEnd,
             ],
         )
+    }
+
+    #[test]
+    fn from_iterator() {
+        let mut r = RingBuffer::<_, 3>::default();
+        assert_eq!(r, RingBuffer::<_, 3>::from_iter([]));
+        r.push(1);
+        assert_eq!(r, RingBuffer::<_, 3>::from_iter([1]));
+        r.push(2);
+        assert_eq!(r, RingBuffer::<_, 3>::from_iter([1, 2]));
+        r.push(3);
+        assert_eq!(r, RingBuffer::<_, 3>::from_iter([1, 2, 3]));
+        r.push(4);
+        assert_eq!(r, RingBuffer::<_, 3>::from_iter([2, 3, 4]));
     }
 }
