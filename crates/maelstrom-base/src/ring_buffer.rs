@@ -80,103 +80,6 @@ impl<T> RingBuffer<T> {
 
 pub type RingBufferIter<'a, T> = iter::Chain<slice::Iter<'a, T>, slice::Iter<'a, T>>;
 
-#[cfg(test)]
-fn insert_test(capacity: usize) {
-    let mut r = RingBuffer::new(capacity);
-    for i in 0..capacity {
-        r.insert(i);
-
-        let expected_len = i + 1;
-        assert_eq!(r.len(), expected_len);
-    }
-
-    assert_eq!(r.len(), capacity);
-    assert_eq!(
-        Vec::from_iter(r.iter().copied()),
-        Vec::from_iter(0..capacity)
-    );
-
-    for i in capacity..=(capacity * 2) {
-        r.insert(i);
-
-        assert_eq!(r.len(), capacity);
-
-        let sequence_len = i + 1;
-        assert_eq!(
-            Vec::from_iter(r.iter().copied()),
-            Vec::from_iter((0..sequence_len).skip(sequence_len - capacity))
-        );
-    }
-}
-
-#[test]
-fn insert_and_iter() {
-    for i in 1..=100 {
-        insert_test(i);
-    }
-}
-
-#[test]
-fn equal_with_different_cursor() {
-    let mut r1 = RingBuffer::new(3);
-    r1.insert(1);
-    r1.insert(2);
-    r1.insert(3);
-
-    let mut r2 = RingBuffer::new(3);
-    r2.insert(1);
-    r2.insert(1);
-    r2.insert(2);
-    r2.insert(3);
-
-    assert_eq!(r1, r2);
-}
-
-#[test]
-fn not_equal_with_different_elements() {
-    let mut r1 = RingBuffer::new(4);
-    r1.insert(1);
-
-    let mut r2 = RingBuffer::new(4);
-    r2.insert(2);
-
-    assert_ne!(r1, r2);
-}
-
-#[test]
-fn equal_with_same_elements() {
-    let mut r1 = RingBuffer::new(3);
-    r1.insert(1);
-
-    let mut r2 = RingBuffer::new(3);
-    r2.insert(1);
-
-    assert_eq!(r1, r2);
-}
-
-#[test]
-fn not_equal_with_different_capacities() {
-    let mut r1 = RingBuffer::new(4);
-    r1.insert(1);
-
-    let mut r2 = RingBuffer::new(3);
-    r2.insert(1);
-
-    assert_ne!(r1, r2);
-}
-
-#[test]
-fn debug_fmt() {
-    let mut r = RingBuffer::new(3);
-    for i in 0..4 {
-        r.insert(i);
-    }
-    assert_eq!(
-        format!("{r:?}"),
-        "RingBuffer { capacity: 3, elements: [1, 2, 3] }"
-    )
-}
-
 struct RingBufferElements<'a, T>(&'a RingBuffer<T>);
 
 impl<T> Serialize for RingBufferElements<'_, T>
@@ -230,64 +133,165 @@ impl<T> From<RingBufferDeserProxy<T>> for RingBuffer<T> {
     }
 }
 
-#[test]
-fn serialize_deserialize_half_empty() {
-    use serde_test::{assert_tokens, Token};
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let mut r = RingBuffer::new(5);
+    fn insert_test(capacity: usize) {
+        let mut r = RingBuffer::new(capacity);
+        for i in 0..capacity {
+            r.insert(i);
 
-    r.insert(1);
-    r.insert(2);
-    r.insert(3);
+            let expected_len = i + 1;
+            assert_eq!(r.len(), expected_len);
+        }
 
-    assert_tokens(
-        &r,
-        &[
-            Token::Struct {
-                name: "RingBuffer",
-                len: 2,
-            },
-            Token::Str("capacity"),
-            Token::U64(5),
-            Token::Str("elements"),
-            Token::Seq { len: Some(3) },
-            Token::I32(1),
-            Token::I32(2),
-            Token::I32(3),
-            Token::SeqEnd,
-            Token::StructEnd,
-        ],
-    )
-}
+        assert_eq!(r.len(), capacity);
+        assert_eq!(
+            Vec::from_iter(r.iter().copied()),
+            Vec::from_iter(0..capacity)
+        );
 
-#[test]
-fn serialize_deserialize_full() {
-    use serde_test::{assert_tokens, Token};
+        for i in capacity..=(capacity * 2) {
+            r.insert(i);
 
-    let mut r = RingBuffer::new(5);
+            assert_eq!(r.len(), capacity);
 
-    for i in 1..=5 {
-        r.insert(i);
+            let sequence_len = i + 1;
+            assert_eq!(
+                Vec::from_iter(r.iter().copied()),
+                Vec::from_iter((0..sequence_len).skip(sequence_len - capacity))
+            );
+        }
     }
 
-    assert_tokens(
-        &r,
-        &[
-            Token::Struct {
-                name: "RingBuffer",
-                len: 2,
-            },
-            Token::Str("capacity"),
-            Token::U64(5),
-            Token::Str("elements"),
-            Token::Seq { len: Some(5) },
-            Token::I32(1),
-            Token::I32(2),
-            Token::I32(3),
-            Token::I32(4),
-            Token::I32(5),
-            Token::SeqEnd,
-            Token::StructEnd,
-        ],
-    )
+    #[test]
+    fn insert_and_iter() {
+        for i in 1..=100 {
+            insert_test(i);
+        }
+    }
+
+    #[test]
+    fn equal_with_different_cursor() {
+        let mut r1 = RingBuffer::new(3);
+        r1.insert(1);
+        r1.insert(2);
+        r1.insert(3);
+
+        let mut r2 = RingBuffer::new(3);
+        r2.insert(1);
+        r2.insert(1);
+        r2.insert(2);
+        r2.insert(3);
+
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn not_equal_with_different_elements() {
+        let mut r1 = RingBuffer::new(4);
+        r1.insert(1);
+
+        let mut r2 = RingBuffer::new(4);
+        r2.insert(2);
+
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn equal_with_same_elements() {
+        let mut r1 = RingBuffer::new(3);
+        r1.insert(1);
+
+        let mut r2 = RingBuffer::new(3);
+        r2.insert(1);
+
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn not_equal_with_different_capacities() {
+        let mut r1 = RingBuffer::new(4);
+        r1.insert(1);
+
+        let mut r2 = RingBuffer::new(3);
+        r2.insert(1);
+
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn debug_fmt() {
+        let mut r = RingBuffer::new(3);
+        for i in 0..4 {
+            r.insert(i);
+        }
+        assert_eq!(
+            format!("{r:?}"),
+            "RingBuffer { capacity: 3, elements: [1, 2, 3] }"
+        )
+    }
+
+    #[test]
+    fn serialize_deserialize_half_empty() {
+        use serde_test::{assert_tokens, Token};
+
+        let mut r = RingBuffer::new(5);
+
+        r.insert(1);
+        r.insert(2);
+        r.insert(3);
+
+        assert_tokens(
+            &r,
+            &[
+                Token::Struct {
+                    name: "RingBuffer",
+                    len: 2,
+                },
+                Token::Str("capacity"),
+                Token::U64(5),
+                Token::Str("elements"),
+                Token::Seq { len: Some(3) },
+                Token::I32(1),
+                Token::I32(2),
+                Token::I32(3),
+                Token::SeqEnd,
+                Token::StructEnd,
+            ],
+        )
+    }
+
+    #[test]
+    fn serialize_deserialize_full() {
+        use serde_test::{assert_tokens, Token};
+
+        let mut r = RingBuffer::new(5);
+
+        for i in 1..=5 {
+            r.insert(i);
+        }
+
+        assert_tokens(
+            &r,
+            &[
+                Token::Struct {
+                    name: "RingBuffer",
+                    len: 2,
+                },
+                Token::Str("capacity"),
+                Token::U64(5),
+                Token::Str("elements"),
+                Token::Seq { len: Some(5) },
+                Token::I32(1),
+                Token::I32(2),
+                Token::I32(3),
+                Token::I32(4),
+                Token::I32(5),
+                Token::SeqEnd,
+                Token::StructEnd,
+            ],
+        )
+    }
 }
