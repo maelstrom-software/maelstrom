@@ -4,7 +4,7 @@ use serde::{
     ser::{SerializeSeq as _, SerializeStruct as _},
     Deserialize, Serialize, Serializer,
 };
-use std::{fmt, iter, slice};
+use std::fmt;
 
 #[derive(Clone, Eq, Deserialize)]
 #[serde(from = "RingBufferDeserProxy<T>")]
@@ -72,13 +72,41 @@ impl<T> RingBuffer<T> {
     }
 
     pub fn iter(&self) -> RingBufferIter<'_, T> {
-        self.buf[self.cursor..]
-            .iter()
-            .chain(self.buf[0..self.cursor].iter())
+        RingBufferIter {
+            ring_buffer: self,
+            looped: false,
+            offset: self.cursor,
+        }
     }
 }
 
-pub type RingBufferIter<'a, T> = iter::Chain<slice::Iter<'a, T>, slice::Iter<'a, T>>;
+#[derive(Clone)]
+pub struct RingBufferIter<'a, T> {
+    ring_buffer: &'a RingBuffer<T>,
+    looped: bool,
+    offset: usize,
+}
+
+impl<'a, T> Iterator for RingBufferIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.looped && self.offset == self.ring_buffer.len() {
+            self.looped = true;
+            self.offset = 0;
+        }
+        let upper_bound = if self.looped {
+            self.ring_buffer.cursor
+        } else {
+            self.ring_buffer.len()
+        };
+        (self.offset < upper_bound).then(|| {
+            let result = self.ring_buffer.buf.get(self.offset).unwrap();
+            self.offset += 1;
+            result
+        })
+    }
+}
 
 struct RingBufferElements<'a, T>(&'a RingBuffer<T>);
 
