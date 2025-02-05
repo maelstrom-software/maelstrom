@@ -11,7 +11,6 @@ use std::fmt;
 pub struct RingBuffer<T, const N: usize> {
     buf: Vec<T>,
     cursor: usize,
-    capacity: usize,
 }
 
 impl<T, const N: usize> PartialEq for RingBuffer<T, N>
@@ -29,7 +28,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RingBuffer")
-            .field("capacity", &self.capacity)
+            .field("capacity", &N)
             .field("elements", &Vec::from_iter(self.iter()))
             .finish()
     }
@@ -44,7 +43,6 @@ impl<T, const N: usize> Default for RingBuffer<T, N> {
         Self {
             buf,
             cursor: 0,
-            capacity: N,
         }
     }
 }
@@ -61,7 +59,7 @@ impl<T, const N: usize> FromIterator<T> for RingBuffer<T, N> {
 
 impl<T, const N: usize> RingBuffer<T, N> {
     pub fn capacity(&self) -> usize {
-        self.capacity
+        N
     }
 
     pub fn push(&mut self, element: T) {
@@ -164,7 +162,6 @@ impl<T, const N: usize> From<RingBufferDeserProxy<T>> for RingBuffer<T, N> {
         Self {
             cursor: 0,
             buf,
-            capacity: N,
         }
     }
 }
