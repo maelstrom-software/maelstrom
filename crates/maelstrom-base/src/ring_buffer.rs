@@ -18,7 +18,7 @@ where
     T: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.capacity() == other.capacity() && self.iter().eq(other.iter())
+        self.iter().eq(other.iter())
     }
 }
 
@@ -40,10 +40,7 @@ impl<T, const N: usize> Default for RingBuffer<T, N> {
 
         let mut buf = vec![];
         buf.reserve_exact(N);
-        Self {
-            buf,
-            cursor: 0,
-        }
+        Self { buf, cursor: 0 }
     }
 }
 
@@ -58,16 +55,12 @@ impl<T, const N: usize> FromIterator<T> for RingBuffer<T, N> {
 }
 
 impl<T, const N: usize> RingBuffer<T, N> {
-    pub fn capacity(&self) -> usize {
-        N
-    }
-
     pub fn push(&mut self, element: T) {
-        if self.buf.len() < self.capacity() {
+        if self.buf.len() < N {
             self.buf.push(element);
         } else {
             self.buf[self.cursor] = element;
-            self.cursor = (self.cursor + 1) % self.capacity();
+            self.cursor = (self.cursor + 1) % N;
         }
     }
 
@@ -143,7 +136,7 @@ where
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("RingBuffer", 2)?;
-        state.serialize_field("capacity", &self.capacity())?;
+        state.serialize_field("capacity", &N)?;
         state.serialize_field("elements", &RingBufferElements(self))?;
         state.end()
     }
@@ -159,10 +152,7 @@ impl<T, const N: usize> From<RingBufferDeserProxy<T>> for RingBuffer<T, N> {
     fn from(proxy: RingBufferDeserProxy<T>) -> Self {
         let mut buf = proxy.elements;
         buf.reserve_exact(N - buf.len());
-        Self {
-            cursor: 0,
-            buf,
-        }
+        Self { cursor: 0, buf }
     }
 }
 

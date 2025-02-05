@@ -111,7 +111,7 @@ impl JobStatisticsTimeSeries {
     }
 
     pub fn capacity(&self) -> usize {
-        self.entries.capacity()
+        CAPACITY
     }
 
     pub fn len(&self) -> usize {
