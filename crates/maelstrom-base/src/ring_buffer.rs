@@ -154,19 +154,17 @@ where
 #[derive(Deserialize)]
 #[serde(rename = "RingBuffer")]
 struct RingBufferDeserProxy<T> {
-    capacity: usize,
     elements: Vec<T>,
 }
 
 impl<T, const N: usize> From<RingBufferDeserProxy<T>> for RingBuffer<T, N> {
     fn from(proxy: RingBufferDeserProxy<T>) -> Self {
         let mut buf = proxy.elements;
-        let capacity = proxy.capacity;
-        buf.reserve_exact(capacity - buf.len());
+        buf.reserve_exact(N - buf.len());
         Self {
             cursor: 0,
             buf,
-            capacity,
+            capacity: N,
         }
     }
 }
