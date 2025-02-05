@@ -6,6 +6,7 @@ use serde::{
 };
 use std::{
     fmt::{self, Debug, Formatter},
+    iter::FusedIterator,
     mem::MaybeUninit,
 };
 
@@ -123,7 +124,20 @@ impl<'a, T, const N: usize> Iterator for RingBufferIter<'a, T, N> {
         }
         result
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.len();
+        (size, Some(size))
+    }
 }
+
+impl<T, const N: usize> ExactSizeIterator for RingBufferIter<'_, T, N> {
+    fn len(&self) -> usize {
+        self.buf.length - self.idx
+    }
+}
+
+impl<T, const N: usize> FusedIterator for RingBufferIter<'_, T, N> {}
 
 struct RingBufferElements<'a, T, const N: usize>(&'a RingBuffer<T, N>);
 
@@ -173,6 +187,7 @@ impl<T, const N: usize> From<RingBufferDeserProxy<T>> for RingBuffer<T, N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use std::{cell::RefCell, mem, rc::Rc};
 
     #[track_caller]
@@ -342,8 +357,8 @@ mod tests {
         assert_eq!(r, RingBuffer::<_, 3>::from_iter([2, 3, 4]));
     }
 
-    #[track_caller]
-    fn drop_test(count: i32) {
+    #[rstest]
+    fn drop(#[values(0, 1, 2, 3, 4)] count: i32) {
         struct TestStruct {
             value: i32,
             drop_log: Rc<RefCell<Vec<i32>>>,
@@ -374,13 +389,24 @@ mod tests {
         assert_eq!(*log.borrow(), expected);
     }
 
-    #[test]
-    fn drop() {
-        drop_test(0);
-        drop_test(1);
-        drop_test(2);
-        drop_test(3);
-        drop_test(4);
-        drop_test(5);
+    #[rstest]
+    fn iter(#[values(0, 1, 2, 3, 4, 5)] count: usize) {
+        let r = RingBuffer::<_, 2>::from_iter(0..count);
+        let mut i = r.iter();
+        if count > 1 {
+            assert_eq!(i.len(), 2);
+            assert_eq!(i.size_hint(), (2, Some(2)));
+            assert_eq!(i.next(), Some(count - 2).as_ref());
+        }
+        if count > 0 {
+            assert_eq!(i.len(), 1);
+            assert_eq!(i.size_hint(), (1, Some(1)));
+            assert_eq!(i.next(), Some(count - 1).as_ref());
+        }
+        for _ in 0..1_000_000 {
+            assert_eq!(i.len(), 0);
+            assert_eq!(i.size_hint(), (0, Some(0)));
+            assert_eq!(i.next(), None);
+        }
     }
 }

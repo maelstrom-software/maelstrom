@@ -26,5 +26,6 @@ strum.workspace = true
 
 [dev-dependencies]
 heck.workspace = true
+rstest.workspace = true
 serde_test.workspace = true
 toml.workspace = true
