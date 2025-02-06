@@ -414,6 +414,31 @@ fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender
     }
 }
 
+fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
+    deps: &'deps MainAppCombinedDeps<MainAppDepsT>,
+    scope: &'scope std::thread::Scope<'scope, 'deps>,
+    sem: &'deps Semaphore,
+    ui: UiSender,
+) -> Result<ExitCode> {
+    let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
+
+    let abs_deps = &deps.abstract_deps;
+    let test_db_store = &deps.test_db_store;
+    let options = &deps.options;
+
+    let deps = MainAppDepsAdapter::new(abs_deps, scope, main_app_sender.clone(), ui.clone(), sem);
+
+    main_app_sender.send(MainAppMessage::Start.into()).unwrap();
+
+    let test_db = test_db_store.load()?;
+    let app = MainApp::new(&deps, options, test_db);
+
+    let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
+    test_db_store.save(test_db)?;
+
+    Ok(exit_code)
+}
+
 fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
     mut deps: MainAppCombinedDeps<MainAppDepsT>,
     timeout_override: Option<Option<Timeout>>,
@@ -421,7 +446,6 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
 ) -> Result<ExitCode> {
     deps.options.timeout_override = timeout_override;
     let abs_deps = &deps.abstract_deps;
-    let options = &deps.options;
     let watch = deps.watch;
     let client = abs_deps.client();
 
@@ -430,10 +454,9 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
         .test_collector()
         .build_test_layers(deps.options.test_metadata.get_all_images(), &ui)?;
 
-    let test_db_store = &deps.test_db_store;
     let project_dir = &deps.project_dir;
-    let done = Event::new();
     let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
+    let done = Event::new();
     let files_changed = Event::new();
 
     std::thread::scope(|scope| {
@@ -455,27 +478,10 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
             }
 
             loop {
-                let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
-
-                let deps = MainAppDepsAdapter::new(
-                    abs_deps,
-                    scope,
-                    main_app_sender.clone(),
-                    ui.clone(),
-                    &sem,
-                );
-
-                main_app_sender.send(MainAppMessage::Start.into()).unwrap();
-
-                let test_db = test_db_store.load()?;
-                let app = MainApp::new(&deps, options, test_db);
-
-                let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
-                test_db_store.save(test_db)?;
+                let exit_code = run_app_once(&deps, scope, &sem, ui.clone())?;
 
                 if watch {
                     client.restart()?;
-                    drop(deps);
 
                     ui.send(UiMessage::UpdateEnqueueStatus(
                         "waiting for changes...".into(),
@@ -483,9 +489,9 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
                     watcher.wait_for_changes();
 
                     continue;
+                } else {
+                    break Ok(exit_code);
                 }
-
-                break Ok(exit_code);
             }
         })();
 
