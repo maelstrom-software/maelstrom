@@ -7,7 +7,7 @@ use serde::{
 use std::{
     fmt::{self, Debug, Formatter},
     iter::FusedIterator,
-    mem::MaybeUninit,
+    mem::{self, MaybeUninit},
 };
 
 #[derive(Deserialize)]
@@ -37,11 +37,11 @@ impl<T: Clone, const N: usize> Clone for RingBuffer<T, N> {
 
 impl<T, const N: usize> Drop for RingBuffer<T, N> {
     fn drop(&mut self) {
-        for elem in &mut self.buf[self.cursor..self.length] {
-            unsafe { elem.assume_init_drop() };
+        for i in self.cursor..self.length {
+            unsafe { self.buf[i].assume_init_drop() };
         }
-        for elem in &mut self.buf[0..self.cursor] {
-            unsafe { elem.assume_init_drop() };
+        for i in 0..self.cursor {
+            unsafe { self.buf[i].assume_init_drop() };
         }
     }
 }
@@ -138,6 +138,83 @@ impl<T, const N: usize> ExactSizeIterator for Iter<'_, T, N> {
 }
 
 impl<T, const N: usize> FusedIterator for Iter<'_, T, N> {}
+
+impl<T, const N: usize> IntoIterator for RingBuffer<T, N> {
+    type Item = T;
+    type IntoIter = IntoIter<T, N>;
+    fn into_iter(mut self) -> Self::IntoIter {
+        let buf = mem::replace(&mut self.buf, [const { MaybeUninit::uninit() }; N]);
+        let length = mem::take(&mut self.length);
+        let cursor = mem::take(&mut self.cursor);
+        if length < N {
+            IntoIter {
+                buf,
+                first_beg: 0,
+                first_end: length,
+                rest_beg: 0,
+                rest_end: 0,
+            }
+        } else {
+            IntoIter {
+                buf,
+                first_beg: cursor,
+                first_end: N,
+                rest_beg: 0,
+                rest_end: cursor,
+            }
+        }
+    }
+}
+
+pub struct IntoIter<T, const N: usize> {
+    buf: [MaybeUninit<T>; N],
+    first_beg: usize,
+    first_end: usize,
+    rest_beg: usize,
+    rest_end: usize,
+}
+
+impl<T, const N: usize> Drop for IntoIter<T, N> {
+    fn drop(&mut self) {
+        for i in self.first_beg..self.first_end {
+            unsafe { self.buf[i].assume_init_drop() };
+        }
+        for i in self.rest_beg..self.rest_end {
+            unsafe { self.buf[i].assume_init_drop() };
+        }
+    }
+}
+
+impl<T, const N: usize> Iterator for IntoIter<T, N> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.first_beg < self.first_end {
+            let loc = mem::replace(&mut self.buf[self.first_beg], MaybeUninit::uninit());
+            self.first_beg += 1;
+            Some(unsafe { loc.assume_init() })
+        } else if self.rest_beg < self.rest_end {
+            let loc = mem::replace(&mut self.buf[self.rest_beg], MaybeUninit::uninit());
+            self.rest_beg += 1;
+            Some(unsafe { loc.assume_init() })
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.len();
+        (size, Some(size))
+    }
+}
+
+impl<T, const N: usize> ExactSizeIterator for IntoIter<T, N> {
+    fn len(&self) -> usize {
+        (self.first_end - self.first_beg) + (self.rest_end - self.rest_beg)
+    }
+}
+
+impl<T, const N: usize> FusedIterator for IntoIter<T, N> {}
 
 struct RingBufferElements<'a, T, const N: usize>(&'a RingBuffer<T, N>);
 
@@ -357,19 +434,19 @@ mod tests {
         assert_eq!(r, RingBuffer::<_, 3>::from_iter([2, 3, 4]));
     }
 
+    struct TestStruct {
+        value: i32,
+        drop_log: Rc<RefCell<Vec<i32>>>,
+    }
+
+    impl Drop for TestStruct {
+        fn drop(&mut self) {
+            self.drop_log.borrow_mut().push(self.value);
+        }
+    }
+
     #[rstest]
     fn drop(#[values(0, 1, 2, 3, 4)] count: i32) {
-        struct TestStruct {
-            value: i32,
-            drop_log: Rc<RefCell<Vec<i32>>>,
-        }
-
-        impl Drop for TestStruct {
-            fn drop(&mut self) {
-                self.drop_log.borrow_mut().push(self.value);
-            }
-        }
-
         let log = Rc::new(RefCell::new(Vec::<_>::new()));
         let mut r = RingBuffer::<_, 2>::default();
         for i in 1..=count {
@@ -408,5 +485,53 @@ mod tests {
             assert_eq!(i.size_hint(), (0, Some(0)));
             assert_eq!(i.next(), None);
         }
+    }
+
+    #[rstest]
+    fn into_iter(#[values(0, 1, 2, 3, 4, 5)] count: usize) {
+        let r = RingBuffer::<_, 2>::from_iter(0..count);
+        let expected = match count {
+            0 => vec![],
+            1 => vec![0],
+            n => vec![n - 2, n - 1],
+        };
+        assert_eq!(r.into_iter().collect::<Vec<_>>(), expected);
+    }
+
+    #[rstest]
+    #[case(0, 0)]
+    #[case(1, 0)]
+    #[case(1, 1)]
+    #[case(2, 0)]
+    #[case(2, 1)]
+    #[case(2, 2)]
+    #[case(3, 0)]
+    #[case(3, 1)]
+    #[case(3, 2)]
+    #[case(4, 0)]
+    #[case(4, 1)]
+    #[case(4, 2)]
+    fn into_iter_drop(#[case] to_insert: i32, #[case] to_consume: i32) {
+        let log = Rc::new(RefCell::new(Vec::<_>::new()));
+        let mut r = RingBuffer::<_, 2>::default();
+        for i in 0..to_insert {
+            r.push(TestStruct {
+                value: i,
+                drop_log: log.clone(),
+            });
+        }
+        let mut iter = r.into_iter();
+        for _ in 0..to_consume {
+            iter.next().unwrap();
+        }
+        log.borrow_mut().clear();
+        mem::drop(iter);
+
+        let expected = match to_insert.min(2) - to_consume {
+            0 => vec![],
+            1 => vec![to_insert - 1],
+            _ => vec![to_insert - 2, to_insert - 1],
+        };
+        assert_eq!(*log.borrow(), expected);
     }
 }
