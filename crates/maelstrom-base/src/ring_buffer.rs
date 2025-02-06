@@ -139,6 +139,14 @@ impl<T, const N: usize> ExactSizeIterator for Iter<'_, T, N> {
 
 impl<T, const N: usize> FusedIterator for Iter<'_, T, N> {}
 
+impl<'a, T, const N: usize> IntoIterator for &'a RingBuffer<T, N> {
+    type Item = &'a T;
+    type IntoIter = Iter<'a, T, N>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 impl<T, const N: usize> IntoIterator for RingBuffer<T, N> {
     type Item = T;
     type IntoIter = IntoIter<T, N>;
@@ -225,7 +233,7 @@ where
         S: Serializer,
     {
         let mut seq = serializer.serialize_seq(Some(self.len()))?;
-        for element in self.iter() {
+        for element in self {
             seq.serialize_element(element)?;
         }
         seq.end()
