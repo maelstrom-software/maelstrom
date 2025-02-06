@@ -90,8 +90,8 @@ impl<T, const N: usize> RingBuffer<T, N> {
         self.length == 0
     }
 
-    pub fn iter(&self) -> RingBufferIter<'_, T, N> {
-        RingBufferIter { buf: self, idx: 0 }
+    pub fn iter(&self) -> Iter<'_, T, N> {
+        Iter { buf: self, idx: 0 }
     }
 
     pub fn get(&self, i: usize) -> Option<&T> {
@@ -109,12 +109,12 @@ impl<T, const N: usize> RingBuffer<T, N> {
 }
 
 #[derive(Clone)]
-pub struct RingBufferIter<'a, T, const N: usize> {
+pub struct Iter<'a, T, const N: usize> {
     buf: &'a RingBuffer<T, N>,
     idx: usize,
 }
 
-impl<'a, T, const N: usize> Iterator for RingBufferIter<'a, T, N> {
+impl<'a, T, const N: usize> Iterator for Iter<'a, T, N> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -131,13 +131,13 @@ impl<'a, T, const N: usize> Iterator for RingBufferIter<'a, T, N> {
     }
 }
 
-impl<T, const N: usize> ExactSizeIterator for RingBufferIter<'_, T, N> {
+impl<T, const N: usize> ExactSizeIterator for Iter<'_, T, N> {
     fn len(&self) -> usize {
         self.buf.length - self.idx
     }
 }
 
-impl<T, const N: usize> FusedIterator for RingBufferIter<'_, T, N> {}
+impl<T, const N: usize> FusedIterator for Iter<'_, T, N> {}
 
 struct RingBufferElements<'a, T, const N: usize>(&'a RingBuffer<T, N>);
 

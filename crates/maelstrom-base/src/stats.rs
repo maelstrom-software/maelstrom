@@ -1,7 +1,7 @@
 //! Contains data-structures for maintaining historical statistics of jobs
 
 use crate::{
-    ring_buffer::{RingBuffer, RingBufferIter},
+    ring_buffer::{self, RingBuffer},
     ClientId, WorkerId,
 };
 use enum_map::EnumMap;
@@ -106,7 +106,7 @@ impl JobStatisticsTimeSeries {
         self.entries.push(entry);
     }
 
-    pub fn iter(&self) -> RingBufferIter<'_, JobStatisticsSample, CAPACITY> {
+    pub fn iter(&self) -> ring_buffer::Iter<'_, JobStatisticsSample, CAPACITY> {
         self.entries.iter()
     }
 
