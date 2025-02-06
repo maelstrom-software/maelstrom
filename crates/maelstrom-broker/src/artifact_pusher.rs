@@ -1,5 +1,5 @@
 use crate::{cache::TempFileFactory, scheduler_task};
-use anyhow::{Result, Error};
+use anyhow::{Error, Result};
 use maelstrom_base::proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
 use maelstrom_util::{
     cache::fs::TempFile as _,

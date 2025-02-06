@@ -414,19 +414,11 @@ fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender
     }
 }
 
-/// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
-/// application on this thread using the UI until it is completed.
-pub fn run_app_with_ui_multithreaded<MainAppDepsT>(
+fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
     mut deps: MainAppCombinedDeps<MainAppDepsT>,
-    logging_output: LoggingOutput,
     timeout_override: Option<Option<Timeout>>,
-    ui: impl Ui,
-) -> Result<ExitCode>
-where
-    MainAppDepsT: MainAppDeps,
-{
-    let (ui_handle, ui) = ui.start_ui_thread(logging_output, deps.log.clone());
-
+    ui: UiSender,
+) -> Result<ExitCode> {
     deps.options.timeout_override = timeout_override;
     let abs_deps = &deps.abstract_deps;
     let options = &deps.options;
@@ -440,12 +432,11 @@ where
 
     let test_db_store = &deps.test_db_store;
     let project_dir = &deps.project_dir;
-
     let done = Event::new();
     let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
     let files_changed = Event::new();
 
-    let main_res = std::thread::scope(|scope| {
+    std::thread::scope(|scope| {
         let ui_clone = ui.clone();
         scope.spawn(|| introspect_loop(&done, client, ui_clone));
 
@@ -500,9 +491,20 @@ where
 
         done.set();
         res
-    });
+    })
+}
 
-    drop(ui);
+/// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
+/// application on this thread using the UI until it is completed.
+pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
+    deps: MainAppCombinedDeps<MainAppDepsT>,
+    logging_output: LoggingOutput,
+    timeout_override: Option<Option<Timeout>>,
+    ui: impl Ui,
+) -> Result<ExitCode> {
+    let (ui_handle, ui) = ui.start_ui_thread(logging_output, deps.log.clone());
+
+    let main_res = run_app_in_loop(deps, timeout_override, ui);
     ui_handle.join()?;
 
     let exit_code = main_res?;
