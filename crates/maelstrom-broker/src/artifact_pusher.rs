@@ -1,5 +1,5 @@
 use crate::{cache::TempFileFactory, scheduler_task};
-use anyhow::Result;
+use anyhow::{Result, Error};
 use maelstrom_base::proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
 use maelstrom_util::{
     cache::fs::TempFile as _,
@@ -43,7 +43,7 @@ where
     loop {
         let msg = net::read_message_from_socket(&mut socket, log)?;
         let result = handle_one_message(msg, &mut socket, scheduler_task_sender, temp_file_factory);
-        let msg = BrokerToArtifactPusher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+        let msg = BrokerToArtifactPusher(result.as_ref().map(drop).map_err(Error::to_string));
         net::write_message_to_socket(&mut socket, msg, log)?;
         result?;
     }
