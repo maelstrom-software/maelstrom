@@ -1,17 +1,17 @@
 //! This implements a simple ring-buffer backed by a vector that has serde support
 
 use serde::{
-    ser::{SerializeSeq as _, SerializeStruct as _},
+    de::{Deserializer, SeqAccess, Visitor},
+    ser::SerializeSeq as _,
     Deserialize, Serialize, Serializer,
 };
 use std::{
     fmt::{self, Debug, Formatter},
     iter::FusedIterator,
+    marker::PhantomData,
     mem::{self, MaybeUninit},
 };
 
-#[derive(Deserialize)]
-#[serde(from = "RingBufferDeserProxy<T>")]
 pub struct RingBuffer<T, const N: usize> {
     buf: [MaybeUninit<T>; N],
     length: usize,
@@ -216,24 +216,6 @@ impl<T, const N: usize> ExactSizeIterator for IntoIter<T, N> {
 
 impl<T, const N: usize> FusedIterator for IntoIter<T, N> {}
 
-struct RingBufferElements<'a, T, const N: usize>(&'a RingBuffer<T, N>);
-
-impl<T, const N: usize> Serialize for RingBufferElements<'_, T, N>
-where
-    T: Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
-        for e in self.0.iter() {
-            seq.serialize_element(e)?;
-        }
-        seq.end()
-    }
-}
-
 impl<T, const N: usize> Serialize for RingBuffer<T, N>
 where
     T: Serialize,
@@ -242,22 +224,48 @@ where
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("RingBuffer", 2)?;
-        state.serialize_field("capacity", &N)?;
-        state.serialize_field("elements", &RingBufferElements(self))?;
-        state.end()
+        let mut seq = serializer.serialize_seq(Some(self.len()))?;
+        for element in self.iter() {
+            seq.serialize_element(element)?;
+        }
+        seq.end()
     }
 }
 
-#[derive(Deserialize)]
-#[serde(rename = "RingBuffer")]
-struct RingBufferDeserProxy<T> {
-    elements: Vec<T>,
+struct DeserializeVisitor<T, const N: usize>(PhantomData<fn() -> RingBuffer<T, N>>);
+
+impl<T, const N: usize> DeserializeVisitor<T, N> {
+    fn new() -> Self {
+        Self(PhantomData)
+    }
 }
 
-impl<T, const N: usize> From<RingBufferDeserProxy<T>> for RingBuffer<T, N> {
-    fn from(proxy: RingBufferDeserProxy<T>) -> Self {
-        Self::from_iter(proxy.elements)
+impl<'de, T: Deserialize<'de>, const N: usize> Visitor<'de> for DeserializeVisitor<T, N> {
+    type Value = RingBuffer<T, N>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a RingBuffer sequence")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        let mut result = RingBuffer::default();
+        while let Some(elem) = access.next_element()? {
+            result.push(elem);
+        }
+        Ok(result)
+    }
+}
+
+// This is the trait that informs Serde how to deserialize MyMap.
+impl<'de, T, const N: usize> Deserialize<'de> for RingBuffer<T, N>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(DeserializeVisitor::new())
     }
 }
 
@@ -265,6 +273,7 @@ impl<T, const N: usize> From<RingBufferDeserProxy<T>> for RingBuffer<T, N> {
 mod tests {
     use super::*;
     use rstest::rstest;
+    use serde_test::{assert_tokens, Token};
     use std::{cell::RefCell, mem, rc::Rc};
 
     #[track_caller]
@@ -359,55 +368,32 @@ mod tests {
     }
 
     #[test]
+    fn serialize_deserialize_empty() {
+        let r = RingBuffer::<i32, 5>::from_iter([]);
+        assert_tokens(&r, &[Token::Seq { len: Some(0) }, Token::SeqEnd])
+    }
+
+    #[test]
     fn serialize_deserialize_half_empty() {
-        use serde_test::{assert_tokens, Token};
-
-        let mut r = RingBuffer::<i32, 5>::default();
-
-        r.push(1);
-        r.push(2);
-        r.push(3);
-
+        let r = RingBuffer::<i32, 5>::from_iter(1..=3);
         assert_tokens(
             &r,
             &[
-                Token::Struct {
-                    name: "RingBuffer",
-                    len: 2,
-                },
-                Token::Str("capacity"),
-                Token::U64(5),
-                Token::Str("elements"),
                 Token::Seq { len: Some(3) },
                 Token::I32(1),
                 Token::I32(2),
                 Token::I32(3),
                 Token::SeqEnd,
-                Token::StructEnd,
             ],
         )
     }
 
     #[test]
     fn serialize_deserialize_full() {
-        use serde_test::{assert_tokens, Token};
-
-        let mut r = RingBuffer::<i32, 5>::default();
-
-        for i in 1..=5 {
-            r.push(i);
-        }
-
+        let r = RingBuffer::<i32, 5>::from_iter(1..=5);
         assert_tokens(
             &r,
             &[
-                Token::Struct {
-                    name: "RingBuffer",
-                    len: 2,
-                },
-                Token::Str("capacity"),
-                Token::U64(5),
-                Token::Str("elements"),
                 Token::Seq { len: Some(5) },
                 Token::I32(1),
                 Token::I32(2),
@@ -415,7 +401,6 @@ mod tests {
                 Token::I32(4),
                 Token::I32(5),
                 Token::SeqEnd,
-                Token::StructEnd,
             ],
         )
     }
