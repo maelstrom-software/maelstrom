@@ -605,7 +605,7 @@ fn find_artifacts(path: &Path) -> Result<Vec<PytestArtifactKey>> {
         .collect())
 }
 
-pub fn main(
+fn main(
     config: Config,
     extra_options: cli::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
@@ -719,5 +719,17 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn is_list(&self, extra_options: &ExtraCommandLineOptions) -> bool {
         extra_options.list
+    }
+
+    fn main(
+        &self,
+        config: Config,
+        extra_options: ExtraCommandLineOptions,
+        bg_proc: ClientBgProcess,
+        logger: Logger,
+        stdout_is_tty: bool,
+        ui: Box<dyn Ui>,
+    ) -> Result<ExitCode> {
+        main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
     }
 }

@@ -157,6 +157,15 @@ pub trait TestRunner {
     fn get_test_metadata_default_contents(&self) -> &str;
     fn get_project_directory(&self, config: &Self::Config) -> Result<Utf8PathBuf>;
     fn is_list(&self, extra_options: &Self::ExtraCommandLineOptions) -> bool;
+    fn main(
+        &self,
+        config: Self::Config,
+        extra_options: Self::ExtraCommandLineOptions,
+        bg_proc: ClientBgProcess,
+        logger: Logger,
+        stdout_is_tty: bool,
+        ui: Box<dyn Ui>,
+    ) -> Result<ExitCode>;
 }
 
 /// Helper that does common work for test-runner main functions and then forwards on to the given
@@ -164,23 +173,15 @@ pub trait TestRunner {
 ///
 /// Mostly it deals with the `--init` and `--client-bg-proc` flags
 #[allow(clippy::too_many_arguments)]
-pub fn main<ArgsT, ArgsIntoIterT, MainFn, TestRunnerT: TestRunner>(
+pub fn main<ArgsT, ArgsIntoIterT, TestRunnerT>(
     command: Command,
     args: ArgsIntoIterT,
     test_runner: TestRunnerT,
-    main: MainFn,
 ) -> Result<ExitCode>
 where
     ArgsIntoIterT: IntoIterator<Item = ArgsT>,
     ArgsT: Into<OsString> + Clone,
-    MainFn: FnOnce(
-        TestRunnerT::Config,
-        TestRunnerT::ExtraCommandLineOptions,
-        ClientBgProcess,
-        Logger,
-        bool,
-        Box<dyn Ui>,
-    ) -> Result<ExitCode>,
+    TestRunnerT: TestRunner,
 {
     let (config, extra_options): (TestRunnerT::Config, TestRunnerT::ExtraCommandLineOptions) =
         maelstrom_util::config::new_config_with_extra_from_args(
@@ -209,5 +210,5 @@ where
         test_runner.is_list(&extra_options),
         stdout_is_tty,
     )?;
-    main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
+    test_runner.main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
 }

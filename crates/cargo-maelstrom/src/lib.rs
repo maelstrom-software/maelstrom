@@ -672,4 +672,16 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     fn is_list(&self, extra_options: &ExtraCommandLineOptions) -> bool {
         extra_options.list.any()
     }
+
+    fn main(
+        &self,
+        config: Config,
+        extra_options: ExtraCommandLineOptions,
+        bg_proc: ClientBgProcess,
+        logger: Logger,
+        stdout_is_tty: bool,
+        ui: Box<dyn Ui>,
+    ) -> Result<ExitCode> {
+        main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
+    }
 }

@@ -1,12 +1,9 @@
 use anyhow::Result;
+use clap::command;
+use maelstrom_pytest::TestRunner;
 use maelstrom_util::process::ExitCode;
 use std::env;
 
 pub fn main() -> Result<ExitCode> {
-    maelstrom_test_runner::main(
-        clap::command!(),
-        env::args(),
-        maelstrom_pytest::TestRunner,
-        maelstrom_pytest::main,
-    )
+    maelstrom_test_runner::main(command!(), env::args(), TestRunner)
 }
