@@ -19,7 +19,7 @@ use crate::{
 };
 use anyhow::{Context as _, Result};
 use maelstrom_base::Timeout;
-use maelstrom_client::{spec::JobSpec, JobStatus, ProjectDir, StateDir};
+use maelstrom_client::{spec::JobSpec, Client, JobStatus, ProjectDir, StateDir};
 use maelstrom_util::{
     fs::Fs,
     process::ExitCode,
@@ -113,6 +113,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         mut watch_exclude_paths: Vec<PathBuf>,
         collector_options: super::CollectOptionsM<MainAppDepsT>,
         log: slog::Logger,
+        client: &Client,
     ) -> Result<Self> {
         let fs = Fs::new();
 
@@ -148,9 +149,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
         // all of the containers while we were doing other startup. In all likelihood, the number
         // of containers would be small and we'd be done long before we started submitting jobs.
         for (name, spec) in metadata_store.containers() {
-            abstract_deps
-                .client()
-                .add_container(name.clone(), spec.clone())?;
+            client.add_container(name.clone(), spec.clone())?;
         }
 
         let test_db_store = TestDbStore::new(fs, &state_dir);
@@ -233,6 +232,7 @@ struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
     ui: UiSender,
     collect_killer: Mutex<Option<KillOnDrop<WaitM<Self>>>>,
     semaphore: &'deps Semaphore,
+    client: &'deps Client,
 }
 
 const MAX_NUM_BACKGROUND_THREADS: isize = 200;
@@ -244,6 +244,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
         main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
         ui: UiSender,
         semaphore: &'deps Semaphore,
+        client: &'deps Client,
     ) -> Self {
         Self {
             deps,
@@ -252,6 +253,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
             ui,
             collect_killer: Mutex::new(None),
             semaphore,
+            client,
         }
     }
 }
@@ -334,7 +336,7 @@ impl<MainAppDepsT: MainAppDeps> Deps for MainAppDepsAdapter<'_, '_, MainAppDepsT
         let sender = self.main_app_sender.clone();
 
         let cb_sender = sender.clone();
-        let res = self.deps.client().add_job(spec, move |result| {
+        let res = self.client.add_job(spec, move |result| {
             let _ = cb_sender.send(MainAppMessage::JobUpdate { job_id, result }.into());
         });
         if let Err(error) = res {
@@ -419,6 +421,7 @@ fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     sem: &'deps Semaphore,
     ui: UiSender,
+    client: &'deps Client,
 ) -> Result<ExitCode> {
     let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
 
@@ -428,11 +431,17 @@ fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
 
     let done = Event::new();
     std::thread::scope(|inner_scope| {
-        inner_scope.spawn(|| introspect_loop(&done, abs_deps.client(), ui.clone()));
+        inner_scope.spawn(|| introspect_loop(&done, client, ui.clone()));
 
         let res = (|| -> Result<_> {
-            let deps =
-                MainAppDepsAdapter::new(abs_deps, scope, main_app_sender.clone(), ui.clone(), sem);
+            let deps = MainAppDepsAdapter::new(
+                abs_deps,
+                scope,
+                main_app_sender.clone(),
+                ui.clone(),
+                sem,
+                client,
+            );
 
             main_app_sender.send(MainAppMessage::Start.into()).unwrap();
 
@@ -454,11 +463,11 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
     mut deps: MainAppCombinedDeps<MainAppDepsT>,
     timeout_override: Option<Option<Timeout>>,
     ui: UiSender,
+    client: &Client,
 ) -> Result<ExitCode> {
     deps.options.timeout_override = timeout_override;
     let abs_deps = &deps.abstract_deps;
     let watch = deps.watch;
-    let client = abs_deps.client();
 
     // This is where the pytest runner builds pip packages.
     abs_deps
@@ -486,7 +495,7 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
             }
 
             loop {
-                let exit_code = run_app_once(&deps, scope, &sem, ui.clone())?;
+                let exit_code = run_app_once(&deps, scope, &sem, ui.clone(), client)?;
 
                 if watch {
                     client.restart()?;
@@ -528,6 +537,7 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
     watch_exclude_paths: Vec<PathBuf>,
     collector_options: super::CollectOptionsM<MainAppDepsT>,
     log: slog::Logger,
+    client: &Client,
 ) -> Result<ExitCode> {
     let deps = MainAppCombinedDeps::new(
         abstract_deps,
@@ -543,11 +553,12 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
         watch_exclude_paths,
         collector_options,
         log,
+        client,
     )?;
 
     let (ui_handle, ui) = ui.start_ui_thread(logging_output, deps.log.clone());
 
-    let main_res = run_app_in_loop(deps, timeout_override, ui);
+    let main_res = run_app_in_loop(deps, timeout_override, ui, client);
     ui_handle.join()?;
 
     let exit_code = main_res?;

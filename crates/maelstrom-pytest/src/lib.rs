@@ -97,7 +97,6 @@ fn create_client(
 }
 
 struct DefaultMainAppDeps<'client> {
-    client: &'client Client,
     test_collector: PytestTestCollector<'client>,
 }
 
@@ -109,7 +108,6 @@ impl<'client> DefaultMainAppDeps<'client> {
         client: &'client Client,
     ) -> Result<Self> {
         Ok(Self {
-            client,
             test_collector: PytestTestCollector {
                 client,
                 project_dir: project_dir.to_owned(),
@@ -555,10 +553,6 @@ fn remove_fixture_output_basic_case() {
 }
 
 impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
-    fn client(&self) -> &Client {
-        self.client
-    }
-
     type TestCollector = PytestTestCollector<'client>;
 
     fn test_collector(&self) -> &PytestTestCollector<'client> {
@@ -660,6 +654,7 @@ pub fn main_with_stderr_and_project_dir(
         vec![build_dir.to_owned().into_path_buf()],
         config.pytest_options,
         log,
+        &client,
     )
 }
 

@@ -41,7 +41,6 @@ pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-meta
 pub struct MaelstromTargetDir;
 
 struct DefaultMainAppDeps {
-    client: Client,
     test_collector: CargoTestCollector,
     target_dir: RootBuf<BuildDir>,
 }
@@ -63,7 +62,7 @@ impl DefaultMainAppDeps {
         artifact_transfer_strategy: ArtifactTransferStrategy,
         packages: Vec<CargoPackage>,
         log: slog::Logger,
-    ) -> Result<Self> {
+    ) -> Result<(Self, Client)> {
         let project_dir = project_dir.as_ref();
         let state_dir = state_dir.as_ref();
         let container_image_depot_dir = container_image_depot_dir.as_ref();
@@ -93,11 +92,13 @@ impl DefaultMainAppDeps {
             artifact_transfer_strategy,
             log.clone(),
         )?;
-        Ok(Self {
+        Ok((
+            Self {
+                test_collector: CargoTestCollector { log, packages },
+                target_dir: target_dir.as_ref().to_owned(),
+            },
             client,
-            test_collector: CargoTestCollector { log, packages },
-            target_dir: target_dir.as_ref().to_owned(),
-        })
+        ))
     }
 }
 
@@ -488,10 +489,6 @@ fn remove_fixture_output_confusing_trailer() {
 }
 
 impl MainAppDeps for DefaultMainAppDeps {
-    fn client(&self) -> &Client {
-        &self.client
-    }
-
     type TestCollector = CargoTestCollector;
 
     fn test_collector(&self) -> &CargoTestCollector {
@@ -625,7 +622,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 .map(|p| CargoPackage(p.clone()))
                 .collect::<Vec<_>>();
 
-            let deps = DefaultMainAppDeps::new(
+            let (deps, client) = DefaultMainAppDeps::new(
                 bg_proc,
                 config.parent.broker,
                 workspace_dir.transmute::<ProjectDir>(),
@@ -666,6 +663,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 vec![target_dir.to_owned().into_path_buf()],
                 cargo_options,
                 log,
+                &client,
             )
         }
     }

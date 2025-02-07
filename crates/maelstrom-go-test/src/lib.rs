@@ -82,19 +82,13 @@ fn create_client(
     )
 }
 
-struct DefaultMainAppDeps<'client> {
-    client: &'client Client,
+struct DefaultMainAppDeps {
     test_collector: GoTestCollector,
 }
 
-impl<'client> DefaultMainAppDeps<'client> {
-    pub fn new(
-        client: &'client Client,
-        project_dir: &Root<ProjectDir>,
-        cache_dir: &Root<CacheDir>,
-    ) -> Result<Self> {
+impl DefaultMainAppDeps {
+    pub fn new(project_dir: &Root<ProjectDir>, cache_dir: &Root<CacheDir>) -> Result<Self> {
         Ok(Self {
-            client,
             test_collector: GoTestCollector::new(project_dir, cache_dir),
         })
     }
@@ -674,11 +668,7 @@ fn remove_fixture_output_example_test() {
     );
 }
 
-impl MainAppDeps for DefaultMainAppDeps<'_> {
-    fn client(&self) -> &Client {
-        self.client
-    }
-
+impl MainAppDeps for DefaultMainAppDeps {
     type TestCollector = GoTestCollector;
 
     fn test_collector(&self) -> &GoTestCollector {
@@ -768,7 +758,7 @@ pub fn main_with_stderr_and_project_dir(
             config.parent.artifact_transfer_strategy,
             log.clone(),
         )?;
-        let deps = DefaultMainAppDeps::new(&client, project_dir, &cache_dir)?;
+        let deps = DefaultMainAppDeps::new(project_dir, &cache_dir)?;
 
         run_app_with_ui_multithreaded(
             logging_output,
@@ -787,6 +777,7 @@ pub fn main_with_stderr_and_project_dir(
             vec![],
             config.go_test_options,
             log,
+            &client,
         )
     }
 }

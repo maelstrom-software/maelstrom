@@ -415,8 +415,6 @@ impl TestFilter for SimpleFilter {
 }
 
 pub trait MainAppDeps: Sync {
-    fn client(&self) -> &maelstrom_client::Client;
-
     type TestCollector: CollectTests;
     fn test_collector(&self) -> &Self::TestCollector;
 
