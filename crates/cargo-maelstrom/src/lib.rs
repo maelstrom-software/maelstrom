@@ -21,9 +21,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiSender},
-    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
-    NoCaseMetadata, TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait,
-    WaitStatus,
+    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata, TestArtifact,
+    TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -649,8 +648,11 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 manifest_options: config.cargo_manifest_options,
                 extra_test_binary_args: config.extra_test_binary_args,
             };
-            let watch_exclude_paths = vec![target_dir.to_owned().into_path_buf()];
-            let deps = MainAppCombinedDeps::new(
+
+            run_app_with_ui_multithreaded(
+                logging_output,
+                config.parent.timeout.map(Timeout::new),
+                ui,
                 deps,
                 extra_options.parent.include,
                 extra_options.parent.exclude,
@@ -661,16 +663,9 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 stdout_is_tty,
                 workspace_dir,
                 &state_dir,
-                watch_exclude_paths,
+                vec![target_dir.to_owned().into_path_buf()],
                 cargo_options,
                 log,
-            )?;
-
-            run_app_with_ui_multithreaded(
-                deps,
-                logging_output,
-                config.parent.timeout.map(Timeout::new),
-                ui,
             )
         }
     }

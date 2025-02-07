@@ -510,12 +510,41 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
 
 /// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
 /// application on this thread using the UI until it is completed.
+#[allow(clippy::too_many_arguments)]
 pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
-    deps: MainAppCombinedDeps<MainAppDepsT>,
     logging_output: LoggingOutput,
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,
+    abstract_deps: MainAppDepsT,
+    include_filter: Vec<String>,
+    exclude_filter: Vec<String>,
+    list_action: Option<ListAction>,
+    repeat: Repeat,
+    stop_after: Option<StopAfter>,
+    watch: bool,
+    stdout_color: bool,
+    project_dir: impl AsRef<Root<ProjectDir>>,
+    state_dir: impl AsRef<Root<StateDir>>,
+    watch_exclude_paths: Vec<PathBuf>,
+    collector_options: super::CollectOptionsM<MainAppDepsT>,
+    log: slog::Logger,
 ) -> Result<ExitCode> {
+    let deps = MainAppCombinedDeps::new(
+        abstract_deps,
+        include_filter,
+        exclude_filter,
+        list_action,
+        repeat,
+        stop_after,
+        watch,
+        stdout_color,
+        project_dir,
+        state_dir,
+        watch_exclude_paths,
+        collector_options,
+        log,
+    )?;
+
     let (ui_handle, ui) = ui.start_ui_thread(logging_output, deps.log.clone());
 
     let main_res = run_app_in_loop(deps, timeout_override, ui);

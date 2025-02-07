@@ -23,9 +23,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppCombinedDeps, MainAppDeps,
-    TestArtifact, TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait,
-    WaitStatus,
+    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppDeps, TestArtifact, TestArtifactKey,
+    TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -644,8 +643,10 @@ pub fn main_with_stderr_and_project_dir(
     )?;
     let deps = DefaultMainAppDeps::new(project_dir, build_dir, &cache_dir, &client)?;
 
-    let watch_exclude_paths = vec![build_dir.to_owned().into_path_buf()];
-    let deps = MainAppCombinedDeps::new(
+    run_app_with_ui_multithreaded(
+        logging_output,
+        config.parent.timeout.map(Timeout::new),
+        ui,
         deps,
         extra_options.parent.include,
         extra_options.parent.exclude,
@@ -656,16 +657,9 @@ pub fn main_with_stderr_and_project_dir(
         stdout_is_tty,
         project_dir,
         &state_dir,
-        watch_exclude_paths,
+        vec![build_dir.to_owned().into_path_buf()],
         config.pytest_options,
         log,
-    )?;
-
-    run_app_with_ui_multithreaded(
-        deps,
-        logging_output,
-        config.parent.timeout.map(Timeout::new),
-        ui,
     )
 }
 
