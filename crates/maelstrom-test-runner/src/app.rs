@@ -87,103 +87,6 @@ pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
     watch_exclude_paths: Vec<PathBuf>,
 }
 
-impl<MainAppDepsT: MainAppDeps> MainAppCombinedDeps<MainAppDepsT> {
-    /// Creates a new `MainAppCombinedDeps`
-    ///
-    /// `bg_proc`: handle to background client process
-    /// `include_filter`: tests which match any of the patterns in this filter are run
-    /// `exclude_filter`: tests which match any of the patterns in this filter are not run
-    /// `list_action`: if some, tests aren't run, instead tests or other things are listed
-    /// `stdout_color`: should terminal color codes be written to `stdout` or not
-    /// `project_dir`: the path to the root of the project
-    /// `broker_addr`: the network address of the broker which we connect to
-    /// `client_driver`: an object which drives the background work of the `Client`
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        abstract_deps: MainAppDepsT,
-        include_filter: Vec<String>,
-        exclude_filter: Vec<String>,
-        list_action: Option<ListAction>,
-        repeat: Repeat,
-        stop_after: Option<StopAfter>,
-        watch: bool,
-        stdout_color: bool,
-        project_dir: impl AsRef<Root<ProjectDir>>,
-        state_dir: impl AsRef<Root<StateDir>>,
-        mut watch_exclude_paths: Vec<PathBuf>,
-        collector_options: super::CollectOptionsM<MainAppDepsT>,
-        log: slog::Logger,
-        client: &Client,
-    ) -> Result<Self> {
-        let fs = Fs::new();
-
-        let project_dir = project_dir.as_ref().to_owned();
-
-        let metadata_template_vars = abstract_deps.get_template_vars(&collector_options)?;
-        let metadata_path = project_dir.join::<()>(MainAppDepsT::TEST_METADATA_FILE_NAME);
-        let metadata_store = if let Some(contents) = fs.read_to_string_if_exists(&metadata_path)? {
-            MetadataStore::load(&contents, &metadata_template_vars)
-                .with_context(|| format!("parsing metadata file {}", metadata_path.display()))?
-        } else {
-            MetadataStore::load(
-                MainAppDepsT::DEFAULT_TEST_METADATA_CONTENTS,
-                &metadata_template_vars,
-            )
-            .expect("embedded default test metadata TOML to be valid")
-        };
-
-        // TODO: There are a few things wrong with this from an efficiency point of view.
-        //
-        // First, we're doing everything serially with synchronous RPCs. We could fix that by
-        // sending all of the RPCs in parallel and then waiting for them all to complete.
-        //
-        // Second, we're blocking the rest of startup by doing this here. We could fix that by
-        // pushing this logic into the main app and have it not enqueue any jobs until all of the
-        // containers have been registered.
-        //
-        // Third, we're unnecessarily registering all containers that we find in in the
-        // configuration file. We could fix that by only registering containers when we need them.
-        // We'd block sending jobs to the client until all of the required containers were
-        // registered. The downside of this "fix" is that it's probably overkill, and it could hurt
-        // performance. If we implemented the fix above in the second point, we'd be registering
-        // all of the containers while we were doing other startup. In all likelihood, the number
-        // of containers would be small and we'd be done long before we started submitting jobs.
-        for (name, spec) in metadata_store.containers() {
-            client.add_container(name.clone(), spec.clone())?;
-        }
-
-        let test_db_store = TestDbStore::new(fs, &state_dir);
-
-        let filter = super::TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
-
-        watch_exclude_paths.push(
-            project_dir
-                .to_path_buf()
-                .join(maelstrom_container::TAG_FILE_NAME),
-        );
-        watch_exclude_paths.push(project_dir.to_path_buf().join(".git"));
-
-        Ok(Self {
-            abstract_deps,
-            log,
-            test_db_store,
-            project_dir,
-            options: TestingOptions {
-                test_metadata: metadata_store,
-                filter,
-                collector_options,
-                timeout_override: None,
-                stdout_color,
-                repeat,
-                stop_after,
-                listing: list_action.is_some(),
-            },
-            watch,
-            watch_exclude_paths,
-        })
-    }
-}
-
 enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static> {
     Start,
     Packages {
@@ -534,27 +437,77 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
     stdout_color: bool,
     project_dir: impl AsRef<Root<ProjectDir>>,
     state_dir: impl AsRef<Root<StateDir>>,
-    watch_exclude_paths: Vec<PathBuf>,
+    mut watch_exclude_paths: Vec<PathBuf>,
     collector_options: super::CollectOptionsM<MainAppDepsT>,
     log: slog::Logger,
     client: &Client,
 ) -> Result<ExitCode> {
-    let deps = MainAppCombinedDeps::new(
+    let fs = Fs::new();
+
+    let project_dir = project_dir.as_ref().to_owned();
+
+    let metadata_template_vars = abstract_deps.get_template_vars(&collector_options)?;
+    let metadata_path = project_dir.join::<()>(MainAppDepsT::TEST_METADATA_FILE_NAME);
+    let metadata_store = if let Some(contents) = fs.read_to_string_if_exists(&metadata_path)? {
+        MetadataStore::load(&contents, &metadata_template_vars)
+            .with_context(|| format!("parsing metadata file {}", metadata_path.display()))?
+    } else {
+        MetadataStore::load(
+            MainAppDepsT::DEFAULT_TEST_METADATA_CONTENTS,
+            &metadata_template_vars,
+        )
+        .expect("embedded default test metadata TOML to be valid")
+    };
+
+    // TODO: There are a few things wrong with this from an efficiency point of view.
+    //
+    // First, we're doing everything serially with synchronous RPCs. We could fix that by
+    // sending all of the RPCs in parallel and then waiting for them all to complete.
+    //
+    // Second, we're blocking the rest of startup by doing this here. We could fix that by
+    // pushing this logic into the main app and have it not enqueue any jobs until all of the
+    // containers have been registered.
+    //
+    // Third, we're unnecessarily registering all containers that we find in in the
+    // configuration file. We could fix that by only registering containers when we need them.
+    // We'd block sending jobs to the client until all of the required containers were
+    // registered. The downside of this "fix" is that it's probably overkill, and it could hurt
+    // performance. If we implemented the fix above in the second point, we'd be registering
+    // all of the containers while we were doing other startup. In all likelihood, the number
+    // of containers would be small and we'd be done long before we started submitting jobs.
+    for (name, spec) in metadata_store.containers() {
+        client.add_container(name.clone(), spec.clone())?;
+    }
+
+    let test_db_store = TestDbStore::new(fs, &state_dir);
+
+    let filter = super::TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
+
+    watch_exclude_paths.push(
+        project_dir
+            .to_path_buf()
+            .join(maelstrom_container::TAG_FILE_NAME),
+    );
+    watch_exclude_paths.push(project_dir.to_path_buf().join(".git"));
+
+    let deps = MainAppCombinedDeps {
         abstract_deps,
-        include_filter,
-        exclude_filter,
-        list_action,
-        repeat,
-        stop_after,
-        watch,
-        stdout_color,
-        project_dir,
-        state_dir,
-        watch_exclude_paths,
-        collector_options,
         log,
-        client,
-    )?;
+        test_db_store,
+        project_dir,
+        options: TestingOptions {
+            test_metadata: metadata_store,
+            filter,
+            collector_options,
+            timeout_override: None,
+            stdout_color,
+            repeat,
+            stop_after,
+            listing: list_action.is_some(),
+        },
+        watch,
+        watch_exclude_paths,
+    };
 
     let (ui_handle, ui) = ui.start_ui_thread(logging_output, deps.log.clone());
 
