@@ -15,6 +15,14 @@ impl TestRunner for MaelstromPytestTestRunner {
     fn get_environment_variable_prefix(&self) -> &'static str {
         "MAELSTROM_PYTEST"
     }
+
+    fn get_test_metadata_file_name(&self) -> &str {
+        maelstrom_pytest::TEST_METADATA_FILE_NAME
+    }
+
+    fn get_test_metadata_default_contents(&self) -> &str {
+        maelstrom_pytest::DEFAULT_TEST_METADATA_CONTENTS
+    }
 }
 
 pub fn main() -> Result<ExitCode> {
@@ -24,8 +32,6 @@ pub fn main() -> Result<ExitCode> {
         MaelstromPytestTestRunner,
         |extra_options: &ExtraCommandLineOptions| extra_options.list,
         |_| -> Result<Utf8PathBuf> { Ok(".".into()) },
-        maelstrom_pytest::TEST_METADATA_FILE_NAME,
-        maelstrom_pytest::DEFAULT_TEST_METADATA_CONTENTS,
         maelstrom_pytest::main,
     )
 }

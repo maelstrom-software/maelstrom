@@ -14,6 +14,14 @@ impl TestRunner for MaelstromGoTestTestRunner {
     fn get_environment_variable_prefix(&self) -> &'static str {
         "MAELSTROM_GO_TEST"
     }
+
+    fn get_test_metadata_file_name(&self) -> &str {
+        maelstrom_go_test::TEST_METADATA_FILE_NAME
+    }
+
+    fn get_test_metadata_default_contents(&self) -> &str {
+        maelstrom_go_test::DEFAULT_TEST_METADATA_CONTENTS
+    }
 }
 
 pub fn main() -> Result<ExitCode> {
@@ -23,8 +31,6 @@ pub fn main() -> Result<ExitCode> {
         MaelstromGoTestTestRunner,
         |extra_options: &ExtraCommandLineOptions| extra_options.list.any(),
         |_| Ok(".".into()),
-        maelstrom_go_test::TEST_METADATA_FILE_NAME,
-        maelstrom_go_test::DEFAULT_TEST_METADATA_CONTENTS,
         maelstrom_go_test::main,
     )
 }

@@ -14,6 +14,14 @@ impl TestRunner for CargoMaelstromTestRunner {
     fn get_environment_variable_prefix(&self) -> &'static str {
         "CARGO_MAELSTROM"
     }
+
+    fn get_test_metadata_file_name(&self) -> &str {
+        cargo_maelstrom::TEST_METADATA_FILE_NAME
+    }
+
+    fn get_test_metadata_default_contents(&self) -> &str {
+        cargo_maelstrom::DEFAULT_TEST_METADATA_CONTENTS
+    }
 }
 
 pub fn main() -> Result<ExitCode> {
@@ -28,8 +36,6 @@ pub fn main() -> Result<ExitCode> {
         CargoMaelstromTestRunner,
         |extra_options: &ExtraCommandLineOptions| extra_options.list.any(),
         cargo_maelstrom::get_project_dir,
-        cargo_maelstrom::TEST_METADATA_FILE_NAME,
-        cargo_maelstrom::DEFAULT_TEST_METADATA_CONTENTS,
         cargo_maelstrom::main,
     )
 }
