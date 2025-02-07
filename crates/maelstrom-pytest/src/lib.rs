@@ -689,3 +689,23 @@ pub fn main_with_stderr_and_project_dir(
         ui,
     )
 }
+
+pub struct TestRunner;
+
+impl maelstrom_test_runner::TestRunner for TestRunner {
+    fn get_base_directory_prefix(&self) -> &'static str {
+        "maelstrom/maelstrom-pytest"
+    }
+
+    fn get_environment_variable_prefix(&self) -> &'static str {
+        "MAELSTROM_PYTEST"
+    }
+
+    fn get_test_metadata_file_name(&self) -> &str {
+        crate::TEST_METADATA_FILE_NAME
+    }
+
+    fn get_test_metadata_default_contents(&self) -> &str {
+        crate::DEFAULT_TEST_METADATA_CONTENTS
+    }
+}

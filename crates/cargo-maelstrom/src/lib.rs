@@ -644,3 +644,23 @@ pub fn main(
         )
     }
 }
+
+pub struct TestRunner;
+
+impl maelstrom_test_runner::TestRunner for TestRunner {
+    fn get_base_directory_prefix(&self) -> &'static str {
+        "maelstrom/cargo-maelstrom"
+    }
+
+    fn get_environment_variable_prefix(&self) -> &'static str {
+        "CARGO_MAELSTROM"
+    }
+
+    fn get_test_metadata_file_name(&self) -> &str {
+        crate::TEST_METADATA_FILE_NAME
+    }
+
+    fn get_test_metadata_default_contents(&self) -> &str {
+        crate::DEFAULT_TEST_METADATA_CONTENTS
+    }
+}
