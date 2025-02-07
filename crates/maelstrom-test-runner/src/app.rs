@@ -374,11 +374,10 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
     options: TestingOptions<super::TestFilterM<MainAppDepsT>, super::CollectOptionsM<MainAppDepsT>>,
     watch: bool,
     watch_exclude_paths: Vec<PathBuf>,
-    timeout_override: Option<Option<Timeout>>,
     ui: UiSender,
     client: &Client,
 ) -> Result<ExitCode> {
-    let mut deps = MainAppCombinedDeps {
+    let deps = MainAppCombinedDeps {
         abstract_deps,
         log,
         test_db_store,
@@ -387,7 +386,6 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
         watch,
         watch_exclude_paths,
     };
-    deps.options.timeout_override = timeout_override;
     let abs_deps = &deps.abstract_deps;
     let watch = deps.watch;
 
@@ -520,7 +518,7 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
             test_metadata: metadata_store,
             filter,
             collector_options,
-            timeout_override: None,
+            timeout_override,
             stdout_color,
             repeat,
             stop_after,
@@ -528,7 +526,6 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
         },
         watch,
         watch_exclude_paths,
-        timeout_override,
         ui,
         client,
     );
