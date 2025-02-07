@@ -362,12 +362,31 @@ fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
-    mut deps: MainAppCombinedDeps<MainAppDepsT>,
+    abstract_deps: MainAppDepsT,
+    log: slog::Logger,
+    test_db_store: TestDbStore<
+        super::ArtifactKeyM<MainAppDepsT>,
+        super::CaseMetadataM<MainAppDepsT>,
+    >,
+    project_dir: RootBuf<ProjectDir>,
+    options: TestingOptions<super::TestFilterM<MainAppDepsT>, super::CollectOptionsM<MainAppDepsT>>,
+    watch: bool,
+    watch_exclude_paths: Vec<PathBuf>,
     timeout_override: Option<Option<Timeout>>,
     ui: UiSender,
     client: &Client,
 ) -> Result<ExitCode> {
+    let mut deps = MainAppCombinedDeps {
+        abstract_deps,
+        log,
+        test_db_store,
+        project_dir,
+        options,
+        watch,
+        watch_exclude_paths,
+    };
     deps.options.timeout_override = timeout_override;
     let abs_deps = &deps.abstract_deps;
     let watch = deps.watch;
@@ -490,12 +509,14 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
     );
     watch_exclude_paths.push(project_dir.to_path_buf().join(".git"));
 
-    let deps = MainAppCombinedDeps {
+    let (ui_handle, ui) = ui.start_ui_thread(logging_output, log.clone());
+
+    let main_res = run_app_in_loop(
         abstract_deps,
         log,
         test_db_store,
         project_dir,
-        options: TestingOptions {
+        TestingOptions {
             test_metadata: metadata_store,
             filter,
             collector_options,
@@ -507,11 +528,10 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
         },
         watch,
         watch_exclude_paths,
-    };
-
-    let (ui_handle, ui) = ui.start_ui_thread(logging_output, deps.log.clone());
-
-    let main_res = run_app_in_loop(deps, timeout_override, ui, client);
+        timeout_override,
+        ui,
+        client,
+    );
     ui_handle.join()?;
 
     let exit_code = main_res?;
