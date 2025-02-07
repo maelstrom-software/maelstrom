@@ -426,17 +426,28 @@ fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
     let test_db_store = &deps.test_db_store;
     let options = &deps.options;
 
-    let deps = MainAppDepsAdapter::new(abs_deps, scope, main_app_sender.clone(), ui.clone(), sem);
+    let done = Event::new();
+    std::thread::scope(|inner_scope| {
+        inner_scope.spawn(|| introspect_loop(&done, abs_deps.client(), ui.clone()));
 
-    main_app_sender.send(MainAppMessage::Start.into()).unwrap();
+        let res = (|| -> Result<_> {
+            let deps =
+                MainAppDepsAdapter::new(abs_deps, scope, main_app_sender.clone(), ui.clone(), sem);
 
-    let test_db = test_db_store.load()?;
-    let app = MainApp::new(&deps, options, test_db);
+            main_app_sender.send(MainAppMessage::Start.into()).unwrap();
 
-    let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
-    test_db_store.save(test_db)?;
+            let test_db = test_db_store.load()?;
+            let app = MainApp::new(&deps, options, test_db);
 
-    Ok(exit_code)
+            let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
+            test_db_store.save(test_db)?;
+
+            Ok(exit_code)
+        })();
+
+        done.set();
+        res
+    })
 }
 
 fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
@@ -460,9 +471,6 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
     let files_changed = Event::new();
 
     std::thread::scope(|scope| {
-        let ui_clone = ui.clone();
-        scope.spawn(|| introspect_loop(&done, client, ui_clone));
-
         let res = (|| -> Result<_> {
             let watcher = Watcher::new(
                 scope,

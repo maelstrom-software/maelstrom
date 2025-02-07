@@ -147,6 +147,11 @@ impl Logger {
     }
 }
 
+pub trait TestRunner {
+    fn get_base_directory_prefix(&self) -> &'static str;
+    fn get_environment_variable_prefix(&self) -> &'static str;
+}
+
 /// Helper that does common work for test-runner main functions and then forwards on to the given
 /// underlying function.
 ///
@@ -162,9 +167,8 @@ pub fn main<
     MainFn,
 >(
     command: Command,
-    base_directories_prefix: &'static str,
-    env_var_prefix: &'static str,
     args: ArgsIntoIterT,
+    test_runner: impl TestRunner,
     is_list: IsListFn,
     get_project_dir: GetProjectDirFn,
     test_metadata_file_name: &str,
@@ -187,6 +191,9 @@ where
         Box<dyn Ui>,
     ) -> Result<ExitCode>,
 {
+    let base_directories_prefix = test_runner.get_base_directory_prefix();
+    let env_var_prefix = test_runner.get_environment_variable_prefix();
+
     let (config, extra_options): (ConfigT, ExtraCommandLineOptionsT) =
         maelstrom_util::config::new_config_with_extra_from_args(
             command,
