@@ -539,106 +539,6 @@ impl Wait for cargo::WaitHandle {
     }
 }
 
-pub fn main(
-    config: Config,
-    extra_options: ExtraCommandLineOptions,
-    bg_proc: ClientBgProcess,
-    logger: Logger,
-    stdout_is_tty: bool,
-    ui: impl Ui,
-) -> Result<ExitCode> {
-    let get_metadata = || {
-        cargo::read_metadata(
-            &config.cargo_feature_selection_options,
-            &config.cargo_manifest_options,
-        )
-    };
-    if extra_options.list.packages {
-        let cargo_metadata = get_metadata()?;
-        alternative_mains::list_packages(
-            &cargo_metadata.workspace_packages(),
-            &extra_options.parent.include,
-            &extra_options.parent.exclude,
-            &mut io::stdout().lock(),
-        )
-    } else if extra_options.list.binaries {
-        let cargo_metadata = get_metadata()?;
-        alternative_mains::list_binaries(
-            &cargo_metadata.workspace_packages(),
-            &extra_options.parent.include,
-            &extra_options.parent.exclude,
-            &mut io::stdout().lock(),
-        )
-    } else {
-        let cargo_metadata = get_metadata()?;
-        let workspace_dir = Root::<ProjectDir>::new(cargo_metadata.workspace_root.as_std_path());
-        let logging_output = LoggingOutput::default();
-        let log = logger.build(logging_output.clone());
-
-        let list_action = extra_options.list.tests.then_some(ListAction::ListTests);
-        let target_dir = Root::<BuildDir>::new(cargo_metadata.target_directory.as_std_path());
-        let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
-        let state_dir = maelstrom_target_dir.join::<StateDir>("state");
-        let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
-
-        Fs.create_dir_all(&state_dir)?;
-        Fs.create_dir_all(&cache_dir)?;
-
-        let packages = cargo_metadata
-            .workspace_packages()
-            .into_iter()
-            .map(|p| CargoPackage(p.clone()))
-            .collect::<Vec<_>>();
-
-        let deps = DefaultMainAppDeps::new(
-            bg_proc,
-            config.parent.broker,
-            workspace_dir.transmute::<ProjectDir>(),
-            &state_dir,
-            config.parent.container_image_depot_root,
-            cache_dir,
-            target_dir,
-            config.parent.cache_size,
-            config.parent.inline_limit,
-            config.parent.slots,
-            config.parent.accept_invalid_remote_container_tls_certs,
-            config.parent.artifact_transfer_strategy,
-            packages,
-            log.clone(),
-        )?;
-
-        let cargo_options = CargoOptions {
-            feature_selection_options: config.cargo_feature_selection_options,
-            compilation_options: config.cargo_compilation_options,
-            manifest_options: config.cargo_manifest_options,
-            extra_test_binary_args: config.extra_test_binary_args,
-        };
-        let watch_exclude_paths = vec![target_dir.to_owned().into_path_buf()];
-        let deps = MainAppCombinedDeps::new(
-            deps,
-            extra_options.parent.include,
-            extra_options.parent.exclude,
-            list_action,
-            config.parent.repeat,
-            config.parent.stop_after,
-            extra_options.parent.watch,
-            stdout_is_tty,
-            workspace_dir,
-            &state_dir,
-            watch_exclude_paths,
-            cargo_options,
-            log,
-        )?;
-
-        run_app_with_ui_multithreaded(
-            deps,
-            logging_output,
-            config.parent.timeout.map(Timeout::new),
-            ui,
-        )
-    }
-}
-
 pub struct TestRunner;
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -682,6 +582,96 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
-        main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
+        let get_metadata = || {
+            cargo::read_metadata(
+                &config.cargo_feature_selection_options,
+                &config.cargo_manifest_options,
+            )
+        };
+        if extra_options.list.packages {
+            let cargo_metadata = get_metadata()?;
+            alternative_mains::list_packages(
+                &cargo_metadata.workspace_packages(),
+                &extra_options.parent.include,
+                &extra_options.parent.exclude,
+                &mut io::stdout().lock(),
+            )
+        } else if extra_options.list.binaries {
+            let cargo_metadata = get_metadata()?;
+            alternative_mains::list_binaries(
+                &cargo_metadata.workspace_packages(),
+                &extra_options.parent.include,
+                &extra_options.parent.exclude,
+                &mut io::stdout().lock(),
+            )
+        } else {
+            let cargo_metadata = get_metadata()?;
+            let workspace_dir =
+                Root::<ProjectDir>::new(cargo_metadata.workspace_root.as_std_path());
+            let logging_output = LoggingOutput::default();
+            let log = logger.build(logging_output.clone());
+
+            let list_action = extra_options.list.tests.then_some(ListAction::ListTests);
+            let target_dir = Root::<BuildDir>::new(cargo_metadata.target_directory.as_std_path());
+            let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
+            let state_dir = maelstrom_target_dir.join::<StateDir>("state");
+            let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
+
+            Fs.create_dir_all(&state_dir)?;
+            Fs.create_dir_all(&cache_dir)?;
+
+            let packages = cargo_metadata
+                .workspace_packages()
+                .into_iter()
+                .map(|p| CargoPackage(p.clone()))
+                .collect::<Vec<_>>();
+
+            let deps = DefaultMainAppDeps::new(
+                bg_proc,
+                config.parent.broker,
+                workspace_dir.transmute::<ProjectDir>(),
+                &state_dir,
+                config.parent.container_image_depot_root,
+                cache_dir,
+                target_dir,
+                config.parent.cache_size,
+                config.parent.inline_limit,
+                config.parent.slots,
+                config.parent.accept_invalid_remote_container_tls_certs,
+                config.parent.artifact_transfer_strategy,
+                packages,
+                log.clone(),
+            )?;
+
+            let cargo_options = CargoOptions {
+                feature_selection_options: config.cargo_feature_selection_options,
+                compilation_options: config.cargo_compilation_options,
+                manifest_options: config.cargo_manifest_options,
+                extra_test_binary_args: config.extra_test_binary_args,
+            };
+            let watch_exclude_paths = vec![target_dir.to_owned().into_path_buf()];
+            let deps = MainAppCombinedDeps::new(
+                deps,
+                extra_options.parent.include,
+                extra_options.parent.exclude,
+                list_action,
+                config.parent.repeat,
+                config.parent.stop_after,
+                extra_options.parent.watch,
+                stdout_is_tty,
+                workspace_dir,
+                &state_dir,
+                watch_exclude_paths,
+                cargo_options,
+                log,
+            )?;
+
+            run_app_with_ui_multithreaded(
+                deps,
+                logging_output,
+                config.parent.timeout.map(Timeout::new),
+                ui,
+            )
+        }
     }
 }

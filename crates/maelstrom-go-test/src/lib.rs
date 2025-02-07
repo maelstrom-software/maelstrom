@@ -713,28 +713,6 @@ impl Wait for go_test::WaitHandle {
     }
 }
 
-fn main(
-    config: Config,
-    extra_options: ExtraCommandLineOptions,
-    bg_proc: ClientBgProcess,
-    logger: Logger,
-    stdout_is_tty: bool,
-    ui: impl Ui,
-) -> Result<ExitCode> {
-    let project_root = go_test::get_module_root()?;
-    let project_dir = Root::<ProjectDir>::new(project_root.as_ref());
-    main_with_stderr_and_project_dir(
-        config,
-        extra_options,
-        bg_proc,
-        logger,
-        stdout_is_tty,
-        ui,
-        std::io::stderr(),
-        project_dir,
-    )
-}
-
 /// This is the `.maelstrom-go-test` directory.
 pub struct HiddenDir;
 
@@ -858,6 +836,17 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
-        main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
+        let project_root = go_test::get_module_root()?;
+        let project_dir = Root::<ProjectDir>::new(project_root.as_ref());
+        main_with_stderr_and_project_dir(
+            config,
+            extra_options,
+            bg_proc,
+            logger,
+            stdout_is_tty,
+            ui,
+            std::io::stderr(),
+            project_dir,
+        )
     }
 }

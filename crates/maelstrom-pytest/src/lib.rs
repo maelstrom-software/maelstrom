@@ -605,28 +605,6 @@ fn find_artifacts(path: &Path) -> Result<Vec<PytestArtifactKey>> {
         .collect())
 }
 
-fn main(
-    config: Config,
-    extra_options: cli::ExtraCommandLineOptions,
-    bg_proc: ClientBgProcess,
-    logger: Logger,
-    stdout_is_tty: bool,
-    ui: impl Ui,
-) -> Result<ExitCode> {
-    let cwd = Path::new(".").canonicalize()?;
-    let project_dir = Root::<ProjectDir>::new(&cwd);
-    main_with_stderr_and_project_dir(
-        config,
-        extra_options,
-        bg_proc,
-        logger,
-        stdout_is_tty,
-        ui,
-        std::io::stderr(),
-        project_dir,
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn main_with_stderr_and_project_dir(
     config: Config,
@@ -730,6 +708,17 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
-        main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
+        let cwd = Path::new(".").canonicalize()?;
+        let project_dir = Root::<ProjectDir>::new(&cwd);
+        main_with_stderr_and_project_dir(
+            config,
+            extra_options,
+            bg_proc,
+            logger,
+            stdout_is_tty,
+            ui,
+            std::io::stderr(),
+            project_dir,
+        )
     }
 }
