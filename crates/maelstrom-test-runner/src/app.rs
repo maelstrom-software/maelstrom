@@ -76,17 +76,6 @@ struct TestingOptions<TestFilterT, CollectOptionsT> {
     listing: bool,
 }
 
-pub struct MainAppCombinedDeps<MainAppDepsT: MainAppDeps> {
-    abstract_deps: MainAppDepsT,
-    log: slog::Logger,
-    test_db_store:
-        TestDbStore<super::ArtifactKeyM<MainAppDepsT>, super::CaseMetadataM<MainAppDepsT>>,
-    project_dir: RootBuf<ProjectDir>,
-    options: TestingOptions<super::TestFilterM<MainAppDepsT>, super::CollectOptionsM<MainAppDepsT>>,
-    watch: bool,
-    watch_exclude_paths: Vec<PathBuf>,
-}
-
 enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static> {
     Start,
     Packages {
@@ -381,24 +370,11 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
     ui: UiSender,
     client: &Client,
 ) -> Result<ExitCode> {
-    let deps = MainAppCombinedDeps {
-        abstract_deps,
-        log,
-        test_db_store,
-        project_dir,
-        options,
-        watch,
-        watch_exclude_paths,
-    };
-    let abs_deps = &deps.abstract_deps;
-    let watch = deps.watch;
-
     // This is where the pytest runner builds pip packages.
-    abs_deps
+    abstract_deps
         .test_collector()
-        .build_test_layers(deps.options.test_metadata.get_all_images(), &ui)?;
+        .build_test_layers(options.test_metadata.get_all_images(), &ui)?;
 
-    let project_dir = &deps.project_dir;
     let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
     let done = Event::new();
     let files_changed = Event::new();
@@ -407,9 +383,9 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
         let res = (|| -> Result<_> {
             let watcher = Watcher::new(
                 scope,
-                deps.log.clone(),
-                project_dir,
-                &deps.watch_exclude_paths,
+                log.clone(),
+                &project_dir,
+                &watch_exclude_paths,
                 &sem,
                 &done,
                 &files_changed,
@@ -420,9 +396,9 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
 
             loop {
                 let exit_code = run_app_once(
-                    &deps.abstract_deps,
-                    &deps.test_db_store,
-                    &deps.options,
+                    &abstract_deps,
+                    &test_db_store,
+                    &options,
                     scope,
                     &sem,
                     ui.clone(),
