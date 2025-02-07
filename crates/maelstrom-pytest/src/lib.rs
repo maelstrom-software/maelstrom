@@ -3,7 +3,11 @@ mod config;
 pub mod pattern;
 mod pytest;
 
+pub use config::{Config, PytestConfigValues};
+pub use maelstrom_test_runner::Logger;
+
 use anyhow::{anyhow, bail, Result};
+use cli::ExtraCommandLineOptions;
 use maelstrom_base::{
     enum_set, CaptureFileSystemChanges, JobDevice, JobMount, JobNetwork, JobOutcome,
     JobTerminationStatus, Timeout, Utf8PathBuf,
@@ -43,9 +47,6 @@ use std::{
     str::FromStr,
     sync::Mutex,
 };
-
-pub use config::{Config, PytestConfigValues};
-pub use maelstrom_test_runner::Logger;
 
 pub const TEST_METADATA_FILE_NAME: &str = "maelstrom-pytest.toml";
 pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
@@ -693,6 +694,9 @@ pub fn main_with_stderr_and_project_dir(
 pub struct TestRunner;
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
+    type Config = Config;
+    type ExtraCommandLineOptions = ExtraCommandLineOptions;
+
     fn get_base_directories_prefix(&self) -> &'static str {
         "maelstrom/maelstrom-pytest"
     }
@@ -707,5 +711,13 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_test_metadata_default_contents(&self) -> &str {
         crate::DEFAULT_TEST_METADATA_CONTENTS
+    }
+
+    fn get_project_directory(&self, _: &Config) -> Result<Utf8PathBuf> {
+        Ok(".".into())
+    }
+
+    fn is_list(&self, extra_options: &ExtraCommandLineOptions) -> bool {
+        extra_options.list
     }
 }

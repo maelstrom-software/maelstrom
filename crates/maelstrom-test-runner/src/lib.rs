@@ -148,10 +148,15 @@ impl Logger {
 }
 
 pub trait TestRunner {
+    type Config: Config + Debug + AsRef<config::Config>;
+    type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
+
     fn get_base_directories_prefix(&self) -> &'static str;
     fn get_environment_variable_prefix(&self) -> &'static str;
     fn get_test_metadata_file_name(&self) -> &str;
     fn get_test_metadata_default_contents(&self) -> &str;
+    fn get_project_directory(&self, config: &Self::Config) -> Result<Utf8PathBuf>;
+    fn is_list(&self, extra_options: &Self::ExtraCommandLineOptions) -> bool;
 }
 
 /// Helper that does common work for test-runner main functions and then forwards on to the given
@@ -159,39 +164,25 @@ pub trait TestRunner {
 ///
 /// Mostly it deals with the `--init` and `--client-bg-proc` flags
 #[allow(clippy::too_many_arguments)]
-pub fn main<
-    ConfigT,
-    ExtraCommandLineOptionsT,
-    ArgsT,
-    ArgsIntoIterT,
-    IsListFn,
-    GetProjectDirFn,
-    MainFn,
->(
+pub fn main<ArgsT, ArgsIntoIterT, MainFn, TestRunnerT: TestRunner>(
     command: Command,
     args: ArgsIntoIterT,
-    test_runner: impl TestRunner,
-    is_list: IsListFn,
-    get_project_dir: GetProjectDirFn,
+    test_runner: TestRunnerT,
     main: MainFn,
 ) -> Result<ExitCode>
 where
-    ConfigT: Config + Debug + AsRef<config::Config>,
-    ExtraCommandLineOptionsT: Args + AsRef<config::ExtraCommandLineOptions>,
     ArgsIntoIterT: IntoIterator<Item = ArgsT>,
     ArgsT: Into<OsString> + Clone,
-    IsListFn: FnOnce(&ExtraCommandLineOptionsT) -> bool,
-    GetProjectDirFn: FnOnce(&ConfigT) -> Result<Utf8PathBuf>,
     MainFn: FnOnce(
-        ConfigT,
-        ExtraCommandLineOptionsT,
+        TestRunnerT::Config,
+        TestRunnerT::ExtraCommandLineOptions,
         ClientBgProcess,
         Logger,
         bool,
         Box<dyn Ui>,
     ) -> Result<ExitCode>,
 {
-    let (config, extra_options): (ConfigT, ExtraCommandLineOptionsT) =
+    let (config, extra_options): (TestRunnerT::Config, TestRunnerT::ExtraCommandLineOptions) =
         maelstrom_util::config::new_config_with_extra_from_args(
             command,
             test_runner.get_base_directories_prefix(),
@@ -199,24 +190,24 @@ where
             args,
         )?;
 
-    let config_parent = config.as_ref();
-
-    let bg_proc = ClientBgProcess::new_from_fork(config_parent.log_level)?;
-    let logger = Logger::DefaultLogger(config_parent.log_level);
-
-    let stdout_is_tty = io::stdout().is_terminal();
-
-    let ui = ui::factory(config_parent.ui, is_list(&extra_options), stdout_is_tty)?;
-
     if extra_options.as_ref().client_bg_proc {
-        alternative_mains::client_bg_proc()
+        return alternative_mains::client_bg_proc();
     } else if extra_options.as_ref().init {
-        alternative_mains::init(
-            &get_project_dir(&config)?,
+        return alternative_mains::init(
+            &test_runner.get_project_directory(&config)?,
             test_runner.get_test_metadata_file_name(),
             test_runner.get_test_metadata_default_contents(),
-        )
-    } else {
-        main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
+        );
     }
+
+    let config_parent = config.as_ref();
+    let bg_proc = ClientBgProcess::new_from_fork(config_parent.log_level)?;
+    let logger = Logger::DefaultLogger(config_parent.log_level);
+    let stdout_is_tty = io::stdout().is_terminal();
+    let ui = ui::factory(
+        config_parent.ui,
+        test_runner.is_list(&extra_options),
+        stdout_is_tty,
+    )?;
+    main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
 }

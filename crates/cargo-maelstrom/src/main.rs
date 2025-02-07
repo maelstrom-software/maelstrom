@@ -1,5 +1,4 @@
 use anyhow::Result;
-use cargo_maelstrom::cli::ExtraCommandLineOptions;
 use maelstrom_util::process::ExitCode;
 use std::env;
 
@@ -13,8 +12,6 @@ pub fn main() -> Result<ExitCode> {
         clap::command!(),
         args,
         cargo_maelstrom::TestRunner,
-        |extra_options: &ExtraCommandLineOptions| extra_options.list.any(),
-        cargo_maelstrom::get_project_dir,
         cargo_maelstrom::main,
     )
 }

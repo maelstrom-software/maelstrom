@@ -4,7 +4,11 @@ mod config;
 mod go_test;
 mod pattern;
 
+pub use config::Config;
+pub use maelstrom_test_runner::Logger;
+
 use anyhow::{Context as _, Result};
+use cli::ExtraCommandLineOptions;
 use config::GoTestOptions;
 use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
@@ -29,9 +33,6 @@ use maelstrom_util::{
     template::TemplateVars,
 };
 use std::{fmt, io, path::Path, str::FromStr};
-
-pub use config::Config;
-pub use maelstrom_test_runner::Logger;
 
 pub const TEST_METADATA_FILE_NAME: &str = "maelstrom-go-test.toml";
 pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
@@ -821,6 +822,9 @@ pub fn main_with_stderr_and_project_dir(
 pub struct TestRunner;
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
+    type Config = Config;
+    type ExtraCommandLineOptions = ExtraCommandLineOptions;
+
     fn get_base_directories_prefix(&self) -> &'static str {
         "maelstrom/maelstrom-go-test"
     }
@@ -835,5 +839,13 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_test_metadata_default_contents(&self) -> &str {
         crate::DEFAULT_TEST_METADATA_CONTENTS
+    }
+
+    fn get_project_directory(&self, _: &Config) -> Result<Utf8PathBuf> {
+        Ok(".".into())
+    }
+
+    fn is_list(&self, extra_options: &ExtraCommandLineOptions) -> bool {
+        extra_options.list.any()
     }
 }

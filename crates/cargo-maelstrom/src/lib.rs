@@ -4,8 +4,12 @@ pub mod cli;
 pub mod config;
 mod pattern;
 
+pub use maelstrom_test_runner::Logger;
+
 use anyhow::{anyhow, Result};
 use cargo_metadata::Target as CargoTarget;
+use cli::ExtraCommandLineOptions;
+use config::Config;
 use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     shared_library_dependencies_layer_spec,
@@ -30,8 +34,6 @@ use maelstrom_util::{
 };
 use pattern::ArtifactKind;
 use std::{fmt, io, path::Path, str::FromStr};
-
-pub use maelstrom_test_runner::Logger;
 
 pub const TEST_METADATA_FILE_NAME: &str = "cargo-maelstrom.toml";
 pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
@@ -537,17 +539,9 @@ impl Wait for cargo::WaitHandle {
     }
 }
 
-pub fn get_project_dir(config: &config::Config) -> Result<Utf8PathBuf> {
-    Ok(cargo::read_metadata(
-        &config.cargo_feature_selection_options,
-        &config.cargo_manifest_options,
-    )?
-    .workspace_root)
-}
-
 pub fn main(
-    config: config::Config,
-    extra_options: cli::ExtraCommandLineOptions,
+    config: Config,
+    extra_options: ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
     logger: Logger,
     stdout_is_tty: bool,
@@ -648,6 +642,9 @@ pub fn main(
 pub struct TestRunner;
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
+    type Config = Config;
+    type ExtraCommandLineOptions = ExtraCommandLineOptions;
+
     fn get_base_directories_prefix(&self) -> &'static str {
         "maelstrom/cargo-maelstrom"
     }
@@ -662,5 +659,17 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_test_metadata_default_contents(&self) -> &str {
         crate::DEFAULT_TEST_METADATA_CONTENTS
+    }
+
+    fn get_project_directory(&self, config: &Config) -> Result<Utf8PathBuf> {
+        Ok(cargo::read_metadata(
+            &config.cargo_feature_selection_options,
+            &config.cargo_manifest_options,
+        )?
+        .workspace_root)
+    }
+
+    fn is_list(&self, extra_options: &ExtraCommandLineOptions) -> bool {
+        extra_options.list.any()
     }
 }
