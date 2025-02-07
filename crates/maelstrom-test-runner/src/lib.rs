@@ -148,7 +148,7 @@ impl Logger {
 }
 
 pub trait TestRunner {
-    fn get_base_directory_prefix(&self) -> &'static str;
+    fn get_base_directories_prefix(&self) -> &'static str;
     fn get_environment_variable_prefix(&self) -> &'static str;
     fn get_test_metadata_file_name(&self) -> &str;
     fn get_test_metadata_default_contents(&self) -> &str;
@@ -191,16 +191,11 @@ where
         Box<dyn Ui>,
     ) -> Result<ExitCode>,
 {
-    let base_directories_prefix = test_runner.get_base_directory_prefix();
-    let env_var_prefix = test_runner.get_environment_variable_prefix();
-    let test_metadata_file_name = test_runner.get_test_metadata_file_name();
-    let test_metadata_default_contents = test_runner.get_test_metadata_default_contents();
-
     let (config, extra_options): (ConfigT, ExtraCommandLineOptionsT) =
         maelstrom_util::config::new_config_with_extra_from_args(
             command,
-            base_directories_prefix,
-            env_var_prefix,
+            test_runner.get_base_directories_prefix(),
+            test_runner.get_environment_variable_prefix(),
             args,
         )?;
 
@@ -218,8 +213,8 @@ where
     } else if extra_options.as_ref().init {
         alternative_mains::init(
             &get_project_dir(&config)?,
-            test_metadata_file_name,
-            test_metadata_default_contents,
+            test_runner.get_test_metadata_file_name(),
+            test_runner.get_test_metadata_default_contents(),
         )
     } else {
         main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)

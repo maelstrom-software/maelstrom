@@ -648,7 +648,7 @@ pub fn main(
 pub struct TestRunner;
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
-    fn get_base_directory_prefix(&self) -> &'static str {
+    fn get_base_directories_prefix(&self) -> &'static str {
         "maelstrom/cargo-maelstrom"
     }
 
