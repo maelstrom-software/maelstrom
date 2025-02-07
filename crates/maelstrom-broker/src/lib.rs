@@ -5,6 +5,7 @@ mod artifact_pusher;
 mod cache;
 pub mod config;
 mod connection;
+#[cfg(feature = "web-ui")]
 mod http;
 mod scheduler_task;
 
@@ -73,11 +74,16 @@ fn github_client() -> Result<Arc<GitHubClient>> {
     Ok(Arc::new(GitHubClient::new(&token, base_url)?))
 }
 
+struct Listeners {
+    listener: TcpListener,
+    #[cfg(feature = "web-ui")]
+    http_listener: TcpListener,
+}
+
 /// The main function for the broker. It will return when a signal is received, or when the broker
 /// or http listener socket returns an error at accept time.
 async fn main_inner_inner<BrokerCacheT>(
-    listener: TcpListener,
-    http_listener: TcpListener,
+    listeners: Listeners,
     config: Config,
     log: Logger,
 ) -> Result<()>
@@ -96,14 +102,15 @@ where
     let github_connection_tasks = Arc::new(Mutex::new(JoinSet::new()));
     let mut join_set = JoinSet::new();
 
+    #[cfg(feature = "web-ui")]
     join_set.spawn(http::listener_main(
-        http_listener,
+        listeners.http_listener,
         scheduler_task.scheduler_task_sender().clone(),
         id_vendor.clone(),
         log.clone(),
     ));
     join_set.spawn(connection::tcp_listener_main(
-        listener,
+        listeners.listener,
         scheduler_task.scheduler_task_sender().clone(),
         id_vendor.clone(),
         temp_file_factory,
@@ -154,37 +161,64 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
     main_inner(config, log)
 }
 
-#[tokio::main]
-async fn main_inner(config: Config, log: Logger) -> Result<()> {
+#[cfg(feature = "web-ui")]
+async fn start_listeners(config: &Config, log: &Logger) -> Result<Listeners> {
     let sock_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, *config.port.inner(), 0, 0);
     let listener = TcpListener::bind(sock_addr)
         .await
         .context("binding listener socket")?;
+    let listener_addr = listener
+        .local_addr()
+        .context("retrieving listener local address")?;
 
     let sock_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, *config.http_port.inner(), 0, 0);
     let http_listener = TcpListener::bind(sock_addr)
         .await
         .context("binding http listener socket")?;
-
-    let listener_addr = listener
-        .local_addr()
-        .context("retrieving listener local address")?;
     let http_listener_addr = http_listener
         .local_addr()
-        .context("retrieving listener local address")?;
+        .context("retrieving http listener local address")?;
+
     info!(log, "started";
         "config" => ?config,
         "addr" => listener_addr,
         "http_addr" => http_listener_addr,
         "pid" => process::id());
 
+    Ok(Listeners {
+        listener,
+        http_listener,
+    })
+}
+
+#[cfg(not(feature = "web-ui"))]
+async fn start_listeners(config: &Config, log: &Logger) -> Result<Listeners> {
+    let sock_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, *config.port.inner(), 0, 0);
+    let listener = TcpListener::bind(sock_addr)
+        .await
+        .context("binding listener socket")?;
+    let listener_addr = listener
+        .local_addr()
+        .context("retrieving listener local address")?;
+
+    info!(log, "started";
+        "config" => ?config,
+        "addr" => listener_addr,
+        "pid" => process::id());
+
+    Ok(Listeners { listener })
+}
+
+#[tokio::main]
+async fn main_inner(config: Config, log: Logger) -> Result<()> {
+    let listeners = start_listeners(&config, &log).await?;
+
     match config.artifact_transfer_strategy {
         ArtifactTransferStrategy::GitHub => {
-            main_inner_inner::<GithubCache>(listener, http_listener, config, log.clone()).await?;
+            main_inner_inner::<GithubCache>(listeners, config, log.clone()).await?;
         }
         ArtifactTransferStrategy::TcpUpload => {
-            main_inner_inner::<TcpUploadLocalCache>(listener, http_listener, config, log.clone())
-                .await?;
+            main_inner_inner::<TcpUploadLocalCache>(listeners, config, log.clone()).await?;
         }
     }
 

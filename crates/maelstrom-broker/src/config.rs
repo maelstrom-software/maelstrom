@@ -31,11 +31,13 @@ impl FromStr for BrokerPort {
     }
 }
 
+#[cfg(feature = "web-ui")]
 #[derive(Deserialize, Debug, From)]
 #[serde(from = "u16")]
 #[debug("{_0:?}")]
 pub struct HttpPort(u16);
 
+#[cfg(feature = "web-ui")]
 impl HttpPort {
     pub fn inner(&self) -> &u16 {
         &self.0
@@ -46,6 +48,7 @@ impl HttpPort {
     }
 }
 
+#[cfg(feature = "web-ui")]
 impl FromStr for HttpPort {
     type Err = <u16 as FromStr>::Err;
     fn from_str(slots: &str) -> result::Result<Self, Self::Err> {
@@ -60,6 +63,7 @@ pub struct Config {
     pub port: BrokerPort,
 
     /// The port the HTTP UI is served on.
+    #[cfg(feature = "web-ui")]
     #[config(short = 'H', value_name = "PORT", default = "0")]
     pub http_port: HttpPort,
 

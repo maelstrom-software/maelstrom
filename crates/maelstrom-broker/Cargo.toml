@@ -11,6 +11,10 @@ repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[features]
+default = ["web-ui"]
+web-ui = [ "dep:hyper-tungstenite", "dep:hyper", "dep:maelstrom-web"]
+
 [dependencies]
 anyhow.workspace = true
 bytesize.workspace = true
@@ -20,13 +24,13 @@ derivative.workspace = true
 enum-map.workspace = true
 futures.workspace = true
 get-size.workspace = true
-hyper-tungstenite.workspace = true
-hyper.workspace = true
+hyper-tungstenite = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
 maelstrom-base.workspace = true
 maelstrom-github.workspace = true
 maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
-maelstrom-web.workspace = true
+maelstrom-web = { workspace = true, optional = true }
 ref-cast.workspace = true
 serde.workspace = true
 slog.workspace = true
