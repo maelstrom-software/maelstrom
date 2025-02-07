@@ -50,7 +50,7 @@ fn do_maelstrom_go_test_test(
     let ui = ui::SimpleUi::new(false, false, term.clone());
     let mut stderr = vec![];
     let bg_proc = spawn_bg_proc();
-    let exit_code = maelstrom_go_test::main_with_stderr_and_project_dir(
+    let exit_code = maelstrom_go_test::main_for_test(
         config,
         extra_options,
         bg_proc,

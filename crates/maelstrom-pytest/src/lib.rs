@@ -599,7 +599,7 @@ fn find_artifacts(path: &Path) -> Result<Vec<PytestArtifactKey>> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn main_with_stderr_and_project_dir(
+pub fn main_for_test(
     config: Config,
     extra_options: cli::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
@@ -699,15 +699,52 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     ) -> Result<ExitCode> {
         let cwd = Path::new(".").canonicalize()?;
         let project_dir = Root::<ProjectDir>::new(&cwd);
-        main_with_stderr_and_project_dir(
-            config,
-            extra_options,
+        let logging_output = LoggingOutput::default();
+        let log = logger.build(logging_output.clone());
+
+        let list_action = extra_options.list.then_some(ListAction::ListTests);
+        let build_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-pytest");
+        let build_dir = Root::<BuildDir>::new(&build_dir);
+        let state_dir = build_dir.join::<StateDir>("state");
+        let cache_dir = build_dir.join::<CacheDir>("cache");
+
+        Fs.create_dir_all(&state_dir)?;
+        Fs.create_dir_all(&cache_dir)?;
+
+        let client = create_client(
             bg_proc,
-            logger,
-            stdout_is_tty,
-            ui,
-            std::io::stderr(),
+            config.parent.broker,
             project_dir,
+            &state_dir,
+            config.parent.container_image_depot_root,
+            &cache_dir,
+            config.parent.cache_size,
+            config.parent.inline_limit,
+            config.parent.slots,
+            config.parent.accept_invalid_remote_container_tls_certs,
+            config.parent.artifact_transfer_strategy,
+            log.clone(),
+        )?;
+        let deps = DefaultMainAppDeps::new(project_dir, build_dir, &cache_dir, &client)?;
+
+        run_app_with_ui_multithreaded(
+            logging_output,
+            config.parent.timeout.map(Timeout::new),
+            ui,
+            deps,
+            extra_options.parent.include,
+            extra_options.parent.exclude,
+            list_action,
+            config.parent.repeat,
+            config.parent.stop_after,
+            extra_options.parent.watch,
+            stdout_is_tty,
+            project_dir,
+            &state_dir,
+            vec![build_dir.to_owned().into_path_buf()],
+            config.pytest_options,
+            log,
+            &client,
         )
     }
 }

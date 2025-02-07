@@ -120,7 +120,7 @@ fn do_maelstrom_pytest_test(
     let ui = ui::SimpleUi::new(extra_options.list, false, term.clone());
     let mut stderr = vec![];
     let bg_proc = spawn_bg_proc();
-    let exit_code = maelstrom_pytest::main_with_stderr_and_project_dir(
+    let exit_code = maelstrom_pytest::main_for_test(
         config,
         extra_options,
         bg_proc,

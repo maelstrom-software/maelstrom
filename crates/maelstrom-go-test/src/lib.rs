@@ -706,7 +706,7 @@ impl Wait for go_test::WaitHandle {
 pub struct HiddenDir;
 
 #[allow(clippy::too_many_arguments)]
-pub fn main_with_stderr_and_project_dir(
+pub fn main_for_test(
     config: Config,
     extra_options: cli::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
@@ -823,15 +823,70 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     ) -> Result<ExitCode> {
         let project_root = go_test::get_module_root()?;
         let project_dir = Root::<ProjectDir>::new(project_root.as_ref());
-        main_with_stderr_and_project_dir(
-            config,
-            extra_options,
-            bg_proc,
-            logger,
-            stdout_is_tty,
-            ui,
-            std::io::stderr(),
-            project_dir,
-        )
+
+        let hidden_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-go-test");
+        let hidden_dir = Root::<HiddenDir>::new(&hidden_dir);
+        let state_dir = hidden_dir.join::<StateDir>("state");
+        let cache_dir = hidden_dir.join::<CacheDir>("cache");
+
+        Fs.create_dir_all(&state_dir)?;
+        Fs.create_dir_all(&cache_dir)?;
+
+        let logging_output = LoggingOutput::default();
+        let log = logger.build(logging_output.clone());
+
+        if extra_options.list.packages {
+            let (ui_handle, ui) = ui.start_ui_thread(logging_output, log);
+
+            let list_res = alternative_mains::list_packages(
+                ui,
+                project_dir,
+                &cache_dir,
+                &extra_options.parent.include,
+                &extra_options.parent.exclude,
+            );
+            let ui_res = ui_handle.join();
+            let exit_code = list_res?;
+            ui_res?;
+            Ok(exit_code)
+        } else {
+            let list_action = extra_options.list.tests.then_some(ListAction::ListTests);
+
+            let client = create_client(
+                bg_proc,
+                config.parent.broker,
+                project_dir,
+                &state_dir,
+                config.parent.container_image_depot_root,
+                &cache_dir,
+                config.parent.cache_size,
+                config.parent.inline_limit,
+                config.parent.slots,
+                config.parent.accept_invalid_remote_container_tls_certs,
+                config.parent.artifact_transfer_strategy,
+                log.clone(),
+            )?;
+            let deps = DefaultMainAppDeps::new(project_dir, &cache_dir)?;
+
+            run_app_with_ui_multithreaded(
+                logging_output,
+                config.parent.timeout.map(Timeout::new),
+                ui,
+                deps,
+                extra_options.parent.include,
+                extra_options.parent.exclude,
+                list_action,
+                config.parent.repeat,
+                config.parent.stop_after,
+                extra_options.parent.watch,
+                stdout_is_tty,
+                project_dir,
+                &state_dir,
+                vec![],
+                config.go_test_options,
+                log,
+                &client,
+            )
+        }
     }
 }
