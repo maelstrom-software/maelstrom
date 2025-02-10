@@ -10,8 +10,8 @@ jobs:
       uses: actions/checkout@v4
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
-    - name: Set up Nix Cache
-      uses: DeterminateSystems/magic-nix-cache-action@main
+      # - name: Set up Nix Cache
+      #   uses: DeterminateSystems/magic-nix-cache-action@main
     - name: Check Nixpkgs Inputs
       uses: DeterminateSystems/flake-checker-action@main
 
@@ -23,8 +23,8 @@ jobs:
       uses: actions/checkout@v4
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
-    - name: Set up Nix Cache
-      uses: DeterminateSystems/magic-nix-cache-action@main
+      #    - name: Set up Nix Cache
+      #      uses: DeterminateSystems/magic-nix-cache-action@main
     # For some reason, GitHub provides Rust for us. The problem is that, when
     # executing the recursive cargo invocation, the cargo in ~/.cargo/bin ends
     # up prepended to PATH, which then causes problems.
@@ -41,8 +41,8 @@ jobs:
       uses: actions/checkout@v4
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
-    - name: Set up Nix Cache
-      uses: DeterminateSystems/magic-nix-cache-action@main
+      # - name: Set up Nix Cache
+      #   uses: DeterminateSystems/magic-nix-cache-action@main
     # For some reason, GitHub provides Rust for us. The problem is that, when
     # executing the recursive cargo invocation, the cargo in ~/.cargo/bin ends
     # up prepended to PATH, which then causes problems.
@@ -54,15 +54,15 @@ jobs:
       run: nix develop --command echo done
     - name: Get Rust version
       run: echo "RUST_VERSION=$(nix develop --command rustc --version | cut -d' ' -f2)" >> $GITHUB_ENV
-    - name: Set up Rust Cache
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: maelstrom-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ env.RUST_VERSION }}
+      # - name: Set up Rust Cache
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       ~/.cargo/registry/index/
+      #       ~/.cargo/registry/cache/
+      #       ~/.cargo/git/db/
+      #       target/
+      #     key: maelstrom-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ env.RUST_VERSION }}
     - name: Expose GitHub Action Runtime
       uses: crazy-max/ghaction-github-runtime@v3
     - name: Test
@@ -79,8 +79,8 @@ jobs:
       uses: actions/checkout@v4
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
-    - name: Set up Nix Cache
-      uses: DeterminateSystems/magic-nix-cache-action@main
+      #- name: Set up Nix Cache
+      #  uses: DeterminateSystems/magic-nix-cache-action@main
     # For some reason, GitHub provides Rust for us. The problem is that, when
     # executing the recursive cargo invocation, the cargo in ~/.cargo/bin ends
     # up prepended to PATH, which then causes problems.
@@ -92,15 +92,15 @@ jobs:
       run: nix develop --command echo done
     - name: Get Rust version
       run: echo "RUST_VERSION=$(nix develop --command rustc --version | cut -d' ' -f2)" >> $GITHUB_ENV
-    - name: Set up Rust Cache
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: maelstrom-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ env.RUST_VERSION }}
+      # - name: Set up Rust Cache
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       ~/.cargo/registry/index/
+      #       ~/.cargo/registry/cache/
+      #       ~/.cargo/git/db/
+      #       target/
+      #     key: maelstrom-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ env.RUST_VERSION }}
     - name: Expose GitHub Action Runtime
       uses: crazy-max/ghaction-github-runtime@v3
     - name: Run Worker
@@ -117,8 +117,8 @@ jobs:
       uses: actions/checkout@v4
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
-    - name: Set up Nix Cache
-      uses: DeterminateSystems/magic-nix-cache-action@main
+      # - name: Set up Nix Cache
+      #   uses: DeterminateSystems/magic-nix-cache-action@main
     # For some reason, GitHub provides Rust for us. The problem is that, when
     # executing the recursive cargo invocation, the cargo in ~/.cargo/bin ends
     # up prepended to PATH, which then causes problems.
