@@ -12,8 +12,7 @@ rust-version.workspace = true
 version.workspace = true
 
 [features]
-default = ["web-ui"]
-web-ui = [ "dep:hyper-tungstenite", "dep:hyper", "dep:maelstrom-web"]
+web-ui = [ "dep:hyper-tungstenite", "dep:hyper", "maelstrom-web/web-ui"]
 
 [dependencies]
 anyhow.workspace = true

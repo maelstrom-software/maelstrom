@@ -12,6 +12,9 @@ version.workspace = true
 [lib]
 crate-type = ["cdylib", "lib"]
 
+[features]
+web-ui = []
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 anyhow.workspace = true
 console_error_panic_hook.workspace = true
