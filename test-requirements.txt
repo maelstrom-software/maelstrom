@@ -1,4 +1,4 @@
-grpcio==1.67.0
-protobuf==5.28.3
+grpcio==1.70.0
+protobuf==5.29.3
 pytest==8.3.3
 xdg_base_dirs==6.0.2
