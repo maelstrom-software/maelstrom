@@ -858,7 +858,7 @@ struct LockedTagsHandle<'a, 'b> {
     _cache_fill: &'a MutexGuard<'b, ()>,
 }
 
-impl<'a, 'b> LockedTagsHandle<'a, 'b> {
+impl LockedTagsHandle<'_, '_> {
     #[anyhow_trace]
     async fn write(mut self) -> Result<()> {
         self.lock_file.seek(SeekFrom::Start(0)).await?;

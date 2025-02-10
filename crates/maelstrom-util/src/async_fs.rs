@@ -480,6 +480,7 @@ impl File {
         fs_inner_trampoline!(self, set_permissions, perm)
     }
 
+    #[allow(unstable_name_collisions)]
     pub async fn lock_shared(&self) -> Result<()> {
         let f = self.inner.try_clone().await?;
         let std_f = f.into_std().await;
@@ -496,6 +497,7 @@ impl File {
             .with_context(|| format!("lock_exclusive(\"{}\")", self.path.display()))
     }
 
+    #[allow(unstable_name_collisions)]
     pub async fn try_lock_shared(&self) -> Result<()> {
         let f = self.inner.try_clone().await?;
         let std_f = f.into_std().await;
@@ -512,6 +514,7 @@ impl File {
             .with_context(|| format!("try_lock_exclusive(\"{}\")", self.path.display()))
     }
 
+    #[allow(unstable_name_collisions)]
     pub async fn unlock(&self) -> Result<()> {
         let f = self.inner.try_clone().await?;
         let std_f = f.into_std().await;

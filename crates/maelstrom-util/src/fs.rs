@@ -543,6 +543,7 @@ impl File<'_> {
         fs_inner_trampoline!(self, set_permissions, perm)
     }
 
+    #[allow(unstable_name_collisions)]
     pub fn lock_shared(&self) -> Result<()> {
         fs_inner_trampoline!(self, lock_shared)
     }
@@ -551,6 +552,7 @@ impl File<'_> {
         fs_inner_trampoline!(self, lock_exclusive)
     }
 
+    #[allow(unstable_name_collisions)]
     pub fn try_lock_shared(&self) -> Result<()> {
         fs_inner_trampoline!(self, try_lock_shared)
     }
@@ -559,6 +561,7 @@ impl File<'_> {
         fs_inner_trampoline!(self, try_lock_exclusive)
     }
 
+    #[allow(unstable_name_collisions)]
     pub fn unlock(&self) -> Result<()> {
         fs_inner_trampoline!(self, unlock)
     }
