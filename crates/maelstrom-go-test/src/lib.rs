@@ -789,10 +789,6 @@ pub fn main_for_test(
 pub struct TestRunner;
 
 impl TestRunner {
-    fn get_watch_exclude_paths(_directories: &Directories) -> Vec<PathBuf> {
-        vec![]
-    }
-
     fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, GoTestOptions) {
         (config.parent, config.go_test_options)
     }
@@ -867,6 +863,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         _metadata: (),
     ) -> Result<DefaultMainAppDeps> {
         DefaultMainAppDeps::new(&directories.project, &directories.cache)
+    }
+
+    fn get_watch_exclude_paths(_directories: &Directories) -> Vec<PathBuf> {
+        vec![]
     }
 
     fn main(

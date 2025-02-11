@@ -22,6 +22,7 @@ use std::{
     ffi::OsString,
     fmt::{self, Debug},
     io::{self, IsTerminal as _},
+    path::PathBuf,
     str,
     sync::{Arc, Mutex},
 };
@@ -187,6 +188,8 @@ pub trait TestRunner {
         log: &slog::Logger,
         metadata: Self::Metadata,
     ) -> Result<Self::Deps<'client>>;
+
+    fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf>;
 
     fn main(
         config: Self::Config,

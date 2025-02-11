@@ -660,10 +660,6 @@ pub fn main_for_test(
 pub struct TestRunner;
 
 impl TestRunner {
-    fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
-        vec![directories.build.to_owned().into_path_buf()]
-    }
-
     fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, PytestConfigValues) {
         (config.parent, config.pytest_options)
     }
@@ -711,6 +707,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         _metadata: (),
     ) -> Result<DefaultMainAppDeps<'client>> {
         DefaultMainAppDeps::new(directories.clone(), client)
+    }
+
+    fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
+        vec![directories.build.to_owned().into_path_buf()]
     }
 
     fn main(

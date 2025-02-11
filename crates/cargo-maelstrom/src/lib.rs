@@ -490,10 +490,6 @@ impl TestRunner {
         )
     }
 
-    fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
-        vec![directories.build.to_owned().into_path_buf()]
-    }
-
     fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, CargoOptions) {
         (
             config.parent,
@@ -593,6 +589,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             },
             target_dir: directories.build.clone(),
         })
+    }
+
+    fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
+        vec![directories.build.to_owned().into_path_buf()]
     }
 
     fn main(
