@@ -31,7 +31,11 @@ use maelstrom_util::{
     root::{Root, RootBuf},
     template::TemplateVars,
 };
-use std::{fmt, io, path::Path, str::FromStr};
+use std::{
+    fmt, io,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 pub const TEST_METADATA_FILE_NAME: &str = "maelstrom-go-test.toml";
 pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
@@ -836,6 +840,10 @@ impl TestRunner {
     ) -> Result<DefaultMainAppDeps> {
         DefaultMainAppDeps::new(&directories.project, &directories.cache)
     }
+
+    fn get_watch_exclude_paths(_directories: &Directories) -> Vec<PathBuf> {
+        vec![]
+    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -908,15 +916,13 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             log.clone(),
         )?;
 
-        let deps = Self::get_deps(&client, &directories, &log, metadata)?;
-        let watch_exclude_paths = vec![];
         let collector_options = config.go_test_options;
 
         run_app_with_ui_multithreaded(
             logging_output,
             config.parent.timeout.map(Timeout::new),
             ui.unwrap(),
-            deps,
+            Self::get_deps(&client, &directories, &log, metadata)?,
             extra_options.parent.include,
             extra_options.parent.exclude,
             extra_options.list.tests.then_some(ListAction::ListTests),
@@ -926,7 +932,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             stdout_is_tty,
             &directories.project,
             &directories.state,
-            watch_exclude_paths,
+            Self::get_watch_exclude_paths(&directories),
             collector_options,
             log,
             &client,

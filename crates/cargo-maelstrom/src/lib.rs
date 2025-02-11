@@ -30,7 +30,11 @@ use maelstrom_util::{
     template::TemplateVars,
 };
 use pattern::ArtifactKind;
-use std::{fmt, io, path::Path, str::FromStr};
+use std::{
+    fmt, io,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 pub const TEST_METADATA_FILE_NAME: &str = "cargo-maelstrom.toml";
 pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
@@ -550,6 +554,10 @@ impl TestRunner {
             target_dir: directories.build.clone(),
         })
     }
+
+    fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
+        vec![directories.build.to_owned().into_path_buf()]
+    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -626,8 +634,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             log.clone(),
         )?;
 
-        let deps = Self::get_deps(&client, &directories, &log, metadata)?;
-        let watch_exclude_paths = vec![directories.build.into_path_buf()];
         let collector_options = CargoOptions {
             feature_selection_options: config.cargo_feature_selection_options,
             compilation_options: config.cargo_compilation_options,
@@ -639,7 +645,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             logging_output,
             config.parent.timeout.map(Timeout::new),
             ui.unwrap(),
-            deps,
+            Self::get_deps(&client, &directories, &log, metadata)?,
             extra_options.parent.include,
             extra_options.parent.exclude,
             extra_options.list.tests.then_some(ListAction::ListTests),
@@ -649,7 +655,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             stdout_is_tty,
             &directories.project,
             &directories.state,
-            watch_exclude_paths,
+            Self::get_watch_exclude_paths(&directories),
             collector_options,
             log,
             &client,
