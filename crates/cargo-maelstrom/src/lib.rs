@@ -483,24 +483,6 @@ impl Wait for cargo::WaitHandle {
 pub struct TestRunner;
 
 impl TestRunner {
-    fn get_directories_and_metadata(config: &Config) -> Result<(Directories, CargoMetadata)> {
-        let cargo_metadata = Self::get_cargo_metadata(config)?;
-        let project = Root::new(cargo_metadata.workspace_root.as_std_path()).to_owned();
-        let build = Root::new(cargo_metadata.target_directory.as_std_path()).to_owned();
-        let maelstrom_target = build.join::<MaelstromTargetDir>("maelstrom");
-        let state = maelstrom_target.join("state");
-        let cache = maelstrom_target.join("cache");
-        Ok((
-            Directories {
-                build,
-                cache,
-                state,
-                project,
-            },
-            cargo_metadata,
-        ))
-    }
-
     fn get_cargo_metadata(config: &Config) -> Result<CargoMetadata> {
         cargo::read_metadata(
             &config.cargo_feature_selection_options,
@@ -575,6 +557,7 @@ impl TestRunner {
 impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
+    type Metadata = CargoMetadata;
 
     fn get_base_directories_prefix(&self) -> &'static str {
         "maelstrom/cargo-maelstrom"
@@ -604,6 +587,27 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         extra_options.list.any()
     }
 
+    fn get_directories_and_metadata(
+        &self,
+        config: &Config,
+    ) -> Result<(Directories, CargoMetadata)> {
+        let cargo_metadata = Self::get_cargo_metadata(config)?;
+        let project = Root::new(cargo_metadata.workspace_root.as_std_path()).to_owned();
+        let build = Root::new(cargo_metadata.target_directory.as_std_path()).to_owned();
+        let maelstrom_target = build.join::<MaelstromTargetDir>("maelstrom");
+        let state = maelstrom_target.join("state");
+        let cache = maelstrom_target.join("cache");
+        Ok((
+            Directories {
+                build,
+                cache,
+                state,
+                project,
+            },
+            cargo_metadata,
+        ))
+    }
+
     fn main(
         &self,
         config: Config,
@@ -623,7 +627,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             return result;
         }
 
-        let (directories, metadata) = Self::get_directories_and_metadata(&config)?;
+        let (directories, metadata) = self.get_directories_and_metadata(&config)?;
 
         Fs.create_dir_all(&directories.state)?;
         Fs.create_dir_all(&directories.cache)?;

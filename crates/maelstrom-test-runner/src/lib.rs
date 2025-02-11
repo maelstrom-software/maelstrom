@@ -158,6 +158,7 @@ pub struct Directories {
 pub trait TestRunner {
     type Config: Config + Debug + AsRef<config::Config>;
     type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
+    type Metadata;
 
     fn get_base_directories_prefix(&self) -> &'static str;
     fn get_environment_variable_prefix(&self) -> &'static str;
@@ -165,6 +166,10 @@ pub trait TestRunner {
     fn get_test_metadata_default_contents(&self) -> &str;
     fn get_project_directory(&self, config: &Self::Config) -> Result<Utf8PathBuf>;
     fn is_list(&self, extra_options: &Self::ExtraCommandLineOptions) -> bool;
+    fn get_directories_and_metadata(
+        &self,
+        config: &Self::Config,
+    ) -> Result<(Directories, Self::Metadata)>;
     fn main(
         &self,
         config: Self::Config,
