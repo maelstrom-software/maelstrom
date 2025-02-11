@@ -320,7 +320,15 @@ fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender
 }
 
 fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
-    deps: &'deps MainAppCombinedDeps<MainAppDepsT>,
+    abstract_deps: &'deps MainAppDepsT,
+    test_db_store: &'deps TestDbStore<
+        super::ArtifactKeyM<MainAppDepsT>,
+        super::CaseMetadataM<MainAppDepsT>,
+    >,
+    options: &'deps TestingOptions<
+        super::TestFilterM<MainAppDepsT>,
+        super::CollectOptionsM<MainAppDepsT>,
+    >,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     sem: &'deps Semaphore,
     ui: UiSender,
@@ -328,17 +336,13 @@ fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
 ) -> Result<ExitCode> {
     let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
 
-    let abs_deps = &deps.abstract_deps;
-    let test_db_store = &deps.test_db_store;
-    let options = &deps.options;
-
     let done = Event::new();
     std::thread::scope(|inner_scope| {
         inner_scope.spawn(|| introspect_loop(&done, client, ui.clone()));
 
         let res = (|| -> Result<_> {
             let deps = MainAppDepsAdapter::new(
-                abs_deps,
+                abstract_deps,
                 scope,
                 main_app_sender.clone(),
                 ui.clone(),
@@ -415,7 +419,15 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
             }
 
             loop {
-                let exit_code = run_app_once(&deps, scope, &sem, ui.clone(), client)?;
+                let exit_code = run_app_once(
+                    &deps.abstract_deps,
+                    &deps.test_db_store,
+                    &deps.options,
+                    scope,
+                    &sem,
+                    ui.clone(),
+                    client,
+                )?;
 
                 if watch {
                     client.restart()?;
