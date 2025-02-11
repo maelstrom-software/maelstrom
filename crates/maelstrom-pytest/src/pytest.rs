@@ -38,9 +38,7 @@ impl WaitHandle {
     }
 }
 
-pub(crate) struct TestArtifactStream(
-    std::collections::hash_map::IntoValues<String, PytestTestArtifact>,
-);
+pub struct TestArtifactStream(std::collections::hash_map::IntoValues<String, PytestTestArtifact>);
 
 impl Iterator for TestArtifactStream {
     type Item = Result<PytestTestArtifact>;

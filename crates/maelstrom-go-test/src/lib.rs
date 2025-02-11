@@ -86,7 +86,7 @@ fn create_client_for_test(
     )
 }
 
-struct DefaultMainAppDeps {
+pub struct DefaultMainAppDeps {
     test_collector: GoTestCollector,
 }
 
@@ -143,7 +143,7 @@ impl TestFilter for pattern::Pattern {
     }
 }
 
-struct GoTestCollector {
+pub struct GoTestCollector {
     project_dir: RootBuf<ProjectDir>,
     cache_dir: RootBuf<CacheDir>,
 }
@@ -158,7 +158,7 @@ impl GoTestCollector {
 }
 
 #[derive(Debug)]
-pub(crate) struct GoTestArtifact {
+pub struct GoTestArtifact {
     id: GoImportPath,
     path: Utf8PathBuf,
     options: GoTestOptions,
@@ -180,7 +180,7 @@ impl TryFrom<go_test::GoTestArtifact> for GoTestArtifact {
 }
 
 #[derive(Debug, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
-pub(crate) struct GoImportPath(String);
+pub struct GoImportPath(String);
 
 impl GoImportPath {
     fn short_name(&self) -> &str {
@@ -289,7 +289,7 @@ impl TestArtifact for GoTestArtifact {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct GoPackage(go_test::GoPackage);
+pub struct GoPackage(go_test::GoPackage);
 
 impl TestPackage for GoPackage {
     type PackageId = GoImportPath;
@@ -311,7 +311,7 @@ impl TestPackage for GoPackage {
     }
 }
 
-struct TestArtifactStream(go_test::TestArtifactStream);
+pub struct TestArtifactStream(go_test::TestArtifactStream);
 
 impl Iterator for TestArtifactStream {
     type Item = Result<GoTestArtifact>;
@@ -789,15 +789,6 @@ pub fn main_for_test(
 pub struct TestRunner;
 
 impl TestRunner {
-    fn get_deps(
-        _client: &Client,
-        directories: &Directories,
-        _log: &slog::Logger,
-        _metadata: (),
-    ) -> Result<DefaultMainAppDeps> {
-        DefaultMainAppDeps::new(&directories.project, &directories.cache)
-    }
-
     fn get_watch_exclude_paths(_directories: &Directories) -> Vec<PathBuf> {
         vec![]
     }
@@ -811,6 +802,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
+    type Deps<'client> = DefaultMainAppDeps;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-go-test";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_GO_TEST";
@@ -866,6 +858,15 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             ui_res?;
             Ok(exit_code)
         })
+    }
+
+    fn get_deps(
+        _client: &Client,
+        directories: &Directories,
+        _log: &slog::Logger,
+        _metadata: (),
+    ) -> Result<DefaultMainAppDeps> {
+        DefaultMainAppDeps::new(&directories.project, &directories.cache)
     }
 
     fn main(

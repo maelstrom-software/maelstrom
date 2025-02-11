@@ -96,7 +96,7 @@ fn create_client_for_test(
     )
 }
 
-struct DefaultMainAppDeps<'client> {
+pub struct DefaultMainAppDeps<'client> {
     test_collector: PytestTestCollector<'client>,
 }
 
@@ -160,7 +160,7 @@ impl TestFilter for pattern::Pattern {
     }
 }
 
-struct PytestTestCollector<'client> {
+pub struct PytestTestCollector<'client> {
     directories: Directories,
     client: &'client Client,
     test_layers: Mutex<HashMap<ImageRef, LayerSpec>>,
@@ -323,7 +323,7 @@ impl PytestTestCollector<'_> {
 }
 
 #[derive(Debug)]
-pub(crate) struct PytestTestArtifact {
+pub struct PytestTestArtifact {
     path: PathBuf,
     tests: Vec<(String, PytestCaseMetadata)>,
     ignored_tests: Vec<String>,
@@ -333,7 +333,7 @@ pub(crate) struct PytestTestArtifact {
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
-struct PytestPackageId(String);
+pub struct PytestPackageId(String);
 
 impl TestPackageId for PytestPackageId {}
 
@@ -407,7 +407,7 @@ impl TestArtifact for PytestTestArtifact {
 }
 
 #[derive(Clone, Debug)]
-struct PytestPackage {
+pub struct PytestPackage {
     name: String,
     id: PytestPackageId,
     artifacts: Vec<PytestArtifactKey>,
@@ -660,15 +660,6 @@ pub fn main_for_test(
 pub struct TestRunner;
 
 impl TestRunner {
-    fn get_deps<'client>(
-        client: &'client Client,
-        directories: &Directories,
-        _log: &slog::Logger,
-        _metadata: (),
-    ) -> Result<DefaultMainAppDeps<'client>> {
-        DefaultMainAppDeps::new(directories.clone(), client)
-    }
-
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
         vec![directories.build.to_owned().into_path_buf()]
     }
@@ -682,6 +673,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
+    type Deps<'client> = DefaultMainAppDeps<'client>;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-pytest";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_PYTEST";
@@ -710,6 +702,15 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             },
             (),
         ))
+    }
+
+    fn get_deps<'client>(
+        client: &'client Client,
+        directories: &Directories,
+        _log: &slog::Logger,
+        _metadata: (),
+    ) -> Result<DefaultMainAppDeps<'client>> {
+        DefaultMainAppDeps::new(directories.clone(), client)
     }
 
     fn main(

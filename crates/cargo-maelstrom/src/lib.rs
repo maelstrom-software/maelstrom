@@ -42,7 +42,7 @@ const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata
 /// The Maelstrom target directory is `<target-dir>/maelstrom`.
 pub struct MaelstromTargetDir;
 
-struct DefaultMainAppDeps {
+pub struct DefaultMainAppDeps {
     test_collector: CargoTestCollector,
     target_dir: RootBuf<BuildDir>,
 }
@@ -157,20 +157,20 @@ impl TestFilter for pattern::Pattern {
     }
 }
 
-struct CargoOptions {
+pub struct CargoOptions {
     feature_selection_options: cargo::FeatureSelectionOptions,
     compilation_options: cargo::CompilationOptions,
     manifest_options: cargo::ManifestOptions,
     extra_test_binary_args: Vec<String>,
 }
 
-struct CargoTestCollector {
+pub struct CargoTestCollector {
     log: slog::Logger,
     packages: Vec<CargoPackage>,
 }
 
 #[derive(Debug)]
-struct CargoTestArtifact {
+pub struct CargoTestArtifact {
     artifact: cargo_metadata::Artifact,
     extra_test_binary_args: Vec<String>,
 }
@@ -182,7 +182,7 @@ impl CargoTestArtifact {
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
-struct CargoPackageId(cargo_metadata::PackageId);
+pub struct CargoPackageId(cargo_metadata::PackageId);
 
 impl TestPackageId for CargoPackageId {}
 
@@ -255,7 +255,7 @@ impl TestArtifact for CargoTestArtifact {
     }
 }
 
-struct CargoTestArtifactStream {
+pub struct CargoTestArtifactStream {
     stream: cargo::TestArtifactStream,
     extra_test_binary_args: Vec<String>,
 }
@@ -293,7 +293,7 @@ fn so_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
 }
 
 #[derive(Clone, Debug)]
-struct CargoPackage(cargo_metadata::Package);
+pub struct CargoPackage(cargo_metadata::Package);
 
 impl TestPackage for CargoPackage {
     type PackageId = CargoPackageId;
@@ -490,25 +490,6 @@ impl TestRunner {
         )
     }
 
-    fn get_deps(
-        _client: &Client,
-        directories: &Directories,
-        log: &slog::Logger,
-        metadata: CargoMetadata,
-    ) -> Result<DefaultMainAppDeps> {
-        Ok(DefaultMainAppDeps {
-            test_collector: CargoTestCollector {
-                log: log.clone(),
-                packages: metadata
-                    .workspace_packages()
-                    .into_iter()
-                    .map(|p| CargoPackage(p.clone()))
-                    .collect(),
-            },
-            target_dir: directories.build.clone(),
-        })
-    }
-
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
         vec![directories.build.to_owned().into_path_buf()]
     }
@@ -530,6 +511,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = CargoMetadata;
+    type Deps<'client> = DefaultMainAppDeps;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/cargo-maelstrom";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "CARGO_MAELSTROM";
@@ -592,6 +574,25 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                     )
                 })
             })
+    }
+
+    fn get_deps(
+        _client: &Client,
+        directories: &Directories,
+        log: &slog::Logger,
+        metadata: CargoMetadata,
+    ) -> Result<DefaultMainAppDeps> {
+        Ok(DefaultMainAppDeps {
+            test_collector: CargoTestCollector {
+                log: log.clone(),
+                packages: metadata
+                    .workspace_packages()
+                    .into_iter()
+                    .map(|p| CargoPackage(p.clone()))
+                    .collect(),
+            },
+            target_dir: directories.build.clone(),
+        })
     }
 
     fn main(

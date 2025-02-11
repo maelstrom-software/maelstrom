@@ -15,7 +15,7 @@ pub use deps::*;
 use anyhow::Result;
 use clap::{Args, Command};
 use maelstrom_base::Utf8PathBuf;
-use maelstrom_client::{CacheDir, ClientBgProcess, ProjectDir, StateDir};
+use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
 use maelstrom_util::{config::common::LogLevel, config::Config, process::ExitCode, root::RootBuf};
 use slog::Drain as _;
 use std::{
@@ -159,6 +159,7 @@ pub trait TestRunner {
     type Config: Config + Debug + AsRef<config::Config>;
     type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
     type Metadata;
+    type Deps<'client>: MainAppDeps;
 
     const BASE_DIRECTORIES_PREFIX: &'static str;
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str;
@@ -166,7 +167,12 @@ pub trait TestRunner {
     const TEST_METADATA_DEFAULT_CONTENTS: &'static str;
 
     fn get_project_directory(config: &Self::Config) -> Result<Utf8PathBuf>;
+
     fn is_list(extra_options: &Self::ExtraCommandLineOptions) -> bool;
+
+    fn get_directories_and_metadata(config: &Self::Config)
+        -> Result<(Directories, Self::Metadata)>;
+
     fn execute_alternative_main(
         _config: &Self::Config,
         _extra_options: &Self::ExtraCommandLineOptions,
@@ -174,8 +180,14 @@ pub trait TestRunner {
     ) -> Option<Result<ExitCode>> {
         None
     }
-    fn get_directories_and_metadata(config: &Self::Config)
-        -> Result<(Directories, Self::Metadata)>;
+
+    fn get_deps<'client>(
+        client: &'client Client,
+        directories: &Directories,
+        log: &slog::Logger,
+        metadata: Self::Metadata,
+    ) -> Result<Self::Deps<'client>>;
+
     fn main(
         config: Self::Config,
         extra_options: Self::ExtraCommandLineOptions,
