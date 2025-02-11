@@ -683,6 +683,15 @@ impl TestRunner {
     ) -> Option<Result<ExitCode>> {
         None
     }
+
+    fn get_deps<'client>(
+        client: &'client Client,
+        directories: &Directories,
+        _log: &slog::Logger,
+        _metadata: (),
+    ) -> Result<DefaultMainAppDeps<'client>> {
+        DefaultMainAppDeps::new(directories.clone(), client)
+    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -732,7 +741,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             return result;
         }
 
-        let (directories, _) = Self::get_directories_and_metadata(&config)?;
+        let (directories, metadata) = Self::get_directories_and_metadata(&config)?;
 
         Fs.create_dir_all(&directories.state)?;
         Fs.create_dir_all(&directories.cache)?;
@@ -755,7 +764,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             log.clone(),
         )?;
 
-        let deps = DefaultMainAppDeps::new(directories.clone(), &client)?;
+        let deps = Self::get_deps(&client, &directories, &log, metadata)?;
         let watch_exclude_paths = vec![directories.build.into_path_buf()];
         let collector_options = config.pytest_options;
 

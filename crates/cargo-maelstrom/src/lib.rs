@@ -531,6 +531,25 @@ impl TestRunner {
                 })
             })
     }
+
+    fn get_deps(
+        _client: &Client,
+        directories: &Directories,
+        log: &slog::Logger,
+        metadata: CargoMetadata,
+    ) -> Result<DefaultMainAppDeps> {
+        Ok(DefaultMainAppDeps {
+            test_collector: CargoTestCollector {
+                log: log.clone(),
+                packages: metadata
+                    .workspace_packages()
+                    .into_iter()
+                    .map(|p| CargoPackage(p.clone()))
+                    .collect(),
+            },
+            target_dir: directories.build.clone(),
+        })
+    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -607,17 +626,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             log.clone(),
         )?;
 
-        let deps = DefaultMainAppDeps {
-            test_collector: CargoTestCollector {
-                log: log.clone(),
-                packages: metadata
-                    .workspace_packages()
-                    .into_iter()
-                    .map(|p| CargoPackage(p.clone()))
-                    .collect(),
-            },
-            target_dir: directories.build.clone(),
-        };
+        let deps = Self::get_deps(&client, &directories, &log, metadata)?;
         let watch_exclude_paths = vec![directories.build.into_path_buf()];
         let collector_options = CargoOptions {
             feature_selection_options: config.cargo_feature_selection_options,

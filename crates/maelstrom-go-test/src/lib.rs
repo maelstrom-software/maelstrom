@@ -827,6 +827,15 @@ impl TestRunner {
             Ok(exit_code)
         })
     }
+
+    fn get_deps(
+        _client: &Client,
+        directories: &Directories,
+        _log: &slog::Logger,
+        _metadata: (),
+    ) -> Result<DefaultMainAppDeps> {
+        DefaultMainAppDeps::new(&directories.project, &directories.cache)
+    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -876,7 +885,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             return result;
         }
 
-        let (directories, _) = Self::get_directories_and_metadata(&config)?;
+        let (directories, metadata) = Self::get_directories_and_metadata(&config)?;
 
         Fs.create_dir_all(&directories.state)?;
         Fs.create_dir_all(&directories.cache)?;
@@ -899,7 +908,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             log.clone(),
         )?;
 
-        let deps = DefaultMainAppDeps::new(&directories.project, &directories.cache)?;
+        let deps = Self::get_deps(&client, &directories, &log, metadata)?;
         let watch_exclude_paths = vec![];
         let collector_options = config.go_test_options;
 
