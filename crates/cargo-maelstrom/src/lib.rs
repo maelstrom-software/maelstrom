@@ -489,18 +489,6 @@ impl TestRunner {
             &config.cargo_manifest_options,
         )
     }
-
-    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, CargoOptions) {
-        (
-            config.parent,
-            CargoOptions {
-                feature_selection_options: config.cargo_feature_selection_options,
-                compilation_options: config.cargo_compilation_options,
-                manifest_options: config.cargo_manifest_options,
-                extra_test_binary_args: config.extra_test_binary_args,
-            },
-        )
-    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -508,6 +496,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = CargoMetadata;
     type Deps<'client> = DefaultMainAppDeps;
+    type CollectorOptions = CargoOptions;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/cargo-maelstrom";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "CARGO_MAELSTROM";
@@ -593,6 +582,18 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
         vec![directories.build.to_owned().into_path_buf()]
+    }
+
+    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, CargoOptions) {
+        (
+            config.parent,
+            CargoOptions {
+                feature_selection_options: config.cargo_feature_selection_options,
+                compilation_options: config.cargo_compilation_options,
+                manifest_options: config.cargo_manifest_options,
+                extra_test_binary_args: config.extra_test_binary_args,
+            },
+        )
     }
 
     fn main(

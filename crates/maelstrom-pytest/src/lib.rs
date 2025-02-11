@@ -659,17 +659,12 @@ pub fn main_for_test(
 
 pub struct TestRunner;
 
-impl TestRunner {
-    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, PytestConfigValues) {
-        (config.parent, config.pytest_options)
-    }
-}
-
 impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
     type Deps<'client> = DefaultMainAppDeps<'client>;
+    type CollectorOptions = PytestConfigValues;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-pytest";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_PYTEST";
@@ -711,6 +706,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
         vec![directories.build.to_owned().into_path_buf()]
+    }
+
+    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, PytestConfigValues) {
+        (config.parent, config.pytest_options)
     }
 
     fn main(

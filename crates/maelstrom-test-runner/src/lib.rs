@@ -161,6 +161,7 @@ pub trait TestRunner {
     type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
     type Metadata;
     type Deps<'client>: MainAppDeps;
+    type CollectorOptions;
 
     const BASE_DIRECTORIES_PREFIX: &'static str;
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str;
@@ -190,6 +191,8 @@ pub trait TestRunner {
     ) -> Result<Self::Deps<'client>>;
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf>;
+
+    fn split_config(config: Self::Config) -> (config::Config, Self::CollectorOptions);
 
     fn main(
         config: Self::Config,

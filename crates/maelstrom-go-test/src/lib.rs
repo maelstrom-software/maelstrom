@@ -788,17 +788,12 @@ pub fn main_for_test(
 
 pub struct TestRunner;
 
-impl TestRunner {
-    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, GoTestOptions) {
-        (config.parent, config.go_test_options)
-    }
-}
-
 impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
     type Deps<'client> = DefaultMainAppDeps;
+    type CollectorOptions = GoTestOptions;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-go-test";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_GO_TEST";
@@ -867,6 +862,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_watch_exclude_paths(_directories: &Directories) -> Vec<PathBuf> {
         vec![]
+    }
+
+    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, GoTestOptions) {
+        (config.parent, config.go_test_options)
     }
 
     fn main(
