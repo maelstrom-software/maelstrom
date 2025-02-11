@@ -660,17 +660,20 @@ pub fn main_for_test(
 pub struct TestRunner;
 
 impl TestRunner {
-    fn get_directories() -> Result<Directories> {
+    fn get_directories_and_metadata(_config: &Config) -> Result<(Directories, ())> {
         let project = RootBuf::new(Path::new(".").canonicalize()?);
         let build = project.join(".maelstrom-pytest");
         let cache = build.join("cache");
         let state = build.join("state");
-        Ok(Directories {
-            build,
-            cache,
-            project,
-            state,
-        })
+        Ok((
+            Directories {
+                build,
+                cache,
+                project,
+                state,
+            },
+            (),
+        ))
     }
 
     fn execute_alternative_main(
@@ -729,7 +732,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             return result;
         }
 
-        let directories = Self::get_directories()?;
+        let (directories, _) = Self::get_directories_and_metadata(&config)?;
 
         Fs.create_dir_all(&directories.state)?;
         Fs.create_dir_all(&directories.cache)?;

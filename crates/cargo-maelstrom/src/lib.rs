@@ -479,18 +479,22 @@ impl Wait for cargo::WaitHandle {
 pub struct TestRunner;
 
 impl TestRunner {
-    fn get_directories(cargo_metadata: &CargoMetadata) -> Result<Directories> {
+    fn get_directories_and_metadata(config: &Config) -> Result<(Directories, CargoMetadata)> {
+        let cargo_metadata = Self::get_cargo_metadata(config)?;
         let project = Root::new(cargo_metadata.workspace_root.as_std_path()).to_owned();
         let build = Root::new(cargo_metadata.target_directory.as_std_path()).to_owned();
         let maelstrom_target = build.join::<MaelstromTargetDir>("maelstrom");
         let state = maelstrom_target.join("state");
         let cache = maelstrom_target.join("cache");
-        Ok(Directories {
-            build,
-            cache,
-            state,
-            project,
-        })
+        Ok((
+            Directories {
+                build,
+                cache,
+                state,
+                project,
+            },
+            cargo_metadata,
+        ))
     }
 
     fn get_cargo_metadata(config: &Config) -> Result<CargoMetadata> {
@@ -580,8 +584,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             return result;
         }
 
-        let cargo_metadata = Self::get_cargo_metadata(&config)?;
-        let directories = Self::get_directories(&cargo_metadata)?;
+        let (directories, metadata) = Self::get_directories_and_metadata(&config)?;
 
         Fs.create_dir_all(&directories.state)?;
         Fs.create_dir_all(&directories.cache)?;
@@ -607,7 +610,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         let deps = DefaultMainAppDeps {
             test_collector: CargoTestCollector {
                 log: log.clone(),
-                packages: cargo_metadata
+                packages: metadata
                     .workspace_packages()
                     .into_iter()
                     .map(|p| CargoPackage(p.clone()))
