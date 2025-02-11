@@ -547,7 +547,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             let logging_output = LoggingOutput::default();
             let log = logger.build(logging_output.clone());
 
-            let list_action = extra_options.list.tests.then_some(ListAction::ListTests);
             let target_dir = Root::<BuildDir>::new(cargo_metadata.target_directory.as_std_path());
             let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
             let state_dir = maelstrom_target_dir.join::<StateDir>("state");
@@ -555,12 +554,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
             Fs.create_dir_all(&state_dir)?;
             Fs.create_dir_all(&cache_dir)?;
-
-            let packages = cargo_metadata
-                .workspace_packages()
-                .into_iter()
-                .map(|p| CargoPackage(p.clone()))
-                .collect::<Vec<_>>();
 
             let client = Client::new(
                 bg_proc,
@@ -580,7 +573,11 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             let deps = DefaultMainAppDeps {
                 test_collector: CargoTestCollector {
                     log: log.clone(),
-                    packages,
+                    packages: cargo_metadata
+                        .workspace_packages()
+                        .into_iter()
+                        .map(|p| CargoPackage(p.clone()))
+                        .collect(),
                 },
                 target_dir: target_dir.to_owned(),
             };
@@ -599,7 +596,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 deps,
                 extra_options.parent.include,
                 extra_options.parent.exclude,
-                list_action,
+                extra_options.list.tests.then_some(ListAction::ListTests),
                 config.parent.repeat,
                 config.parent.stop_after,
                 extra_options.parent.watch,
