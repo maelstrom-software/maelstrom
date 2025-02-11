@@ -7,21 +7,21 @@ mod pattern;
 pub use maelstrom_test_runner::Logger;
 
 use anyhow::{anyhow, Result};
-use cargo_metadata::Target as CargoTarget;
+use cargo_metadata::{Metadata as CargoMetadata, Target as CargoTarget};
 use cli::ExtraCommandLineOptions;
 use config::Config;
 use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     shared_library_dependencies_layer_spec,
     spec::{LayerSpec, PathsLayerSpec, PrefixOptions},
-    CacheDir, Client, ClientBgProcess, ProjectDir, StateDir,
+    Client, ClientBgProcess,
 };
 use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiSender},
-    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata, TestArtifact,
-    TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata,
+    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     fs::Fs,
@@ -478,6 +478,22 @@ impl Wait for cargo::WaitHandle {
 
 pub struct TestRunner;
 
+impl TestRunner {
+    fn get_directories(cargo_metadata: &CargoMetadata) -> Result<Directories> {
+        let project = Root::new(cargo_metadata.workspace_root.as_std_path()).to_owned();
+        let build = Root::new(cargo_metadata.target_directory.as_std_path()).to_owned();
+        let maelstrom_target = build.join::<MaelstromTargetDir>("maelstrom");
+        let state = maelstrom_target.join("state");
+        let cache = maelstrom_target.join("cache");
+        Ok(Directories {
+            build,
+            cache,
+            state,
+            project,
+        })
+    }
+}
+
 impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
@@ -543,25 +559,21 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             )
         } else {
             let cargo_metadata = get_metadata()?;
-            let project_dir = Root::<ProjectDir>::new(cargo_metadata.workspace_root.as_std_path());
+            let directories = Self::get_directories(&cargo_metadata)?;
+
+            Fs.create_dir_all(&directories.state)?;
+            Fs.create_dir_all(&directories.cache)?;
+
             let logging_output = LoggingOutput::default();
             let log = logger.build(logging_output.clone());
-
-            let target_dir = Root::<BuildDir>::new(cargo_metadata.target_directory.as_std_path());
-            let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
-            let state_dir = maelstrom_target_dir.join::<StateDir>("state");
-            let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
-
-            Fs.create_dir_all(&state_dir)?;
-            Fs.create_dir_all(&cache_dir)?;
 
             let client = Client::new(
                 bg_proc,
                 config.parent.broker,
-                project_dir,
-                &state_dir,
+                &directories.project,
+                &directories.state,
                 config.parent.container_image_depot_root,
-                &cache_dir,
+                &directories.cache,
                 config.parent.cache_size,
                 config.parent.inline_limit,
                 config.parent.slots,
@@ -579,7 +591,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                         .map(|p| CargoPackage(p.clone()))
                         .collect(),
                 },
-                target_dir: target_dir.to_owned(),
+                target_dir: directories.build.clone(),
             };
 
             let cargo_options = CargoOptions {
@@ -601,9 +613,9 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 config.parent.stop_after,
                 extra_options.parent.watch,
                 stdout_is_tty,
-                project_dir,
-                &state_dir,
-                vec![target_dir.to_owned().into_path_buf()],
+                &directories.project,
+                &directories.state,
+                vec![directories.build.into_path_buf()],
                 cargo_options,
                 log,
                 &client,
