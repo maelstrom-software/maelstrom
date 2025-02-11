@@ -160,10 +160,11 @@ pub trait TestRunner {
     type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
     type Metadata;
 
-    fn get_base_directories_prefix() -> &'static str;
-    fn get_environment_variable_prefix() -> &'static str;
-    fn get_test_metadata_file_name() -> &'static str;
-    fn get_test_metadata_default_contents() -> &'static str;
+    const BASE_DIRECTORIES_PREFIX: &'static str;
+    const ENVIRONMENT_VARIABLE_PREFIX: &'static str;
+    const TEST_METADATA_FILE_NAME: &'static str;
+    const TEST_METADATA_DEFAULT_CONTENTS: &'static str;
+
     fn get_project_directory(config: &Self::Config) -> Result<Utf8PathBuf>;
     fn is_list(extra_options: &Self::ExtraCommandLineOptions) -> bool;
     fn execute_alternative_main(
@@ -203,8 +204,8 @@ where
     let (config, extra_options): (TestRunnerT::Config, TestRunnerT::ExtraCommandLineOptions) =
         maelstrom_util::config::new_config_with_extra_from_args(
             command,
-            TestRunnerT::get_base_directories_prefix(),
-            TestRunnerT::get_environment_variable_prefix(),
+            TestRunnerT::BASE_DIRECTORIES_PREFIX,
+            TestRunnerT::ENVIRONMENT_VARIABLE_PREFIX,
             args,
         )?;
 
@@ -213,8 +214,8 @@ where
     } else if extra_options.as_ref().init {
         return alternative_mains::init(
             &TestRunnerT::get_project_directory(&config)?,
-            TestRunnerT::get_test_metadata_file_name(),
-            TestRunnerT::get_test_metadata_default_contents(),
+            TestRunnerT::TEST_METADATA_FILE_NAME,
+            TestRunnerT::TEST_METADATA_DEFAULT_CONTENTS,
         );
     }
 

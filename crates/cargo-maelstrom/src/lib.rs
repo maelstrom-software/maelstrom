@@ -36,8 +36,8 @@ use std::{
     str::FromStr,
 };
 
-pub const TEST_METADATA_FILE_NAME: &str = "cargo-maelstrom.toml";
-pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
+const TEST_METADATA_FILE_NAME: &str = "cargo-maelstrom.toml";
+const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
 
 /// The Maelstrom target directory is `<target-dir>/maelstrom`.
 pub struct MaelstromTargetDir;
@@ -531,21 +531,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = CargoMetadata;
 
-    fn get_base_directories_prefix() -> &'static str {
-        "maelstrom/cargo-maelstrom"
-    }
-
-    fn get_environment_variable_prefix() -> &'static str {
-        "CARGO_MAELSTROM"
-    }
-
-    fn get_test_metadata_file_name() -> &'static str {
-        crate::TEST_METADATA_FILE_NAME
-    }
-
-    fn get_test_metadata_default_contents() -> &'static str {
-        crate::DEFAULT_TEST_METADATA_CONTENTS
-    }
+    const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/cargo-maelstrom";
+    const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "CARGO_MAELSTROM";
+    const TEST_METADATA_FILE_NAME: &'static str = crate::TEST_METADATA_FILE_NAME;
+    const TEST_METADATA_DEFAULT_CONTENTS: &'static str = crate::DEFAULT_TEST_METADATA_CONTENTS;
 
     fn get_project_directory(config: &Config) -> Result<Utf8PathBuf> {
         Ok(cargo::read_metadata(

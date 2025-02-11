@@ -47,8 +47,8 @@ use std::{
     sync::Mutex,
 };
 
-pub const TEST_METADATA_FILE_NAME: &str = "maelstrom-pytest.toml";
-pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
+const TEST_METADATA_FILE_NAME: &str = "maelstrom-pytest.toml";
+const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
 
 #[allow(clippy::too_many_arguments)]
 fn create_client_for_test(
@@ -683,21 +683,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
 
-    fn get_base_directories_prefix() -> &'static str {
-        "maelstrom/maelstrom-pytest"
-    }
-
-    fn get_environment_variable_prefix() -> &'static str {
-        "MAELSTROM_PYTEST"
-    }
-
-    fn get_test_metadata_file_name() -> &'static str {
-        crate::TEST_METADATA_FILE_NAME
-    }
-
-    fn get_test_metadata_default_contents() -> &'static str {
-        crate::DEFAULT_TEST_METADATA_CONTENTS
-    }
+    const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-pytest";
+    const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_PYTEST";
+    const TEST_METADATA_FILE_NAME: &'static str = crate::TEST_METADATA_FILE_NAME;
+    const TEST_METADATA_DEFAULT_CONTENTS: &'static str = crate::DEFAULT_TEST_METADATA_CONTENTS;
 
     fn get_project_directory(_: &Config) -> Result<Utf8PathBuf> {
         Ok(".".into())
