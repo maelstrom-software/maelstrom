@@ -14,8 +14,7 @@ use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     shared_library_dependencies_layer_spec,
     spec::{LayerSpec, PathsLayerSpec, PrefixOptions},
-    CacheDir, Client, ClientBgProcess,
-    ProjectDir, StateDir,
+    CacheDir, Client, ClientBgProcess, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
     metadata::Metadata,
@@ -544,8 +543,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             )
         } else {
             let cargo_metadata = get_metadata()?;
-            let workspace_dir =
-                Root::<ProjectDir>::new(cargo_metadata.workspace_root.as_std_path());
+            let project_dir = Root::<ProjectDir>::new(cargo_metadata.workspace_root.as_std_path());
             let logging_output = LoggingOutput::default();
             let log = logger.build(logging_output.clone());
 
@@ -564,56 +562,27 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 .map(|p| CargoPackage(p.clone()))
                 .collect::<Vec<_>>();
 
-            let (deps, client) = {
-                let bg_proc = bg_proc;
-                let broker_addr = config.parent.broker;
-                let project_dir = workspace_dir.transmute::<ProjectDir>();
-                let state_dir = &state_dir;
-                let container_image_depot_dir = config.parent.container_image_depot_root;
-                let cache_dir = cache_dir;
-                let target_dir = target_dir;
-                let cache_size = config.parent.cache_size;
-                let inline_limit = config.parent.inline_limit;
-                let slots = config.parent.slots;
-                let accept_invalid_remote_container_tls_certs =
-                    config.parent.accept_invalid_remote_container_tls_certs;
-                let artifact_transfer_strategy = config.parent.artifact_transfer_strategy;
-                let packages = packages;
-                let log = log.clone();
+            let client = Client::new(
+                bg_proc,
+                config.parent.broker,
+                project_dir,
+                &state_dir,
+                config.parent.container_image_depot_root,
+                &cache_dir,
+                config.parent.cache_size,
+                config.parent.inline_limit,
+                config.parent.slots,
+                config.parent.accept_invalid_remote_container_tls_certs,
+                config.parent.artifact_transfer_strategy,
+                log.clone(),
+            )?;
 
-                slog::debug!(
-                    log, "creating app dependencies";
-                    "broker_addr" => ?broker_addr,
-                    "project_dir" => ?project_dir,
-                    "state_dir" => ?state_dir,
-                    "container_image_depot_dir" => ?container_image_depot_dir,
-                    "cache_dir" => ?cache_dir,
-                    "cache_size" => ?cache_size,
-                    "inline_limit" => ?inline_limit,
-                    "slots" => ?slots,
-                );
-                let client = Client::new(
-                    bg_proc,
-                    broker_addr,
-                    project_dir,
-                    state_dir,
-                    container_image_depot_dir,
-                    cache_dir,
-                    cache_size,
-                    inline_limit,
-                    slots,
-                    accept_invalid_remote_container_tls_certs,
-                    artifact_transfer_strategy,
-                    log.clone(),
-                )?;
-
-                (
-                    DefaultMainAppDeps {
-                        test_collector: CargoTestCollector { log, packages },
-                        target_dir: target_dir.to_owned(),
-                    },
-                    client,
-                )
+            let deps = DefaultMainAppDeps {
+                test_collector: CargoTestCollector {
+                    log: log.clone(),
+                    packages,
+                },
+                target_dir: target_dir.to_owned(),
             };
 
             let cargo_options = CargoOptions {
@@ -635,7 +604,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 config.parent.stop_after,
                 extra_options.parent.watch,
                 stdout_is_tty,
-                workspace_dir,
+                project_dir,
                 &state_dir,
                 vec![target_dir.to_owned().into_path_buf()],
                 cargo_options,
