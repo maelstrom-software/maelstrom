@@ -51,7 +51,7 @@ pub const TEST_METADATA_FILE_NAME: &str = "maelstrom-pytest.toml";
 pub const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
 
 #[allow(clippy::too_many_arguments)]
-fn create_client(
+fn create_client_for_test(
     bg_proc: ClientBgProcess,
     broker_addr: Option<BrokerAddr>,
     project_dir: impl AsRef<Root<ProjectDir>>,
@@ -621,7 +621,7 @@ pub fn main_for_test(
     Fs.create_dir_all(&state_dir)?;
     Fs.create_dir_all(&cache_dir)?;
 
-    let client = create_client(
+    let client = create_client_for_test(
         bg_proc,
         config.parent.broker,
         project_dir,
@@ -711,7 +711,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         Fs.create_dir_all(&state_dir)?;
         Fs.create_dir_all(&cache_dir)?;
 
-        let client = create_client(
+        let client = Client::new(
             bg_proc,
             config.parent.broker,
             project_dir,
