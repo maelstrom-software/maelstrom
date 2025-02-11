@@ -15,8 +15,8 @@ pub use deps::*;
 use anyhow::Result;
 use clap::{Args, Command};
 use maelstrom_base::Utf8PathBuf;
-use maelstrom_client::ClientBgProcess;
-use maelstrom_util::{config::common::LogLevel, config::Config, process::ExitCode};
+use maelstrom_client::{CacheDir, ClientBgProcess, ProjectDir, StateDir};
+use maelstrom_util::{config::common::LogLevel, config::Config, process::ExitCode, root::RootBuf};
 use slog::Drain as _;
 use std::{
     ffi::OsString,
@@ -145,6 +145,14 @@ impl Logger {
             Self::GivenLogger(logger) => logger.clone(),
         }
     }
+}
+
+#[derive(Clone)]
+pub struct Directories {
+    pub build: RootBuf<BuildDir>,
+    pub cache: RootBuf<CacheDir>,
+    pub project: RootBuf<ProjectDir>,
+    pub state: RootBuf<StateDir>,
 }
 
 pub trait TestRunner {

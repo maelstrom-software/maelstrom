@@ -21,8 +21,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiSender},
-    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata, TestArtifact,
-    TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata,
+    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -784,6 +784,22 @@ pub fn main_for_test(
 
 pub struct TestRunner;
 
+impl TestRunner {
+    fn get_directories() -> Result<Directories> {
+        let project = RootBuf::new(go_test::get_module_root()?);
+        let hidden = project.join::<HiddenDir>(".maelstrom-go-test");
+        let cache = hidden.join("cache");
+        let build = cache.join("test-binaries");
+        let state = hidden.join("state");
+        Ok(Directories {
+            build,
+            cache,
+            project,
+            state,
+        })
+    }
+}
+
 impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
@@ -821,27 +837,20 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
-        let project_root = go_test::get_module_root()?;
-        let project_dir = Root::<ProjectDir>::new(project_root.as_ref());
-
-        let hidden_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-go-test");
-        let hidden_dir = Root::<HiddenDir>::new(&hidden_dir);
-        let state_dir = hidden_dir.join::<StateDir>("state");
-        let cache_dir = hidden_dir.join::<CacheDir>("cache");
-
-        Fs.create_dir_all(&state_dir)?;
-        Fs.create_dir_all(&cache_dir)?;
-
-        let logging_output = LoggingOutput::default();
-        let log = logger.build(logging_output.clone());
-
         if extra_options.list.packages {
+            let directories = Self::get_directories()?;
+
+            Fs.create_dir_all(&directories.cache)?;
+
+            let logging_output = LoggingOutput::default();
+            let log = logger.build(logging_output.clone());
+
             let (ui_handle, ui) = ui.start_ui_thread(logging_output, log);
 
             let list_res = alternative_mains::list_packages(
                 ui,
-                project_dir,
-                &cache_dir,
+                &directories.project,
+                &directories.cache,
                 &extra_options.parent.include,
                 &extra_options.parent.exclude,
             );
@@ -850,13 +859,21 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             ui_res?;
             Ok(exit_code)
         } else {
+            let directories = Self::get_directories()?;
+
+            Fs.create_dir_all(&directories.state)?;
+            Fs.create_dir_all(&directories.cache)?;
+
+            let logging_output = LoggingOutput::default();
+            let log = logger.build(logging_output.clone());
+
             let client = Client::new(
                 bg_proc,
                 config.parent.broker,
-                project_dir,
-                &state_dir,
+                &directories.project,
+                &directories.state,
                 config.parent.container_image_depot_root,
-                &cache_dir,
+                &directories.cache,
                 config.parent.cache_size,
                 config.parent.inline_limit,
                 config.parent.slots,
@@ -864,7 +881,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 config.parent.artifact_transfer_strategy,
                 log.clone(),
             )?;
-            let deps = DefaultMainAppDeps::new(project_dir, &cache_dir)?;
+            let deps = DefaultMainAppDeps::new(&directories.project, &directories.cache)?;
 
             run_app_with_ui_multithreaded(
                 logging_output,
@@ -878,8 +895,8 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 config.parent.stop_after,
                 extra_options.parent.watch,
                 stdout_is_tty,
-                project_dir,
-                &state_dir,
+                &directories.project,
+                &directories.state,
                 vec![],
                 config.go_test_options,
                 log,

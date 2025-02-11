@@ -23,8 +23,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, ListAction, LoggingOutput, MainAppDeps, TestArtifact, TestArtifactKey,
-    TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, TestArtifact,
+    TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -101,18 +101,11 @@ struct DefaultMainAppDeps<'client> {
 }
 
 impl<'client> DefaultMainAppDeps<'client> {
-    pub fn new(
-        project_dir: &Root<ProjectDir>,
-        build_dir: &Root<BuildDir>,
-        cache_dir: &Root<CacheDir>,
-        client: &'client Client,
-    ) -> Result<Self> {
+    pub fn new(directories: Directories, client: &'client Client) -> Result<Self> {
         Ok(Self {
             test_collector: PytestTestCollector {
                 client,
-                project_dir: project_dir.to_owned(),
-                build_dir: build_dir.to_owned(),
-                cache_dir: cache_dir.to_owned(),
+                directories,
                 test_layers: Mutex::new(HashMap::new()),
             },
         })
@@ -168,9 +161,7 @@ impl TestFilter for pattern::Pattern {
 }
 
 struct PytestTestCollector<'client> {
-    project_dir: RootBuf<ProjectDir>,
-    build_dir: RootBuf<BuildDir>,
-    cache_dir: RootBuf<CacheDir>,
+    directories: Directories,
     client: &'client Client,
     test_layers: Mutex<HashMap<ImageRef, LayerSpec>>,
 }
@@ -185,8 +176,8 @@ impl PytestTestCollector<'_> {
         let fs = Fs::new();
 
         // Build some paths
-        let cache_dir: &Path = self.cache_dir.as_ref();
-        let project_dir: &Path = self.project_dir.as_ref();
+        let cache_dir: &Path = self.directories.cache.as_ref();
+        let project_dir: &Path = self.directories.project.as_ref();
         let packages_path: PathBuf = cache_dir.join(format!("pip_packages/{ref_}"));
         if !fs.exists(&packages_path) {
             fs.create_dir_all(&packages_path)?;
@@ -321,7 +312,9 @@ impl PytestTestCollector<'_> {
         }
 
         let packages_path = self.get_pip_packages(image, &ref_, ui)?;
-        let packages_path = packages_path.strip_prefix(&self.project_dir).unwrap();
+        let packages_path = packages_path
+            .strip_prefix(&self.directories.project)
+            .unwrap();
         Ok(Some(glob_layer_spec! {
             format!("{packages_path}/**"),
             strip_prefix: packages_path,
@@ -461,8 +454,8 @@ impl CollectTests for PytestTestCollector<'_> {
         let (handle, stream) = pytest::pytest_collect_tests(
             color,
             options,
-            &self.project_dir,
-            &self.build_dir,
+            &self.directories.project,
+            &self.directories.build,
             test_layers,
         )?;
         Ok((handle, stream))
@@ -484,7 +477,7 @@ impl CollectTests for PytestTestCollector<'_> {
         Ok(vec![PytestPackage {
             name: "default".into(),
             id: PytestPackageId("default".into()),
-            artifacts: find_artifacts(self.project_dir.as_ref())?,
+            artifacts: find_artifacts(self.directories.project.as_ref())?,
         }])
     }
 
@@ -613,21 +606,27 @@ pub fn main_for_test(
     let log = logger.build(logging_output.clone());
 
     let list_action = extra_options.list.then_some(ListAction::ListTests);
-    let build_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-pytest");
-    let build_dir = Root::<BuildDir>::new(&build_dir);
-    let state_dir = build_dir.join::<StateDir>("state");
-    let cache_dir = build_dir.join::<CacheDir>("cache");
+    let project = project_dir.to_owned();
+    let build = project.join(".maelstrom-pytest");
+    let cache = build.join("cache");
+    let state = build.join("state");
+    let directories = Directories {
+        build,
+        cache,
+        project,
+        state,
+    };
 
-    Fs.create_dir_all(&state_dir)?;
-    Fs.create_dir_all(&cache_dir)?;
+    Fs.create_dir_all(&directories.state)?;
+    Fs.create_dir_all(&directories.cache)?;
 
     let client = create_client_for_test(
         bg_proc,
         config.parent.broker,
         project_dir,
-        &state_dir,
+        &directories.state,
         config.parent.container_image_depot_root,
-        &cache_dir,
+        &directories.cache,
         config.parent.cache_size,
         config.parent.inline_limit,
         config.parent.slots,
@@ -635,7 +634,7 @@ pub fn main_for_test(
         config.parent.artifact_transfer_strategy,
         log.clone(),
     )?;
-    let deps = DefaultMainAppDeps::new(project_dir, build_dir, &cache_dir, &client)?;
+    let deps = DefaultMainAppDeps::new(directories.clone(), &client)?;
 
     run_app_with_ui_multithreaded(
         logging_output,
@@ -650,8 +649,8 @@ pub fn main_for_test(
         extra_options.parent.watch,
         stdout_is_tty,
         project_dir,
-        &state_dir,
-        vec![build_dir.to_owned().into_path_buf()],
+        &directories.state,
+        vec![directories.build.into_path_buf()],
         config.pytest_options,
         log,
         &client,
@@ -659,6 +658,21 @@ pub fn main_for_test(
 }
 
 pub struct TestRunner;
+
+impl TestRunner {
+    fn get_directories() -> Result<Directories> {
+        let project = RootBuf::new(Path::new(".").canonicalize()?);
+        let build = project.join(".maelstrom-pytest");
+        let cache = build.join("cache");
+        let state = build.join("state");
+        Ok(Directories {
+            build,
+            cache,
+            project,
+            state,
+        })
+    }
+}
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
@@ -697,26 +711,21 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
-        let cwd = Path::new(".").canonicalize()?;
-        let project_dir = Root::<ProjectDir>::new(&cwd);
+        let directories = Self::get_directories()?;
+
+        Fs.create_dir_all(&directories.state)?;
+        Fs.create_dir_all(&directories.cache)?;
+
         let logging_output = LoggingOutput::default();
         let log = logger.build(logging_output.clone());
-
-        let build_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-pytest");
-        let build_dir = Root::<BuildDir>::new(&build_dir);
-        let state_dir = build_dir.join::<StateDir>("state");
-        let cache_dir = build_dir.join::<CacheDir>("cache");
-
-        Fs.create_dir_all(&state_dir)?;
-        Fs.create_dir_all(&cache_dir)?;
 
         let client = Client::new(
             bg_proc,
             config.parent.broker,
-            project_dir,
-            &state_dir,
+            &directories.project,
+            &directories.state,
             config.parent.container_image_depot_root,
-            &cache_dir,
+            &directories.cache,
             config.parent.cache_size,
             config.parent.inline_limit,
             config.parent.slots,
@@ -724,7 +733,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             config.parent.artifact_transfer_strategy,
             log.clone(),
         )?;
-        let deps = DefaultMainAppDeps::new(project_dir, build_dir, &cache_dir, &client)?;
+        let deps = DefaultMainAppDeps::new(directories.clone(), &client)?;
 
         run_app_with_ui_multithreaded(
             logging_output,
@@ -738,9 +747,9 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             config.parent.stop_after,
             extra_options.parent.watch,
             stdout_is_tty,
-            project_dir,
-            &state_dir,
-            vec![build_dir.to_owned().into_path_buf()],
+            &directories.project,
+            &directories.state,
+            vec![directories.build.into_path_buf()],
             config.pytest_options,
             log,
             &client,
