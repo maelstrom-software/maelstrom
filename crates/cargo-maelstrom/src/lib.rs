@@ -490,34 +490,6 @@ impl TestRunner {
         )
     }
 
-    fn execute_alternative_main(
-        config: &Config,
-        extra_options: &ExtraCommandLineOptions,
-        _start_ui: impl FnOnce() -> (UiHandle, UiSender),
-    ) -> Option<Result<ExitCode>> {
-        extra_options
-            .list
-            .packages
-            .then(|| {
-                alternative_mains::list_packages(
-                    &Self::get_cargo_metadata(config)?.workspace_packages(),
-                    &extra_options.parent.include,
-                    &extra_options.parent.exclude,
-                    &mut io::stdout().lock(),
-                )
-            })
-            .or_else(|| {
-                extra_options.list.binaries.then(|| {
-                    alternative_mains::list_binaries(
-                        &Self::get_cargo_metadata(config)?.workspace_packages(),
-                        &extra_options.parent.include,
-                        &extra_options.parent.exclude,
-                        &mut io::stdout().lock(),
-                    )
-                })
-            })
-    }
-
     fn get_deps(
         _client: &Client,
         directories: &Directories,
@@ -608,6 +580,35 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         ))
     }
 
+    fn execute_alternative_main(
+        &self,
+        config: &Config,
+        extra_options: &ExtraCommandLineOptions,
+        _start_ui: impl FnOnce() -> (UiHandle, UiSender),
+    ) -> Option<Result<ExitCode>> {
+        extra_options
+            .list
+            .packages
+            .then(|| {
+                alternative_mains::list_packages(
+                    &Self::get_cargo_metadata(config)?.workspace_packages(),
+                    &extra_options.parent.include,
+                    &extra_options.parent.exclude,
+                    &mut io::stdout().lock(),
+                )
+            })
+            .or_else(|| {
+                extra_options.list.binaries.then(|| {
+                    alternative_mains::list_binaries(
+                        &Self::get_cargo_metadata(config)?.workspace_packages(),
+                        &extra_options.parent.include,
+                        &extra_options.parent.exclude,
+                        &mut io::stdout().lock(),
+                    )
+                })
+            })
+    }
+
     fn main(
         &self,
         config: Config,
@@ -623,7 +624,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             let log = logger.build(logging_output.clone());
             ui.take().unwrap().start_ui_thread(logging_output, log)
         };
-        if let Some(result) = Self::execute_alternative_main(&config, &extra_options, start_ui) {
+        if let Some(result) = self.execute_alternative_main(&config, &extra_options, start_ui) {
             return result;
         }
 

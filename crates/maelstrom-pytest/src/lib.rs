@@ -22,7 +22,7 @@ use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
-    ui::{Ui, UiHandle, UiMessage, UiSender},
+    ui::{Ui, UiMessage, UiSender},
     BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, TestArtifact,
     TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
@@ -660,14 +660,6 @@ pub fn main_for_test(
 pub struct TestRunner;
 
 impl TestRunner {
-    fn execute_alternative_main(
-        _config: &Config,
-        _extra_options: &ExtraCommandLineOptions,
-        _start_ui: impl FnOnce() -> (UiHandle, UiSender),
-    ) -> Option<Result<ExitCode>> {
-        None
-    }
-
     fn get_deps<'client>(
         client: &'client Client,
         directories: &Directories,
@@ -746,7 +738,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             let log = logger.build(logging_output.clone());
             ui.take().unwrap().start_ui_thread(logging_output, log)
         };
-        if let Some(result) = Self::execute_alternative_main(&config, &extra_options, start_ui) {
+        if let Some(result) = self.execute_alternative_main(&config, &extra_options, start_ui) {
             return result;
         }
 

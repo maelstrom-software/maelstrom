@@ -789,36 +789,6 @@ pub fn main_for_test(
 pub struct TestRunner;
 
 impl TestRunner {
-    fn execute_alternative_main(
-        &self,
-        config: &Config,
-        extra_options: &ExtraCommandLineOptions,
-        start_ui: impl FnOnce() -> (UiHandle, UiSender),
-    ) -> Option<Result<ExitCode>> {
-        extra_options.list.packages.then(|| {
-            let (directories, _) =
-                <Self as maelstrom_test_runner::TestRunner>::get_directories_and_metadata(
-                    self, config,
-                )?;
-
-            Fs.create_dir_all(&directories.cache)?;
-
-            let (ui_handle, ui) = start_ui();
-
-            let list_res = alternative_mains::list_packages(
-                ui,
-                &directories.project,
-                &directories.cache,
-                &extra_options.parent.include,
-                &extra_options.parent.exclude,
-            );
-            let ui_res = ui_handle.join();
-            let exit_code = list_res?;
-            ui_res?;
-            Ok(exit_code)
-        })
-    }
-
     fn get_deps(
         _client: &Client,
         directories: &Directories,
@@ -881,6 +851,33 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             },
             (),
         ))
+    }
+
+    fn execute_alternative_main(
+        &self,
+        config: &Config,
+        extra_options: &ExtraCommandLineOptions,
+        start_ui: impl FnOnce() -> (UiHandle, UiSender),
+    ) -> Option<Result<ExitCode>> {
+        extra_options.list.packages.then(|| {
+            let (directories, _) = self.get_directories_and_metadata(config)?;
+
+            Fs.create_dir_all(&directories.cache)?;
+
+            let (ui_handle, ui) = start_ui();
+
+            let list_res = alternative_mains::list_packages(
+                ui,
+                &directories.project,
+                &directories.cache,
+                &extra_options.parent.include,
+                &extra_options.parent.exclude,
+            );
+            let ui_res = ui_handle.join();
+            let exit_code = list_res?;
+            ui_res?;
+            Ok(exit_code)
+        })
     }
 
     fn main(

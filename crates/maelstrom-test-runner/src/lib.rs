@@ -25,7 +25,7 @@ use std::{
     str,
     sync::{Arc, Mutex},
 };
-use ui::{Ui, UiSender, UiSlogDrain};
+use ui::{Ui, UiHandle, UiSender, UiSlogDrain};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NotRunEstimate {
@@ -166,6 +166,14 @@ pub trait TestRunner {
     fn get_test_metadata_default_contents(&self) -> &str;
     fn get_project_directory(&self, config: &Self::Config) -> Result<Utf8PathBuf>;
     fn is_list(&self, extra_options: &Self::ExtraCommandLineOptions) -> bool;
+    fn execute_alternative_main(
+        &self,
+        _config: &Self::Config,
+        _extra_options: &Self::ExtraCommandLineOptions,
+        _start_ui: impl FnOnce() -> (UiHandle, UiSender),
+    ) -> Option<Result<ExitCode>> {
+        None
+    }
     fn get_directories_and_metadata(
         &self,
         config: &Self::Config,
