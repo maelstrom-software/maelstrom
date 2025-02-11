@@ -696,6 +696,10 @@ impl TestRunner {
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
         vec![directories.build.to_owned().into_path_buf()]
     }
+
+    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, PytestConfigValues) {
+        (config.parent, config.pytest_options)
+    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -753,39 +757,38 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         let logging_output = LoggingOutput::default();
         let log = logger.build(logging_output.clone());
 
+        let (parent_config, collector_config) = Self::split_config(config);
         let client = Client::new(
             bg_proc,
-            config.parent.broker,
+            parent_config.broker,
             &directories.project,
             &directories.state,
-            config.parent.container_image_depot_root,
+            parent_config.container_image_depot_root,
             &directories.cache,
-            config.parent.cache_size,
-            config.parent.inline_limit,
-            config.parent.slots,
-            config.parent.accept_invalid_remote_container_tls_certs,
-            config.parent.artifact_transfer_strategy,
+            parent_config.cache_size,
+            parent_config.inline_limit,
+            parent_config.slots,
+            parent_config.accept_invalid_remote_container_tls_certs,
+            parent_config.artifact_transfer_strategy,
             log.clone(),
         )?;
 
-        let collector_options = config.pytest_options;
-
         run_app_with_ui_multithreaded(
             logging_output,
-            config.parent.timeout.map(Timeout::new),
+            parent_config.timeout.map(Timeout::new),
             ui.unwrap(),
             Self::get_deps(&client, &directories, &log, metadata)?,
             extra_options.parent.include,
             extra_options.parent.exclude,
             extra_options.list.then_some(ListAction::ListTests),
-            config.parent.repeat,
-            config.parent.stop_after,
+            parent_config.repeat,
+            parent_config.stop_after,
             extra_options.parent.watch,
             stdout_is_tty,
             &directories.project,
             &directories.state,
             Self::get_watch_exclude_paths(&directories),
-            collector_options,
+            collector_config,
             log,
             &client,
         )

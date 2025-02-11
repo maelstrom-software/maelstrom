@@ -72,7 +72,7 @@ pub struct IntrospectResponse {
     pub image_downloads: Vec<RemoteProgress>,
 }
 
-#[derive(Clone, Debug, Deserialize, From, Into, TryFromProtoBuf, IntoProtoBuf)]
+#[derive(Clone, Copy, Debug, Deserialize, From, Into, TryFromProtoBuf, IntoProtoBuf)]
 #[proto(proto_buf_type = bool, try_from_into)]
 #[serde(transparent)]
 #[debug("{_0:?}")]
