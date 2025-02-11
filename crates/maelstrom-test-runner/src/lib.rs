@@ -172,6 +172,8 @@ pub trait TestRunner {
 
     fn is_list(extra_options: &Self::ExtraCommandLineOptions) -> bool;
 
+    fn is_list_tests(extra_options: &Self::ExtraCommandLineOptions) -> bool;
+
     fn get_directories_and_metadata(config: &Self::Config)
         -> Result<(Directories, Self::Metadata)>;
 

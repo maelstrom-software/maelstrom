@@ -679,6 +679,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         extra_options.list
     }
 
+    fn is_list_tests(extra_options: &ExtraCommandLineOptions) -> bool {
+        extra_options.list
+    }
+
     fn get_directories_and_metadata(_config: &Config) -> Result<(Directories, ())> {
         let project = RootBuf::new(Path::new(".").canonicalize()?);
         let build = project.join(".maelstrom-pytest");
@@ -754,6 +758,8 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             log.clone(),
         )?;
 
+        let list_action = Self::is_list(&extra_options).then_some(ListAction::ListTests);
+
         run_app_with_ui_multithreaded(
             logging_output,
             parent_config.timeout.map(Timeout::new),
@@ -761,7 +767,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             Self::get_deps(&client, &directories, &log, metadata)?,
             extra_options.parent.include,
             extra_options.parent.exclude,
-            extra_options.list.then_some(ListAction::ListTests),
+            list_action,
             parent_config.repeat,
             parent_config.stop_after,
             extra_options.parent.watch,
