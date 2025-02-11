@@ -22,7 +22,7 @@ use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
-    ui::{Ui, UiMessage, UiSender},
+    ui::{Ui, UiHandle, UiMessage, UiSender},
     BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, TestArtifact,
     TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
@@ -673,7 +673,11 @@ impl TestRunner {
         })
     }
 
-    fn execute_alternative_main() -> Option<Result<ExitCode>> {
+    fn execute_alternative_main(
+        _config: &Config,
+        _extra_options: &ExtraCommandLineOptions,
+        _start_ui: impl FnOnce() -> (UiHandle, UiSender),
+    ) -> Option<Result<ExitCode>> {
         None
     }
 }
@@ -715,7 +719,13 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
-        if let Some(result) = Self::execute_alternative_main() {
+        let mut ui = Some(ui);
+        let start_ui = || {
+            let logging_output = LoggingOutput::default();
+            let log = logger.build(logging_output.clone());
+            ui.take().unwrap().start_ui_thread(logging_output, log)
+        };
+        if let Some(result) = Self::execute_alternative_main(&config, &extra_options, start_ui) {
             return result;
         }
 
@@ -741,12 +751,15 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             config.parent.artifact_transfer_strategy,
             log.clone(),
         )?;
+
         let deps = DefaultMainAppDeps::new(directories.clone(), &client)?;
+        let watch_exclude_paths = vec![directories.build.into_path_buf()];
+        let collector_options = config.pytest_options;
 
         run_app_with_ui_multithreaded(
             logging_output,
             config.parent.timeout.map(Timeout::new),
-            ui,
+            ui.unwrap(),
             deps,
             extra_options.parent.include,
             extra_options.parent.exclude,
@@ -757,8 +770,8 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             stdout_is_tty,
             &directories.project,
             &directories.state,
-            vec![directories.build.into_path_buf()],
-            config.pytest_options,
+            watch_exclude_paths,
+            collector_options,
             log,
             &client,
         )

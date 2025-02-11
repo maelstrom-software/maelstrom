@@ -800,6 +800,7 @@ impl TestRunner {
     }
 
     fn execute_alternative_main(
+        _config: &Config,
         extra_options: &ExtraCommandLineOptions,
         start_ui: impl FnOnce() -> (UiHandle, UiSender),
     ) -> Option<Result<ExitCode>> {
@@ -868,7 +869,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             let log = logger.build(logging_output.clone());
             ui.take().unwrap().start_ui_thread(logging_output, log)
         };
-        if let Some(result) = Self::execute_alternative_main(&extra_options, start_ui) {
+        if let Some(result) = Self::execute_alternative_main(&config, &extra_options, start_ui) {
             return result;
         }
 
@@ -894,7 +895,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             config.parent.artifact_transfer_strategy,
             log.clone(),
         )?;
+
         let deps = DefaultMainAppDeps::new(&directories.project, &directories.cache)?;
+        let watch_exclude_paths = vec![];
+        let collector_options = config.go_test_options;
 
         run_app_with_ui_multithreaded(
             logging_output,
@@ -910,8 +914,8 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             stdout_is_tty,
             &directories.project,
             &directories.state,
-            vec![],
-            config.go_test_options,
+            watch_exclude_paths,
+            collector_options,
             log,
             &client,
         )

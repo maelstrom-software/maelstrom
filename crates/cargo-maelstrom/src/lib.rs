@@ -19,7 +19,7 @@ use maelstrom_client::{
 use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
-    ui::{Ui, UiSender},
+    ui::{Ui, UiHandle, UiSender},
     BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata,
     TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
@@ -503,6 +503,7 @@ impl TestRunner {
     fn execute_alternative_main(
         config: &Config,
         extra_options: &ExtraCommandLineOptions,
+        _start_ui: impl FnOnce() -> (UiHandle, UiSender),
     ) -> Option<Result<ExitCode>> {
         extra_options
             .list
@@ -569,7 +570,13 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
-        if let Some(result) = Self::execute_alternative_main(&config, &extra_options) {
+        let mut ui = Some(ui);
+        let start_ui = || {
+            let logging_output = LoggingOutput::default();
+            let log = logger.build(logging_output.clone());
+            ui.take().unwrap().start_ui_thread(logging_output, log)
+        };
+        if let Some(result) = Self::execute_alternative_main(&config, &extra_options, start_ui) {
             return result;
         }
 
@@ -608,8 +615,8 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             },
             target_dir: directories.build.clone(),
         };
-
-        let cargo_options = CargoOptions {
+        let watch_exclude_paths = vec![directories.build.into_path_buf()];
+        let collector_options = CargoOptions {
             feature_selection_options: config.cargo_feature_selection_options,
             compilation_options: config.cargo_compilation_options,
             manifest_options: config.cargo_manifest_options,
@@ -619,7 +626,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         run_app_with_ui_multithreaded(
             logging_output,
             config.parent.timeout.map(Timeout::new),
-            ui,
+            ui.unwrap(),
             deps,
             extra_options.parent.include,
             extra_options.parent.exclude,
@@ -630,8 +637,8 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             stdout_is_tty,
             &directories.project,
             &directories.state,
-            vec![directories.build.into_path_buf()],
-            cargo_options,
+            watch_exclude_paths,
+            collector_options,
             log,
             &client,
         )
