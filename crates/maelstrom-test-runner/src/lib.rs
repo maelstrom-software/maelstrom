@@ -196,6 +196,10 @@ pub trait TestRunner {
 
     fn split_config(config: Self::Config) -> (config::Config, Self::CollectorOptions);
 
+    fn extra_options_into_parent(
+        extra_options: Self::ExtraCommandLineOptions,
+    ) -> config::ExtraCommandLineOptions;
+
     fn main(
         config: Self::Config,
         extra_options: Self::ExtraCommandLineOptions,

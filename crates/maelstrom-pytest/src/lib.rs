@@ -716,6 +716,12 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         (config.parent, config.pytest_options)
     }
 
+    fn extra_options_into_parent(
+        extra_options: ExtraCommandLineOptions,
+    ) -> maelstrom_test_runner::config::ExtraCommandLineOptions {
+        extra_options.parent
+    }
+
     fn main(
         config: Config,
         extra_options: ExtraCommandLineOptions,
@@ -759,18 +765,19 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         )?;
 
         let list_action = Self::is_list(&extra_options).then_some(ListAction::ListTests);
+        let parent_extra_options = Self::extra_options_into_parent(extra_options);
 
         run_app_with_ui_multithreaded(
             logging_output,
             parent_config.timeout.map(Timeout::new),
             ui.unwrap(),
             Self::get_deps(&client, &directories, &log, metadata)?,
-            extra_options.parent.include,
-            extra_options.parent.exclude,
+            parent_extra_options.include,
+            parent_extra_options.exclude,
             list_action,
             parent_config.repeat,
             parent_config.stop_after,
-            extra_options.parent.watch,
+            parent_extra_options.watch,
             stdout_is_tty,
             &directories.project,
             &directories.state,
