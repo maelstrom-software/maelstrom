@@ -850,7 +850,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             ui_res?;
             Ok(exit_code)
         } else {
-            let list_action = extra_options.list.tests.then_some(ListAction::ListTests);
             let client = Client::new(
                 bg_proc,
                 config.parent.broker,
@@ -874,7 +873,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 deps,
                 extra_options.parent.include,
                 extra_options.parent.exclude,
-                list_action,
+                extra_options.list.tests.then_some(ListAction::ListTests),
                 config.parent.repeat,
                 config.parent.stop_after,
                 extra_options.parent.watch,

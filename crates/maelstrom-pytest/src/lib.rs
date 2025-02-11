@@ -702,7 +702,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         let logging_output = LoggingOutput::default();
         let log = logger.build(logging_output.clone());
 
-        let list_action = extra_options.list.then_some(ListAction::ListTests);
         let build_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-pytest");
         let build_dir = Root::<BuildDir>::new(&build_dir);
         let state_dir = build_dir.join::<StateDir>("state");
@@ -734,7 +733,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             deps,
             extra_options.parent.include,
             extra_options.parent.exclude,
-            list_action,
+            extra_options.list.then_some(ListAction::ListTests),
             config.parent.repeat,
             config.parent.stop_after,
             extra_options.parent.watch,
