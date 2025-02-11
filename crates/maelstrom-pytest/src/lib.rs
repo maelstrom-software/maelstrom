@@ -672,6 +672,10 @@ impl TestRunner {
             state,
         })
     }
+
+    fn execute_alternative_main() -> Option<Result<ExitCode>> {
+        None
+    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -711,6 +715,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
+        if let Some(result) = Self::execute_alternative_main() {
+            return result;
+        }
+
         let directories = Self::get_directories()?;
 
         Fs.create_dir_all(&directories.state)?;

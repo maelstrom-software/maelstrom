@@ -20,7 +20,7 @@ use maelstrom_client::{
 use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
-    ui::{Ui, UiSender},
+    ui::{Ui, UiHandle, UiSender},
     BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata,
     TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
@@ -798,6 +798,31 @@ impl TestRunner {
             state,
         })
     }
+
+    fn execute_alternative_main(
+        extra_options: &ExtraCommandLineOptions,
+        start_ui: impl FnOnce() -> (UiHandle, UiSender),
+    ) -> Option<Result<ExitCode>> {
+        extra_options.list.packages.then(|| {
+            let directories = Self::get_directories()?;
+
+            Fs.create_dir_all(&directories.cache)?;
+
+            let (ui_handle, ui) = start_ui();
+
+            let list_res = alternative_mains::list_packages(
+                ui,
+                &directories.project,
+                &directories.cache,
+                &extra_options.parent.include,
+                &extra_options.parent.exclude,
+            );
+            let ui_res = ui_handle.join();
+            let exit_code = list_res?;
+            ui_res?;
+            Ok(exit_code)
+        })
+    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -837,71 +862,58 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
-        if extra_options.list.packages {
-            let directories = Self::get_directories()?;
-
-            Fs.create_dir_all(&directories.cache)?;
-
+        let mut ui = Some(ui);
+        let start_ui = || {
             let logging_output = LoggingOutput::default();
             let log = logger.build(logging_output.clone());
-
-            let (ui_handle, ui) = ui.start_ui_thread(logging_output, log);
-
-            let list_res = alternative_mains::list_packages(
-                ui,
-                &directories.project,
-                &directories.cache,
-                &extra_options.parent.include,
-                &extra_options.parent.exclude,
-            );
-            let ui_res = ui_handle.join();
-            let exit_code = list_res?;
-            ui_res?;
-            Ok(exit_code)
-        } else {
-            let directories = Self::get_directories()?;
-
-            Fs.create_dir_all(&directories.state)?;
-            Fs.create_dir_all(&directories.cache)?;
-
-            let logging_output = LoggingOutput::default();
-            let log = logger.build(logging_output.clone());
-
-            let client = Client::new(
-                bg_proc,
-                config.parent.broker,
-                &directories.project,
-                &directories.state,
-                config.parent.container_image_depot_root,
-                &directories.cache,
-                config.parent.cache_size,
-                config.parent.inline_limit,
-                config.parent.slots,
-                config.parent.accept_invalid_remote_container_tls_certs,
-                config.parent.artifact_transfer_strategy,
-                log.clone(),
-            )?;
-            let deps = DefaultMainAppDeps::new(&directories.project, &directories.cache)?;
-
-            run_app_with_ui_multithreaded(
-                logging_output,
-                config.parent.timeout.map(Timeout::new),
-                ui,
-                deps,
-                extra_options.parent.include,
-                extra_options.parent.exclude,
-                extra_options.list.tests.then_some(ListAction::ListTests),
-                config.parent.repeat,
-                config.parent.stop_after,
-                extra_options.parent.watch,
-                stdout_is_tty,
-                &directories.project,
-                &directories.state,
-                vec![],
-                config.go_test_options,
-                log,
-                &client,
-            )
+            ui.take().unwrap().start_ui_thread(logging_output, log)
+        };
+        if let Some(result) = Self::execute_alternative_main(&extra_options, start_ui) {
+            return result;
         }
+
+        let directories = Self::get_directories()?;
+
+        Fs.create_dir_all(&directories.state)?;
+        Fs.create_dir_all(&directories.cache)?;
+
+        let logging_output = LoggingOutput::default();
+        let log = logger.build(logging_output.clone());
+
+        let client = Client::new(
+            bg_proc,
+            config.parent.broker,
+            &directories.project,
+            &directories.state,
+            config.parent.container_image_depot_root,
+            &directories.cache,
+            config.parent.cache_size,
+            config.parent.inline_limit,
+            config.parent.slots,
+            config.parent.accept_invalid_remote_container_tls_certs,
+            config.parent.artifact_transfer_strategy,
+            log.clone(),
+        )?;
+        let deps = DefaultMainAppDeps::new(&directories.project, &directories.cache)?;
+
+        run_app_with_ui_multithreaded(
+            logging_output,
+            config.parent.timeout.map(Timeout::new),
+            ui.unwrap(),
+            deps,
+            extra_options.parent.include,
+            extra_options.parent.exclude,
+            extra_options.list.tests.then_some(ListAction::ListTests),
+            config.parent.repeat,
+            config.parent.stop_after,
+            extra_options.parent.watch,
+            stdout_is_tty,
+            &directories.project,
+            &directories.state,
+            vec![],
+            config.go_test_options,
+            log,
+            &client,
+        )
     }
 }

@@ -492,6 +492,40 @@ impl TestRunner {
             project,
         })
     }
+
+    fn get_cargo_metadata(config: &Config) -> Result<CargoMetadata> {
+        cargo::read_metadata(
+            &config.cargo_feature_selection_options,
+            &config.cargo_manifest_options,
+        )
+    }
+
+    fn execute_alternative_main(
+        config: &Config,
+        extra_options: &ExtraCommandLineOptions,
+    ) -> Option<Result<ExitCode>> {
+        extra_options
+            .list
+            .packages
+            .then(|| {
+                alternative_mains::list_packages(
+                    &Self::get_cargo_metadata(config)?.workspace_packages(),
+                    &extra_options.parent.include,
+                    &extra_options.parent.exclude,
+                    &mut io::stdout().lock(),
+                )
+            })
+            .or_else(|| {
+                extra_options.list.binaries.then(|| {
+                    alternative_mains::list_binaries(
+                        &Self::get_cargo_metadata(config)?.workspace_packages(),
+                        &extra_options.parent.include,
+                        &extra_options.parent.exclude,
+                        &mut io::stdout().lock(),
+                    )
+                })
+            })
+    }
 }
 
 impl maelstrom_test_runner::TestRunner for TestRunner {
@@ -535,91 +569,71 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         stdout_is_tty: bool,
         ui: Box<dyn Ui>,
     ) -> Result<ExitCode> {
-        let get_metadata = || {
-            cargo::read_metadata(
-                &config.cargo_feature_selection_options,
-                &config.cargo_manifest_options,
-            )
-        };
-        if extra_options.list.packages {
-            let cargo_metadata = get_metadata()?;
-            alternative_mains::list_packages(
-                &cargo_metadata.workspace_packages(),
-                &extra_options.parent.include,
-                &extra_options.parent.exclude,
-                &mut io::stdout().lock(),
-            )
-        } else if extra_options.list.binaries {
-            let cargo_metadata = get_metadata()?;
-            alternative_mains::list_binaries(
-                &cargo_metadata.workspace_packages(),
-                &extra_options.parent.include,
-                &extra_options.parent.exclude,
-                &mut io::stdout().lock(),
-            )
-        } else {
-            let cargo_metadata = get_metadata()?;
-            let directories = Self::get_directories(&cargo_metadata)?;
-
-            Fs.create_dir_all(&directories.state)?;
-            Fs.create_dir_all(&directories.cache)?;
-
-            let logging_output = LoggingOutput::default();
-            let log = logger.build(logging_output.clone());
-
-            let client = Client::new(
-                bg_proc,
-                config.parent.broker,
-                &directories.project,
-                &directories.state,
-                config.parent.container_image_depot_root,
-                &directories.cache,
-                config.parent.cache_size,
-                config.parent.inline_limit,
-                config.parent.slots,
-                config.parent.accept_invalid_remote_container_tls_certs,
-                config.parent.artifact_transfer_strategy,
-                log.clone(),
-            )?;
-
-            let deps = DefaultMainAppDeps {
-                test_collector: CargoTestCollector {
-                    log: log.clone(),
-                    packages: cargo_metadata
-                        .workspace_packages()
-                        .into_iter()
-                        .map(|p| CargoPackage(p.clone()))
-                        .collect(),
-                },
-                target_dir: directories.build.clone(),
-            };
-
-            let cargo_options = CargoOptions {
-                feature_selection_options: config.cargo_feature_selection_options,
-                compilation_options: config.cargo_compilation_options,
-                manifest_options: config.cargo_manifest_options,
-                extra_test_binary_args: config.extra_test_binary_args,
-            };
-
-            run_app_with_ui_multithreaded(
-                logging_output,
-                config.parent.timeout.map(Timeout::new),
-                ui,
-                deps,
-                extra_options.parent.include,
-                extra_options.parent.exclude,
-                extra_options.list.tests.then_some(ListAction::ListTests),
-                config.parent.repeat,
-                config.parent.stop_after,
-                extra_options.parent.watch,
-                stdout_is_tty,
-                &directories.project,
-                &directories.state,
-                vec![directories.build.into_path_buf()],
-                cargo_options,
-                log,
-                &client,
-            )
+        if let Some(result) = Self::execute_alternative_main(&config, &extra_options) {
+            return result;
         }
+
+        let cargo_metadata = Self::get_cargo_metadata(&config)?;
+        let directories = Self::get_directories(&cargo_metadata)?;
+
+        Fs.create_dir_all(&directories.state)?;
+        Fs.create_dir_all(&directories.cache)?;
+
+        let logging_output = LoggingOutput::default();
+        let log = logger.build(logging_output.clone());
+
+        let client = Client::new(
+            bg_proc,
+            config.parent.broker,
+            &directories.project,
+            &directories.state,
+            config.parent.container_image_depot_root,
+            &directories.cache,
+            config.parent.cache_size,
+            config.parent.inline_limit,
+            config.parent.slots,
+            config.parent.accept_invalid_remote_container_tls_certs,
+            config.parent.artifact_transfer_strategy,
+            log.clone(),
+        )?;
+
+        let deps = DefaultMainAppDeps {
+            test_collector: CargoTestCollector {
+                log: log.clone(),
+                packages: cargo_metadata
+                    .workspace_packages()
+                    .into_iter()
+                    .map(|p| CargoPackage(p.clone()))
+                    .collect(),
+            },
+            target_dir: directories.build.clone(),
+        };
+
+        let cargo_options = CargoOptions {
+            feature_selection_options: config.cargo_feature_selection_options,
+            compilation_options: config.cargo_compilation_options,
+            manifest_options: config.cargo_manifest_options,
+            extra_test_binary_args: config.extra_test_binary_args,
+        };
+
+        run_app_with_ui_multithreaded(
+            logging_output,
+            config.parent.timeout.map(Timeout::new),
+            ui,
+            deps,
+            extra_options.parent.include,
+            extra_options.parent.exclude,
+            extra_options.list.tests.then_some(ListAction::ListTests),
+            config.parent.repeat,
+            config.parent.stop_after,
+            extra_options.parent.watch,
+            stdout_is_tty,
+            &directories.project,
+            &directories.state,
+            vec![directories.build.into_path_buf()],
+            cargo_options,
+            log,
+            &client,
+        )
     }
 }
