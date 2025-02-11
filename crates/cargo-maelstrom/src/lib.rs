@@ -14,8 +14,8 @@ use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     shared_library_dependencies_layer_spec,
     spec::{LayerSpec, PathsLayerSpec, PrefixOptions},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, ProjectDir, StateDir,
+    CacheDir, Client, ClientBgProcess,
+    ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
     metadata::Metadata,
@@ -25,7 +25,6 @@ use maelstrom_test_runner::{
     TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
-    config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
@@ -43,63 +42,6 @@ pub struct MaelstromTargetDir;
 struct DefaultMainAppDeps {
     test_collector: CargoTestCollector,
     target_dir: RootBuf<BuildDir>,
-}
-
-impl DefaultMainAppDeps {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        bg_proc: ClientBgProcess,
-        broker_addr: Option<BrokerAddr>,
-        project_dir: impl AsRef<Root<ProjectDir>>,
-        state_dir: impl AsRef<Root<StateDir>>,
-        container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
-        cache_dir: impl AsRef<Root<CacheDir>>,
-        target_dir: impl AsRef<Root<BuildDir>>,
-        cache_size: CacheSize,
-        inline_limit: InlineLimit,
-        slots: Slots,
-        accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-        artifact_transfer_strategy: ArtifactTransferStrategy,
-        packages: Vec<CargoPackage>,
-        log: slog::Logger,
-    ) -> Result<(Self, Client)> {
-        let project_dir = project_dir.as_ref();
-        let state_dir = state_dir.as_ref();
-        let container_image_depot_dir = container_image_depot_dir.as_ref();
-        let cache_dir = cache_dir.as_ref();
-        slog::debug!(
-            log, "creating app dependencies";
-            "broker_addr" => ?broker_addr,
-            "project_dir" => ?project_dir,
-            "state_dir" => ?state_dir,
-            "container_image_depot_dir" => ?container_image_depot_dir,
-            "cache_dir" => ?cache_dir,
-            "cache_size" => ?cache_size,
-            "inline_limit" => ?inline_limit,
-            "slots" => ?slots,
-        );
-        let client = Client::new(
-            bg_proc,
-            broker_addr,
-            project_dir,
-            state_dir,
-            container_image_depot_dir,
-            cache_dir,
-            cache_size,
-            inline_limit,
-            slots,
-            accept_invalid_remote_container_tls_certs,
-            artifact_transfer_strategy,
-            log.clone(),
-        )?;
-        Ok((
-            Self {
-                test_collector: CargoTestCollector { log, packages },
-                target_dir: target_dir.as_ref().to_owned(),
-            },
-            client,
-        ))
-    }
 }
 
 const MISSING_RIGHT_PAREN: &str = "last character was not ')'";
@@ -622,22 +564,57 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 .map(|p| CargoPackage(p.clone()))
                 .collect::<Vec<_>>();
 
-            let (deps, client) = DefaultMainAppDeps::new(
-                bg_proc,
-                config.parent.broker,
-                workspace_dir.transmute::<ProjectDir>(),
-                &state_dir,
-                config.parent.container_image_depot_root,
-                cache_dir,
-                target_dir,
-                config.parent.cache_size,
-                config.parent.inline_limit,
-                config.parent.slots,
-                config.parent.accept_invalid_remote_container_tls_certs,
-                config.parent.artifact_transfer_strategy,
-                packages,
-                log.clone(),
-            )?;
+            let (deps, client) = {
+                let bg_proc = bg_proc;
+                let broker_addr = config.parent.broker;
+                let project_dir = workspace_dir.transmute::<ProjectDir>();
+                let state_dir = &state_dir;
+                let container_image_depot_dir = config.parent.container_image_depot_root;
+                let cache_dir = cache_dir;
+                let target_dir = target_dir;
+                let cache_size = config.parent.cache_size;
+                let inline_limit = config.parent.inline_limit;
+                let slots = config.parent.slots;
+                let accept_invalid_remote_container_tls_certs =
+                    config.parent.accept_invalid_remote_container_tls_certs;
+                let artifact_transfer_strategy = config.parent.artifact_transfer_strategy;
+                let packages = packages;
+                let log = log.clone();
+
+                slog::debug!(
+                    log, "creating app dependencies";
+                    "broker_addr" => ?broker_addr,
+                    "project_dir" => ?project_dir,
+                    "state_dir" => ?state_dir,
+                    "container_image_depot_dir" => ?container_image_depot_dir,
+                    "cache_dir" => ?cache_dir,
+                    "cache_size" => ?cache_size,
+                    "inline_limit" => ?inline_limit,
+                    "slots" => ?slots,
+                );
+                let client = Client::new(
+                    bg_proc,
+                    broker_addr,
+                    project_dir,
+                    state_dir,
+                    container_image_depot_dir,
+                    cache_dir,
+                    cache_size,
+                    inline_limit,
+                    slots,
+                    accept_invalid_remote_container_tls_certs,
+                    artifact_transfer_strategy,
+                    log.clone(),
+                )?;
+
+                (
+                    DefaultMainAppDeps {
+                        test_collector: CargoTestCollector { log, packages },
+                        target_dir: target_dir.to_owned(),
+                    },
+                    client,
+                )
+            };
 
             let cargo_options = CargoOptions {
                 feature_selection_options: config.cargo_feature_selection_options,
