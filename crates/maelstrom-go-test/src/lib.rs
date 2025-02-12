@@ -38,7 +38,7 @@ use std::{
 };
 
 const TEST_METADATA_FILE_NAME: &str = "maelstrom-go-test.toml";
-const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
+const DEFAULT_TEST_METADATA_FILE_CONTENTS: &str = include_str!("default-test-metadata.toml");
 
 #[allow(clippy::too_many_arguments)]
 fn create_client_for_test(
@@ -663,7 +663,7 @@ fn remove_fixture_output_example_test() {
 #[test]
 fn default_test_metadata_parses() {
     maelstrom_test_runner::metadata::Store::<pattern::Pattern>::load(
-        DEFAULT_TEST_METADATA_CONTENTS,
+        DEFAULT_TEST_METADATA_FILE_CONTENTS,
         &Default::default(),
     )
     .unwrap();
@@ -767,7 +767,7 @@ pub fn main_for_test(
             log,
             &client,
             TEST_METADATA_FILE_NAME,
-            DEFAULT_TEST_METADATA_CONTENTS,
+            DEFAULT_TEST_METADATA_FILE_CONTENTS,
             template_vars,
         )
     }
@@ -785,7 +785,8 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-go-test";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_GO_TEST";
     const TEST_METADATA_FILE_NAME: &'static str = crate::TEST_METADATA_FILE_NAME;
-    const TEST_METADATA_DEFAULT_CONTENTS: &'static str = crate::DEFAULT_TEST_METADATA_CONTENTS;
+    const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
+        crate::DEFAULT_TEST_METADATA_FILE_CONTENTS;
 
     fn get_project_directory(_: &Config) -> Result<Utf8PathBuf> {
         Ok(".".into())

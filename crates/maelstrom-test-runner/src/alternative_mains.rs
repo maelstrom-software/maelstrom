@@ -1,6 +1,6 @@
 use anyhow::Result;
-use maelstrom_base::Utf8Path;
-use maelstrom_util::{fs::Fs, process::ExitCode};
+use maelstrom_client::ProjectDir;
+use maelstrom_util::{fs::Fs, process::ExitCode, root::Root};
 
 pub fn client_bg_proc() -> Result<ExitCode> {
     maelstrom_client::bg_proc_main()?;
@@ -9,17 +9,22 @@ pub fn client_bg_proc() -> Result<ExitCode> {
 
 /// Write out a default config file to `<project-dir>/<TEST_TOML>` if nothing exists there already.
 pub fn init(
-    project_dir: &Utf8Path,
+    project_dir: &Root<ProjectDir>,
     test_metadata_file_name: &str,
-    test_metdata_default_contents: &str,
+    default_test_metadata_file_contents: &str,
 ) -> Result<ExitCode> {
-    let path = project_dir.join(test_metadata_file_name);
+    let path = project_dir
+        .join::<()>(test_metadata_file_name)
+        .into_path_buf();
     if !Fs.exists(&path) {
-        Fs.write(&path, test_metdata_default_contents)?;
-        println!("Wrote default config to {path}.");
+        Fs.write(&path, default_test_metadata_file_contents)?;
+        println!("Wrote default config to {}.", path.to_string_lossy());
         Ok(ExitCode::SUCCESS)
     } else {
-        println!("Config already exists at {path}. Doing nothing.");
+        println!(
+            "Config already exists at {}. Doing nothing.",
+            path.to_string_lossy()
+        );
         Ok(ExitCode::FAILURE)
     }
 }

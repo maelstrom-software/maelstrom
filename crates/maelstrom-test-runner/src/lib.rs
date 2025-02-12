@@ -64,7 +64,7 @@ pub trait TestRunner {
     const BASE_DIRECTORIES_PREFIX: &'static str;
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str;
     const TEST_METADATA_FILE_NAME: &'static str;
-    const TEST_METADATA_DEFAULT_CONTENTS: &'static str;
+    const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str;
 
     fn get_project_directory(config: &Self::Config) -> Result<Utf8PathBuf>;
 
@@ -132,10 +132,11 @@ where
     if extra_options.as_ref().client_bg_proc {
         return alternative_mains::client_bg_proc();
     } else if extra_options.as_ref().init {
+        let (directories, _) = TestRunnerT::get_directories_and_metadata(&config)?;
         return alternative_mains::init(
-            &TestRunnerT::get_project_directory(&config)?,
+            &directories.project,
             TestRunnerT::TEST_METADATA_FILE_NAME,
-            TestRunnerT::TEST_METADATA_DEFAULT_CONTENTS,
+            TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
         );
     }
 
@@ -206,7 +207,7 @@ where
         log,
         &client,
         TestRunnerT::TEST_METADATA_FILE_NAME,
-        TestRunnerT::TEST_METADATA_DEFAULT_CONTENTS,
+        TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
         template_vars,
     )
 }

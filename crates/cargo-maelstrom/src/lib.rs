@@ -31,7 +31,7 @@ use std::{
 };
 
 const TEST_METADATA_FILE_NAME: &str = "cargo-maelstrom.toml";
-const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata.toml");
+const DEFAULT_TEST_METADATA_FILE_CONTENTS: &str = include_str!("default-test-metadata.toml");
 
 /// The Maelstrom target directory is `<target-dir>/maelstrom`.
 pub struct MaelstromTargetDir;
@@ -425,7 +425,7 @@ fn remove_fixture_output_confusing_trailer() {
 #[test]
 fn default_test_metadata_parses() {
     maelstrom_test_runner::metadata::Store::<pattern::Pattern>::load(
-        DEFAULT_TEST_METADATA_CONTENTS,
+        DEFAULT_TEST_METADATA_FILE_CONTENTS,
         &Default::default(),
     )
     .unwrap();
@@ -462,7 +462,8 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/cargo-maelstrom";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "CARGO_MAELSTROM";
     const TEST_METADATA_FILE_NAME: &'static str = crate::TEST_METADATA_FILE_NAME;
-    const TEST_METADATA_DEFAULT_CONTENTS: &'static str = crate::DEFAULT_TEST_METADATA_CONTENTS;
+    const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
+        crate::DEFAULT_TEST_METADATA_FILE_CONTENTS;
 
     fn get_project_directory(config: &Config) -> Result<Utf8PathBuf> {
         Ok(cargo::read_metadata(
