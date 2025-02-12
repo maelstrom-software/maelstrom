@@ -32,6 +32,7 @@ use maelstrom_util::{
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
+    template::TemplateVars,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -685,5 +686,12 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
         vec![directories.build.to_owned().into_path_buf()]
+    }
+
+    fn get_template_vars(
+        _collector_options: &Self::CollectorOptions,
+        _directories: &Directories,
+    ) -> Result<TemplateVars> {
+        Ok(TemplateVars::default())
     }
 }

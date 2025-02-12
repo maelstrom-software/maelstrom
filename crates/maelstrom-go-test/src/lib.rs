@@ -30,6 +30,7 @@ use maelstrom_util::{
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
+    template::TemplateVars,
 };
 use std::{
     fmt, io,
@@ -845,5 +846,12 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_watch_exclude_paths(_directories: &Directories) -> Vec<PathBuf> {
         vec![]
+    }
+
+    fn get_template_vars(
+        _collector_options: &Self::CollectorOptions,
+        _directories: &Directories,
+    ) -> Result<TemplateVars> {
+        Ok(TemplateVars::default())
     }
 }

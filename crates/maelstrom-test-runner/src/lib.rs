@@ -109,11 +109,9 @@ pub trait TestRunner {
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf>;
 
     fn get_template_vars(
-        _collector_options: &Self::CollectorOptions,
-        _directories: &Directories,
-    ) -> Result<TemplateVars> {
-        Ok(TemplateVars::default())
-    }
+        collector_options: &Self::CollectorOptions,
+        directories: &Directories,
+    ) -> Result<TemplateVars>;
 }
 
 /// Helper that does common work for test-runner main functions and then forwards on to the given
