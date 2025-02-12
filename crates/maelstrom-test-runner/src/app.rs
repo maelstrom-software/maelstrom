@@ -12,7 +12,7 @@ use crate::{
     test_db::{TestDb, TestDbStore},
     ui::UiSender,
     ui::{Ui, UiJobId as JobId, UiMessage},
-    ListAction, LoggingOutput,
+    ListTests, LoggingOutput,
 };
 use anyhow::{Context as _, Result};
 use maelstrom_base::Timeout;
@@ -71,7 +71,7 @@ struct TestingOptions<TestFilterT, CollectOptionsT> {
     stdout_color: bool,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
-    listing: bool,
+    list_tests: ListTests,
 }
 
 enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static> {
@@ -423,7 +423,7 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT, CollectorOptionsT>(
     test_collector: &TestCollectorT,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-    list_action: Option<ListAction>,
+    list_tests: ListTests,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
     watch: bool,
@@ -500,7 +500,7 @@ where
             stdout_color,
             repeat,
             stop_after,
-            listing: list_action.is_some(),
+            list_tests,
         },
         watch,
         watch_exclude_paths,

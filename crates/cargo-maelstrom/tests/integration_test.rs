@@ -10,7 +10,7 @@ use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_test_runner::{
     run_app_with_ui_multithreaded,
     ui::{self, Ui as _},
-    ListAction, LoggingOutput, TestRunner as _,
+    LoggingOutput, TestRunner as _,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -125,8 +125,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             log.clone(),
         )?;
 
-        let list_action =
-            cargo_maelstrom::TestRunner::is_list(&extra_options).then_some(ListAction::ListTests);
+        let list_tests = cargo_maelstrom::TestRunner::is_list_tests(&extra_options).into();
         let parent_extra_options =
             cargo_maelstrom::TestRunner::extra_options_into_parent(extra_options);
         let template_vars =
@@ -144,7 +143,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             )?,
             parent_extra_options.include,
             parent_extra_options.exclude,
-            list_action,
+            list_tests,
             parent_config.repeat,
             parent_config.stop_after,
             parent_extra_options.watch,

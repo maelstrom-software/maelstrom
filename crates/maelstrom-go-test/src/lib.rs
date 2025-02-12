@@ -21,7 +21,7 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiHandle, UiSender},
-    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, NoCaseMetadata, TestArtifact,
+    BuildDir, CollectTests, Directories, LoggingOutput, NoCaseMetadata, TestArtifact,
     TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
@@ -725,7 +725,7 @@ pub fn main_for_test(
         ui_res?;
         Ok(exit_code)
     } else {
-        let list_action = extra_options.list.tests.then_some(ListAction::ListTests);
+        let list_tests = extra_options.list.tests.into();
 
         let client = create_client_for_test(
             bg_proc,
@@ -754,7 +754,7 @@ pub fn main_for_test(
             &test_collector,
             extra_options.parent.include,
             extra_options.parent.exclude,
-            list_action,
+            list_tests,
             config.parent.repeat,
             config.parent.stop_after,
             extra_options.parent.watch,

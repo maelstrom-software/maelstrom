@@ -138,7 +138,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
 
     fn check_for_done(&mut self) {
         if self.is_done() {
-            if !self.options.listing {
+            if !self.options.list_tests.as_bool() {
                 let all_pending_stuff_done =
                     self.jobs.is_empty() && self.pending_listings == 0 && self.collection_finished;
                 let stuff_not_run = !all_pending_stuff_done || self.collection_failed;
@@ -310,7 +310,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             return;
         }
 
-        if self.options.listing {
+        if self.options.list_tests.as_bool() {
             let case_str = artifact.format_case(&package_name, case_name, case_metadata);
             self.deps.send_ui_msg(UiMessage::List(case_str));
             return;

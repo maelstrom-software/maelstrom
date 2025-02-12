@@ -23,7 +23,7 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, TestArtifact, TestArtifactKey,
+    BuildDir, CollectTests, Directories, LoggingOutput, TestArtifact, TestArtifactKey,
     TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
@@ -573,7 +573,7 @@ pub fn main_for_test(
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
 
-    let list_action = extra_options.list.then_some(ListAction::ListTests);
+    let list_tests = extra_options.list.into();
     let project = project_dir.to_owned();
     let build = project.join(".maelstrom-pytest");
     let cache = build.join("cache");
@@ -619,7 +619,7 @@ pub fn main_for_test(
         &test_collector,
         extra_options.parent.include,
         extra_options.parent.exclude,
-        list_action,
+        list_tests,
         config.parent.repeat,
         config.parent.stop_after,
         extra_options.parent.watch,

@@ -285,7 +285,7 @@ fn default_testing_options() -> TestingOptions<FakeTestFilter, TestOptions> {
         stdout_color: false,
         repeat: Repeat::try_from(1).unwrap(),
         stop_after: None,
-        listing: false,
+        list_tests: false.into(),
     }
 }
 
@@ -3360,7 +3360,7 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     listing,
-    @ listing = true,
+    @ list_tests = true.into(),
     expected_test_db_out = [
         TestDbEntry::new("foo_pkg", "foo_test", "test_a"),
         TestDbEntry::new("foo_pkg", "foo_test", "test_b")
@@ -3406,7 +3406,7 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     listing_ignored_tests,
-    @ listing = true,
+    @ list_tests = true.into(),
     expected_test_db_out = [
         TestDbEntry::new("foo_pkg", "foo_test", "test_a"),
         TestDbEntry::new("foo_pkg", "foo_test", "test_b")
@@ -3452,7 +3452,7 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     listing_no_tests,
-    @ listing = true,
+    @ list_tests = true.into(),
     expected_test_db_out = [
         TestDbEntry::empty_artifact("foo_pkg", "foo_test")
     ],
@@ -3492,7 +3492,7 @@ script_test_with_error_simex! {
 script_test_with_error_simex! {
     listing_and_filtering_cases,
     @ filter = SimpleFilter::Name("test_a".into()).into(),
-    @ listing = true,
+    @ list_tests = true.into(),
     expected_test_db_out = [
         TestDbEntry::new("foo_pkg", "foo_test", "test_a"),
         TestDbEntry::new("foo_pkg", "foo_test", "test_b")
@@ -3535,8 +3535,8 @@ script_test_with_error_simex! {
 
 script_test_with_error_simex! {
     listing_and_repeating,
-    @ listing = true,
-    @ repeat = Repeat::try_from(2).unwrap(),
+    @ list_tests = true.into(),
+    @ repeat = 2.try_into().unwrap(),
     expected_test_db_out = [
         TestDbEntry::new("foo_pkg", "foo_test", "test_a"),
         TestDbEntry::new("foo_pkg", "foo_test", "test_b")

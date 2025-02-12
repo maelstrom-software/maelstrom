@@ -14,6 +14,7 @@ pub use deps::*;
 
 use anyhow::Result;
 use clap::{Args, Command};
+use derive_more::{From, Into};
 use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
 use maelstrom_util::{
@@ -23,7 +24,7 @@ use maelstrom_util::{
 use slog::Drain as _;
 use std::{
     ffi::OsString,
-    fmt::{self, Debug},
+    fmt::{self, Debug, Display, Formatter},
     io::{self, IsTerminal as _},
     path::PathBuf,
     str,
@@ -39,20 +40,24 @@ pub enum NotRunEstimate {
     Unknown,
 }
 
-impl fmt::Display for NotRunEstimate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for NotRunEstimate {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::About(n) => fmt::Display::fmt(&format!("~{n}"), f),
-            Self::Exactly(n) => fmt::Display::fmt(&n, f),
-            Self::GreaterThan(n) => fmt::Display::fmt(&format!(">{n}"), f),
-            Self::Unknown => fmt::Display::fmt("unknown number of", f),
+            Self::About(n) => Display::fmt(&format!("~{n}"), f),
+            Self::Exactly(n) => Display::fmt(&n, f),
+            Self::GreaterThan(n) => Display::fmt(&format!(">{n}"), f),
+            Self::Unknown => Display::fmt("unknown number of", f),
         }
     }
 }
 
-#[derive(Debug)]
-pub enum ListAction {
-    ListTests,
+#[derive(Clone, Copy, derive_more::Debug, derive_more::Display, Eq, From, PartialEq)]
+pub struct ListTests(bool);
+
+impl ListTests {
+    pub fn as_bool(self) -> bool {
+        self.0
+    }
 }
 
 /// This is where cached data goes. If there is build output it is also here.
@@ -276,7 +281,7 @@ where
         log.clone(),
     )?;
 
-    let list_action = TestRunnerT::is_list(&extra_options).then_some(ListAction::ListTests);
+    let list_tests = TestRunnerT::is_list_tests(&extra_options).into();
     let parent_extra_options = TestRunnerT::extra_options_into_parent(extra_options);
     let template_vars = TestRunnerT::get_template_vars(&collector_config, &directories)?;
     let test_collector = TestRunnerT::get_test_collector(&client, &directories, &log, metadata)?;
@@ -287,7 +292,7 @@ where
         &test_collector,
         parent_extra_options.include,
         parent_extra_options.exclude,
-        list_action,
+        list_tests,
         parent_config.repeat,
         parent_config.stop_after,
         parent_extra_options.watch,
