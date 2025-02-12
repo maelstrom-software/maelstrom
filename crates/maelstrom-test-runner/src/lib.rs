@@ -152,6 +152,7 @@ pub trait TestRunner {
     fn get_metadata_and_directories(config: &Self::Config)
         -> Result<(Self::Metadata, Directories)>;
 
+    /// Build the test collector. This will be used for the rest of the execution.
     fn build_test_collector<'client>(
         client: &'client Client,
         config: Self::TestCollectorConfig,
