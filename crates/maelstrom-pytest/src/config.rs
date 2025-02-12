@@ -1,8 +1,17 @@
 use maelstrom_macro::Config;
 use maelstrom_test_runner::config::{Config as TestRunnerConfig, IntoParts};
 
+#[derive(Config, Debug)]
+pub struct Config {
+    #[config(flatten)]
+    pub parent: TestRunnerConfig,
+
+    #[config(flatten, next_help_heading = "Pytest Config Options")]
+    pub pytest: PytestConfig,
+}
+
 #[derive(Config, Clone, Debug, Default)]
-pub struct PytestConfigValues {
+pub struct PytestConfig {
     /// Collect tests from the provided module instead of using pytest's default collection
     /// algorithm. This will pass the provided module to pytest along with the --pyargs flag.
     #[config(
@@ -32,15 +41,6 @@ pub struct PytestConfigValues {
     pub extra_pytest_test_args: Vec<String>,
 }
 
-#[derive(Config, Debug)]
-pub struct Config {
-    #[config(flatten)]
-    pub parent: TestRunnerConfig,
-
-    #[config(flatten, next_help_heading = "Pytest Config Options")]
-    pub pytest_options: PytestConfigValues,
-}
-
 impl AsRef<TestRunnerConfig> for Config {
     fn as_ref(&self) -> &TestRunnerConfig {
         &self.parent
@@ -49,8 +49,8 @@ impl AsRef<TestRunnerConfig> for Config {
 
 impl IntoParts for Config {
     type First = TestRunnerConfig;
-    type Second = PytestConfigValues;
-    fn into_parts(self) -> (TestRunnerConfig, PytestConfigValues) {
-        (self.parent, self.pytest_options)
+    type Second = PytestConfig;
+    fn into_parts(self) -> (TestRunnerConfig, PytestConfig) {
+        (self.parent, self.pytest)
     }
 }

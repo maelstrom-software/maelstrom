@@ -9,7 +9,7 @@ pub use maelstrom_test_runner::log::LoggerBuilder;
 
 use anyhow::{Context as _, Result};
 use cli::{ExtraCommandLineOptions, ListOptions};
-use config::GoTestOptions;
+use config::GoTestConfig;
 use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     shared_library_dependencies_layer_spec,
@@ -131,14 +131,14 @@ impl TestFilter for pattern::Pattern {
 
 pub struct GoTestCollector {
     cache_dir: RootBuf<CacheDir>,
-    config: GoTestOptions,
+    config: GoTestConfig,
     project_dir: RootBuf<ProjectDir>,
 }
 
 impl GoTestCollector {
     fn new(
         cache_dir: &Root<CacheDir>,
-        config: GoTestOptions,
+        config: GoTestConfig,
         project_dir: &Root<ProjectDir>,
     ) -> Self {
         Self {
@@ -153,7 +153,7 @@ impl GoTestCollector {
 pub struct GoTestArtifact {
     id: GoImportPath,
     path: Utf8PathBuf,
-    options: GoTestOptions,
+    options: GoTestConfig,
 }
 
 impl TryFrom<go_test::GoTestArtifact> for GoTestArtifact {
@@ -744,12 +744,9 @@ pub fn main_for_test(
             config.parent.artifact_transfer_strategy,
             log.clone(),
         )?;
-        let template_vars = TestRunner::get_template_vars(&config.go_test_options, &directories)?;
-        let test_collector = GoTestCollector::new(
-            &directories.cache,
-            config.go_test_options,
-            &directories.project,
-        );
+        let template_vars = TestRunner::get_template_vars(&config.go_test, &directories)?;
+        let test_collector =
+            GoTestCollector::new(&directories.cache, config.go_test, &directories.project);
 
         run_app_with_ui_multithreaded(
             log_destination,
@@ -782,7 +779,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
     type TestCollector<'client> = GoTestCollector;
-    type TestCollectorConfig = GoTestOptions;
+    type TestCollectorConfig = GoTestConfig;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-go-test";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_GO_TEST";
@@ -850,7 +847,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn build_test_collector(
         _client: &Client,
-        config: GoTestOptions,
+        config: GoTestConfig,
         directories: &Directories,
         _log: &slog::Logger,
         _metadata: (),

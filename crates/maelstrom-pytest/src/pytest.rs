@@ -1,6 +1,4 @@
-use crate::{
-    BuildDir, PytestCaseMetadata, PytestConfigValues, PytestPackageId, PytestTestArtifact,
-};
+use crate::{BuildDir, PytestCaseMetadata, PytestConfig, PytestPackageId, PytestTestArtifact};
 use anyhow::{anyhow, bail, Result};
 use maelstrom_client::{
     spec::{ImageRef, LayerSpec},
@@ -118,7 +116,7 @@ struct PytestCase {
 
 pub fn pytest_collect_tests(
     _color: bool,
-    pytest_options: &PytestConfigValues,
+    pytest_options: &PytestConfig,
     project_dir: &Root<ProjectDir>,
     build_dir: &Root<BuildDir>,
     test_layers: HashMap<ImageRef, LayerSpec>,

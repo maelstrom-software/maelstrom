@@ -3,7 +3,7 @@ mod config;
 pub mod pattern;
 mod pytest;
 
-pub use config::{Config, PytestConfigValues};
+pub use config::{Config, PytestConfig};
 pub use maelstrom_test_runner::log::LoggerBuilder;
 
 use anyhow::{anyhow, bail, Result};
@@ -144,7 +144,7 @@ impl TestFilter for pattern::Pattern {
 
 pub struct PytestTestCollector<'client> {
     client: &'client Client,
-    config: PytestConfigValues,
+    config: PytestConfig,
     directories: Directories,
     test_layers: Mutex<HashMap<ImageRef, LayerSpec>>,
 }
@@ -311,7 +311,7 @@ pub struct PytestTestArtifact {
     tests: Vec<(String, PytestCaseMetadata)>,
     ignored_tests: Vec<String>,
     package: PytestPackageId,
-    pytest_options: PytestConfigValues,
+    pytest_options: PytestConfig,
     test_layers: HashMap<ImageRef, LayerSpec>,
 }
 
@@ -600,10 +600,10 @@ pub fn main_for_test(
         config.parent.artifact_transfer_strategy,
         log.clone(),
     )?;
-    let template_vars = TestRunner::get_template_vars(&config.pytest_options, &directories)?;
+    let template_vars = TestRunner::get_template_vars(&config.pytest, &directories)?;
     let test_collector = PytestTestCollector {
         client: &client,
-        config: config.pytest_options,
+        config: config.pytest,
         directories: directories.clone(),
         test_layers: Mutex::new(HashMap::new()),
     };
@@ -638,7 +638,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
     type TestCollector<'client> = PytestTestCollector<'client>;
-    type TestCollectorConfig = PytestConfigValues;
+    type TestCollectorConfig = PytestConfig;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-pytest";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_PYTEST";
@@ -672,7 +672,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn build_test_collector<'client>(
         client: &'client Client,
-        config: PytestConfigValues,
+        config: PytestConfig,
         directories: &Directories,
         _log: &slog::Logger,
         _metadata: (),

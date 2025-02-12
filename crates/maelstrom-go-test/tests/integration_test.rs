@@ -40,7 +40,7 @@ fn do_maelstrom_go_test_test(
             stop_after: None,
             artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
         },
-        go_test_options: Default::default(),
+        go_test: Default::default(),
     };
     let term = InMemoryTerm::new(50, 50);
 

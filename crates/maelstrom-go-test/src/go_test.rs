@@ -1,4 +1,4 @@
-use crate::{GoImportPath, GoTestOptions};
+use crate::{GoImportPath, GoTestConfig};
 use anyhow::{anyhow, Context as _, Result};
 use maelstrom_linux as linux;
 use maelstrom_test_runner::{
@@ -196,7 +196,7 @@ fn go_build(
     killer: Arc<MultiProcessKiller>,
     dir: &Path,
     output: &Path,
-    options: &GoTestOptions,
+    options: &GoTestConfig,
     ui: UiWeakSender,
 ) -> Result<String> {
     let mut cmd = Command::new("go");
@@ -223,14 +223,14 @@ fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
 pub(crate) struct GoTestArtifact {
     pub package: GoPackage,
     pub path: PathBuf,
-    pub options: GoTestOptions,
+    pub options: GoTestConfig,
 }
 
 fn multi_go_build(
     killer: Arc<MultiProcessKiller>,
     packages: Vec<GoPackage>,
     build_dir: RootBuf<BuildDir>,
-    options: GoTestOptions,
+    options: GoTestConfig,
     send: mpsc::Sender<GoTestArtifact>,
     ui: UiWeakSender,
 ) -> Result<()> {
@@ -292,7 +292,7 @@ fn multi_go_build(
 }
 
 pub(crate) fn build_and_collect(
-    options: &GoTestOptions,
+    options: &GoTestConfig,
     packages: Vec<&GoPackage>,
     build_dir: &Root<BuildDir>,
     ui: UiWeakSender,

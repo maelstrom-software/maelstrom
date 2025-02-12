@@ -105,7 +105,7 @@ impl TestFilter for pattern::Pattern {
     }
 }
 
-pub struct CargoOptions {
+pub struct CargoConfig {
     feature_selection_options: cargo::FeatureSelectionOptions,
     compilation_options: cargo::CompilationOptions,
     manifest_options: cargo::ManifestOptions,
@@ -113,7 +113,7 @@ pub struct CargoOptions {
 }
 
 pub struct CargoTestCollector {
-    config: CargoOptions,
+    config: CargoConfig,
     log: slog::Logger,
     packages: Vec<CargoPackage>,
 }
@@ -344,7 +344,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = CargoMetadata;
     type TestCollector<'client> = CargoTestCollector;
-    type TestCollectorConfig = CargoOptions;
+    type TestCollectorConfig = CargoConfig;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/cargo-maelstrom";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "CARGO_MAELSTROM";
@@ -435,7 +435,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn build_test_collector(
         _client: &Client,
-        config: CargoOptions,
+        config: CargoConfig,
         _directories: &Directories,
         log: &slog::Logger,
         metadata: CargoMetadata,
@@ -456,7 +456,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     }
 
     fn get_template_vars(
-        cargo_options: &CargoOptions,
+        cargo_options: &CargoConfig,
         directories: &Directories,
     ) -> Result<TemplateVars> {
         let profile = cargo_options

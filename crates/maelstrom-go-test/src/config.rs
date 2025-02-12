@@ -7,11 +7,11 @@ pub struct Config {
     pub parent: TestRunnerConfig,
 
     #[config(flatten, next_help_heading = "Go Testing Options")]
-    pub go_test_options: GoTestOptions,
+    pub go_test: GoTestConfig,
 }
 
 #[derive(Config, Clone, Debug, Default)]
-pub struct GoTestOptions {
+pub struct GoTestConfig {
     /// Controls the value of the `-vet` flag being passed to `go test`. See `go help test` for
     /// details.
     #[config(option, default = r#""go test's default""#, value_name = "VET-OPTIONS")]
@@ -43,8 +43,8 @@ impl AsRef<TestRunnerConfig> for Config {
 
 impl IntoParts for Config {
     type First = TestRunnerConfig;
-    type Second = GoTestOptions;
-    fn into_parts(self) -> (TestRunnerConfig, GoTestOptions) {
-        (self.parent, self.go_test_options)
+    type Second = GoTestConfig;
+    fn into_parts(self) -> (TestRunnerConfig, GoTestConfig) {
+        (self.parent, self.go_test)
     }
 }

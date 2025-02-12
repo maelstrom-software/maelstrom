@@ -111,7 +111,7 @@ fn do_maelstrom_pytest_test(
             stop_after: None,
             artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
         },
-        pytest_options: Default::default(),
+        pytest: Default::default(),
     };
     let term = InMemoryTerm::new(terminal_size.0, terminal_size.1);
 

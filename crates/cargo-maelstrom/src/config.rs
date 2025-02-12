@@ -1,6 +1,6 @@
 use crate::{
     cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
-    CargoOptions,
+    CargoConfig,
 };
 use maelstrom_macro::Config;
 use maelstrom_test_runner::config::{Config as TestRunnerConfig, IntoParts};
@@ -38,11 +38,11 @@ impl AsRef<TestRunnerConfig> for Config {
 
 impl IntoParts for Config {
     type First = TestRunnerConfig;
-    type Second = CargoOptions;
-    fn into_parts(self) -> (TestRunnerConfig, CargoOptions) {
+    type Second = CargoConfig;
+    fn into_parts(self) -> (TestRunnerConfig, CargoConfig) {
         (
             self.parent,
-            CargoOptions {
+            CargoConfig {
                 feature_selection_options: self.cargo_feature_selection_options,
                 compilation_options: self.cargo_compilation_options,
                 manifest_options: self.cargo_manifest_options,
