@@ -55,14 +55,6 @@ pub enum ListAction {
     ListTests,
 }
 
-type CaseMetadataM<TestCollectorT> = <TestCollectorT as CollectTests>::CaseMetadata;
-
-type ArtifactKeyM<TestCollectorT> = <TestCollectorT as CollectTests>::ArtifactKey;
-
-type CollectOptionsM<TestCollectorT> = <TestCollectorT as CollectTests>::Options;
-
-type TestFilterM<TestCollectorT> = <TestCollectorT as CollectTests>::TestFilter;
-
 /// This is where cached data goes. If there is build output it is also here.
 pub struct BuildDir;
 

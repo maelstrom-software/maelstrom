@@ -309,14 +309,8 @@ fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender
 
 fn run_app_once<'scope, 'deps, TestCollectorT: CollectTests + Sync>(
     test_collector: &'deps TestCollectorT,
-    test_db_store: &'deps TestDbStore<
-        super::ArtifactKeyM<TestCollectorT>,
-        super::CaseMetadataM<TestCollectorT>,
-    >,
-    options: &'deps TestingOptions<
-        super::TestFilterM<TestCollectorT>,
-        super::CollectOptionsM<TestCollectorT>,
-    >,
+    test_db_store: &'deps TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
+    options: &'deps TestingOptions<TestCollectorT::TestFilter, TestCollectorT::Options>,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     sem: &'deps Semaphore,
     ui: UiSender,
@@ -358,15 +352,9 @@ fn run_app_once<'scope, 'deps, TestCollectorT: CollectTests + Sync>(
 fn run_app_in_loop<TestCollectorT: CollectTests + Sync>(
     test_collector: &TestCollectorT,
     log: slog::Logger,
-    test_db_store: TestDbStore<
-        super::ArtifactKeyM<TestCollectorT>,
-        super::CaseMetadataM<TestCollectorT>,
-    >,
+    test_db_store: TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
     project_dir: RootBuf<ProjectDir>,
-    options: TestingOptions<
-        super::TestFilterM<TestCollectorT>,
-        super::CollectOptionsM<TestCollectorT>,
-    >,
+    options: TestingOptions<TestCollectorT::TestFilter, TestCollectorT::Options>,
     watch: bool,
     watch_exclude_paths: Vec<PathBuf>,
     ui: UiSender,
@@ -488,7 +476,7 @@ where
 
     let test_db_store = TestDbStore::new(fs, &state_dir);
 
-    let filter = super::TestFilterM::<TestCollectorT>::compile(&include_filter, &exclude_filter)?;
+    let filter = <TestCollectorT::TestFilter>::compile(&include_filter, &exclude_filter)?;
 
     watch_exclude_paths.push(
         project_dir
