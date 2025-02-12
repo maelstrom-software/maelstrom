@@ -10,7 +10,7 @@ pub struct ExtraCommandLineOptions {
     pub list: ListOptions,
 }
 
-#[derive(Args)]
+#[derive(Args, Debug)]
 #[group(multiple = false)]
 #[command(next_help_heading = "List Options")]
 pub struct ListOptions {

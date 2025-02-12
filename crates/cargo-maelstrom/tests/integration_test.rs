@@ -8,10 +8,7 @@ use indicatif::InMemoryTerm;
 use maelstrom_base::Timeout;
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_test_runner::{
-    log::LogDestination,
-    run_app_with_ui_multithreaded,
-    ui::{self, Ui as _},
-    TestRunner as _,
+    log::LogDestination, run_app_with_ui_multithreaded, ui, ListTests, ListingType, TestRunner as _,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -89,17 +86,20 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     let ui = ui::SimpleUi::new(false, false, term.clone());
 
     (|| {
-        let mut ui = Some(ui);
-        let start_ui = || {
-            let log_destination = LogDestination::default();
-            let log = logger.build(log_destination.clone());
-            ui.take().unwrap().start_ui_thread(log_destination, log)
-        };
-        if let Some(result) =
-            cargo_maelstrom::TestRunner::execute_alternative_main(&config, &extra_options, start_ui)
-        {
-            return result;
-        }
+        let list_tests: ListTests =
+            match cargo_maelstrom::TestRunner::get_listing_type(&extra_options) {
+                ListingType::None => false.into(),
+                ListingType::Tests => true.into(),
+                ListingType::OtherWithoutUi => {
+                    return cargo_maelstrom::TestRunner::execute_listing_without_ui(
+                        &config,
+                        &extra_options,
+                    );
+                }
+                ListingType::OtherWithUi => {
+                    unreachable!("cargo-maelstrom doesn't use this");
+                }
+            };
 
         let (directories, metadata) =
             cargo_maelstrom::TestRunner::get_directories_and_metadata(&config)?;
@@ -126,7 +126,6 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             log.clone(),
         )?;
 
-        let list_tests = cargo_maelstrom::TestRunner::is_list_tests(&extra_options).into();
         let parent_extra_options =
             cargo_maelstrom::TestRunner::extra_options_into_parent(extra_options);
         let template_vars =
@@ -135,7 +134,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         run_app_with_ui_multithreaded(
             log_destination,
             parent_config.timeout.map(Timeout::new),
-            ui.unwrap(),
+            ui,
             &cargo_maelstrom::TestRunner::get_test_collector(
                 &client,
                 &directories,

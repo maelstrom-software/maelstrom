@@ -30,7 +30,7 @@ use std::{
     path::PathBuf,
     str,
 };
-use ui::{Ui, UiHandle, UiSender};
+use ui::{Ui, UiSender};
 
 #[derive(Clone, Copy, derive_more::Debug, derive_more::Display, Eq, From, PartialEq)]
 pub struct ListTests(bool);
@@ -39,6 +39,13 @@ impl ListTests {
     pub fn as_bool(self) -> bool {
         self.0
     }
+}
+
+pub enum ListingType {
+    None,
+    Tests,
+    OtherWithUi,
+    OtherWithoutUi,
 }
 
 /// This is the directory that contains build artifacts. The [`CacheDir`] and [`StateDir`]
@@ -66,19 +73,24 @@ pub trait TestRunner {
     const TEST_METADATA_FILE_NAME: &'static str;
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str;
 
-    fn is_list(extra_options: &Self::ExtraCommandLineOptions) -> bool;
-
-    fn is_list_tests(extra_options: &Self::ExtraCommandLineOptions) -> bool;
+    fn get_listing_type(extra_options: &Self::ExtraCommandLineOptions) -> ListingType;
 
     fn get_directories_and_metadata(config: &Self::Config)
         -> Result<(Directories, Self::Metadata)>;
 
-    fn execute_alternative_main(
+    fn execute_listing_without_ui(
         _config: &Self::Config,
         _extra_options: &Self::ExtraCommandLineOptions,
-        _start_ui: impl FnOnce() -> (UiHandle, UiSender),
-    ) -> Option<Result<ExitCode>> {
-        None
+    ) -> Result<ExitCode> {
+        unimplemented!()
+    }
+
+    fn execute_listing_with_ui(
+        _config: &Self::Config,
+        _extra_options: &Self::ExtraCommandLineOptions,
+        _ui_sender: UiSender,
+    ) -> Result<ExitCode> {
+        unimplemented!()
     }
 
     fn get_test_collector<'client>(
@@ -139,32 +151,38 @@ where
     }
 
     let config_parent = config.as_ref();
-    let bg_proc = ClientBgProcess::new_from_fork(config_parent.log_level)?;
-    let logger = LoggerBuilder::DefaultLogger(config_parent.log_level);
-    let stdout_is_tty = io::stdout().is_terminal();
-    let ui = ui::factory(
-        config_parent.ui,
-        TestRunnerT::is_list(&extra_options),
-        stdout_is_tty,
-    )?;
 
-    let mut ui = Some(ui);
-    let start_ui = || {
-        let log_destination = LogDestination::default();
-        let log = logger.build(log_destination.clone());
-        ui.take().unwrap().start_ui_thread(log_destination, log)
+    let list_tests: ListTests = match TestRunnerT::get_listing_type(&extra_options) {
+        ListingType::None => false.into(),
+        ListingType::Tests => true.into(),
+        ListingType::OtherWithoutUi => {
+            return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
+        }
+        ListingType::OtherWithUi => {
+            let ui = ui::factory(config_parent.ui, true, io::stdout().is_terminal())?;
+            let log_destination = LogDestination::default();
+            let log_builder = LoggerBuilder::DefaultLogger(config_parent.log_level);
+            let log = log_builder.build(log_destination.clone());
+            let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log);
+            let result = TestRunnerT::execute_listing_with_ui(&config, &extra_options, ui_sender);
+            ui_handle.join()?;
+            return result;
+        }
     };
-    if let Some(result) = TestRunnerT::execute_alternative_main(&config, &extra_options, start_ui) {
-        return result;
-    }
+
+    let bg_proc = ClientBgProcess::new_from_fork(config_parent.log_level)?;
+
+    let stdout_is_tty = io::stdout().is_terminal();
+    let ui = ui::factory(config_parent.ui, list_tests.as_bool(), stdout_is_tty)?;
 
     let (directories, metadata) = TestRunnerT::get_directories_and_metadata(&config)?;
 
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
+    let log_builder = LoggerBuilder::DefaultLogger(config_parent.log_level);
     let log_destination = LogDestination::default();
-    let log = logger.build(log_destination.clone());
+    let log = log_builder.build(log_destination.clone());
 
     let (parent_config, collector_config) = TestRunnerT::split_config(config);
     let client = Client::new(
@@ -182,14 +200,13 @@ where
         log.clone(),
     )?;
 
-    let list_tests = TestRunnerT::is_list_tests(&extra_options).into();
     let parent_extra_options = TestRunnerT::extra_options_into_parent(extra_options);
     let template_vars = TestRunnerT::get_template_vars(&collector_config, &directories)?;
     let test_collector = TestRunnerT::get_test_collector(&client, &directories, &log, metadata)?;
     run_app_with_ui_multithreaded(
         log_destination,
         parent_config.timeout.map(Timeout::new),
-        ui.unwrap(),
+        ui,
         &test_collector,
         parent_extra_options.include,
         parent_extra_options.exclude,

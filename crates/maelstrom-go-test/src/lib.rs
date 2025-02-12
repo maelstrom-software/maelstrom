@@ -8,7 +8,7 @@ pub use config::Config;
 pub use maelstrom_test_runner::log::LoggerBuilder;
 
 use anyhow::{Context as _, Result};
-use cli::ExtraCommandLineOptions;
+use cli::{ExtraCommandLineOptions, ListOptions};
 use config::GoTestOptions;
 use maelstrom_base::{Timeout, Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
@@ -21,9 +21,9 @@ use maelstrom_test_runner::{
     log::LogDestination,
     metadata::Metadata,
     run_app_with_ui_multithreaded,
-    ui::{Ui, UiHandle, UiSender},
-    BuildDir, CollectTests, Directories, NoCaseMetadata, TestArtifact, TestArtifactKey, TestFilter,
-    TestPackage, TestPackageId, Wait, WaitStatus,
+    ui::{Ui, UiSender},
+    BuildDir, CollectTests, Directories, ListingType, NoCaseMetadata, TestArtifact,
+    TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -788,12 +788,16 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
         crate::DEFAULT_TEST_METADATA_FILE_CONTENTS;
 
-    fn is_list(extra_options: &ExtraCommandLineOptions) -> bool {
-        extra_options.list.any()
-    }
-
-    fn is_list_tests(extra_options: &ExtraCommandLineOptions) -> bool {
-        extra_options.list.tests
+    fn get_listing_type(extra_options: &ExtraCommandLineOptions) -> ListingType {
+        let ListOptions { tests, packages } = &extra_options.list;
+        if *tests {
+            assert!(!*packages); // Clap should guarantee this.
+            ListingType::Tests
+        } else if *packages {
+            ListingType::OtherWithUi
+        } else {
+            ListingType::None
+        }
     }
 
     fn get_directories_and_metadata(_config: &Config) -> Result<(Directories, ())> {
@@ -813,30 +817,24 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         ))
     }
 
-    fn execute_alternative_main(
+    fn execute_listing_with_ui(
         config: &Config,
         extra_options: &ExtraCommandLineOptions,
-        start_ui: impl FnOnce() -> (UiHandle, UiSender),
-    ) -> Option<Result<ExitCode>> {
-        extra_options.list.packages.then(|| {
-            let (directories, _) = Self::get_directories_and_metadata(config)?;
+        ui_sender: UiSender,
+    ) -> Result<ExitCode> {
+        assert!(extra_options.list.packages);
 
-            Fs.create_dir_all(&directories.cache)?;
+        let (directories, _) = Self::get_directories_and_metadata(config)?;
 
-            let (ui_handle, ui) = start_ui();
+        Fs.create_dir_all(&directories.cache)?;
 
-            let list_res = alternative_mains::list_packages(
-                ui,
-                &directories.project,
-                &directories.cache,
-                &extra_options.parent.include,
-                &extra_options.parent.exclude,
-            );
-            let ui_res = ui_handle.join();
-            let exit_code = list_res?;
-            ui_res?;
-            Ok(exit_code)
-        })
+        alternative_mains::list_packages(
+            ui_sender,
+            &directories.project,
+            &directories.cache,
+            &extra_options.parent.include,
+            &extra_options.parent.exclude,
+        )
     }
 
     fn get_test_collector(

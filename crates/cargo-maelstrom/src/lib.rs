@@ -8,7 +8,7 @@ pub use maelstrom_test_runner::log::LoggerBuilder;
 
 use anyhow::{anyhow, Result};
 use cargo_metadata::{Metadata as CargoMetadata, Target as CargoTarget};
-use cli::ExtraCommandLineOptions;
+use cli::{ExtraCommandLineOptions, ListOptions};
 use config::Config;
 use maelstrom_base::{Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
@@ -17,10 +17,8 @@ use maelstrom_client::{
     Client,
 };
 use maelstrom_test_runner::{
-    metadata::Metadata,
-    ui::{UiHandle, UiSender},
-    CollectTests, Directories, NoCaseMetadata, TestArtifact, TestArtifactKey, TestFilter,
-    TestPackage, TestPackageId, Wait, WaitStatus,
+    metadata::Metadata, ui::UiSender, CollectTests, Directories, ListingType, NoCaseMetadata,
+    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{process::ExitCode, root::Root, template::TemplateVars};
 use pattern::ArtifactKind;
@@ -465,12 +463,32 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
         crate::DEFAULT_TEST_METADATA_FILE_CONTENTS;
 
-    fn is_list(extra_options: &ExtraCommandLineOptions) -> bool {
-        extra_options.list.any()
-    }
-
-    fn is_list_tests(extra_options: &ExtraCommandLineOptions) -> bool {
-        extra_options.list.tests
+    fn get_listing_type(extra_options: &ExtraCommandLineOptions) -> ListingType {
+        match &extra_options.list {
+            ListOptions {
+                tests: true,
+                binaries: false,
+                packages: false,
+            } => ListingType::Tests,
+            ListOptions {
+                tests: false,
+                binaries: true,
+                packages: false,
+            }
+            | ListOptions {
+                tests: false,
+                binaries: false,
+                packages: true,
+            } => ListingType::OtherWithoutUi,
+            ListOptions {
+                tests: false,
+                binaries: false,
+                packages: false,
+            } => ListingType::None,
+            options => {
+                panic!("invalid ListOptions {options:?}, clap should have disallowed");
+            }
+        }
     }
 
     fn get_directories_and_metadata(config: &Config) -> Result<(Directories, CargoMetadata)> {
@@ -491,32 +509,39 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         ))
     }
 
-    fn execute_alternative_main(
+    fn execute_listing_without_ui(
         config: &Config,
         extra_options: &ExtraCommandLineOptions,
-        _start_ui: impl FnOnce() -> (UiHandle, UiSender),
-    ) -> Option<Result<ExitCode>> {
-        extra_options
-            .list
-            .packages
-            .then(|| {
-                alternative_mains::list_packages(
-                    &Self::get_cargo_metadata(config)?.workspace_packages(),
-                    &extra_options.parent.include,
-                    &extra_options.parent.exclude,
-                    &mut io::stdout().lock(),
-                )
-            })
-            .or_else(|| {
-                extra_options.list.binaries.then(|| {
-                    alternative_mains::list_binaries(
-                        &Self::get_cargo_metadata(config)?.workspace_packages(),
-                        &extra_options.parent.include,
-                        &extra_options.parent.exclude,
-                        &mut io::stdout().lock(),
-                    )
-                })
-            })
+    ) -> Result<ExitCode> {
+        assert!(!extra_options.list.tests);
+        assert!(extra_options.list.binaries || extra_options.list.packages);
+        assert!(!(extra_options.list.binaries && extra_options.list.packages));
+
+        match &extra_options.list {
+            ListOptions {
+                tests: false,
+                binaries: true,
+                packages: false,
+            } => alternative_mains::list_binaries(
+                &Self::get_cargo_metadata(config)?.workspace_packages(),
+                &extra_options.parent.include,
+                &extra_options.parent.exclude,
+                &mut io::stdout().lock(),
+            ),
+            ListOptions {
+                tests: false,
+                binaries: false,
+                packages: true,
+            } => alternative_mains::list_packages(
+                &Self::get_cargo_metadata(config)?.workspace_packages(),
+                &extra_options.parent.include,
+                &extra_options.parent.exclude,
+                &mut io::stdout().lock(),
+            ),
+            options => {
+                panic!("invalid ListOptions {options:?}");
+            }
+        }
     }
 
     fn get_test_collector(

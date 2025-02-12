@@ -24,8 +24,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, Directories, TestArtifact, TestArtifactKey, TestCaseMetadata,
-    TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    BuildDir, CollectTests, Directories, ListingType, TestArtifact, TestArtifactKey,
+    TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -652,12 +652,12 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
         crate::DEFAULT_TEST_METADATA_FILE_CONTENTS;
 
-    fn is_list(extra_options: &ExtraCommandLineOptions) -> bool {
-        extra_options.list
-    }
-
-    fn is_list_tests(extra_options: &ExtraCommandLineOptions) -> bool {
-        extra_options.list
+    fn get_listing_type(extra_options: &ExtraCommandLineOptions) -> ListingType {
+        if extra_options.list {
+            ListingType::Tests
+        } else {
+            ListingType::None
+        }
     }
 
     fn get_directories_and_metadata(_config: &Config) -> Result<(Directories, ())> {
