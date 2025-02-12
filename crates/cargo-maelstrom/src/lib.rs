@@ -465,14 +465,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
         crate::DEFAULT_TEST_METADATA_FILE_CONTENTS;
 
-    fn get_project_directory(config: &Config) -> Result<Utf8PathBuf> {
-        Ok(cargo::read_metadata(
-            &config.cargo_feature_selection_options,
-            &config.cargo_manifest_options,
-        )?
-        .workspace_root)
-    }
-
     fn is_list(extra_options: &ExtraCommandLineOptions) -> bool {
         extra_options.list.any()
     }

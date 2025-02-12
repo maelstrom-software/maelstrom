@@ -18,7 +18,7 @@ use anyhow::Result;
 use clap::{Args, Command};
 use derive_more::{From, Into};
 use log::{LogDestination, LoggerBuilder};
-use maelstrom_base::{Timeout, Utf8PathBuf};
+use maelstrom_base::Timeout;
 use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
 use maelstrom_util::{
     config::Config, fs::Fs, process::ExitCode, root::RootBuf, template::TemplateVars,
@@ -65,8 +65,6 @@ pub trait TestRunner {
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str;
     const TEST_METADATA_FILE_NAME: &'static str;
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str;
-
-    fn get_project_directory(config: &Self::Config) -> Result<Utf8PathBuf>;
 
     fn is_list(extra_options: &Self::ExtraCommandLineOptions) -> bool;
 
