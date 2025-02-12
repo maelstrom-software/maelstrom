@@ -28,7 +28,6 @@ use std::{
     ffi::OsString,
     fmt::Debug,
     io::{self, IsTerminal as _},
-    path::PathBuf,
     str,
 };
 use ui::{Ui, UiSender};
@@ -161,8 +160,6 @@ pub trait TestRunner {
         metadata: Self::Metadata,
     ) -> Result<Self::TestCollector<'client>>;
 
-    fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf>;
-
     fn get_template_vars(
         collector_options: &Self::TestCollectorConfig,
         directories: &Directories,
@@ -275,7 +272,7 @@ where
         stdout_is_tty,
         &directories.project,
         &directories.state,
-        TestRunnerT::get_watch_exclude_paths(&directories),
+        test_collector.get_paths_to_exclude_from_watch(),
         log,
         &client,
         TestRunnerT::TEST_METADATA_FILE_NAME,

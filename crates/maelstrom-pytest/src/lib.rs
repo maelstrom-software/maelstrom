@@ -474,6 +474,10 @@ impl TestCollector for PytestTestCollector<'_> {
         }
         lines
     }
+
+    fn get_paths_to_exclude_from_watch(&self) -> Vec<PathBuf> {
+        vec![self.directories.build.clone().into_path_buf()]
+    }
 }
 
 #[test]
@@ -683,10 +687,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             directories: directories.clone(),
             test_layers: Mutex::new(HashMap::new()),
         })
-    }
-
-    fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
-        vec![directories.build.to_owned().into_path_buf()]
     }
 
     fn get_template_vars(

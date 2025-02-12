@@ -32,11 +32,7 @@ use maelstrom_util::{
     root::{Root, RootBuf},
     template::TemplateVars,
 };
-use std::{
-    fmt, io,
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use std::{fmt, io, path::Path, str::FromStr};
 
 #[allow(clippy::too_many_arguments)]
 fn create_client_for_test(
@@ -857,10 +853,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             config,
             &directories.project,
         ))
-    }
-
-    fn get_watch_exclude_paths(_directories: &Directories) -> Vec<PathBuf> {
-        vec![]
     }
 
     fn get_template_vars(

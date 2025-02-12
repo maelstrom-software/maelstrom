@@ -17,10 +17,15 @@ use maelstrom_client::{
     Client,
 };
 use maelstrom_test_runner::{
-    metadata::Metadata, ui::UiSender, Directories, ListingMode, NoCaseMetadata, TestArtifact,
-    TestArtifactKey, TestCollector, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    metadata::Metadata, ui::UiSender, BuildDir, Directories, ListingMode, NoCaseMetadata,
+    TestArtifact, TestArtifactKey, TestCollector, TestFilter, TestPackage, TestPackageId, Wait,
+    WaitStatus,
 };
-use maelstrom_util::{process::ExitCode, root::Root, template::TemplateVars};
+use maelstrom_util::{
+    process::ExitCode,
+    root::{Root, RootBuf},
+    template::TemplateVars,
+};
 use pattern::ArtifactKind;
 use std::{
     fmt, io,
@@ -106,6 +111,7 @@ impl TestFilter for pattern::Pattern {
 }
 
 pub struct CargoTestCollector {
+    build_dir: RootBuf<BuildDir>,
     config: CargoConfig,
     log: slog::Logger,
     packages: Vec<CargoPackage>,
@@ -309,6 +315,10 @@ impl TestCollector for CargoTestCollector {
         }
         lines
     }
+
+    fn get_paths_to_exclude_from_watch(&self) -> Vec<PathBuf> {
+        vec![self.build_dir.clone().into_path_buf()]
+    }
 }
 
 impl Wait for cargo::WaitHandle {
@@ -429,11 +439,12 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     fn build_test_collector(
         _client: &Client,
         config: CargoConfig,
-        _directories: &Directories,
+        directories: &Directories,
         log: &slog::Logger,
         metadata: CargoMetadata,
     ) -> Result<CargoTestCollector> {
         Ok(CargoTestCollector {
+            build_dir: directories.build.to_owned(),
             config,
             log: log.clone(),
             packages: metadata
@@ -442,10 +453,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 .map(|p| CargoPackage(p.clone()))
                 .collect(),
         })
-    }
-
-    fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
-        vec![directories.build.to_owned().into_path_buf()]
     }
 
     fn get_template_vars(

@@ -9,7 +9,7 @@ use maelstrom_base::Timeout;
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_test_runner::{
     config::IntoParts as _, log::LogDestination, run_app_with_ui_multithreaded, ui,
-    util::ListTests, ListingMode, TestRunner as _,
+    util::ListTests, ListingMode, TestCollector as _, TestRunner as _,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -133,18 +133,19 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         let (extra_options, _) = extra_options.into_parts();
         let template_vars =
             cargo_maelstrom::TestRunner::get_template_vars(&collector_config, &directories)?;
+        let test_collector = cargo_maelstrom::TestRunner::build_test_collector(
+            &client,
+            collector_config,
+            &directories,
+            &log,
+            metadata,
+        )?;
 
         run_app_with_ui_multithreaded(
             log_destination,
             parent_config.timeout.map(Timeout::new),
             ui,
-            &cargo_maelstrom::TestRunner::build_test_collector(
-                &client,
-                collector_config,
-                &directories,
-                &log,
-                metadata,
-            )?,
+            &test_collector,
             extra_options.include,
             extra_options.exclude,
             list_tests,
@@ -154,7 +155,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             false,
             &directories.project,
             &directories.state,
-            cargo_maelstrom::TestRunner::get_watch_exclude_paths(&directories),
+            test_collector.get_paths_to_exclude_from_watch(),
             log,
             &client,
             cargo_maelstrom::TestRunner::TEST_METADATA_FILE_NAME,
