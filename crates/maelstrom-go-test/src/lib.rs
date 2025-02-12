@@ -21,8 +21,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiHandle, UiSender},
-    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata,
-    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, NoCaseMetadata, TestArtifact,
+    TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -83,18 +83,6 @@ fn create_client_for_test(
         artifact_transfer_strategy,
         log,
     )
-}
-
-pub struct DefaultMainAppDeps {
-    test_collector: GoTestCollector,
-}
-
-impl DefaultMainAppDeps {
-    pub fn new(project_dir: &Root<ProjectDir>, cache_dir: &Root<CacheDir>) -> Result<Self> {
-        Ok(Self {
-            test_collector: GoTestCollector::new(project_dir, cache_dir),
-        })
-    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -671,14 +659,6 @@ fn remove_fixture_output_example_test() {
     );
 }
 
-impl MainAppDeps for DefaultMainAppDeps {
-    type TestCollector = GoTestCollector;
-
-    fn test_collector(&self) -> &GoTestCollector {
-        &self.test_collector
-    }
-}
-
 #[test]
 fn default_test_metadata_parses() {
     maelstrom_test_runner::metadata::Store::<pattern::Pattern>::load(
@@ -761,7 +741,7 @@ pub fn main_for_test(
             config.parent.artifact_transfer_strategy,
             log.clone(),
         )?;
-        let deps = DefaultMainAppDeps::new(&directories.project, &directories.cache)?;
+        let test_collector = GoTestCollector::new(&directories.project, &directories.cache);
         let template_vars = <TestRunner as maelstrom_test_runner::TestRunner>::get_template_vars(
             &config.go_test_options,
             &directories,
@@ -771,7 +751,7 @@ pub fn main_for_test(
             logging_output,
             config.parent.timeout.map(Timeout::new),
             ui,
-            deps,
+            &test_collector,
             extra_options.parent.include,
             extra_options.parent.exclude,
             list_action,
@@ -798,7 +778,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
-    type Deps<'client> = DefaultMainAppDeps;
+    type TestCollector<'client> = GoTestCollector;
     type CollectorOptions = GoTestOptions;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-go-test";
@@ -861,13 +841,16 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         })
     }
 
-    fn get_deps(
+    fn get_test_collector(
         _client: &Client,
         directories: &Directories,
         _log: &slog::Logger,
         _metadata: (),
-    ) -> Result<DefaultMainAppDeps> {
-        DefaultMainAppDeps::new(&directories.project, &directories.cache)
+    ) -> Result<GoTestCollector> {
+        Ok(GoTestCollector::new(
+            &directories.project,
+            &directories.cache,
+        ))
     }
 
     fn get_watch_exclude_paths(_directories: &Directories) -> Vec<PathBuf> {
@@ -934,7 +917,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             logging_output,
             parent_config.timeout.map(Timeout::new),
             ui.unwrap(),
-            Self::get_deps(&client, &directories, &log, metadata)?,
+            &Self::get_test_collector(&client, &directories, &log, metadata)?,
             parent_extra_options.include,
             parent_extra_options.exclude,
             list_action,

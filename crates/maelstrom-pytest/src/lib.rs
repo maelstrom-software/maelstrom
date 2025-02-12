@@ -23,8 +23,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, TestArtifact,
-    TestArtifactKey, TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, TestArtifact, TestArtifactKey,
+    TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -93,22 +93,6 @@ fn create_client_for_test(
         artifact_transfer_strategy,
         log,
     )
-}
-
-pub struct DefaultMainAppDeps<'client> {
-    test_collector: PytestTestCollector<'client>,
-}
-
-impl<'client> DefaultMainAppDeps<'client> {
-    pub fn new(directories: Directories, client: &'client Client) -> Result<Self> {
-        Ok(Self {
-            test_collector: PytestTestCollector {
-                client,
-                directories,
-                test_layers: Mutex::new(HashMap::new()),
-            },
-        })
-    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -544,14 +528,6 @@ fn remove_fixture_output_basic_case() {
     );
 }
 
-impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
-    type TestCollector = PytestTestCollector<'client>;
-
-    fn test_collector(&self) -> &PytestTestCollector<'client> {
-        &self.test_collector
-    }
-}
-
 #[test]
 fn default_test_metadata_parses() {
     maelstrom_test_runner::metadata::Store::<pattern::Pattern>::load(
@@ -626,7 +602,11 @@ pub fn main_for_test(
         config.parent.artifact_transfer_strategy,
         log.clone(),
     )?;
-    let deps = DefaultMainAppDeps::new(directories.clone(), &client)?;
+    let test_collector = PytestTestCollector {
+        client: &client,
+        directories: directories.clone(),
+        test_layers: Mutex::new(HashMap::new()),
+    };
     let template_vars = <TestRunner as maelstrom_test_runner::TestRunner>::get_template_vars(
         &config.pytest_options,
         &directories,
@@ -636,7 +616,7 @@ pub fn main_for_test(
         logging_output,
         config.parent.timeout.map(Timeout::new),
         ui,
-        deps,
+        &test_collector,
         extra_options.parent.include,
         extra_options.parent.exclude,
         list_action,
@@ -662,7 +642,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
-    type Deps<'client> = DefaultMainAppDeps<'client>;
+    type TestCollector<'client> = PytestTestCollector<'client>;
     type CollectorOptions = PytestConfigValues;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-pytest";
@@ -698,13 +678,17 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         ))
     }
 
-    fn get_deps<'client>(
+    fn get_test_collector<'client>(
         client: &'client Client,
         directories: &Directories,
         _log: &slog::Logger,
         _metadata: (),
-    ) -> Result<DefaultMainAppDeps<'client>> {
-        DefaultMainAppDeps::new(directories.clone(), client)
+    ) -> Result<PytestTestCollector<'client>> {
+        Ok(PytestTestCollector {
+            client,
+            directories: directories.clone(),
+            test_layers: Mutex::new(HashMap::new()),
+        })
     }
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
@@ -771,7 +755,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             logging_output,
             parent_config.timeout.map(Timeout::new),
             ui.unwrap(),
-            Self::get_deps(&client, &directories, &log, metadata)?,
+            &Self::get_test_collector(&client, &directories, &log, metadata)?,
             parent_extra_options.include,
             parent_extra_options.exclude,
             list_action,

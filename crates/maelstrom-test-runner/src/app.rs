@@ -7,10 +7,7 @@ mod tests;
 
 use crate::{
     config::{Repeat, StopAfter},
-    deps::{
-        CollectTests, KillOnDrop, MainAppDeps, TestArtifact as _, TestFilter as _, Wait as _,
-        WaitStatus,
-    },
+    deps::{CollectTests, KillOnDrop, TestArtifact as _, TestFilter as _, Wait as _, WaitStatus},
     metadata::Store as MetadataStore,
     test_db::{TestDb, TestDbStore},
     ui::UiSender,
@@ -50,7 +47,7 @@ type TestDbM<DepsT> = TestDb<ArtifactKeyM<DepsT>, CaseMetadataM<DepsT>>;
 type TestingOptionsM<DepsT> = TestingOptions<TestFilterM<DepsT>, CollectOptionsM<DepsT>>;
 
 trait Deps {
-    type TestCollector: CollectTests;
+    type TestCollector: CollectTests + Sync;
 
     fn start_collection(
         &self,
@@ -118,8 +115,8 @@ impl<MessageT> From<MessageT> for ControlMessage<MessageT> {
 
 type WaitM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::BuildHandle;
 
-struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
-    deps: &'deps MainAppDepsT,
+struct MainAppDepsAdapter<'deps, 'scope, TestCollectorT: CollectTests + Sync> {
+    test_collector: &'deps TestCollectorT,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
     ui: UiSender,
@@ -130,9 +127,11 @@ struct MainAppDepsAdapter<'deps, 'scope, MainAppDepsT: MainAppDeps> {
 
 const MAX_NUM_BACKGROUND_THREADS: isize = 200;
 
-impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope, MainAppDepsT> {
+impl<'deps, 'scope, TestCollectorT: CollectTests + Sync>
+    MainAppDepsAdapter<'deps, 'scope, TestCollectorT>
+{
     fn new(
-        deps: &'deps MainAppDepsT,
+        test_collector: &'deps TestCollectorT,
         scope: &'scope std::thread::Scope<'scope, 'deps>,
         main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
         ui: UiSender,
@@ -140,7 +139,7 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
         client: &'deps Client,
     ) -> Self {
         Self {
-            deps,
+            test_collector,
             scope,
             main_app_sender,
             ui,
@@ -151,8 +150,8 @@ impl<'deps, 'scope, MainAppDepsT: MainAppDeps> MainAppDepsAdapter<'deps, 'scope,
     }
 }
 
-impl<MainAppDepsT: MainAppDeps> Deps for MainAppDepsAdapter<'_, '_, MainAppDepsT> {
-    type TestCollector = MainAppDepsT::TestCollector;
+impl<TestCollectorT: CollectTests + Sync> Deps for MainAppDepsAdapter<'_, '_, TestCollectorT> {
+    type TestCollector = TestCollectorT;
 
     fn start_collection(
         &self,
@@ -163,8 +162,7 @@ impl<MainAppDepsT: MainAppDeps> Deps for MainAppDepsAdapter<'_, '_, MainAppDepsT
         let sem = self.semaphore;
         let sender = self.main_app_sender.clone();
         match self
-            .deps
-            .test_collector()
+            .test_collector
             .start(color, options, packages, &self.ui)
         {
             Ok((build_handle, artifact_stream)) => {
@@ -209,12 +207,12 @@ impl<MainAppDepsT: MainAppDeps> Deps for MainAppDepsAdapter<'_, '_, MainAppDepsT
 
     fn get_packages(&self) {
         let sem = self.semaphore;
-        let deps = self.deps;
+        let test_collector = self.test_collector;
         let sender = self.main_app_sender.clone();
         let ui = self.ui.clone();
         self.scope.spawn(move || {
             let _guard = sem.access();
-            match deps.test_collector().get_packages(&ui) {
+            match test_collector.get_packages(&ui) {
                 Ok(packages) => {
                     let _ = sender.send(MainAppMessage::Packages { packages }.into());
                 }
@@ -309,15 +307,15 @@ fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender
     }
 }
 
-fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
-    abstract_deps: &'deps MainAppDepsT,
+fn run_app_once<'scope, 'deps, TestCollectorT: CollectTests + Sync>(
+    test_collector: &'deps TestCollectorT,
     test_db_store: &'deps TestDbStore<
-        super::ArtifactKeyM<MainAppDepsT>,
-        super::CaseMetadataM<MainAppDepsT>,
+        super::ArtifactKeyM<TestCollectorT>,
+        super::CaseMetadataM<TestCollectorT>,
     >,
     options: &'deps TestingOptions<
-        super::TestFilterM<MainAppDepsT>,
-        super::CollectOptionsM<MainAppDepsT>,
+        super::TestFilterM<TestCollectorT>,
+        super::CollectOptionsM<TestCollectorT>,
     >,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     sem: &'deps Semaphore,
@@ -332,7 +330,7 @@ fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
 
         let res = (|| -> Result<_> {
             let deps = MainAppDepsAdapter::new(
-                abstract_deps,
+                test_collector,
                 scope,
                 main_app_sender.clone(),
                 ui.clone(),
@@ -357,24 +355,25 @@ fn run_app_once<'scope, 'deps, MainAppDepsT: MainAppDeps>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
-    abstract_deps: MainAppDepsT,
+fn run_app_in_loop<TestCollectorT: CollectTests + Sync>(
+    test_collector: &TestCollectorT,
     log: slog::Logger,
     test_db_store: TestDbStore<
-        super::ArtifactKeyM<MainAppDepsT>,
-        super::CaseMetadataM<MainAppDepsT>,
+        super::ArtifactKeyM<TestCollectorT>,
+        super::CaseMetadataM<TestCollectorT>,
     >,
     project_dir: RootBuf<ProjectDir>,
-    options: TestingOptions<super::TestFilterM<MainAppDepsT>, super::CollectOptionsM<MainAppDepsT>>,
+    options: TestingOptions<
+        super::TestFilterM<TestCollectorT>,
+        super::CollectOptionsM<TestCollectorT>,
+    >,
     watch: bool,
     watch_exclude_paths: Vec<PathBuf>,
     ui: UiSender,
     client: &Client,
 ) -> Result<ExitCode> {
     // This is where the pytest runner builds pip packages.
-    abstract_deps
-        .test_collector()
-        .build_test_layers(options.test_metadata.get_all_images(), &ui)?;
+    test_collector.build_test_layers(options.test_metadata.get_all_images(), &ui)?;
 
     let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
     let done = Event::new();
@@ -397,7 +396,7 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
 
             loop {
                 let exit_code = run_app_once(
-                    &abstract_deps,
+                    test_collector,
                     &test_db_store,
                     &options,
                     scope,
@@ -429,11 +428,11 @@ fn run_app_in_loop<MainAppDepsT: MainAppDeps>(
 /// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
 /// application on this thread using the UI until it is completed.
 #[allow(clippy::too_many_arguments)]
-pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
+pub fn run_app_with_ui_multithreaded<TestCollectorT: CollectTests + Sync>(
     logging_output: LoggingOutput,
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,
-    abstract_deps: MainAppDepsT,
+    test_collector: &TestCollectorT,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
     list_action: Option<ListAction>,
@@ -444,7 +443,7 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
     project_dir: impl AsRef<Root<ProjectDir>>,
     state_dir: impl AsRef<Root<StateDir>>,
     mut watch_exclude_paths: Vec<PathBuf>,
-    collector_options: super::CollectOptionsM<MainAppDepsT>,
+    collector_options: super::CollectOptionsM<TestCollectorT>,
     log: slog::Logger,
     client: &Client,
     test_metadata_file_name: &'static str,
@@ -486,7 +485,7 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
 
     let test_db_store = TestDbStore::new(fs, &state_dir);
 
-    let filter = super::TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
+    let filter = super::TestFilterM::<TestCollectorT>::compile(&include_filter, &exclude_filter)?;
 
     watch_exclude_paths.push(
         project_dir
@@ -498,7 +497,7 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
     let (ui_handle, ui) = ui.start_ui_thread(logging_output, log.clone());
 
     let main_res = run_app_in_loop(
-        abstract_deps,
+        test_collector,
         log,
         test_db_store,
         project_dir,

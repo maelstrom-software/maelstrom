@@ -20,8 +20,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiHandle, UiSender},
-    CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata,
-    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    CollectTests, Directories, ListAction, LoggingOutput, NoCaseMetadata, TestArtifact,
+    TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{fs::Fs, process::ExitCode, root::Root, template::TemplateVars};
 use pattern::ArtifactKind;
@@ -36,10 +36,6 @@ const DEFAULT_TEST_METADATA_CONTENTS: &str = include_str!("default-test-metadata
 
 /// The Maelstrom target directory is `<target-dir>/maelstrom`.
 pub struct MaelstromTargetDir;
-
-pub struct DefaultMainAppDeps {
-    test_collector: CargoTestCollector,
-}
 
 const MISSING_RIGHT_PAREN: &str = "last character was not ')'";
 const MISSING_LEFT_PAREN: &str = "could not find opening '('";
@@ -427,14 +423,6 @@ fn remove_fixture_output_confusing_trailer() {
     );
 }
 
-impl MainAppDeps for DefaultMainAppDeps {
-    type TestCollector = CargoTestCollector;
-
-    fn test_collector(&self) -> &CargoTestCollector {
-        &self.test_collector
-    }
-}
-
 #[test]
 fn default_test_metadata_parses() {
     maelstrom_test_runner::metadata::Store::<pattern::Pattern>::load(
@@ -469,7 +457,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type Config = Config;
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = CargoMetadata;
-    type Deps<'client> = DefaultMainAppDeps;
+    type TestCollector<'client> = CargoTestCollector;
     type CollectorOptions = CargoOptions;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/cargo-maelstrom";
@@ -539,21 +527,19 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             })
     }
 
-    fn get_deps(
+    fn get_test_collector(
         _client: &Client,
         _directories: &Directories,
         log: &slog::Logger,
         metadata: CargoMetadata,
-    ) -> Result<DefaultMainAppDeps> {
-        Ok(DefaultMainAppDeps {
-            test_collector: CargoTestCollector {
-                log: log.clone(),
-                packages: metadata
-                    .workspace_packages()
-                    .into_iter()
-                    .map(|p| CargoPackage(p.clone()))
-                    .collect(),
-            },
+    ) -> Result<CargoTestCollector> {
+        Ok(CargoTestCollector {
+            log: log.clone(),
+            packages: metadata
+                .workspace_packages()
+                .into_iter()
+                .map(|p| CargoPackage(p.clone()))
+                .collect(),
         })
     }
 
@@ -648,7 +634,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             logging_output,
             parent_config.timeout.map(Timeout::new),
             ui.unwrap(),
-            Self::get_deps(&client, &directories, &log, metadata)?,
+            &Self::get_test_collector(&client, &directories, &log, metadata)?,
             parent_extra_options.include,
             parent_extra_options.exclude,
             list_action,

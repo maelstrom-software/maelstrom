@@ -55,17 +55,13 @@ pub enum ListAction {
     ListTests,
 }
 
-type CaseMetadataM<MainAppDepsT> =
-    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::CaseMetadata;
+type CaseMetadataM<TestCollectorT> = <TestCollectorT as CollectTests>::CaseMetadata;
 
-type ArtifactKeyM<MainAppDepsT> =
-    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::ArtifactKey;
+type ArtifactKeyM<TestCollectorT> = <TestCollectorT as CollectTests>::ArtifactKey;
 
-type CollectOptionsM<MainAppDepsT> =
-    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::Options;
+type CollectOptionsM<TestCollectorT> = <TestCollectorT as CollectTests>::Options;
 
-type TestFilterM<MainAppDepsT> =
-    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::TestFilter;
+type TestFilterM<TestCollectorT> = <TestCollectorT as CollectTests>::TestFilter;
 
 /// This is where cached data goes. If there is build output it is also here.
 pub struct BuildDir;
@@ -163,7 +159,7 @@ pub trait TestRunner {
     type Config: Config + Debug + AsRef<config::Config>;
     type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
     type Metadata;
-    type Deps<'client>: MainAppDeps;
+    type TestCollector<'client>: CollectTests;
     type CollectorOptions;
 
     const BASE_DIRECTORIES_PREFIX: &'static str;
@@ -188,12 +184,12 @@ pub trait TestRunner {
         None
     }
 
-    fn get_deps<'client>(
+    fn get_test_collector<'client>(
         client: &'client Client,
         directories: &Directories,
         log: &slog::Logger,
         metadata: Self::Metadata,
-    ) -> Result<Self::Deps<'client>>;
+    ) -> Result<Self::TestCollector<'client>>;
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf>;
 

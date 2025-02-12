@@ -413,8 +413,3 @@ impl TestFilter for SimpleFilter {
         }
     }
 }
-
-pub trait MainAppDeps: Sync {
-    type TestCollector: CollectTests;
-    fn test_collector(&self) -> &Self::TestCollector;
-}
