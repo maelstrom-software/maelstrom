@@ -655,19 +655,19 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         }
     }
 
-    fn get_directories_and_metadata(_config: &Config) -> Result<(Directories, ())> {
+    fn get_metadata_and_directories(_config: &Config) -> Result<((), Directories)> {
         let project = RootBuf::new(Path::new(".").canonicalize()?);
         let build = project.join(".maelstrom-pytest");
         let cache = build.join("cache");
         let state = build.join("state");
         Ok((
+            (),
             Directories {
                 build,
                 cache,
                 project,
                 state,
             },
-            (),
         ))
     }
 

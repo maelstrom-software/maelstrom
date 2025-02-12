@@ -81,8 +81,8 @@ pub trait TestRunner {
 
     fn get_listing_type(extra_options: &Self::ExtraCommandLineOptions) -> ListingType;
 
-    fn get_directories_and_metadata(config: &Self::Config)
-        -> Result<(Directories, Self::Metadata)>;
+    fn get_metadata_and_directories(config: &Self::Config)
+        -> Result<(Self::Metadata, Directories)>;
 
     fn execute_listing_without_ui(
         _config: &Self::Config,
@@ -140,7 +140,7 @@ where
     if extra_options.as_ref().client_bg_proc {
         return alternative_mains::client_bg_proc();
     } else if extra_options.as_ref().init {
-        let (directories, _) = TestRunnerT::get_directories_and_metadata(&config)?;
+        let (_, directories) = TestRunnerT::get_metadata_and_directories(&config)?;
         return alternative_mains::init(
             &directories.project,
             TestRunnerT::TEST_METADATA_FILE_NAME,
@@ -173,7 +173,7 @@ where
     let stdout_is_tty = io::stdout().is_terminal();
     let ui = ui::factory(config_parent.ui, list_tests.as_bool(), stdout_is_tty)?;
 
-    let (directories, metadata) = TestRunnerT::get_directories_and_metadata(&config)?;
+    let (metadata, directories) = TestRunnerT::get_metadata_and_directories(&config)?;
 
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;

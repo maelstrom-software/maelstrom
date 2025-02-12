@@ -103,8 +103,8 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
                 }
             };
 
-        let (directories, metadata) =
-            cargo_maelstrom::TestRunner::get_directories_and_metadata(&config)?;
+        let (metadata, directories) =
+            cargo_maelstrom::TestRunner::get_metadata_and_directories(&config)?;
 
         Fs.create_dir_all(&directories.state)?;
         Fs.create_dir_all(&directories.cache)?;
