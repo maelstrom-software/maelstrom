@@ -28,9 +28,6 @@ use std::{
     str::FromStr,
 };
 
-const TEST_METADATA_FILE_NAME: &str = "cargo-maelstrom.toml";
-const DEFAULT_TEST_METADATA_FILE_CONTENTS: &str = include_str!("default-test-metadata.toml");
-
 /// The Maelstrom target directory is `<target-dir>/maelstrom`.
 pub struct MaelstromTargetDir;
 
@@ -79,42 +76,6 @@ impl FromStr for CargoArtifactKey {
         let name = name.to_owned();
         Ok(Self { name, kind })
     }
-}
-
-#[test]
-fn cargo_artifact_key_display() {
-    let key = CargoArtifactKey::new("foo", ArtifactKind::Library);
-    assert_eq!(format!("{key}"), "foo(library)");
-}
-
-#[test]
-fn cargo_artifact_key_from_str_empty_string() {
-    let err = CargoArtifactKey::from_str("").unwrap_err();
-    assert_eq!(err.to_string(), MISSING_RIGHT_PAREN);
-}
-
-#[test]
-fn cargo_artifact_key_from_str_no_right_paren() {
-    let err = CargoArtifactKey::from_str("foo bar").unwrap_err();
-    assert_eq!(err.to_string(), MISSING_RIGHT_PAREN);
-}
-
-#[test]
-fn cargo_artifact_key_from_str_no_left_paren() {
-    let err = CargoArtifactKey::from_str("bar)").unwrap_err();
-    assert_eq!(err.to_string(), MISSING_LEFT_PAREN);
-}
-
-#[test]
-fn cargo_artifact_key_from_str_bad_kind() {
-    let err = CargoArtifactKey::from_str("foo(not-a-valid-kind)").unwrap_err();
-    assert_eq!(err.to_string(), "Matching variant not found");
-}
-
-#[test]
-fn cargo_artifact_key_from_str_good() {
-    let key = CargoArtifactKey::from_str("foo(library)").unwrap();
-    assert_eq!(key, CargoArtifactKey::new("foo", ArtifactKind::Library));
 }
 
 impl TestFilter for pattern::Pattern {
@@ -358,77 +319,6 @@ impl CollectTests for CargoTestCollector {
     }
 }
 
-#[test]
-fn remove_fixture_output_basic_case() {
-    let example = "\n\
-    running 1 test\n\
-    this is some output from the test\n\
-    this is too\n\
-    test tests::i_be_failing ... FAILED\n\
-    \n\
-    failures:\n\
-    \n\
-    failures:\n\
-        tests::i_be_failing\n\
-        \n\
-    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
-    finished in 0.01s\n\
-    \n\
-    ";
-    let cleansed = CargoTestCollector::remove_fixture_output(
-        "tests::i_be_failing",
-        example.split('\n').map(ToOwned::to_owned).collect(),
-    );
-    assert_eq!(
-        cleansed.join("\n") + "\n",
-        "\
-        this is some output from the test\n\
-        this is too\n\
-        "
-    );
-}
-
-#[test]
-fn remove_fixture_output_confusing_trailer() {
-    let example = "\n\
-    running 1 test\n\
-    this is some output from the test\n\
-    test tests::i_be_failing ... this is the test's own weird output\n\
-    this is too\n\
-    test tests::i_be_failing ... FAILED\n\
-    \n\
-    failures:\n\
-    \n\
-    failures:\n\
-        tests::i_be_failing\n\
-        \n\
-    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
-    finished in 0.01s\n\
-    \n\
-    ";
-    let cleansed = CargoTestCollector::remove_fixture_output(
-        "tests::i_be_failing",
-        example.split('\n').map(ToOwned::to_owned).collect(),
-    );
-    assert_eq!(
-        cleansed.join("\n") + "\n",
-        "\
-        this is some output from the test\n\
-        test tests::i_be_failing ... this is the test's own weird output\n\
-        this is too\n\
-        "
-    );
-}
-
-#[test]
-fn default_test_metadata_parses() {
-    maelstrom_test_runner::metadata::Store::<pattern::Pattern>::load(
-        DEFAULT_TEST_METADATA_FILE_CONTENTS,
-        &Default::default(),
-    )
-    .unwrap();
-}
-
 impl Wait for cargo::WaitHandle {
     fn wait(&self) -> Result<WaitStatus> {
         cargo::WaitHandle::wait(self)
@@ -459,9 +349,9 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/cargo-maelstrom";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "CARGO_MAELSTROM";
-    const TEST_METADATA_FILE_NAME: &'static str = crate::TEST_METADATA_FILE_NAME;
+    const TEST_METADATA_FILE_NAME: &'static str = "cargo-maelstrom.toml";
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
-        crate::DEFAULT_TEST_METADATA_FILE_CONTENTS;
+        include_str!("default-test-metadata.toml");
 
     fn get_listing_type(extra_options: &ExtraCommandLineOptions) -> ListingType {
         match &extra_options.list {
@@ -599,5 +489,118 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             .to_str()
             .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
         Ok(TemplateVars::new([("build-dir", build_dir)]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maelstrom_test_runner::TestRunner as _;
+
+    #[test]
+    fn cargo_artifact_key_display() {
+        let key = CargoArtifactKey::new("foo", ArtifactKind::Library);
+        assert_eq!(format!("{key}"), "foo(library)");
+    }
+
+    #[test]
+    fn cargo_artifact_key_from_str_empty_string() {
+        let err = CargoArtifactKey::from_str("").unwrap_err();
+        assert_eq!(err.to_string(), MISSING_RIGHT_PAREN);
+    }
+
+    #[test]
+    fn cargo_artifact_key_from_str_no_right_paren() {
+        let err = CargoArtifactKey::from_str("foo bar").unwrap_err();
+        assert_eq!(err.to_string(), MISSING_RIGHT_PAREN);
+    }
+
+    #[test]
+    fn cargo_artifact_key_from_str_no_left_paren() {
+        let err = CargoArtifactKey::from_str("bar)").unwrap_err();
+        assert_eq!(err.to_string(), MISSING_LEFT_PAREN);
+    }
+
+    #[test]
+    fn cargo_artifact_key_from_str_bad_kind() {
+        let err = CargoArtifactKey::from_str("foo(not-a-valid-kind)").unwrap_err();
+        assert_eq!(err.to_string(), "Matching variant not found");
+    }
+
+    #[test]
+    fn cargo_artifact_key_from_str_good() {
+        let key = CargoArtifactKey::from_str("foo(library)").unwrap();
+        assert_eq!(key, CargoArtifactKey::new("foo", ArtifactKind::Library));
+    }
+
+    #[test]
+    fn remove_fixture_output_basic_case() {
+        let example = "\n\
+            running 1 test\n\
+            this is some output from the test\n\
+            this is too\n\
+            test tests::i_be_failing ... FAILED\n\
+            \n\
+            failures:\n\
+            \n\
+            failures:\n\
+                tests::i_be_failing\n\
+                \n\
+            test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
+            finished in 0.01s\n\
+            \n\
+            ";
+        let cleansed = CargoTestCollector::remove_fixture_output(
+            "tests::i_be_failing",
+            example.split('\n').map(ToOwned::to_owned).collect(),
+        );
+        assert_eq!(
+            cleansed.join("\n") + "\n",
+            "\
+            this is some output from the test\n\
+            this is too\n\
+            "
+        );
+    }
+
+    #[test]
+    fn remove_fixture_output_confusing_trailer() {
+        let example = "\n\
+            running 1 test\n\
+            this is some output from the test\n\
+            test tests::i_be_failing ... this is the test's own weird output\n\
+            this is too\n\
+            test tests::i_be_failing ... FAILED\n\
+            \n\
+            failures:\n\
+            \n\
+            failures:\n\
+                tests::i_be_failing\n\
+                \n\
+            test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
+            finished in 0.01s\n\
+            \n\
+            ";
+        let cleansed = CargoTestCollector::remove_fixture_output(
+            "tests::i_be_failing",
+            example.split('\n').map(ToOwned::to_owned).collect(),
+        );
+        assert_eq!(
+            cleansed.join("\n") + "\n",
+            "\
+            this is some output from the test\n\
+            test tests::i_be_failing ... this is the test's own weird output\n\
+            this is too\n\
+            "
+        );
+    }
+
+    #[test]
+    fn default_test_metadata_parses() {
+        maelstrom_test_runner::metadata::Store::<pattern::Pattern>::load(
+            TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+            &Default::default(),
+        )
+        .unwrap();
     }
 }

@@ -25,7 +25,7 @@ use maelstrom_test_runner::{
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
     BuildDir, CollectTests, Directories, ListingType, TestArtifact, TestArtifactKey,
-    TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    TestCaseMetadata, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -46,9 +46,6 @@ use std::{
     str::FromStr,
     sync::Mutex,
 };
-
-const TEST_METADATA_FILE_NAME: &str = "maelstrom-pytest.toml";
-const DEFAULT_TEST_METADATA_FILE_CONTENTS: &str = include_str!("default-test-metadata.toml");
 
 #[allow(clippy::too_many_arguments)]
 fn create_client_for_test(
@@ -532,7 +529,7 @@ fn remove_fixture_output_basic_case() {
 #[test]
 fn default_test_metadata_parses() {
     maelstrom_test_runner::metadata::Store::<pattern::Pattern>::load(
-        DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
         &Default::default(),
     )
     .unwrap();
@@ -608,10 +605,7 @@ pub fn main_for_test(
         directories: directories.clone(),
         test_layers: Mutex::new(HashMap::new()),
     };
-    let template_vars = <TestRunner as maelstrom_test_runner::TestRunner>::get_template_vars(
-        &config.pytest_options,
-        &directories,
-    )?;
+    let template_vars = TestRunner::get_template_vars(&config.pytest_options, &directories)?;
 
     run_app_with_ui_multithreaded(
         log_destination,
@@ -631,8 +625,8 @@ pub fn main_for_test(
         config.pytest_options,
         log,
         &client,
-        TEST_METADATA_FILE_NAME,
-        DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        TestRunner::TEST_METADATA_FILE_NAME,
+        TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
         template_vars,
     )
 }
@@ -648,9 +642,9 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-pytest";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_PYTEST";
-    const TEST_METADATA_FILE_NAME: &'static str = crate::TEST_METADATA_FILE_NAME;
+    const TEST_METADATA_FILE_NAME: &'static str = "maelstrom-pytest.toml";
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
-        crate::DEFAULT_TEST_METADATA_FILE_CONTENTS;
+        include_str!("default-test-metadata.toml");
 
     fn get_listing_type(extra_options: &ExtraCommandLineOptions) -> ListingType {
         if extra_options.list {
