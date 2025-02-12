@@ -381,24 +381,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         }
     }
 
-    fn get_metadata_and_directories(config: &Config) -> Result<(CargoMetadata, Directories)> {
-        let cargo_metadata = Self::get_cargo_metadata(config)?;
-        let project = Root::new(cargo_metadata.workspace_root.as_std_path()).to_owned();
-        let build = Root::new(cargo_metadata.target_directory.as_std_path()).to_owned();
-        let maelstrom_target = build.join::<MaelstromTargetDir>("maelstrom");
-        let state = maelstrom_target.join("state");
-        let cache = maelstrom_target.join("cache");
-        Ok((
-            cargo_metadata,
-            Directories {
-                build,
-                cache,
-                state,
-                project,
-            },
-        ))
-    }
-
     fn execute_listing_without_ui(
         config: &Config,
         extra_options: &ExtraCommandLineOptions,
@@ -432,6 +414,24 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 panic!("invalid ListOptions {options:?}");
             }
         }
+    }
+
+    fn get_metadata_and_directories(config: &Config) -> Result<(CargoMetadata, Directories)> {
+        let cargo_metadata = Self::get_cargo_metadata(config)?;
+        let project = Root::new(cargo_metadata.workspace_root.as_std_path()).to_owned();
+        let build = Root::new(cargo_metadata.target_directory.as_std_path()).to_owned();
+        let maelstrom_target = build.join::<MaelstromTargetDir>("maelstrom");
+        let state = maelstrom_target.join("state");
+        let cache = maelstrom_target.join("cache");
+        Ok((
+            cargo_metadata,
+            Directories {
+                build,
+                cache,
+                state,
+                project,
+            },
+        ))
     }
 
     fn get_test_collector(

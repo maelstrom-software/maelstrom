@@ -784,15 +784,44 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         include_str!("default-test-metadata.toml");
 
     fn get_listing_mode(extra_options: &ExtraCommandLineOptions) -> ListingMode {
-        let ListOptions { tests, packages } = &extra_options.list;
-        if *tests {
-            assert!(!*packages); // Clap should guarantee this.
-            ListingMode::Tests
-        } else if *packages {
-            ListingMode::OtherWithUi
-        } else {
-            ListingMode::None
+        match &extra_options.list {
+            ListOptions {
+                tests: true,
+                packages: false,
+            } => ListingMode::Tests,
+            ListOptions {
+                tests: false,
+                packages: true,
+            } => ListingMode::OtherWithUi,
+            ListOptions {
+                tests: false,
+                packages: false,
+            } => ListingMode::None,
+            options => {
+                panic!("invalid ListOptions {options:?}, clap should have disallowed");
+            }
         }
+    }
+
+    fn execute_listing_with_ui(
+        config: &Config,
+        extra_options: &ExtraCommandLineOptions,
+        ui_sender: UiSender,
+    ) -> Result<ExitCode> {
+        assert!(!extra_options.list.tests);
+        assert!(extra_options.list.packages);
+
+        let (_, directories) = Self::get_metadata_and_directories(config)?;
+
+        Fs.create_dir_all(&directories.cache)?;
+
+        alternative_mains::list_packages(
+            ui_sender,
+            &directories.project,
+            &directories.cache,
+            &extra_options.parent.include,
+            &extra_options.parent.exclude,
+        )
     }
 
     fn get_metadata_and_directories(_config: &Config) -> Result<((), Directories)> {
@@ -810,26 +839,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 state,
             },
         ))
-    }
-
-    fn execute_listing_with_ui(
-        config: &Config,
-        extra_options: &ExtraCommandLineOptions,
-        ui_sender: UiSender,
-    ) -> Result<ExitCode> {
-        assert!(extra_options.list.packages);
-
-        let (_, directories) = Self::get_metadata_and_directories(config)?;
-
-        Fs.create_dir_all(&directories.cache)?;
-
-        alternative_mains::list_packages(
-            ui_sender,
-            &directories.project,
-            &directories.cache,
-            &extra_options.parent.include,
-            &extra_options.parent.exclude,
-        )
     }
 
     fn get_test_collector(

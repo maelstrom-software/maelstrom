@@ -34,10 +34,26 @@ use std::{
 use ui::{Ui, UiSender};
 use util::ListTests;
 
+/// The listing mode of the test runner. This determines whether the test runner runs normally, or
+/// instead lists tests, binaries, packages, etc.
 pub enum ListingMode {
+    /// Run normally. Execute specified tests, potentially building them first.
     None,
+
+    /// Instead of running specified tests, list them instead. This may require building the test
+    /// executables first. This will always run with the full UI.
     Tests,
+
+    /// Instead of running normally, list something like the selected packages or binaries. Do so
+    /// with the full UI. This is used when listing the packages or binaries or whatever may take a
+    /// while. This happens, for example, with Golang, as listing all of the packages may cause it
+    /// to download and install dependencies.
     OtherWithUi,
+
+    /// Instead of running normally, list something like the selected packages or binaries. Do so
+    /// without the full UI. This is used when listing the packages or binaries or whatever is very
+    /// fast. This happens, for example, with Rust, as all of the relevant information can be
+    /// quickly acquired from `cargo metadata`.
     OtherWithoutUi,
 }
 
@@ -46,6 +62,8 @@ pub enum ListingMode {
 /// always be a descendant of the [`ProjectDir`].
 pub struct BuildDir;
 
+/// The relevant directories for the project. It must be the case that `project` is an ancestor of
+/// `build`, `build` is an ancestor of `cache`, and `build` is an ancestor of `state`.
 #[derive(Clone)]
 pub struct Directories {
     pub build: RootBuf<BuildDir>,
@@ -75,27 +93,46 @@ pub trait TestRunner {
         + AsRef<config::ExtraCommandLineOptions>
         + IntoParts<First = config::ExtraCommandLineOptions>;
 
+    /// Project metadata specific to the test runner. This is called out as a separate type so that
+    /// it can be acquired once, and then used later. In particular, for Cargo, this is the result
+    /// of running `cargo metadata`. This is assumed to be required for determining the directories
+    /// [`Self::get_metadata_and_directories`], and is then used by [`Self::get_test_collector`].
     type Metadata;
+
+    /// The test collector does most of the actual work for the test runner. Currently, it is
+    /// provided a reference to the [`Client`]. However, in the future, we want to remove this
+    /// direct dependency. When that happens, this type will no longer need to be a GAT.
     type TestCollector<'client>: CollectTests<Options = Self::CollectorOptions> + Sync;
+
+    /// The test-collector-specific configuration values. Currently, this is a separate type since
+    /// [`Self::TestCollector`] is a GAT. This type must be the same as [`CollectTests::Options`]
+    /// for all [`Self::TestCollector`]s. When [`Self::TestCollector`] is no longer a GAT, this
+    /// type can go away.
     type CollectorOptions;
 
+    /// The prefix used when looking for files defined by the XDG base directories specification.
+    /// This is something like `maelstrom/maelstrom-go-test`.
     const BASE_DIRECTORIES_PREFIX: &'static str;
+
+    /// The environment variable prefix used when determining configuration values. This is
+    /// something like `MAELSTROM_GO_TEST`.
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str;
+
+    /// The file where the test runner looks for test metadata. This is something like
+    /// "maelstrom-go-test.toml".
     const TEST_METADATA_FILE_NAME: &'static str;
+
+    /// When the test metadata file doesn't exist, these are the contents used instead. They can be
+    /// persisted with the `--init` command-line option.
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str;
 
+    /// Determine the listing mode. Based on the potential values that can be returned by this,
+    /// it's possible that [`Self::execute_listing_without_ui`] or
+    /// [`Self::execute_listing_with_ui`] may need to be implemented.
     fn get_listing_mode(extra_options: &Self::ExtraCommandLineOptions) -> ListingMode;
 
-    fn get_metadata_and_directories(config: &Self::Config)
-        -> Result<(Self::Metadata, Directories)>;
-
-    fn execute_listing_without_ui(
-        _config: &Self::Config,
-        _extra_options: &Self::ExtraCommandLineOptions,
-    ) -> Result<ExitCode> {
-        unimplemented!()
-    }
-
+    /// Execute an "other", with the UI. This must be implemented if [`Self::get_listing_mode`]
+    /// can return [`ListingMode::OtherWithUi`].
     fn execute_listing_with_ui(
         _config: &Self::Config,
         _extra_options: &Self::ExtraCommandLineOptions,
@@ -103,6 +140,19 @@ pub trait TestRunner {
     ) -> Result<ExitCode> {
         unimplemented!()
     }
+
+    /// Execute an "other", without the UI. This must be implemented if [`Self::get_listing_mode`]
+    /// can return [`ListingMode::OtherWithoutUi`].
+    fn execute_listing_without_ui(
+        _config: &Self::Config,
+        _extra_options: &Self::ExtraCommandLineOptions,
+    ) -> Result<ExitCode> {
+        unimplemented!()
+    }
+
+    /// Return the directories and metadata for the project.
+    fn get_metadata_and_directories(config: &Self::Config)
+        -> Result<(Self::Metadata, Directories)>;
 
     fn get_test_collector<'client>(
         client: &'client Client,
