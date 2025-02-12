@@ -2,7 +2,7 @@ use crate::{metadata::Metadata, ui};
 use anyhow::Result;
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_client::spec::{ImageRef, LayerSpec};
-use maelstrom_util::{process::ExitCode, template::TemplateVars};
+use maelstrom_util::process::ExitCode;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -417,12 +417,4 @@ impl TestFilter for SimpleFilter {
 pub trait MainAppDeps: Sync {
     type TestCollector: CollectTests;
     fn test_collector(&self) -> &Self::TestCollector;
-
-    fn get_template_vars(
-        &self,
-        options: &<Self::TestCollector as CollectTests>::Options,
-    ) -> Result<TemplateVars>;
-
-    const TEST_METADATA_FILE_NAME: &'static str;
-    const DEFAULT_TEST_METADATA_CONTENTS: &'static str;
 }

@@ -29,7 +29,6 @@ use maelstrom_util::{
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
-    template::TemplateVars,
 };
 use std::{
     fmt, io,
@@ -372,7 +371,7 @@ fn path_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
 fn so_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
     shared_library_dependencies_layer_spec! {
         [binary_path],
-            follow_symlinks: true,
+        follow_symlinks: true,
     }
 }
 
@@ -678,13 +677,6 @@ impl MainAppDeps for DefaultMainAppDeps {
     fn test_collector(&self) -> &GoTestCollector {
         &self.test_collector
     }
-
-    fn get_template_vars(&self, _: &GoTestOptions) -> Result<TemplateVars> {
-        Ok(TemplateVars::default())
-    }
-
-    const TEST_METADATA_FILE_NAME: &'static str = TEST_METADATA_FILE_NAME;
-    const DEFAULT_TEST_METADATA_CONTENTS: &'static str = DEFAULT_TEST_METADATA_CONTENTS;
 }
 
 #[test]
@@ -718,15 +710,22 @@ pub fn main_for_test(
     stdout_is_tty: bool,
     ui: impl Ui,
     _stderr: impl io::Write,
-    project_dir: &Root<ProjectDir>,
+    project: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
-    let hidden_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-go-test");
-    let hidden_dir = Root::<HiddenDir>::new(&hidden_dir);
-    let state_dir = hidden_dir.join::<StateDir>("state");
-    let cache_dir = hidden_dir.join::<CacheDir>("cache");
+    let project = project.to_owned();
+    let hidden = project.join::<HiddenDir>(".maelstrom-go-test");
+    let state = hidden.join("state");
+    let cache = hidden.join("cache");
+    let build = cache.join("test-binaries");
+    let directories = Directories {
+        build,
+        cache,
+        project,
+        state,
+    };
 
-    Fs.create_dir_all(&state_dir)?;
-    Fs.create_dir_all(&cache_dir)?;
+    Fs.create_dir_all(&directories.state)?;
+    Fs.create_dir_all(&directories.cache)?;
 
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
@@ -736,8 +735,8 @@ pub fn main_for_test(
 
         let list_res = alternative_mains::list_packages(
             ui,
-            project_dir,
-            &cache_dir,
+            &directories.project,
+            &directories.cache,
             &extra_options.parent.include,
             &extra_options.parent.exclude,
         );
@@ -751,10 +750,10 @@ pub fn main_for_test(
         let client = create_client_for_test(
             bg_proc,
             config.parent.broker,
-            project_dir,
-            &state_dir,
+            &directories.project,
+            &directories.state,
             config.parent.container_image_depot_root,
-            &cache_dir,
+            &directories.cache,
             config.parent.cache_size,
             config.parent.inline_limit,
             config.parent.slots,
@@ -762,7 +761,11 @@ pub fn main_for_test(
             config.parent.artifact_transfer_strategy,
             log.clone(),
         )?;
-        let deps = DefaultMainAppDeps::new(project_dir, &cache_dir)?;
+        let deps = DefaultMainAppDeps::new(&directories.project, &directories.cache)?;
+        let template_vars = <TestRunner as maelstrom_test_runner::TestRunner>::get_template_vars(
+            &config.go_test_options,
+            &directories,
+        )?;
 
         run_app_with_ui_multithreaded(
             logging_output,
@@ -776,12 +779,15 @@ pub fn main_for_test(
             config.parent.stop_after,
             extra_options.parent.watch,
             stdout_is_tty,
-            project_dir,
-            &state_dir,
+            &directories.project,
+            &directories.state,
             vec![],
             config.go_test_options,
             log,
             &client,
+            TEST_METADATA_FILE_NAME,
+            DEFAULT_TEST_METADATA_CONTENTS,
+            template_vars,
         )
     }
 }
@@ -922,6 +928,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
         let list_action = Self::is_list(&extra_options).then_some(ListAction::ListTests);
         let parent_extra_options = Self::extra_options_into_parent(extra_options);
+        let template_vars = Self::get_template_vars(&collector_config, &directories)?;
 
         run_app_with_ui_multithreaded(
             logging_output,
@@ -941,6 +948,9 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             collector_config,
             log,
             &client,
+            Self::TEST_METADATA_FILE_NAME,
+            Self::TEST_METADATA_DEFAULT_CONTENTS,
+            template_vars,
         )
     }
 }

@@ -20,15 +20,10 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiHandle, UiSender},
-    BuildDir, CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata,
+    CollectTests, Directories, ListAction, LoggingOutput, MainAppDeps, NoCaseMetadata,
     TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
-use maelstrom_util::{
-    fs::Fs,
-    process::ExitCode,
-    root::{Root, RootBuf},
-    template::TemplateVars,
-};
+use maelstrom_util::{fs::Fs, process::ExitCode, root::Root, template::TemplateVars};
 use pattern::ArtifactKind;
 use std::{
     fmt, io,
@@ -44,7 +39,6 @@ pub struct MaelstromTargetDir;
 
 pub struct DefaultMainAppDeps {
     test_collector: CargoTestCollector,
-    target_dir: RootBuf<BuildDir>,
 }
 
 const MISSING_RIGHT_PAREN: &str = "last character was not ')'";
@@ -439,26 +433,6 @@ impl MainAppDeps for DefaultMainAppDeps {
     fn test_collector(&self) -> &CargoTestCollector {
         &self.test_collector
     }
-
-    fn get_template_vars(&self, cargo_options: &CargoOptions) -> Result<TemplateVars> {
-        let profile = cargo_options
-            .compilation_options
-            .profile
-            .clone()
-            .unwrap_or("dev".into());
-        let mut target = (**self.target_dir).to_owned();
-        match profile.as_str() {
-            "dev" => target.push("debug"),
-            other => target.push(other),
-        }
-        let build_dir = target
-            .to_str()
-            .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
-        Ok(TemplateVars::new([("build-dir", build_dir)]))
-    }
-
-    const TEST_METADATA_FILE_NAME: &'static str = TEST_METADATA_FILE_NAME;
-    const DEFAULT_TEST_METADATA_CONTENTS: &'static str = DEFAULT_TEST_METADATA_CONTENTS;
 }
 
 #[test]
@@ -567,7 +541,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_deps(
         _client: &Client,
-        directories: &Directories,
+        _directories: &Directories,
         log: &slog::Logger,
         metadata: CargoMetadata,
     ) -> Result<DefaultMainAppDeps> {
@@ -580,7 +554,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                     .map(|p| CargoPackage(p.clone()))
                     .collect(),
             },
-            target_dir: directories.build.clone(),
         })
     }
 
@@ -604,6 +577,25 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         extra_options: ExtraCommandLineOptions,
     ) -> maelstrom_test_runner::config::ExtraCommandLineOptions {
         extra_options.parent
+    }
+
+    fn get_template_vars(
+        cargo_options: &CargoOptions,
+        directories: &Directories,
+    ) -> Result<TemplateVars> {
+        let profile = cargo_options
+            .compilation_options
+            .profile
+            .clone()
+            .unwrap_or("dev".into());
+        let target = match profile.as_str() {
+            "dev" => directories.build.join::<()>("debug"),
+            other => directories.build.join::<()>(other),
+        };
+        let build_dir = target
+            .to_str()
+            .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
+        Ok(TemplateVars::new([("build-dir", build_dir)]))
     }
 
     fn main(
@@ -650,6 +642,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
         let list_action = Self::is_list(&extra_options).then_some(ListAction::ListTests);
         let parent_extra_options = Self::extra_options_into_parent(extra_options);
+        let template_vars = Self::get_template_vars(&collector_config, &directories)?;
 
         run_app_with_ui_multithreaded(
             logging_output,
@@ -669,6 +662,9 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             collector_config,
             log,
             &client,
+            Self::TEST_METADATA_FILE_NAME,
+            Self::TEST_METADATA_DEFAULT_CONTENTS,
+            template_vars,
         )
     }
 }

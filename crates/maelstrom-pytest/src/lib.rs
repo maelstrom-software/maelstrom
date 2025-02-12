@@ -31,7 +31,6 @@ use maelstrom_util::{
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
-    template::TemplateVars,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -551,13 +550,6 @@ impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
     fn test_collector(&self) -> &PytestTestCollector<'client> {
         &self.test_collector
     }
-
-    fn get_template_vars(&self, _pytest_options: &PytestConfigValues) -> Result<TemplateVars> {
-        Ok(TemplateVars::default())
-    }
-
-    const TEST_METADATA_FILE_NAME: &'static str = TEST_METADATA_FILE_NAME;
-    const DEFAULT_TEST_METADATA_CONTENTS: &'static str = DEFAULT_TEST_METADATA_CONTENTS;
 }
 
 #[test]
@@ -635,6 +627,10 @@ pub fn main_for_test(
         log.clone(),
     )?;
     let deps = DefaultMainAppDeps::new(directories.clone(), &client)?;
+    let template_vars = <TestRunner as maelstrom_test_runner::TestRunner>::get_template_vars(
+        &config.pytest_options,
+        &directories,
+    )?;
 
     run_app_with_ui_multithreaded(
         logging_output,
@@ -654,6 +650,9 @@ pub fn main_for_test(
         config.pytest_options,
         log,
         &client,
+        TEST_METADATA_FILE_NAME,
+        DEFAULT_TEST_METADATA_CONTENTS,
+        template_vars,
     )
 }
 
@@ -766,6 +765,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
         let list_action = Self::is_list(&extra_options).then_some(ListAction::ListTests);
         let parent_extra_options = Self::extra_options_into_parent(extra_options);
+        let template_vars = Self::get_template_vars(&collector_config, &directories)?;
 
         run_app_with_ui_multithreaded(
             logging_output,
@@ -785,6 +785,9 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             collector_config,
             log,
             &client,
+            Self::TEST_METADATA_FILE_NAME,
+            Self::TEST_METADATA_DEFAULT_CONTENTS,
+            template_vars,
         )
     }
 }

@@ -16,7 +16,10 @@ use anyhow::Result;
 use clap::{Args, Command};
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
-use maelstrom_util::{config::common::LogLevel, config::Config, process::ExitCode, root::RootBuf};
+use maelstrom_util::{
+    config::common::LogLevel, config::Config, process::ExitCode, root::RootBuf,
+    template::TemplateVars,
+};
 use slog::Drain as _;
 use std::{
     ffi::OsString,
@@ -199,6 +202,13 @@ pub trait TestRunner {
     fn extra_options_into_parent(
         extra_options: Self::ExtraCommandLineOptions,
     ) -> config::ExtraCommandLineOptions;
+
+    fn get_template_vars(
+        _collector_options: &Self::CollectorOptions,
+        _directories: &Directories,
+    ) -> Result<TemplateVars> {
+        Ok(TemplateVars::default())
+    }
 
     fn main(
         config: Self::Config,

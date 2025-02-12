@@ -25,6 +25,7 @@ use maelstrom_util::{
     process::ExitCode,
     root::{Root, RootBuf},
     sync::Event,
+    template::TemplateVars,
 };
 use main_app::MainApp;
 use std::{
@@ -446,22 +447,21 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT: MainAppDeps>(
     collector_options: super::CollectOptionsM<MainAppDepsT>,
     log: slog::Logger,
     client: &Client,
+    test_metadata_file_name: &'static str,
+    test_metadata_default_contents: &'static str,
+    metadata_template_vars: TemplateVars,
 ) -> Result<ExitCode> {
     let fs = Fs::new();
 
     let project_dir = project_dir.as_ref().to_owned();
 
-    let metadata_template_vars = abstract_deps.get_template_vars(&collector_options)?;
-    let metadata_path = project_dir.join::<()>(MainAppDepsT::TEST_METADATA_FILE_NAME);
+    let metadata_path = project_dir.join::<()>(test_metadata_file_name);
     let metadata_store = if let Some(contents) = fs.read_to_string_if_exists(&metadata_path)? {
         MetadataStore::load(&contents, &metadata_template_vars)
             .with_context(|| format!("parsing metadata file {}", metadata_path.display()))?
     } else {
-        MetadataStore::load(
-            MainAppDepsT::DEFAULT_TEST_METADATA_CONTENTS,
-            &metadata_template_vars,
-        )
-        .expect("embedded default test metadata TOML to be valid")
+        MetadataStore::load(test_metadata_default_contents, &metadata_template_vars)
+            .expect("embedded default test metadata TOML to be valid")
     };
 
     // TODO: There are a few things wrong with this from an efficiency point of view.
