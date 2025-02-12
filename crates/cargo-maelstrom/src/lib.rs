@@ -17,8 +17,9 @@ use maelstrom_client::{
     Client,
 };
 use maelstrom_test_runner::{
-    metadata::Metadata, ui::UiSender, CollectTests, Directories, ListingType, NoCaseMetadata,
-    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    config::IntoParts, metadata::Metadata, ui::UiSender, CollectTests, Directories, ListingType,
+    NoCaseMetadata, TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait,
+    WaitStatus,
 };
 use maelstrom_util::{process::ExitCode, root::Root, template::TemplateVars};
 use pattern::ArtifactKind;
@@ -455,15 +456,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     }
 
     fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, CargoOptions) {
-        (
-            config.parent,
-            CargoOptions {
-                feature_selection_options: config.cargo_feature_selection_options,
-                compilation_options: config.cargo_compilation_options,
-                manifest_options: config.cargo_manifest_options,
-                extra_test_binary_args: config.extra_test_binary_args,
-            },
-        )
+        config.into_parts()
     }
 
     fn extra_options_into_parent(

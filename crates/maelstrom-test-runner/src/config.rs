@@ -63,6 +63,12 @@ impl Default for Repeat {
 
 non_zero_usize_wrapper!(StopAfter);
 
+pub trait IntoParts {
+    type First;
+    type Second;
+    fn into_parts(self) -> (Self::First, Self::Second);
+}
+
 #[derive(Config, Debug)]
 pub struct Config {
     /// The target amount of disk space to use for the cache. This bound won't be followed

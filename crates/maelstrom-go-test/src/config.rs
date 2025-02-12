@@ -1,9 +1,10 @@
 use maelstrom_macro::Config;
+use maelstrom_test_runner::config::{Config as TestRunnerConfig, IntoParts};
 
 #[derive(Config, Debug)]
 pub struct Config {
     #[config(flatten)]
-    pub parent: maelstrom_test_runner::config::Config,
+    pub parent: TestRunnerConfig,
 
     #[config(flatten, next_help_heading = "Go Testing Options")]
     pub go_test_options: GoTestOptions,
@@ -34,8 +35,16 @@ pub struct GoTestOptions {
     pub extra_test_binary_args: Vec<String>,
 }
 
-impl AsRef<maelstrom_test_runner::config::Config> for Config {
-    fn as_ref(&self) -> &maelstrom_test_runner::config::Config {
+impl AsRef<TestRunnerConfig> for Config {
+    fn as_ref(&self) -> &TestRunnerConfig {
         &self.parent
+    }
+}
+
+impl IntoParts for Config {
+    type First = TestRunnerConfig;
+    type Second = GoTestOptions;
+    fn into_parts(self) -> (TestRunnerConfig, GoTestOptions) {
+        (self.parent, self.go_test_options)
     }
 }
