@@ -1,7 +1,4 @@
-use crate::{
-    cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
-    CargoConfig,
-};
+use crate::cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
 use maelstrom_macro::Config;
 use maelstrom_test_runner::config::{Config as TestRunnerConfig, IntoParts};
 
@@ -19,14 +16,20 @@ pub struct Config {
     #[config(flatten, next_help_heading = "Manifest Config Options")]
     pub cargo_manifest_options: ManifestOptions,
 
-    /// Extra arguments to pass to the test binary. See the help text for a test binary to see what
-    /// it accepts.
+    /// Extra arguments to pass to the test binary. Refer to the help text of a test binary.
     #[config(
         var_arg,
         value_name = "EXTRA-TEST-BINARY-ARGS",
         default = r#""no args""#,
         next_help_heading = "Test Binary Options"
     )]
+    pub extra_test_binary_args: Vec<String>,
+}
+
+pub struct CargoConfig {
+    pub feature_selection_options: FeatureSelectionOptions,
+    pub compilation_options: CompilationOptions,
+    pub manifest_options: ManifestOptions,
     pub extra_test_binary_args: Vec<String>,
 }
 

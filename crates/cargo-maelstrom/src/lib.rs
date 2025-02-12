@@ -9,7 +9,7 @@ pub use maelstrom_test_runner::log::LoggerBuilder;
 use anyhow::{anyhow, Result};
 use cargo_metadata::{Metadata as CargoMetadata, Target as CargoTarget};
 use cli::{ExtraCommandLineOptions, ListOptions};
-use config::Config;
+use config::{CargoConfig, Config};
 use maelstrom_base::{Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     shared_library_dependencies_layer_spec,
@@ -103,13 +103,6 @@ impl TestFilter for pattern::Pattern {
         };
         pattern::interpret_pattern(self, &c)
     }
-}
-
-pub struct CargoConfig {
-    feature_selection_options: cargo::FeatureSelectionOptions,
-    compilation_options: cargo::CompilationOptions,
-    manifest_options: cargo::ManifestOptions,
-    extra_test_binary_args: Vec<String>,
 }
 
 pub struct CargoTestCollector {
