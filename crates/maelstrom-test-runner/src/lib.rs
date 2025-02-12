@@ -45,7 +45,7 @@ impl fmt::Display for NotRunEstimate {
             Self::About(n) => fmt::Display::fmt(&format!("~{n}"), f),
             Self::Exactly(n) => fmt::Display::fmt(&n, f),
             Self::GreaterThan(n) => fmt::Display::fmt(&format!(">{n}"), f),
-            Self::Unknown => fmt::Display::fmt("unknown", f),
+            Self::Unknown => fmt::Display::fmt("unknown number of", f),
         }
     }
 }
@@ -302,4 +302,22 @@ where
         TestRunnerT::TEST_METADATA_DEFAULT_CONTENTS,
         template_vars,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn not_run_estimate_display() {
+        #[track_caller]
+        fn not_run_estimate_test(estimate: NotRunEstimate, expected: &str) {
+            assert_eq!(format!("{estimate} tests not run"), expected);
+        }
+
+        not_run_estimate_test(NotRunEstimate::About(42), "~42 tests not run");
+        not_run_estimate_test(NotRunEstimate::Exactly(42), "42 tests not run");
+        not_run_estimate_test(NotRunEstimate::GreaterThan(42), ">42 tests not run");
+        not_run_estimate_test(NotRunEstimate::Unknown, "unknown number of tests not run");
+    }
 }
