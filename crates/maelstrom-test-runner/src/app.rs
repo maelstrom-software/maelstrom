@@ -8,11 +8,11 @@ mod tests;
 use crate::{
     config::{Repeat, StopAfter},
     deps::{CollectTests, KillOnDrop, TestArtifact as _, TestFilter as _, Wait as _, WaitStatus},
+    log::LoggingOutput,
     metadata::Store as MetadataStore,
     test_db::{TestDb, TestDbStore},
-    ui::UiSender,
-    ui::{Ui, UiJobId as JobId, UiMessage},
-    ListTests, LoggingOutput,
+    ui::{Ui, UiJobId as JobId, UiMessage, UiSender},
+    ListTests,
 };
 use anyhow::{Context as _, Result};
 use maelstrom_base::Timeout;

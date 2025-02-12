@@ -4,7 +4,7 @@ pub mod cli;
 pub mod config;
 mod pattern;
 
-pub use maelstrom_test_runner::Logger;
+pub use maelstrom_test_runner::log::Logger;
 
 use anyhow::{anyhow, Result};
 use cargo_metadata::{Metadata as CargoMetadata, Target as CargoTarget};

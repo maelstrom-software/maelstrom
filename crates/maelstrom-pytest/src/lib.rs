@@ -4,7 +4,7 @@ pub mod pattern;
 mod pytest;
 
 pub use config::{Config, PytestConfigValues};
-pub use maelstrom_test_runner::Logger;
+pub use maelstrom_test_runner::log::Logger;
 
 use anyhow::{anyhow, bail, Result};
 use cli::ExtraCommandLineOptions;
@@ -20,11 +20,12 @@ use maelstrom_client::{
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
+    log::LoggingOutput,
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, Directories, LoggingOutput, TestArtifact, TestArtifactKey,
-    TestCaseMetadata, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    BuildDir, CollectTests, Directories, TestArtifact, TestArtifactKey, TestCaseMetadata,
+    TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
