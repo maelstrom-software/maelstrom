@@ -54,14 +54,28 @@ pub struct Directories {
     pub state: RootBuf<StateDir>,
 }
 
+/// Top-level trait that defines a test runner.
+///
+/// This trait is mostly responsible for startup and configuration concerns. It hands most of the
+/// heavy lifting off to [`Self::TestCollector`].
 pub trait TestRunner {
+
+    /// Configuration values for the test runner. This consists of configuration values shared
+    /// between all test runners ([`config::Config`]), and those specific to this test runner
+    /// ([`Self::CollectorOptions`]).
     type Config: Config
         + Debug
         + AsRef<config::Config>
         + IntoParts<First = config::Config, Second = Self::CollectorOptions>;
+
+    /// Extra command-line options for the test runner. This consists of extra command-line options
+    /// shared between all test runners ([`config::ExtraCommandLineOptions`]), and those specific
+    /// to this test runner. The extra command-line options specific to this test runner are used
+    /// to control the listing mode.
     type ExtraCommandLineOptions: Args
         + AsRef<config::ExtraCommandLineOptions>
         + IntoParts<First = config::ExtraCommandLineOptions>;
+
     type Metadata;
     type TestCollector<'client>: CollectTests<Options = Self::CollectorOptions> + Sync;
     type CollectorOptions;
