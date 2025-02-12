@@ -41,7 +41,7 @@ impl UiHandle {
     /// Wait for the UI thread to exit and return any error it had. This must be called after the
     /// associated `UiSender` has been destroyed, or else it will wait forever.
     pub fn join(self) -> Result<()> {
-        self.logging_output.display_on_term();
+        self.logging_output.display_directly_to_terminal();
         let ui_res = self.handle.join().unwrap();
         slog::debug!(self.log, "UI thread joined");
         ui_res
@@ -62,7 +62,7 @@ pub trait Ui: Send + Sync + 'static {
         let (ui_send, ui_recv) = std::sync::mpsc::channel();
         let ui_sender = UiSender::new(ui_send);
         let thread_handle = std::thread::spawn(move || self.run(ui_recv));
-        logging_output.display_on_ui(ui_sender.clone());
+        logging_output.display_to_ui(ui_sender.clone());
 
         (
             UiHandle {

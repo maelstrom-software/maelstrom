@@ -60,8 +60,18 @@ impl ListTests {
     }
 }
 
-/// This is where cached data goes. If there is build output it is also here.
+/// This is the directory that contains build artifacts. The [`CacheDir`] and [`StateDir`]
+/// directories will be descendents of this directory. On the other hand, this directory will
+/// always be a descendant of the [`ProjectDir`].
 pub struct BuildDir;
+
+#[derive(Clone)]
+pub struct Directories {
+    pub build: RootBuf<BuildDir>,
+    pub cache: RootBuf<CacheDir>,
+    pub project: RootBuf<ProjectDir>,
+    pub state: RootBuf<StateDir>,
+}
 
 type TermDrain = slog::Fuse<slog_async::Async>;
 
@@ -85,7 +95,7 @@ impl Default for LoggingOutputInner {
 /// this time. Before or after the UI is running though, we just display log messages more normally
 /// directly to the terminal.
 ///
-/// When this object is created via `[Default::default]`, it starts out sending messages directly
+/// When this object is created via [`Default::default`], it starts out sending messages directly
 /// to the terminal.
 #[derive(Clone, Default)]
 pub struct LoggingOutput {
@@ -93,15 +103,15 @@ pub struct LoggingOutput {
 }
 
 impl LoggingOutput {
-    /// Send any future log messages to the given UI sender. Probably best to call this when the
-    /// process is single-threaded.
-    pub fn display_on_ui(&self, ui: UiSender) {
+    /// Send any future log messages to the given UI sender. It's Probably best to call this when
+    /// the process is single-threaded.
+    pub fn display_to_ui(&self, ui: UiSender) {
         *self.inner.lock().unwrap() = LoggingOutputInner::Ui(UiSlogDrain::new(ui));
     }
 
-    /// Send any future log messages directly to the terminal on `stdout`. Probably best to call
-    /// this when the process is single-threaded.
-    pub fn display_on_term(&self) {
+    /// Send any future log messages directly to the terminal on `stdout`. It's probably best to
+    /// call this when the process is single-threaded.
+    pub fn display_directly_to_terminal(&self) {
         *self.inner.lock().unwrap() = LoggingOutputInner::default();
     }
 }
@@ -142,14 +152,6 @@ impl Logger {
             Self::GivenLogger(logger) => logger.clone(),
         }
     }
-}
-
-#[derive(Clone)]
-pub struct Directories {
-    pub build: RootBuf<BuildDir>,
-    pub cache: RootBuf<CacheDir>,
-    pub project: RootBuf<ProjectDir>,
-    pub state: RootBuf<StateDir>,
 }
 
 pub trait TestRunner {
