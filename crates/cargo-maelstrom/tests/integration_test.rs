@@ -136,7 +136,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             log_destination,
             parent_config.timeout.map(Timeout::new),
             ui,
-            &cargo_maelstrom::TestRunner::get_test_collector(
+            &cargo_maelstrom::TestRunner::build_test_collector(
                 &client,
                 &directories,
                 &log,

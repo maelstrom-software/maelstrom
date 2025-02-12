@@ -154,7 +154,7 @@ pub trait TestRunner {
     fn get_metadata_and_directories(config: &Self::Config)
         -> Result<(Self::Metadata, Directories)>;
 
-    fn get_test_collector<'client>(
+    fn build_test_collector<'client>(
         client: &'client Client,
         directories: &Directories,
         log: &slog::Logger,
@@ -255,7 +255,7 @@ where
 
     let (extra_options, _) = extra_options.into_parts();
     let template_vars = TestRunnerT::get_template_vars(&collector_config, &directories)?;
-    let test_collector = TestRunnerT::get_test_collector(&client, &directories, &log, metadata)?;
+    let test_collector = TestRunnerT::build_test_collector(&client, &directories, &log, metadata)?;
     run_app_with_ui_multithreaded(
         log_destination,
         parent_config.timeout.map(Timeout::new),

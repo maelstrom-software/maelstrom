@@ -671,7 +671,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         ))
     }
 
-    fn get_test_collector<'client>(
+    fn build_test_collector<'client>(
         client: &'client Client,
         directories: &Directories,
         _log: &slog::Logger,
