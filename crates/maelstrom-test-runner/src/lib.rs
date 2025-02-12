@@ -67,7 +67,9 @@ pub trait TestRunner {
         + Debug
         + AsRef<config::Config>
         + IntoParts<First = config::Config, Second = Self::CollectorOptions>;
-    type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
+    type ExtraCommandLineOptions: Args
+        + AsRef<config::ExtraCommandLineOptions>
+        + IntoParts<First = config::ExtraCommandLineOptions>;
     type Metadata;
     type TestCollector<'client>: CollectTests<Options = Self::CollectorOptions> + Sync;
     type CollectorOptions;
@@ -105,10 +107,6 @@ pub trait TestRunner {
     ) -> Result<Self::TestCollector<'client>>;
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf>;
-
-    fn extra_options_into_parent(
-        extra_options: Self::ExtraCommandLineOptions,
-    ) -> config::ExtraCommandLineOptions;
 
     fn get_template_vars(
         _collector_options: &Self::CollectorOptions,
@@ -202,7 +200,7 @@ where
         log.clone(),
     )?;
 
-    let parent_extra_options = TestRunnerT::extra_options_into_parent(extra_options);
+    let (extra_options, _) = extra_options.into_parts();
     let template_vars = TestRunnerT::get_template_vars(&collector_config, &directories)?;
     let test_collector = TestRunnerT::get_test_collector(&client, &directories, &log, metadata)?;
     run_app_with_ui_multithreaded(
@@ -210,12 +208,12 @@ where
         parent_config.timeout.map(Timeout::new),
         ui,
         &test_collector,
-        parent_extra_options.include,
-        parent_extra_options.exclude,
+        extra_options.include,
+        extra_options.exclude,
         list_tests,
         parent_config.repeat,
         parent_config.stop_after,
-        parent_extra_options.watch,
+        extra_options.watch,
         stdout_is_tty,
         &directories.project,
         &directories.state,

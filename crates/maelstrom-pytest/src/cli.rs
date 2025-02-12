@@ -1,10 +1,13 @@
 use clap::{command, Args};
+use maelstrom_test_runner::config::{
+    ExtraCommandLineOptions as TestRunnerExtraCommandLineOptions, IntoParts,
+};
 
 #[derive(Args)]
 #[command(next_help_heading = "Test Selection Options")]
 pub struct ExtraCommandLineOptions {
     #[command(flatten)]
-    pub parent: maelstrom_test_runner::config::ExtraCommandLineOptions,
+    pub parent: TestRunnerExtraCommandLineOptions,
 
     #[arg(
         long = "list",
@@ -14,8 +17,16 @@ pub struct ExtraCommandLineOptions {
     pub list: bool,
 }
 
-impl AsRef<maelstrom_test_runner::config::ExtraCommandLineOptions> for ExtraCommandLineOptions {
-    fn as_ref(&self) -> &maelstrom_test_runner::config::ExtraCommandLineOptions {
+impl AsRef<TestRunnerExtraCommandLineOptions> for ExtraCommandLineOptions {
+    fn as_ref(&self) -> &TestRunnerExtraCommandLineOptions {
         &self.parent
+    }
+}
+
+impl IntoParts for ExtraCommandLineOptions {
+    type First = TestRunnerExtraCommandLineOptions;
+    type Second = bool;
+    fn into_parts(self) -> (TestRunnerExtraCommandLineOptions, bool) {
+        (self.parent, self.list)
     }
 }

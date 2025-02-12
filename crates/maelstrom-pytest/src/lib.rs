@@ -686,10 +686,4 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
         vec![directories.build.to_owned().into_path_buf()]
     }
-
-    fn extra_options_into_parent(
-        extra_options: ExtraCommandLineOptions,
-    ) -> maelstrom_test_runner::config::ExtraCommandLineOptions {
-        extra_options.parent
-    }
 }

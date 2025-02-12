@@ -128,8 +128,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             log.clone(),
         )?;
 
-        let parent_extra_options =
-            cargo_maelstrom::TestRunner::extra_options_into_parent(extra_options);
+        let (extra_options, _) = extra_options.into_parts();
         let template_vars =
             cargo_maelstrom::TestRunner::get_template_vars(&collector_config, &directories)?;
 
@@ -143,12 +142,12 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
                 &log,
                 metadata,
             )?,
-            parent_extra_options.include,
-            parent_extra_options.exclude,
+            extra_options.include,
+            extra_options.exclude,
             list_tests,
             parent_config.repeat,
             parent_config.stop_after,
-            parent_extra_options.watch,
+            extra_options.watch,
             false,
             &directories.project,
             &directories.state,
