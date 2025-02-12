@@ -79,11 +79,11 @@ pub struct Directories {
 pub trait TestRunner {
     /// Configuration values for the test runner. This consists of configuration values shared
     /// between all test runners ([`config::Config`]), and those specific to this test runner
-    /// ([`Self::CollectorOptions`]).
+    /// ([`Self::TestCollectorConfig`]).
     type Config: Config
         + Debug
         + AsRef<config::Config>
-        + IntoParts<First = config::Config, Second = Self::CollectorOptions>;
+        + IntoParts<First = config::Config, Second = Self::TestCollectorConfig>;
 
     /// Extra command-line options for the test runner. This consists of extra command-line options
     /// shared between all test runners ([`config::ExtraCommandLineOptions`]), and those specific
@@ -104,11 +104,9 @@ pub trait TestRunner {
     /// direct dependency. When that happens, this type will no longer need to be a GAT.
     type TestCollector<'client>: CollectTests + Sync;
 
-    /// The test-collector-specific configuration values. Currently, this is a separate type since
-    /// [`Self::TestCollector`] is a GAT. This type must be the same as [`CollectTests::Options`]
-    /// for all [`Self::TestCollector`]s. When [`Self::TestCollector`] is no longer a GAT, this
-    /// type can go away.
-    type CollectorOptions;
+    /// The test-collector-specific configuration values. Used to build the test collector with
+    /// [`Self::build_test_collector`].
+    type TestCollectorConfig;
 
     /// The prefix used when looking for files defined by the XDG base directories specification.
     /// This is something like `maelstrom/maelstrom-go-test`.
@@ -156,7 +154,7 @@ pub trait TestRunner {
 
     fn build_test_collector<'client>(
         client: &'client Client,
-        config: Self::CollectorOptions,
+        config: Self::TestCollectorConfig,
         directories: &Directories,
         log: &slog::Logger,
         metadata: Self::Metadata,
@@ -165,7 +163,7 @@ pub trait TestRunner {
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf>;
 
     fn get_template_vars(
-        collector_options: &Self::CollectorOptions,
+        collector_options: &Self::TestCollectorConfig,
         directories: &Directories,
     ) -> Result<TemplateVars>;
 }

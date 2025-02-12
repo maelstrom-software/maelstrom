@@ -782,7 +782,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
     type TestCollector<'client> = GoTestCollector;
-    type CollectorOptions = GoTestOptions;
+    type TestCollectorConfig = GoTestOptions;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-go-test";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_GO_TEST";
@@ -867,7 +867,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     }
 
     fn get_template_vars(
-        _collector_options: &Self::CollectorOptions,
+        _collector_options: &Self::TestCollectorConfig,
         _directories: &Directories,
     ) -> Result<TemplateVars> {
         Ok(TemplateVars::default())

@@ -638,7 +638,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
     type TestCollector<'client> = PytestTestCollector<'client>;
-    type CollectorOptions = PytestConfigValues;
+    type TestCollectorConfig = PytestConfigValues;
 
     const BASE_DIRECTORIES_PREFIX: &'static str = "maelstrom/maelstrom-pytest";
     const ENVIRONMENT_VARIABLE_PREFIX: &'static str = "MAELSTROM_PYTEST";
@@ -690,7 +690,7 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     }
 
     fn get_template_vars(
-        _collector_options: &Self::CollectorOptions,
+        _collector_options: &Self::TestCollectorConfig,
         _directories: &Directories,
     ) -> Result<TemplateVars> {
         Ok(TemplateVars::default())
