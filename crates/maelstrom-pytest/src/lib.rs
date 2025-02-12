@@ -20,7 +20,6 @@ use maelstrom_client::{
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
-    config::IntoParts as _,
     log::LogDestination,
     metadata::Metadata,
     run_app_with_ui_multithreaded,
@@ -686,10 +685,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
         vec![directories.build.to_owned().into_path_buf()]
-    }
-
-    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, PytestConfigValues) {
-        config.into_parts()
     }
 
     fn extra_options_into_parent(

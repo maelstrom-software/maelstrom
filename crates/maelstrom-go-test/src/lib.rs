@@ -18,7 +18,6 @@ use maelstrom_client::{
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
-    config::IntoParts as _,
     log::LogDestination,
     metadata::Metadata,
     run_app_with_ui_multithreaded,
@@ -846,10 +845,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_watch_exclude_paths(_directories: &Directories) -> Vec<PathBuf> {
         vec![]
-    }
-
-    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, GoTestOptions) {
-        config.into_parts()
     }
 
     fn extra_options_into_parent(

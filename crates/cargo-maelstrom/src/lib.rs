@@ -17,9 +17,8 @@ use maelstrom_client::{
     Client,
 };
 use maelstrom_test_runner::{
-    config::IntoParts, metadata::Metadata, ui::UiSender, CollectTests, Directories, ListingType,
-    NoCaseMetadata, TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait,
-    WaitStatus,
+    metadata::Metadata, ui::UiSender, CollectTests, Directories, ListingType, NoCaseMetadata,
+    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{process::ExitCode, root::Root, template::TemplateVars};
 use pattern::ArtifactKind;
@@ -453,10 +452,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf> {
         vec![directories.build.to_owned().into_path_buf()]
-    }
-
-    fn split_config(config: Config) -> (maelstrom_test_runner::config::Config, CargoOptions) {
-        config.into_parts()
     }
 
     fn extra_options_into_parent(

@@ -16,6 +16,7 @@ pub use deps::*;
 
 use anyhow::Result;
 use clap::{Args, Command};
+use config::IntoParts;
 use derive_more::{From, Into};
 use log::{LogDestination, LoggerBuilder};
 use maelstrom_base::Timeout;
@@ -62,7 +63,10 @@ pub struct Directories {
 }
 
 pub trait TestRunner {
-    type Config: Config + Debug + AsRef<config::Config>;
+    type Config: Config
+        + Debug
+        + AsRef<config::Config>
+        + IntoParts<First = config::Config, Second = Self::CollectorOptions>;
     type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
     type Metadata;
     type TestCollector<'client>: CollectTests<Options = Self::CollectorOptions> + Sync;
@@ -101,8 +105,6 @@ pub trait TestRunner {
     ) -> Result<Self::TestCollector<'client>>;
 
     fn get_watch_exclude_paths(directories: &Directories) -> Vec<PathBuf>;
-
-    fn split_config(config: Self::Config) -> (config::Config, Self::CollectorOptions);
 
     fn extra_options_into_parent(
         extra_options: Self::ExtraCommandLineOptions,
@@ -184,7 +186,7 @@ where
     let log_destination = LogDestination::default();
     let log = log_builder.build(log_destination.clone());
 
-    let (parent_config, collector_config) = TestRunnerT::split_config(config);
+    let (parent_config, collector_config) = config.into_parts();
     let client = Client::new(
         bg_proc,
         parent_config.broker,

@@ -8,7 +8,8 @@ use indicatif::InMemoryTerm;
 use maelstrom_base::Timeout;
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_test_runner::{
-    log::LogDestination, run_app_with_ui_multithreaded, ui, ListTests, ListingType, TestRunner as _,
+    config::IntoParts as _, log::LogDestination, run_app_with_ui_multithreaded, ui, ListTests,
+    ListingType, TestRunner as _,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -16,9 +17,10 @@ use maelstrom_util::{
     root::RootBuf,
 };
 use regex::Regex;
-use std::path::Path;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::{
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
 use tempfile::tempdir;
 
 fn spawn_bg_proc() -> ClientBgProcess {
@@ -110,7 +112,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         let log_destination = LogDestination::default();
         let log = logger.build(log_destination.clone());
 
-        let (parent_config, collector_config) = cargo_maelstrom::TestRunner::split_config(config);
+        let (parent_config, collector_config) = config.into_parts();
         let client = Client::new(
             bg_proc,
             parent_config.broker,
