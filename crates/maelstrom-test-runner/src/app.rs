@@ -12,7 +12,7 @@ use crate::{
     metadata::Store as MetadataStore,
     test_db::{TestDb, TestDbStore},
     ui::{Ui, UiJobId as JobId, UiMessage, UiSender},
-    ListTests,
+    util::ListTests,
 };
 use anyhow::{Context as _, Result};
 use maelstrom_base::Timeout;

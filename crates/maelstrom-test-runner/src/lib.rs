@@ -32,15 +32,7 @@ use std::{
     str,
 };
 use ui::{Ui, UiSender};
-
-#[derive(Clone, Copy, derive_more::Debug, derive_more::Display, Eq, From, PartialEq)]
-pub struct ListTests(bool);
-
-impl ListTests {
-    pub fn as_bool(self) -> bool {
-        self.0
-    }
-}
+use util::ListTests;
 
 pub enum ListingType {
     None,

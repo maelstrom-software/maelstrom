@@ -1,3 +1,4 @@
+use derive_more::From;
 use std::fmt::{self, Debug, Display, Formatter};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -16,6 +17,15 @@ impl Display for NotRunEstimate {
             Self::GreaterThan(n) => Display::fmt(&format!(">{n}"), f),
             Self::Unknown => Display::fmt("unknown number of", f),
         }
+    }
+}
+
+#[derive(Clone, Copy, derive_more::Debug, derive_more::Display, Eq, From, PartialEq)]
+pub struct ListTests(bool);
+
+impl ListTests {
+    pub fn as_bool(self) -> bool {
+        self.0
     }
 }
 

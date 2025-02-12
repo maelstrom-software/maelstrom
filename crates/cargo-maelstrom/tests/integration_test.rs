@@ -8,8 +8,8 @@ use indicatif::InMemoryTerm;
 use maelstrom_base::Timeout;
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_test_runner::{
-    config::IntoParts as _, log::LogDestination, run_app_with_ui_multithreaded, ui, ListTests,
-    ListingType, TestRunner as _,
+    config::IntoParts as _, log::LogDestination, run_app_with_ui_multithreaded, ui,
+    util::ListTests, ListingType, TestRunner as _,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
