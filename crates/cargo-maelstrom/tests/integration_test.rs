@@ -9,7 +9,7 @@ use maelstrom_base::Timeout;
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_test_runner::{
     config::IntoParts as _, log::LogDestination, run_app_with_ui_multithreaded, ui,
-    util::ListTests, ListingType, TestRunner as _,
+    util::ListTests, ListingMode, TestRunner as _,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -89,16 +89,16 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
 
     (|| {
         let list_tests: ListTests =
-            match cargo_maelstrom::TestRunner::get_listing_type(&extra_options) {
-                ListingType::None => false.into(),
-                ListingType::Tests => true.into(),
-                ListingType::OtherWithoutUi => {
+            match cargo_maelstrom::TestRunner::get_listing_mode(&extra_options) {
+                ListingMode::None => false.into(),
+                ListingMode::Tests => true.into(),
+                ListingMode::OtherWithoutUi => {
                     return cargo_maelstrom::TestRunner::execute_listing_without_ui(
                         &config,
                         &extra_options,
                     );
                 }
-                ListingType::OtherWithUi => {
+                ListingMode::OtherWithUi => {
                     unreachable!("cargo-maelstrom doesn't use this");
                 }
             };

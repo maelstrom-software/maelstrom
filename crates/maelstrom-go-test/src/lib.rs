@@ -22,7 +22,7 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiSender},
-    BuildDir, CollectTests, Directories, ListingType, NoCaseMetadata, TestArtifact,
+    BuildDir, CollectTests, Directories, ListingMode, NoCaseMetadata, TestArtifact,
     TestArtifactKey, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
 };
 use maelstrom_util::{
@@ -783,15 +783,15 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
         include_str!("default-test-metadata.toml");
 
-    fn get_listing_type(extra_options: &ExtraCommandLineOptions) -> ListingType {
+    fn get_listing_mode(extra_options: &ExtraCommandLineOptions) -> ListingMode {
         let ListOptions { tests, packages } = &extra_options.list;
         if *tests {
             assert!(!*packages); // Clap should guarantee this.
-            ListingType::Tests
+            ListingMode::Tests
         } else if *packages {
-            ListingType::OtherWithUi
+            ListingMode::OtherWithUi
         } else {
-            ListingType::None
+            ListingMode::None
         }
     }
 

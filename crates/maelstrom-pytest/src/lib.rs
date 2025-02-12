@@ -24,7 +24,7 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, Directories, ListingType, TestArtifact, TestArtifactKey,
+    BuildDir, CollectTests, Directories, ListingMode, TestArtifact, TestArtifactKey,
     TestCaseMetadata, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
 };
 use maelstrom_util::{
@@ -647,11 +647,11 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
         include_str!("default-test-metadata.toml");
 
-    fn get_listing_type(extra_options: &ExtraCommandLineOptions) -> ListingType {
+    fn get_listing_mode(extra_options: &ExtraCommandLineOptions) -> ListingMode {
         if extra_options.list {
-            ListingType::Tests
+            ListingMode::Tests
         } else {
-            ListingType::None
+            ListingMode::None
         }
     }
 

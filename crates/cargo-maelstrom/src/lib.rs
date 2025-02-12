@@ -17,7 +17,7 @@ use maelstrom_client::{
     Client,
 };
 use maelstrom_test_runner::{
-    metadata::Metadata, ui::UiSender, CollectTests, Directories, ListingType, NoCaseMetadata,
+    metadata::Metadata, ui::UiSender, CollectTests, Directories, ListingMode, NoCaseMetadata,
     TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{process::ExitCode, root::Root, template::TemplateVars};
@@ -353,13 +353,13 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str =
         include_str!("default-test-metadata.toml");
 
-    fn get_listing_type(extra_options: &ExtraCommandLineOptions) -> ListingType {
+    fn get_listing_mode(extra_options: &ExtraCommandLineOptions) -> ListingMode {
         match &extra_options.list {
             ListOptions {
                 tests: true,
                 binaries: false,
                 packages: false,
-            } => ListingType::Tests,
+            } => ListingMode::Tests,
             ListOptions {
                 tests: false,
                 binaries: true,
@@ -369,12 +369,12 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 tests: false,
                 binaries: false,
                 packages: true,
-            } => ListingType::OtherWithoutUi,
+            } => ListingMode::OtherWithoutUi,
             ListOptions {
                 tests: false,
                 binaries: false,
                 packages: false,
-            } => ListingType::None,
+            } => ListingMode::None,
             options => {
                 panic!("invalid ListOptions {options:?}, clap should have disallowed");
             }

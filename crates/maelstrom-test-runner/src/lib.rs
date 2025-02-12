@@ -34,7 +34,7 @@ use std::{
 use ui::{Ui, UiSender};
 use util::ListTests;
 
-pub enum ListingType {
+pub enum ListingMode {
     None,
     Tests,
     OtherWithUi,
@@ -59,7 +59,6 @@ pub struct Directories {
 /// This trait is mostly responsible for startup and configuration concerns. It hands most of the
 /// heavy lifting off to [`Self::TestCollector`].
 pub trait TestRunner {
-
     /// Configuration values for the test runner. This consists of configuration values shared
     /// between all test runners ([`config::Config`]), and those specific to this test runner
     /// ([`Self::CollectorOptions`]).
@@ -85,7 +84,7 @@ pub trait TestRunner {
     const TEST_METADATA_FILE_NAME: &'static str;
     const DEFAULT_TEST_METADATA_FILE_CONTENTS: &'static str;
 
-    fn get_listing_type(extra_options: &Self::ExtraCommandLineOptions) -> ListingType;
+    fn get_listing_mode(extra_options: &Self::ExtraCommandLineOptions) -> ListingMode;
 
     fn get_metadata_and_directories(config: &Self::Config)
         -> Result<(Self::Metadata, Directories)>;
@@ -156,13 +155,13 @@ where
 
     let config_parent = config.as_ref();
 
-    let list_tests: ListTests = match TestRunnerT::get_listing_type(&extra_options) {
-        ListingType::None => false.into(),
-        ListingType::Tests => true.into(),
-        ListingType::OtherWithoutUi => {
+    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
+        ListingMode::None => false.into(),
+        ListingMode::Tests => true.into(),
+        ListingMode::OtherWithoutUi => {
             return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
         }
-        ListingType::OtherWithUi => {
+        ListingMode::OtherWithUi => {
             let ui = ui::factory(config_parent.ui, true, io::stdout().is_terminal())?;
             let log_destination = LogDestination::default();
             let log_builder = LoggerBuilder::DefaultLogger(config_parent.log_level);
