@@ -2,7 +2,7 @@ mod fancy;
 mod quiet;
 mod simple;
 
-use crate::{log::LogDestination, NotRunEstimate};
+use crate::{log::LogDestination, util::NotRunEstimate};
 use anyhow::Result;
 use derive_more::Debug;
 use derive_more::{From, Into};

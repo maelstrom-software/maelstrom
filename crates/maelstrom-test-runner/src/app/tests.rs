@@ -12,7 +12,8 @@ use crate::{
         UiJobEnqueued, UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate,
         UiMessage,
     },
-    NoCaseMetadata, NotRunEstimate, StringArtifactKey, WaitStatus,
+    util::NotRunEstimate,
+    NoCaseMetadata, StringArtifactKey, WaitStatus,
 };
 use anyhow::anyhow;
 use itertools::Itertools as _;

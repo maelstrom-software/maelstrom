@@ -6,6 +6,7 @@ pub mod log;
 pub mod metadata;
 pub mod test_db;
 pub mod ui;
+pub mod util;
 
 #[cfg(test)]
 pub mod fake_test_framework;
@@ -24,31 +25,12 @@ use maelstrom_util::{
 };
 use std::{
     ffi::OsString,
-    fmt::{self, Debug, Display, Formatter},
+    fmt::Debug,
     io::{self, IsTerminal as _},
     path::PathBuf,
     str,
 };
 use ui::{Ui, UiHandle, UiSender};
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum NotRunEstimate {
-    About(u64),
-    Exactly(u64),
-    GreaterThan(u64),
-    Unknown,
-}
-
-impl Display for NotRunEstimate {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::About(n) => Display::fmt(&format!("~{n}"), f),
-            Self::Exactly(n) => Display::fmt(&n, f),
-            Self::GreaterThan(n) => Display::fmt(&format!(">{n}"), f),
-            Self::Unknown => Display::fmt("unknown number of", f),
-        }
-    }
-}
 
 #[derive(Clone, Copy, derive_more::Debug, derive_more::Display, Eq, From, PartialEq)]
 pub struct ListTests(bool);
@@ -227,22 +209,4 @@ where
         TestRunnerT::TEST_METADATA_DEFAULT_CONTENTS,
         template_vars,
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn not_run_estimate_display() {
-        #[track_caller]
-        fn not_run_estimate_test(estimate: NotRunEstimate, expected: &str) {
-            assert_eq!(format!("{estimate} tests not run"), expected);
-        }
-
-        not_run_estimate_test(NotRunEstimate::About(42), "~42 tests not run");
-        not_run_estimate_test(NotRunEstimate::Exactly(42), "42 tests not run");
-        not_run_estimate_test(NotRunEstimate::GreaterThan(42), ">42 tests not run");
-        not_run_estimate_test(NotRunEstimate::Unknown, "unknown number of tests not run");
-    }
 }

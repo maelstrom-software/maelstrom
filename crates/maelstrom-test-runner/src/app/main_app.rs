@@ -3,12 +3,13 @@ use super::{
     ArtifactKeyM, ArtifactM, CaseMetadataM, Deps, MainAppMessage, MainAppMessageM, PackageIdM,
     PackageM, TestDbM, TestingOptionsM,
 };
-use crate::metadata::Metadata;
-use crate::test_db::CaseOutcome;
-use crate::ui::{
-    UiJobEnqueued, UiJobId as JobId, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage,
+use crate::{
+    metadata::Metadata,
+    test_db::CaseOutcome,
+    ui::{UiJobEnqueued, UiJobId as JobId, UiJobStatus, UiJobSummary, UiJobUpdate, UiMessage},
+    util::NotRunEstimate,
+    *,
 };
-use crate::*;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client::{
     spec::{ContainerSpec, JobSpec},
