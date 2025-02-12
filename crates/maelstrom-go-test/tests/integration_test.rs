@@ -1,6 +1,6 @@
 use indicatif::InMemoryTerm;
 use maelstrom_client::{ClientBgProcess, ProjectDir};
-use maelstrom_go_test::{cli::ExtraCommandLineOptions, Config, Logger};
+use maelstrom_go_test::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
 use maelstrom_test_runner::ui;
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -45,7 +45,7 @@ fn do_maelstrom_go_test_test(
     let term = InMemoryTerm::new(50, 50);
 
     let log = maelstrom_util::log::test_logger();
-    let logger = Logger::GivenLogger(log.clone());
+    let logger = LoggerBuilder::GivenLogger(log.clone());
 
     let ui = ui::SimpleUi::new(false, false, term.clone());
     let mut stderr = vec![];

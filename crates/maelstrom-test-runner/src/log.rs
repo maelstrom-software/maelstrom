@@ -5,12 +5,12 @@ use std::sync::{Arc, Mutex};
 
 type TermDrain = slog::Fuse<slog_async::Async>;
 
-enum LoggingOutputInner {
+enum LogDestinationInner {
     Ui(UiSlogDrain),
     Term(TermDrain),
 }
 
-impl Default for LoggingOutputInner {
+impl Default for LogDestinationInner {
     fn default() -> Self {
         let decorator = slog_term::TermDecorator::new().stdout().build();
         let drain = slog_term::FullFormat::new(decorator).build().fuse();
@@ -28,25 +28,25 @@ impl Default for LoggingOutputInner {
 /// When this object is created via [`Default::default`], it starts out sending messages directly
 /// to the terminal.
 #[derive(Clone, Default)]
-pub struct LoggingOutput {
-    inner: Arc<Mutex<LoggingOutputInner>>,
+pub struct LogDestination {
+    inner: Arc<Mutex<LogDestinationInner>>,
 }
 
-impl LoggingOutput {
+impl LogDestination {
     /// Send any future log messages to the given UI sender. It's Probably best to call this when
     /// the process is single-threaded.
-    pub fn display_to_ui(&self, ui: UiSender) {
-        *self.inner.lock().unwrap() = LoggingOutputInner::Ui(UiSlogDrain::new(ui));
+    pub fn log_to_ui(&self, ui: UiSender) {
+        *self.inner.lock().unwrap() = LogDestinationInner::Ui(UiSlogDrain::new(ui));
     }
 
     /// Send any future log messages directly to the terminal on `stdout`. It's probably best to
     /// call this when the process is single-threaded.
-    pub fn display_directly_to_terminal(&self) {
-        *self.inner.lock().unwrap() = LoggingOutputInner::default();
+    pub fn log_to_terminal(&self) {
+        *self.inner.lock().unwrap() = LogDestinationInner::default();
     }
 }
 
-impl slog::Drain for LoggingOutput {
+impl slog::Drain for LogDestination {
     type Ok = ();
     type Err = <TermDrain as slog::Drain>::Err;
 
@@ -56,8 +56,8 @@ impl slog::Drain for LoggingOutput {
         values: &slog::OwnedKVList,
     ) -> Result<Self::Ok, Self::Err> {
         match &mut *self.inner.lock().unwrap() {
-            LoggingOutputInner::Ui(d) => d.log(record, values),
-            LoggingOutputInner::Term(d) => d.log(record, values),
+            LogDestinationInner::Ui(d) => d.log(record, values),
+            LogDestinationInner::Term(d) => d.log(record, values),
         }
     }
 }
@@ -67,16 +67,16 @@ impl slog::Drain for LoggingOutput {
 ///
 /// This is used when invoking the main entry-point for test runners. The caller either wants the
 /// test runner to create it own logger, or (in the case of the tests) use the given one.
-pub enum Logger {
+pub enum LoggerBuilder {
     DefaultLogger(LogLevel),
     GivenLogger(slog::Logger),
 }
 
-impl Logger {
-    pub fn build(&self, out: LoggingOutput) -> slog::Logger {
+impl LoggerBuilder {
+    pub fn build(&self, destination: LogDestination) -> slog::Logger {
         match self {
             Self::DefaultLogger(level) => {
-                let drain = slog::LevelFilter::new(out, level.as_slog_level()).fuse();
+                let drain = slog::LevelFilter::new(destination, level.as_slog_level()).fuse();
                 slog::Logger::root(drain, slog::o!())
             }
             Self::GivenLogger(logger) => logger.clone(),

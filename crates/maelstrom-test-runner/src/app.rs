@@ -8,7 +8,7 @@ mod tests;
 use crate::{
     config::{Repeat, StopAfter},
     deps::{CollectTests, KillOnDrop, TestArtifact as _, TestFilter as _, Wait as _, WaitStatus},
-    log::LoggingOutput,
+    log::LogDestination,
     metadata::Store as MetadataStore,
     test_db::{TestDb, TestDbStore},
     ui::{Ui, UiJobId as JobId, UiMessage, UiSender},
@@ -417,7 +417,7 @@ fn run_app_in_loop<TestCollectorT: CollectTests + Sync>(
 /// application on this thread using the UI until it is completed.
 #[allow(clippy::too_many_arguments)]
 pub fn run_app_with_ui_multithreaded<TestCollectorT, CollectorOptionsT>(
-    logging_output: LoggingOutput,
+    log_destination: LogDestination,
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,
     test_collector: &TestCollectorT,
@@ -485,7 +485,7 @@ where
     );
     watch_exclude_paths.push(project_dir.to_path_buf().join(".git"));
 
-    let (ui_handle, ui) = ui.start_ui_thread(logging_output, log.clone());
+    let (ui_handle, ui) = ui.start_ui_thread(log_destination, log.clone());
 
     let main_res = run_app_in_loop(
         test_collector,

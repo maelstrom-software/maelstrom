@@ -4,7 +4,7 @@ pub mod pattern;
 mod pytest;
 
 pub use config::{Config, PytestConfigValues};
-pub use maelstrom_test_runner::log::Logger;
+pub use maelstrom_test_runner::log::LoggerBuilder;
 
 use anyhow::{anyhow, bail, Result};
 use cli::ExtraCommandLineOptions;
@@ -20,7 +20,7 @@ use maelstrom_client::{
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
-    log::LoggingOutput,
+    log::LogDestination,
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
@@ -565,14 +565,14 @@ pub fn main_for_test(
     config: Config,
     extra_options: cli::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
-    logger: Logger,
+    logger: LoggerBuilder,
     stdout_is_tty: bool,
     ui: impl Ui,
     _stderr: impl io::Write,
     project_dir: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
-    let logging_output = LoggingOutput::default();
-    let log = logger.build(logging_output.clone());
+    let log_destination = LogDestination::default();
+    let log = logger.build(log_destination.clone());
 
     let list_tests = extra_options.list.into();
     let project = project_dir.to_owned();
@@ -614,7 +614,7 @@ pub fn main_for_test(
     )?;
 
     run_app_with_ui_multithreaded(
-        logging_output,
+        log_destination,
         config.parent.timeout.map(Timeout::new),
         ui,
         &test_collector,

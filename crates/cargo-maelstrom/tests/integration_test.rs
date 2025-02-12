@@ -2,13 +2,13 @@ use cargo_maelstrom::{
     cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
     cli::{ExtraCommandLineOptions, ListOptions},
     config::Config,
-    Logger,
+    LoggerBuilder,
 };
 use indicatif::InMemoryTerm;
 use maelstrom_base::Timeout;
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_test_runner::{
-    log::LoggingOutput,
+    log::LogDestination,
     run_app_with_ui_multithreaded,
     ui::{self, Ui as _},
     TestRunner as _,
@@ -82,7 +82,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     let term = InMemoryTerm::new(50, 50);
 
     let log = maelstrom_util::log::test_logger();
-    let logger = Logger::GivenLogger(log.clone());
+    let logger = LoggerBuilder::GivenLogger(log.clone());
 
     let bg_proc = spawn_bg_proc();
 
@@ -91,9 +91,9 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     (|| {
         let mut ui = Some(ui);
         let start_ui = || {
-            let logging_output = LoggingOutput::default();
-            let log = logger.build(logging_output.clone());
-            ui.take().unwrap().start_ui_thread(logging_output, log)
+            let log_destination = LogDestination::default();
+            let log = logger.build(log_destination.clone());
+            ui.take().unwrap().start_ui_thread(log_destination, log)
         };
         if let Some(result) =
             cargo_maelstrom::TestRunner::execute_alternative_main(&config, &extra_options, start_ui)
@@ -107,8 +107,8 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         Fs.create_dir_all(&directories.state)?;
         Fs.create_dir_all(&directories.cache)?;
 
-        let logging_output = LoggingOutput::default();
-        let log = logger.build(logging_output.clone());
+        let log_destination = LogDestination::default();
+        let log = logger.build(log_destination.clone());
 
         let (parent_config, collector_config) = cargo_maelstrom::TestRunner::split_config(config);
         let client = Client::new(
@@ -133,7 +133,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             cargo_maelstrom::TestRunner::get_template_vars(&collector_config, &directories)?;
 
         run_app_with_ui_multithreaded(
-            logging_output,
+            log_destination,
             parent_config.timeout.map(Timeout::new),
             ui.unwrap(),
             &cargo_maelstrom::TestRunner::get_test_collector(

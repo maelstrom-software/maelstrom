@@ -16,7 +16,7 @@ pub use deps::*;
 use anyhow::Result;
 use clap::{Args, Command};
 use derive_more::{From, Into};
-use log::{Logger, LoggingOutput};
+use log::{LogDestination, LoggerBuilder};
 use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
 use maelstrom_util::{
@@ -159,7 +159,7 @@ where
 
     let config_parent = config.as_ref();
     let bg_proc = ClientBgProcess::new_from_fork(config_parent.log_level)?;
-    let logger = Logger::DefaultLogger(config_parent.log_level);
+    let logger = LoggerBuilder::DefaultLogger(config_parent.log_level);
     let stdout_is_tty = io::stdout().is_terminal();
     let ui = ui::factory(
         config_parent.ui,
@@ -169,9 +169,9 @@ where
 
     let mut ui = Some(ui);
     let start_ui = || {
-        let logging_output = LoggingOutput::default();
-        let log = logger.build(logging_output.clone());
-        ui.take().unwrap().start_ui_thread(logging_output, log)
+        let log_destination = LogDestination::default();
+        let log = logger.build(log_destination.clone());
+        ui.take().unwrap().start_ui_thread(log_destination, log)
     };
     if let Some(result) = TestRunnerT::execute_alternative_main(&config, &extra_options, start_ui) {
         return result;
@@ -182,8 +182,8 @@ where
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
-    let logging_output = LoggingOutput::default();
-    let log = logger.build(logging_output.clone());
+    let log_destination = LogDestination::default();
+    let log = logger.build(log_destination.clone());
 
     let (parent_config, collector_config) = TestRunnerT::split_config(config);
     let client = Client::new(
@@ -206,7 +206,7 @@ where
     let template_vars = TestRunnerT::get_template_vars(&collector_config, &directories)?;
     let test_collector = TestRunnerT::get_test_collector(&client, &directories, &log, metadata)?;
     run_app_with_ui_multithreaded(
-        logging_output,
+        log_destination,
         parent_config.timeout.map(Timeout::new),
         ui.unwrap(),
         &test_collector,

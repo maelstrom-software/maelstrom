@@ -5,7 +5,7 @@ mod go_test;
 mod pattern;
 
 pub use config::Config;
-pub use maelstrom_test_runner::log::Logger;
+pub use maelstrom_test_runner::log::LoggerBuilder;
 
 use anyhow::{Context as _, Result};
 use cli::ExtraCommandLineOptions;
@@ -18,7 +18,7 @@ use maelstrom_client::{
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
-    log::LoggingOutput,
+    log::LogDestination,
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiHandle, UiSender},
@@ -687,7 +687,7 @@ pub fn main_for_test(
     config: Config,
     extra_options: cli::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
-    logger: Logger,
+    logger: LoggerBuilder,
     stdout_is_tty: bool,
     ui: impl Ui,
     _stderr: impl io::Write,
@@ -708,11 +708,11 @@ pub fn main_for_test(
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
-    let logging_output = LoggingOutput::default();
-    let log = logger.build(logging_output.clone());
+    let log_destination = LogDestination::default();
+    let log = logger.build(log_destination.clone());
 
     if extra_options.list.packages {
-        let (ui_handle, ui) = ui.start_ui_thread(logging_output, log);
+        let (ui_handle, ui) = ui.start_ui_thread(log_destination, log);
 
         let list_res = alternative_mains::list_packages(
             ui,
@@ -749,7 +749,7 @@ pub fn main_for_test(
         )?;
 
         run_app_with_ui_multithreaded(
-            logging_output,
+            log_destination,
             config.parent.timeout.map(Timeout::new),
             ui,
             &test_collector,

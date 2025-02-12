@@ -2,7 +2,7 @@ mod fancy;
 mod quiet;
 mod simple;
 
-use crate::{log::LoggingOutput, NotRunEstimate};
+use crate::{log::LogDestination, NotRunEstimate};
 use anyhow::Result;
 use derive_more::Debug;
 use derive_more::{From, Into};
@@ -33,7 +33,7 @@ impl<TermT> Terminal for TermT where
 
 pub struct UiHandle {
     handle: std::thread::JoinHandle<Result<()>>,
-    logging_output: LoggingOutput,
+    log_destination: LogDestination,
     log: slog::Logger,
 }
 
@@ -41,7 +41,7 @@ impl UiHandle {
     /// Wait for the UI thread to exit and return any error it had. This must be called after the
     /// associated `UiSender` has been destroyed, or else it will wait forever.
     pub fn join(self) -> Result<()> {
-        self.logging_output.display_directly_to_terminal();
+        self.log_destination.log_to_terminal();
         let ui_res = self.handle.join().unwrap();
         slog::debug!(self.log, "UI thread joined");
         ui_res
@@ -53,7 +53,7 @@ pub trait Ui: Send + Sync + 'static {
 
     fn start_ui_thread(
         mut self,
-        logging_output: LoggingOutput,
+        log_destination: LogDestination,
         log: slog::Logger,
     ) -> (UiHandle, UiSender)
     where
@@ -62,11 +62,11 @@ pub trait Ui: Send + Sync + 'static {
         let (ui_send, ui_recv) = std::sync::mpsc::channel();
         let ui_sender = UiSender::new(ui_send);
         let thread_handle = std::thread::spawn(move || self.run(ui_recv));
-        logging_output.display_to_ui(ui_sender.clone());
+        log_destination.log_to_ui(ui_sender.clone());
 
         (
             UiHandle {
-                logging_output,
+                log_destination,
                 log,
                 handle: thread_handle,
             },

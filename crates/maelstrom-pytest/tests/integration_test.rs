@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use indicatif::InMemoryTerm;
 use maelstrom_client::{ClientBgProcess, ProjectDir};
 use maelstrom_container::local_registry;
-use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, Logger};
+use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
 use maelstrom_test_runner::ui;
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -115,7 +115,7 @@ fn do_maelstrom_pytest_test(
     };
     let term = InMemoryTerm::new(terminal_size.0, terminal_size.1);
 
-    let logger = Logger::GivenLogger(log.clone());
+    let logger = LoggerBuilder::GivenLogger(log.clone());
 
     let ui = ui::SimpleUi::new(extra_options.list, false, term.clone());
     let mut stderr = vec![];
