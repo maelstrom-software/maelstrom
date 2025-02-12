@@ -428,7 +428,7 @@ fn run_app_in_loop<TestCollectorT: CollectTests + Sync>(
 /// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
 /// application on this thread using the UI until it is completed.
 #[allow(clippy::too_many_arguments)]
-pub fn run_app_with_ui_multithreaded<TestCollectorT: CollectTests + Sync>(
+pub fn run_app_with_ui_multithreaded<TestCollectorT, CollectorOptionsT>(
     logging_output: LoggingOutput,
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,
@@ -443,13 +443,16 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: CollectTests + Sync>(
     project_dir: impl AsRef<Root<ProjectDir>>,
     state_dir: impl AsRef<Root<StateDir>>,
     mut watch_exclude_paths: Vec<PathBuf>,
-    collector_options: super::CollectOptionsM<TestCollectorT>,
+    collector_options: CollectorOptionsT,
     log: slog::Logger,
     client: &Client,
     test_metadata_file_name: &'static str,
     test_metadata_default_contents: &'static str,
     metadata_template_vars: TemplateVars,
-) -> Result<ExitCode> {
+) -> Result<ExitCode>
+where
+    TestCollectorT: CollectTests<Options = CollectorOptionsT> + Sync,
+{
     let fs = Fs::new();
 
     let project_dir = project_dir.as_ref().to_owned();

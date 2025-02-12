@@ -14,10 +14,10 @@ pub use deps::*;
 
 use anyhow::Result;
 use clap::{Args, Command};
-use maelstrom_base::Utf8PathBuf;
+use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
 use maelstrom_util::{
-    config::common::LogLevel, config::Config, process::ExitCode, root::RootBuf,
+    config::common::LogLevel, config::Config, fs::Fs, process::ExitCode, root::RootBuf,
     template::TemplateVars,
 };
 use slog::Drain as _;
@@ -159,7 +159,7 @@ pub trait TestRunner {
     type Config: Config + Debug + AsRef<config::Config>;
     type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
     type Metadata;
-    type TestCollector<'client>: CollectTests;
+    type TestCollector<'client>: CollectTests<Options = Self::CollectorOptions> + Sync;
     type CollectorOptions;
 
     const BASE_DIRECTORIES_PREFIX: &'static str;
@@ -205,15 +205,6 @@ pub trait TestRunner {
     ) -> Result<TemplateVars> {
         Ok(TemplateVars::default())
     }
-
-    fn main(
-        config: Self::Config,
-        extra_options: Self::ExtraCommandLineOptions,
-        bg_proc: ClientBgProcess,
-        logger: Logger,
-        stdout_is_tty: bool,
-        ui: Box<dyn Ui>,
-    ) -> Result<ExitCode>;
 }
 
 /// Helper that does common work for test-runner main functions and then forwards on to the given
@@ -258,5 +249,65 @@ where
         TestRunnerT::is_list(&extra_options),
         stdout_is_tty,
     )?;
-    TestRunnerT::main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
+
+    let mut ui = Some(ui);
+    let start_ui = || {
+        let logging_output = LoggingOutput::default();
+        let log = logger.build(logging_output.clone());
+        ui.take().unwrap().start_ui_thread(logging_output, log)
+    };
+    if let Some(result) = TestRunnerT::execute_alternative_main(&config, &extra_options, start_ui) {
+        return result;
+    }
+
+    let (directories, metadata) = TestRunnerT::get_directories_and_metadata(&config)?;
+
+    Fs.create_dir_all(&directories.state)?;
+    Fs.create_dir_all(&directories.cache)?;
+
+    let logging_output = LoggingOutput::default();
+    let log = logger.build(logging_output.clone());
+
+    let (parent_config, collector_config) = TestRunnerT::split_config(config);
+    let client = Client::new(
+        bg_proc,
+        parent_config.broker,
+        &directories.project,
+        &directories.state,
+        parent_config.container_image_depot_root,
+        &directories.cache,
+        parent_config.cache_size,
+        parent_config.inline_limit,
+        parent_config.slots,
+        parent_config.accept_invalid_remote_container_tls_certs,
+        parent_config.artifact_transfer_strategy,
+        log.clone(),
+    )?;
+
+    let list_action = TestRunnerT::is_list(&extra_options).then_some(ListAction::ListTests);
+    let parent_extra_options = TestRunnerT::extra_options_into_parent(extra_options);
+    let template_vars = TestRunnerT::get_template_vars(&collector_config, &directories)?;
+    let test_collector = TestRunnerT::get_test_collector(&client, &directories, &log, metadata)?;
+    run_app_with_ui_multithreaded(
+        logging_output,
+        parent_config.timeout.map(Timeout::new),
+        ui.unwrap(),
+        &test_collector,
+        parent_extra_options.include,
+        parent_extra_options.exclude,
+        list_action,
+        parent_config.repeat,
+        parent_config.stop_after,
+        parent_extra_options.watch,
+        stdout_is_tty,
+        &directories.project,
+        &directories.state,
+        TestRunnerT::get_watch_exclude_paths(&directories),
+        collector_config,
+        log,
+        &client,
+        TestRunnerT::TEST_METADATA_FILE_NAME,
+        TestRunnerT::TEST_METADATA_DEFAULT_CONTENTS,
+        template_vars,
+    )
 }
