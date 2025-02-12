@@ -1,7 +1,7 @@
 use cargo_maelstrom::{
     cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
     cli::{ExtraCommandLineOptions, ListOptions},
-    config::Config,
+    config::{CargoConfig, Config},
     LoggerBuilder,
 };
 use indicatif::InMemoryTerm;
@@ -59,13 +59,15 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             stop_after: None,
             artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
         },
-        cargo_feature_selection_options: FeatureSelectionOptions::default(),
-        cargo_compilation_options: CompilationOptions::default(),
-        cargo_manifest_options: ManifestOptions {
-            manifest_path: Some(temp_dir.path().join("project/Cargo.toml")),
-            ..Default::default()
+        cargo: CargoConfig {
+            feature_selection_options: FeatureSelectionOptions::default(),
+            compilation_options: CompilationOptions::default(),
+            manifest_options: ManifestOptions {
+                manifest_path: Some(temp_dir.path().join("project/Cargo.toml")),
+                ..Default::default()
+            },
+            extra_test_binary_args: vec![],
         },
-        extra_test_binary_args: vec![],
     };
     let extra_options = ExtraCommandLineOptions {
         parent: maelstrom_test_runner::config::ExtraCommandLineOptions {

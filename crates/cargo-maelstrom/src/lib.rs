@@ -326,8 +326,8 @@ pub struct TestRunner;
 impl TestRunner {
     fn get_cargo_metadata(config: &Config) -> Result<CargoMetadata> {
         cargo::read_metadata(
-            &config.cargo_feature_selection_options,
-            &config.cargo_manifest_options,
+            &config.cargo.feature_selection_options,
+            &config.cargo.manifest_options,
         )
     }
 }
