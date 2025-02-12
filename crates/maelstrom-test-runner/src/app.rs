@@ -7,7 +7,7 @@ mod tests;
 
 use crate::{
     config::{Repeat, StopAfter},
-    deps::{CollectTests, KillOnDrop, TestArtifact as _, TestFilter as _, Wait as _, WaitStatus},
+    deps::{KillOnDrop, TestArtifact as _, TestCollector, TestFilter as _, Wait as _, WaitStatus},
     log::LogDestination,
     metadata::Store as MetadataStore,
     test_db::{TestDb, TestDbStore},
@@ -36,17 +36,17 @@ use std::{
 use std_semaphore::Semaphore;
 use watch::Watcher;
 
-type ArtifactM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Artifact;
-type ArtifactKeyM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::ArtifactKey;
-type CaseMetadataM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::CaseMetadata;
-type PackageM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Package;
-type PackageIdM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::PackageId;
-type TestFilterM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::TestFilter;
+type ArtifactM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::Artifact;
+type ArtifactKeyM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::ArtifactKey;
+type CaseMetadataM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::CaseMetadata;
+type PackageM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::Package;
+type PackageIdM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::PackageId;
+type TestFilterM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::TestFilter;
 type TestDbM<DepsT> = TestDb<ArtifactKeyM<DepsT>, CaseMetadataM<DepsT>>;
 type TestingOptionsM<DepsT> = TestingOptions<TestFilterM<DepsT>>;
 
 trait Deps {
-    type TestCollector: CollectTests + Sync;
+    type TestCollector: TestCollector + Sync;
 
     fn start_collection(&self, color: bool, packages: Vec<&PackageM<Self>>);
     fn get_packages(&self);
@@ -106,9 +106,9 @@ impl<MessageT> From<MessageT> for ControlMessage<MessageT> {
     }
 }
 
-type WaitM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::BuildHandle;
+type WaitM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::BuildHandle;
 
-struct MainAppDepsAdapter<'deps, 'scope, TestCollectorT: CollectTests + Sync> {
+struct MainAppDepsAdapter<'deps, 'scope, TestCollectorT: TestCollector + Sync> {
     test_collector: &'deps TestCollectorT,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
@@ -120,7 +120,7 @@ struct MainAppDepsAdapter<'deps, 'scope, TestCollectorT: CollectTests + Sync> {
 
 const MAX_NUM_BACKGROUND_THREADS: isize = 200;
 
-impl<'deps, 'scope, TestCollectorT: CollectTests + Sync>
+impl<'deps, 'scope, TestCollectorT: TestCollector + Sync>
     MainAppDepsAdapter<'deps, 'scope, TestCollectorT>
 {
     fn new(
@@ -143,7 +143,7 @@ impl<'deps, 'scope, TestCollectorT: CollectTests + Sync>
     }
 }
 
-impl<TestCollectorT: CollectTests + Sync> Deps for MainAppDepsAdapter<'_, '_, TestCollectorT> {
+impl<TestCollectorT: TestCollector + Sync> Deps for MainAppDepsAdapter<'_, '_, TestCollectorT> {
     type TestCollector = TestCollectorT;
 
     fn start_collection(&self, color: bool, packages: Vec<&PackageM<Self>>) {
@@ -292,7 +292,7 @@ fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender
     }
 }
 
-fn run_app_once<'scope, 'deps, TestCollectorT: CollectTests + Sync>(
+fn run_app_once<'scope, 'deps, TestCollectorT: TestCollector + Sync>(
     test_collector: &'deps TestCollectorT,
     test_db_store: &'deps TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
     options: &'deps TestingOptions<TestCollectorT::TestFilter>,
@@ -334,7 +334,7 @@ fn run_app_once<'scope, 'deps, TestCollectorT: CollectTests + Sync>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_app_in_loop<TestCollectorT: CollectTests + Sync>(
+fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
     test_collector: &TestCollectorT,
     log: slog::Logger,
     test_db_store: TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
@@ -401,7 +401,7 @@ fn run_app_in_loop<TestCollectorT: CollectTests + Sync>(
 /// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
 /// application on this thread using the UI until it is completed.
 #[allow(clippy::too_many_arguments)]
-pub fn run_app_with_ui_multithreaded<TestCollectorT: CollectTests + Sync>(
+pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
     log_destination: LogDestination,
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,

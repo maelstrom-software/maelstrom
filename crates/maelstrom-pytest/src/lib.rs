@@ -24,8 +24,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
-    BuildDir, CollectTests, Directories, ListingMode, TestArtifact, TestArtifactKey,
-    TestCaseMetadata, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
+    BuildDir, Directories, ListingMode, TestArtifact, TestArtifactKey, TestCaseMetadata,
+    TestCollector, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -413,7 +413,7 @@ impl TestPackage for PytestPackage {
     }
 }
 
-impl CollectTests for PytestTestCollector<'_> {
+impl TestCollector for PytestTestCollector<'_> {
     const ENQUEUE_MESSAGE: &'static str = "collecting tests...";
 
     type BuildHandle = pytest::WaitHandle;

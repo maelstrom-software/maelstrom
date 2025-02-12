@@ -1,7 +1,6 @@
 use crate::{
-    metadata::Metadata, ui, BuildDir, CollectTests, NoCaseMetadata, SimpleFilter,
-    StringArtifactKey, StringPackage, TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,
-    WaitStatus,
+    metadata::Metadata, ui, BuildDir, NoCaseMetadata, SimpleFilter, StringArtifactKey,
+    StringPackage, TestArtifact, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use anyhow::Result;
 use derive_more::From;
@@ -262,7 +261,7 @@ impl TestFilter for FakeTestFilter {
     }
 }
 
-impl CollectTests for TestCollector {
+impl crate::TestCollector for TestCollector {
     const ENQUEUE_MESSAGE: &'static str = "building artifacts...";
 
     type BuildHandle = WaitForNothing;

@@ -17,8 +17,8 @@ use maelstrom_client::{
     Client,
 };
 use maelstrom_test_runner::{
-    metadata::Metadata, ui::UiSender, CollectTests, Directories, ListingMode, NoCaseMetadata,
-    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    metadata::Metadata, ui::UiSender, Directories, ListingMode, NoCaseMetadata, TestArtifact,
+    TestArtifactKey, TestCollector, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{process::ExitCode, root::Root, template::TemplateVars};
 use pattern::ArtifactKind;
@@ -261,7 +261,7 @@ impl TestPackage for CargoPackage {
     }
 }
 
-impl CollectTests for CargoTestCollector {
+impl TestCollector for CargoTestCollector {
     const ENQUEUE_MESSAGE: &'static str = "building artifacts...";
 
     type BuildHandle = cargo::WaitHandle;

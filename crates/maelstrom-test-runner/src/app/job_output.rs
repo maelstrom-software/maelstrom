@@ -1,5 +1,5 @@
 use crate::ui::{UiJobId as JobId, UiJobResult, UiJobStatus};
-use crate::CollectTests;
+use crate::TestCollector;
 use anyhow::Result;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
@@ -41,7 +41,7 @@ fn split_into_lines() {
     );
 }
 
-fn was_ignored<TestCollectorT: CollectTests>(res: &JobOutputResult, case_str: &str) -> bool {
+fn was_ignored<TestCollectorT: TestCollector>(res: &JobOutputResult, case_str: &str) -> bool {
     let (_, case_str) = case_str.rsplit_once(' ').unwrap_or(("", case_str));
     let lines = match res {
         JobOutputResult::None => vec![],
@@ -51,7 +51,7 @@ fn was_ignored<TestCollectorT: CollectTests>(res: &JobOutputResult, case_str: &s
     TestCollectorT::was_test_ignored(case_str, &lines)
 }
 
-fn format_test_output<TestCollectorT: CollectTests>(
+fn format_test_output<TestCollectorT: TestCollector>(
     res: &JobOutputResult,
     name: &str,
     cjid: ClientJobId,
@@ -93,7 +93,7 @@ pub fn build_ignored_ui_job_result(job_id: JobId, case_str: &str) -> UiJobResult
     }
 }
 
-pub fn build_ui_job_result_and_exit_code<TestCollectorT: CollectTests>(
+pub fn build_ui_job_result_and_exit_code<TestCollectorT: TestCollector>(
     job_id: JobId,
     case_str: &str,
     res: Result<(ClientJobId, JobOutcomeResult)>,

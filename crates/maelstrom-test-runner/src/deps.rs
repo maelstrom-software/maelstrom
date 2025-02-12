@@ -176,7 +176,7 @@ pub trait TestPackage: Clone + fmt::Debug + Send + Sync + 'static {
     fn id(&self) -> Self::PackageId;
 }
 
-pub trait CollectTests {
+pub trait TestCollector {
     /// This message is displayed in the UI when tests are being enqueued.
     const ENQUEUE_MESSAGE: &'static str;
 
@@ -193,7 +193,7 @@ pub trait CollectTests {
     /// A handle to a package.
     type PackageId: TestPackageId;
 
-    /// A package contains artifats.
+    /// A package contains artifacts.
     type Package: TestPackage<PackageId = Self::PackageId, ArtifactKey = Self::ArtifactKey>;
 
     /// The handle to an artifact.

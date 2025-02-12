@@ -102,7 +102,7 @@ pub trait TestRunner {
     /// The test collector does most of the actual work for the test runner. Currently, it is
     /// provided a reference to the [`Client`]. However, in the future, we want to remove this
     /// direct dependency. When that happens, this type will no longer need to be a GAT.
-    type TestCollector<'client>: CollectTests + Sync;
+    type TestCollector<'client>: TestCollector + Sync;
 
     /// The test-collector-specific configuration values. Used to build the test collector with
     /// [`Self::build_test_collector`].

@@ -2,7 +2,7 @@ use crate::{pattern, CacheDir, GoPackage, GoTestCollector, ProjectDir};
 use anyhow::Result;
 use maelstrom_test_runner::{
     ui::{UiMessage, UiSender},
-    CollectTests as _, TestPackage as _,
+    TestCollector as _, TestPackage as _,
 };
 use maelstrom_util::{process::ExitCode, root::Root};
 

@@ -22,8 +22,8 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiSender},
-    BuildDir, CollectTests, Directories, ListingMode, NoCaseMetadata, TestArtifact,
-    TestArtifactKey, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
+    BuildDir, Directories, ListingMode, NoCaseMetadata, TestArtifact, TestArtifactKey,
+    TestCollector, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -368,7 +368,7 @@ fn so_layer_for_binary(binary_path: &Utf8Path) -> LayerSpec {
     }
 }
 
-impl CollectTests for GoTestCollector {
+impl TestCollector for GoTestCollector {
     const ENQUEUE_MESSAGE: &'static str = "building artifacts...";
 
     type BuildHandle = go_test::WaitHandle;
