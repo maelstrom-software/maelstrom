@@ -231,8 +231,6 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
     Fs.create_dir_all(&directories.cache)?;
 
     let logger_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
-    let log_destination = LogDestination::default();
-    let log = logger_builder.build(log_destination.clone());
 
     main_part_2::<TestRunnerT>(
         bg_proc,
@@ -240,8 +238,7 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
         directories,
         extra_options,
         list_tests,
-        log,
-        log_destination,
+        logger_builder,
         metadata,
         stdout_tty,
         ui,
@@ -272,17 +269,13 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
-    let log_destination = LogDestination::default();
-    let log = logger_builder.build(log_destination.clone());
-
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
         directories,
         extra_options,
         list_tests,
-        log,
-        log_destination,
+        logger_builder,
         metadata,
         StdoutTty::from(false),
         ui,
@@ -294,7 +287,7 @@ pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
-    logger: LoggerBuilder,
+    logger_builder: LoggerBuilder,
     stdout_tty: StdoutTty,
     ui: impl Ui,
     project_dir: &Root<ProjectDir>,
@@ -325,17 +318,13 @@ pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
-    let log_destination = LogDestination::default();
-    let log = logger.build(log_destination.clone());
-
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
         directories,
         extra_options,
         list_tests,
-        log,
-        log_destination,
+        logger_builder,
         metadata,
         stdout_tty,
         ui,
@@ -379,17 +368,13 @@ pub fn main_for_test_for_go<TestRunnerT: TestRunner>(
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
-    let log_destination = LogDestination::default();
-    let log = logger_builder.build(log_destination.clone());
-
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
         directories,
         extra_options,
         list_tests,
-        log,
-        log_destination,
+        logger_builder,
         metadata,
         stdout_tty,
         ui,
@@ -403,12 +388,14 @@ fn main_part_2<TestRunnerT: TestRunner>(
     directories: Directories,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     list_tests: ListTests,
-    log: slog::Logger,
-    log_destination: LogDestination,
+    logger_builder: LoggerBuilder,
     metadata: TestRunnerT::Metadata,
     stdout_tty: StdoutTty,
     ui: impl Ui,
 ) -> Result<ExitCode> {
+    let log_destination = LogDestination::default();
+    let log = logger_builder.build(log_destination.clone());
+
     let (parent_config, test_collector_config) = config.into_parts();
     let client = Client::new(
         bg_proc,
