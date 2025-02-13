@@ -129,16 +129,18 @@ fn do_maelstrom_pytest_test(
         term.clone(),
     );
     let bg_proc = spawn_bg_proc();
-    let exit_code = maelstrom_pytest::main_for_test(
-        config,
-        extra_options,
-        bg_proc,
-        logger,
-        stdout_tty,
-        ui,
-        Root::<ProjectDir>::new(&project_dir),
-    )
-    .unwrap();
+    let exit_code =
+        maelstrom_test_runner::main_for_test_for_pytest::<maelstrom_pytest::TestRunner>(
+            config,
+            extra_options,
+            bg_proc,
+            logger,
+            stdout_tty,
+            ui,
+            Root::<ProjectDir>::new(&project_dir),
+            (),
+        )
+        .unwrap();
 
     (term.contents(), exit_code)
 }

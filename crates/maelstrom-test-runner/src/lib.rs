@@ -21,7 +21,12 @@ use derive_more::{From, Into};
 use log::{LogDestination, LoggerBuilder};
 use maelstrom_base::Timeout;
 use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
-use maelstrom_util::{config::Config, fs::Fs, process::ExitCode, root::RootBuf};
+use maelstrom_util::{
+    config::Config,
+    fs::Fs,
+    process::ExitCode,
+    root::{Root, RootBuf},
+};
 use std::{
     ffi::OsString,
     fmt::Debug,
@@ -331,6 +336,83 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
         parent_config.repeat,
         parent_config.stop_after,
         UseColor::from(false),
+        log,
+        &client,
+        TestRunnerT::TEST_METADATA_FILE_NAME,
+        TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        directories,
+        extra_options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
+    config: TestRunnerT::Config,
+    extra_options: TestRunnerT::ExtraCommandLineOptions,
+    bg_proc: ClientBgProcess,
+    logger: LoggerBuilder,
+    stdout_tty: StdoutTty,
+    ui: impl Ui,
+    project_dir: &Root<ProjectDir>,
+    metadata: TestRunnerT::Metadata,
+) -> Result<ExitCode> {
+    let log_destination = LogDestination::default();
+    let log = logger.build(log_destination.clone());
+
+    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
+        ListingMode::None => false.into(),
+        ListingMode::Tests => true.into(),
+        ListingMode::OtherWithoutUi => {
+            unreachable!("maelstrom-pytest doesn't use this");
+        }
+        ListingMode::OtherWithUi => {
+            unreachable!("cargo-maelstrom doesn't use this");
+        }
+    };
+
+    let project = project_dir.to_owned();
+    let build = project.join(".maelstrom-pytest");
+    let cache = build.join("cache");
+    let state = build.join("state");
+    let directories = Directories {
+        build,
+        cache,
+        project,
+        state,
+    };
+
+    Fs.create_dir_all(&directories.state)?;
+    Fs.create_dir_all(&directories.cache)?;
+
+    let (parent_config, collector_config) = config.into_parts();
+    let client = Client::new(
+        bg_proc,
+        parent_config.broker,
+        &directories.project,
+        &directories.state,
+        parent_config.container_image_depot_root,
+        &directories.cache,
+        parent_config.cache_size,
+        parent_config.inline_limit,
+        parent_config.slots,
+        parent_config.accept_invalid_remote_container_tls_certs,
+        parent_config.artifact_transfer_strategy,
+        log.clone(),
+    )?;
+
+    let (extra_options, _) = extra_options.into_parts();
+    let test_collector =
+        TestRunnerT::build_test_collector(&client, collector_config, &directories, &log, metadata)?;
+
+    run_app_with_ui_multithreaded(
+        log_destination,
+        parent_config.timeout.map(Timeout::new),
+        ui,
+        test_collector,
+        list_tests,
+        parent_config.repeat,
+        parent_config.stop_after,
+        UseColor::from(stdout_tty.as_bool()),
         log,
         &client,
         TestRunnerT::TEST_METADATA_FILE_NAME,

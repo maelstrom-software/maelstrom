@@ -10,30 +10,22 @@ use anyhow::{anyhow, bail, Result};
 use cli::ExtraCommandLineOptions;
 use maelstrom_base::{
     enum_set, CaptureFileSystemChanges, JobDevice, JobMount, JobNetwork, JobOutcome,
-    JobTerminationStatus, Timeout, Utf8PathBuf,
+    JobTerminationStatus, Utf8PathBuf,
 };
 use maelstrom_client::{
     glob_layer_spec, job_spec,
     spec::{ContainerParent, ImageRef, LayerSpec, PathsLayerSpec, PrefixOptions, StubsLayerSpec},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, ProjectDir, StateDir,
+    Client,
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
-    log::LogDestination,
     metadata::Metadata,
-    run_app_with_ui_multithreaded,
-    ui::{Ui, UiMessage, UiSender},
-    util::{StdoutTty, UseColor},
+    ui::{UiMessage, UiSender},
+    util::UseColor,
     BuildDir, Directories, ListingMode, TestArtifact, TestArtifactKey, TestCaseMetadata,
-    TestCollector, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
+    TestCollector, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
-use maelstrom_util::{
-    config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
-    fs::Fs,
-    process::ExitCode,
-    root::{Root, RootBuf},
-};
+use maelstrom_util::{fs::Fs, root::RootBuf};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -47,52 +39,6 @@ use std::{
     str::FromStr,
     sync::Mutex,
 };
-
-#[allow(clippy::too_many_arguments)]
-fn create_client_for_test(
-    bg_proc: ClientBgProcess,
-    broker_addr: Option<BrokerAddr>,
-    project_dir: impl AsRef<Root<ProjectDir>>,
-    state_dir: impl AsRef<Root<StateDir>>,
-    container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
-    cache_dir: impl AsRef<Root<CacheDir>>,
-    cache_size: CacheSize,
-    inline_limit: InlineLimit,
-    slots: Slots,
-    accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-    artifact_transfer_strategy: ArtifactTransferStrategy,
-    log: slog::Logger,
-) -> Result<Client> {
-    let project_dir = project_dir.as_ref();
-    let state_dir = state_dir.as_ref();
-    let container_image_depot_dir = container_image_depot_dir.as_ref();
-    let cache_dir = cache_dir.as_ref();
-    slog::debug!(
-        log, "creating app dependencies";
-        "broker_addr" => ?broker_addr,
-        "project_dir" => ?project_dir,
-        "state_dir" => ?state_dir,
-        "container_image_depot_dir" => ?container_image_depot_dir,
-        "cache_dir" => ?cache_dir,
-        "cache_size" => ?cache_size,
-        "inline_limit" => ?inline_limit,
-        "slots" => ?slots,
-    );
-    Client::new(
-        bg_proc,
-        broker_addr,
-        project_dir,
-        state_dir,
-        container_image_depot_dir,
-        cache_dir,
-        cache_size,
-        inline_limit,
-        slots,
-        accept_invalid_remote_container_tls_certs,
-        artifact_transfer_strategy,
-        log,
-    )
-}
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PytestArtifactKey {
@@ -532,6 +478,7 @@ fn remove_fixture_output_basic_case() {
 
 #[test]
 fn default_test_metadata_parses() {
+    use maelstrom_test_runner::TestRunner as _;
     maelstrom_test_runner::metadata::Store::<pattern::Pattern>::load(
         TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
         &Default::default(),
@@ -559,73 +506,6 @@ fn find_artifacts(path: &Path) -> Result<Vec<PytestArtifactKey>> {
             })
         })
         .collect())
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn main_for_test(
-    config: Config,
-    extra_options: cli::ExtraCommandLineOptions,
-    bg_proc: ClientBgProcess,
-    logger: LoggerBuilder,
-    stdout_tty: StdoutTty,
-    ui: impl Ui,
-    project_dir: &Root<ProjectDir>,
-) -> Result<ExitCode> {
-    let log_destination = LogDestination::default();
-    let log = logger.build(log_destination.clone());
-
-    let list_tests = extra_options.list.into();
-    let project = project_dir.to_owned();
-    let build = project.join(".maelstrom-pytest");
-    let cache = build.join("cache");
-    let state = build.join("state");
-    let directories = Directories {
-        build,
-        cache,
-        project,
-        state,
-    };
-
-    Fs.create_dir_all(&directories.state)?;
-    Fs.create_dir_all(&directories.cache)?;
-
-    let client = create_client_for_test(
-        bg_proc,
-        config.parent.broker,
-        project_dir,
-        &directories.state,
-        config.parent.container_image_depot_root,
-        &directories.cache,
-        config.parent.cache_size,
-        config.parent.inline_limit,
-        config.parent.slots,
-        config.parent.accept_invalid_remote_container_tls_certs,
-        config.parent.artifact_transfer_strategy,
-        log.clone(),
-    )?;
-    let test_collector = PytestTestCollector {
-        client: &client,
-        config: config.pytest,
-        directories: directories.clone(),
-        test_layers: Mutex::new(HashMap::new()),
-    };
-
-    run_app_with_ui_multithreaded(
-        log_destination,
-        config.parent.timeout.map(Timeout::new),
-        ui,
-        test_collector,
-        list_tests,
-        config.parent.repeat,
-        config.parent.stop_after,
-        UseColor::from(stdout_tty.as_bool()),
-        log,
-        &client,
-        TestRunner::TEST_METADATA_FILE_NAME,
-        TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-        directories,
-        extra_options.parent,
-    )
 }
 
 pub struct TestRunner;
