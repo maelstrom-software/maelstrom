@@ -30,7 +30,6 @@ use maelstrom_util::{
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
-    template::TemplateVars,
 };
 use std::{fmt, io, path::Path, str::FromStr};
 
@@ -740,7 +739,6 @@ pub fn main_for_test(
             config.parent.artifact_transfer_strategy,
             log.clone(),
         )?;
-        let template_vars = TestRunner::get_template_vars(&config.go_test, &directories)?;
         let test_collector =
             GoTestCollector::new(&directories.cache, config.go_test, &directories.project);
 
@@ -763,7 +761,7 @@ pub fn main_for_test(
             &client,
             TestRunner::TEST_METADATA_FILE_NAME,
             TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-            template_vars,
+            test_collector.get_template_vars()?,
         )
     }
 }
@@ -853,12 +851,5 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             config,
             &directories.project,
         ))
-    }
-
-    fn get_template_vars(
-        _collector_options: &Self::TestCollectorConfig,
-        _directories: &Directories,
-    ) -> Result<TemplateVars> {
-        Ok(TemplateVars::default())
     }
 }

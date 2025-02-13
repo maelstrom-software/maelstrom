@@ -21,9 +21,7 @@ use derive_more::{From, Into};
 use log::{LogDestination, LoggerBuilder};
 use maelstrom_base::Timeout;
 use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
-use maelstrom_util::{
-    config::Config, fs::Fs, process::ExitCode, root::RootBuf, template::TemplateVars,
-};
+use maelstrom_util::{config::Config, fs::Fs, process::ExitCode, root::RootBuf};
 use std::{
     ffi::OsString,
     fmt::Debug,
@@ -159,11 +157,6 @@ pub trait TestRunner {
         log: &slog::Logger,
         metadata: Self::Metadata,
     ) -> Result<Self::TestCollector<'client>>;
-
-    fn get_template_vars(
-        collector_options: &Self::TestCollectorConfig,
-        directories: &Directories,
-    ) -> Result<TemplateVars>;
 }
 
 /// Helper that does common work for test-runner main functions and then forwards on to the given
@@ -250,7 +243,6 @@ where
     )?;
 
     let (extra_options, _) = extra_options.into_parts();
-    let template_vars = TestRunnerT::get_template_vars(&test_collector_config, &directories)?;
     let test_collector = TestRunnerT::build_test_collector(
         &client,
         test_collector_config,
@@ -277,6 +269,6 @@ where
         &client,
         TestRunnerT::TEST_METADATA_FILE_NAME,
         TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-        template_vars,
+        test_collector.get_template_vars()?,
     )
 }

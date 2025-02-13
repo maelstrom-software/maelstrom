@@ -319,6 +319,23 @@ impl TestCollector for CargoTestCollector {
     fn get_paths_to_exclude_from_watch(&self) -> Vec<PathBuf> {
         vec![self.build_dir.clone().into_path_buf()]
     }
+
+    fn get_template_vars(&self) -> Result<TemplateVars> {
+        let profile = self
+            .config
+            .compilation_options
+            .profile
+            .clone()
+            .unwrap_or("dev".into());
+        let target = match profile.as_str() {
+            "dev" => self.build_dir.join::<()>("debug"),
+            other => self.build_dir.join::<()>(other),
+        };
+        let build_dir = target
+            .to_str()
+            .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
+        Ok(TemplateVars::new([("build-dir", build_dir)]))
+    }
 }
 
 impl Wait for cargo::WaitHandle {
@@ -453,25 +470,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
                 .map(|p| CargoPackage(p.clone()))
                 .collect(),
         })
-    }
-
-    fn get_template_vars(
-        cargo_options: &CargoConfig,
-        directories: &Directories,
-    ) -> Result<TemplateVars> {
-        let profile = cargo_options
-            .compilation_options
-            .profile
-            .clone()
-            .unwrap_or("dev".into());
-        let target = match profile.as_str() {
-            "dev" => directories.build.join::<()>("debug"),
-            other => directories.build.join::<()>(other),
-        };
-        let build_dir = target
-            .to_str()
-            .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
-        Ok(TemplateVars::new([("build-dir", build_dir)]))
     }
 }
 

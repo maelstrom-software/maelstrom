@@ -32,7 +32,6 @@ use maelstrom_util::{
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
-    template::TemplateVars,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -604,7 +603,6 @@ pub fn main_for_test(
         config.parent.artifact_transfer_strategy,
         log.clone(),
     )?;
-    let template_vars = TestRunner::get_template_vars(&config.pytest, &directories)?;
     let test_collector = PytestTestCollector {
         client: &client,
         config: config.pytest,
@@ -631,7 +629,7 @@ pub fn main_for_test(
         &client,
         TestRunner::TEST_METADATA_FILE_NAME,
         TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-        template_vars,
+        test_collector.get_template_vars()?,
     )
 }
 
@@ -687,12 +685,5 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             directories: directories.clone(),
             test_layers: Mutex::new(HashMap::new()),
         })
-    }
-
-    fn get_template_vars(
-        _collector_options: &Self::TestCollectorConfig,
-        _directories: &Directories,
-    ) -> Result<TemplateVars> {
-        Ok(TemplateVars::default())
     }
 }

@@ -2,7 +2,7 @@ use crate::{metadata::Metadata, ui};
 use anyhow::Result;
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_client::spec::{ImageRef, LayerSpec};
-use maelstrom_util::process::ExitCode;
+use maelstrom_util::{process::ExitCode, template::TemplateVars};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -250,6 +250,11 @@ pub trait TestCollector {
     /// Return any extra paths that should be excluded in `--watch` mode.
     fn get_paths_to_exclude_from_watch(&self) -> Vec<PathBuf> {
         vec![]
+    }
+
+    /// Return any template variables to make available to test metadata.
+    fn get_template_vars(&self) -> Result<TemplateVars> {
+        Ok(Default::default())
     }
 }
 

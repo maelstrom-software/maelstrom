@@ -131,8 +131,6 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         )?;
 
         let (extra_options, _) = extra_options.into_parts();
-        let template_vars =
-            cargo_maelstrom::TestRunner::get_template_vars(&collector_config, &directories)?;
         let test_collector = cargo_maelstrom::TestRunner::build_test_collector(
             &client,
             collector_config,
@@ -160,7 +158,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             &client,
             cargo_maelstrom::TestRunner::TEST_METADATA_FILE_NAME,
             cargo_maelstrom::TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-            template_vars,
+            test_collector.get_template_vars()?,
         )
     })()
     .unwrap();
