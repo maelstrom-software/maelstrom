@@ -113,6 +113,7 @@ pub struct CargoOptions {
 }
 
 pub struct CargoTestCollector {
+    config: CargoOptions,
     log: slog::Logger,
     packages: Vec<CargoPackage>,
 }
@@ -270,22 +271,20 @@ impl CollectTests for CargoTestCollector {
     type PackageId = CargoPackageId;
     type Package = CargoPackage;
     type ArtifactKey = CargoArtifactKey;
-    type Options = CargoOptions;
     type CaseMetadata = NoCaseMetadata;
 
     fn start(
         &self,
         color: bool,
-        options: &CargoOptions,
         packages: Vec<&CargoPackage>,
         ui: &UiSender,
     ) -> Result<(cargo::WaitHandle, CargoTestArtifactStream)> {
         let packages: Vec<_> = packages.into_iter().map(|p| &p.0).collect();
         let (handle, stream) = cargo::run_cargo_test(
             color,
-            &options.feature_selection_options,
-            &options.compilation_options,
-            &options.manifest_options,
+            &self.config.feature_selection_options,
+            &self.config.compilation_options,
+            &self.config.manifest_options,
             packages,
             ui.downgrade(),
             self.log.clone(),
@@ -294,7 +293,7 @@ impl CollectTests for CargoTestCollector {
             handle,
             CargoTestArtifactStream {
                 stream,
-                extra_test_binary_args: options.extra_test_binary_args.clone(),
+                extra_test_binary_args: self.config.extra_test_binary_args.clone(),
             },
         ))
     }
@@ -436,11 +435,13 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn build_test_collector(
         _client: &Client,
+        config: CargoOptions,
         _directories: &Directories,
         log: &slog::Logger,
         metadata: CargoMetadata,
     ) -> Result<CargoTestCollector> {
         Ok(CargoTestCollector {
+            config,
             log: log.clone(),
             packages: metadata
                 .workspace_packages()

@@ -26,7 +26,7 @@ pub fn list_packages(
 ) -> Result<ExitCode> {
     ui.send(UiMessage::UpdateEnqueueStatus("listing packages...".into()));
 
-    let collector = GoTestCollector::new(project_dir, cache_dir);
+    let collector = GoTestCollector::new(cache_dir, Default::default(), project_dir);
     let packages = collector.get_packages(&ui)?;
     let filter = pattern::compile_filter(include, exclude)?;
     for package in packages {

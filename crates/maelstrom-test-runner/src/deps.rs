@@ -212,9 +212,6 @@ pub trait CollectTests {
     /// Metadata associated with a test case.
     type CaseMetadata: TestCaseMetadata;
 
-    /// These options are used in `start`.
-    type Options;
-
     /// Start collecting tests for the given packages. Kick off any building that may need to
     /// happen in the background.
     /// The given `color` controls if any build output sent to the UI has color codes. The given
@@ -227,7 +224,6 @@ pub trait CollectTests {
     fn start(
         &self,
         color: bool,
-        options: &Self::Options,
         packages: Vec<&Self::Package>,
         ui: &ui::UiSender,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;

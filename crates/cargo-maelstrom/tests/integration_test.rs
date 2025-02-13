@@ -138,6 +138,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             ui,
             &cargo_maelstrom::TestRunner::build_test_collector(
                 &client,
+                collector_config,
                 &directories,
                 &log,
                 metadata,
@@ -152,7 +153,6 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             &directories.project,
             &directories.state,
             cargo_maelstrom::TestRunner::get_watch_exclude_paths(&directories),
-            collector_config,
             log,
             &client,
             cargo_maelstrom::TestRunner::TEST_METADATA_FILE_NAME,

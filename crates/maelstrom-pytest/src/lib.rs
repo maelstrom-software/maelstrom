@@ -143,8 +143,9 @@ impl TestFilter for pattern::Pattern {
 }
 
 pub struct PytestTestCollector<'client> {
-    directories: Directories,
     client: &'client Client,
+    config: PytestConfigValues,
+    directories: Directories,
     test_layers: Mutex<HashMap<ImageRef, LayerSpec>>,
 }
 
@@ -422,20 +423,18 @@ impl CollectTests for PytestTestCollector<'_> {
     type PackageId = PytestPackageId;
     type Package = PytestPackage;
     type ArtifactKey = PytestArtifactKey;
-    type Options = PytestConfigValues;
     type CaseMetadata = PytestCaseMetadata;
 
     fn start(
         &self,
         color: bool,
-        options: &PytestConfigValues,
         _packages: Vec<&PytestPackage>,
         _ui: &UiSender,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
         let test_layers = self.test_layers.lock().unwrap().clone();
         let (handle, stream) = pytest::pytest_collect_tests(
             color,
-            options,
+            &self.config,
             &self.directories.project,
             &self.directories.build,
             test_layers,
@@ -601,12 +600,13 @@ pub fn main_for_test(
         config.parent.artifact_transfer_strategy,
         log.clone(),
     )?;
+    let template_vars = TestRunner::get_template_vars(&config.pytest_options, &directories)?;
     let test_collector = PytestTestCollector {
         client: &client,
+        config: config.pytest_options,
         directories: directories.clone(),
         test_layers: Mutex::new(HashMap::new()),
     };
-    let template_vars = TestRunner::get_template_vars(&config.pytest_options, &directories)?;
 
     run_app_with_ui_multithreaded(
         log_destination,
@@ -623,7 +623,6 @@ pub fn main_for_test(
         project_dir,
         &directories.state,
         vec![directories.build.into_path_buf()],
-        config.pytest_options,
         log,
         &client,
         TestRunner::TEST_METADATA_FILE_NAME,
@@ -673,12 +672,14 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn build_test_collector<'client>(
         client: &'client Client,
+        config: PytestConfigValues,
         directories: &Directories,
         _log: &slog::Logger,
         _metadata: (),
     ) -> Result<PytestTestCollector<'client>> {
         Ok(PytestTestCollector {
             client,
+            config,
             directories: directories.clone(),
             test_layers: Mutex::new(HashMap::new()),
         })

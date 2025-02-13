@@ -130,15 +130,21 @@ impl TestFilter for pattern::Pattern {
 }
 
 pub struct GoTestCollector {
-    project_dir: RootBuf<ProjectDir>,
     cache_dir: RootBuf<CacheDir>,
+    config: GoTestOptions,
+    project_dir: RootBuf<ProjectDir>,
 }
 
 impl GoTestCollector {
-    fn new(project_dir: &Root<ProjectDir>, cache_dir: &Root<CacheDir>) -> Self {
+    fn new(
+        cache_dir: &Root<CacheDir>,
+        config: GoTestOptions,
+        project_dir: &Root<ProjectDir>,
+    ) -> Self {
         Self {
-            project_dir: project_dir.to_owned(),
             cache_dir: cache_dir.to_owned(),
+            config,
+            project_dir: project_dir.to_owned(),
         }
     }
 }
@@ -372,13 +378,11 @@ impl CollectTests for GoTestCollector {
     type PackageId = GoImportPath;
     type Package = GoPackage;
     type ArtifactKey = GoTestArtifactKey;
-    type Options = GoTestOptions;
     type CaseMetadata = NoCaseMetadata;
 
     fn start(
         &self,
         _color: bool,
-        options: &GoTestOptions,
         packages: Vec<&GoPackage>,
         ui: &UiSender,
     ) -> Result<(go_test::WaitHandle, TestArtifactStream)> {
@@ -386,7 +390,7 @@ impl CollectTests for GoTestCollector {
 
         let build_dir = self.cache_dir.join::<BuildDir>("test-binaries");
         let (wait, stream) =
-            go_test::build_and_collect(options, packages, &build_dir, ui.downgrade())?;
+            go_test::build_and_collect(&self.config, packages, &build_dir, ui.downgrade())?;
         Ok((wait, TestArtifactStream(stream)))
     }
 
@@ -740,8 +744,12 @@ pub fn main_for_test(
             config.parent.artifact_transfer_strategy,
             log.clone(),
         )?;
-        let test_collector = GoTestCollector::new(&directories.project, &directories.cache);
         let template_vars = TestRunner::get_template_vars(&config.go_test_options, &directories)?;
+        let test_collector = GoTestCollector::new(
+            &directories.cache,
+            config.go_test_options,
+            &directories.project,
+        );
 
         run_app_with_ui_multithreaded(
             log_destination,
@@ -758,7 +766,6 @@ pub fn main_for_test(
             &directories.project,
             &directories.state,
             vec![],
-            config.go_test_options,
             log,
             &client,
             TestRunner::TEST_METADATA_FILE_NAME,
@@ -843,13 +850,15 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn build_test_collector(
         _client: &Client,
+        config: GoTestOptions,
         directories: &Directories,
         _log: &slog::Logger,
         _metadata: (),
     ) -> Result<GoTestCollector> {
         Ok(GoTestCollector::new(
-            &directories.project,
             &directories.cache,
+            config,
+            &directories.project,
         ))
     }
 

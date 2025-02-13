@@ -262,16 +262,12 @@ impl TestFilter for FakeTestFilter {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TestOptions;
-
 impl CollectTests for TestCollector {
     const ENQUEUE_MESSAGE: &'static str = "building artifacts...";
 
     type BuildHandle = WaitForNothing;
     type Artifact = FakeTestArtifact;
     type ArtifactStream = std::vec::IntoIter<Result<FakeTestArtifact>>;
-    type Options = TestOptions;
     type TestFilter = FakeTestFilter;
     type ArtifactKey = StringArtifactKey;
     type PackageId = FakePackageId;
@@ -281,7 +277,6 @@ impl CollectTests for TestCollector {
     fn start(
         &self,
         _color: bool,
-        _options: &TestOptions,
         packages: Vec<&FakeTestPackage>,
         _ui: &ui::UiSender,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)> {

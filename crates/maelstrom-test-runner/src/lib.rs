@@ -96,13 +96,13 @@ pub trait TestRunner {
     /// Project metadata specific to the test runner. This is called out as a separate type so that
     /// it can be acquired once, and then used later. In particular, for Cargo, this is the result
     /// of running `cargo metadata`. This is assumed to be required for determining the directories
-    /// [`Self::get_metadata_and_directories`], and is then used by [`Self::get_test_collector`].
+    /// [`Self::get_metadata_and_directories`], and is then used by [`Self::build_test_collector`].
     type Metadata;
 
     /// The test collector does most of the actual work for the test runner. Currently, it is
     /// provided a reference to the [`Client`]. However, in the future, we want to remove this
     /// direct dependency. When that happens, this type will no longer need to be a GAT.
-    type TestCollector<'client>: CollectTests<Options = Self::CollectorOptions> + Sync;
+    type TestCollector<'client>: CollectTests + Sync;
 
     /// The test-collector-specific configuration values. Currently, this is a separate type since
     /// [`Self::TestCollector`] is a GAT. This type must be the same as [`CollectTests::Options`]
@@ -156,6 +156,7 @@ pub trait TestRunner {
 
     fn build_test_collector<'client>(
         client: &'client Client,
+        config: Self::CollectorOptions,
         directories: &Directories,
         log: &slog::Logger,
         metadata: Self::Metadata,
@@ -173,7 +174,6 @@ pub trait TestRunner {
 /// underlying function.
 ///
 /// Mostly it deals with the `--init` and `--client-bg-proc` flags
-#[allow(clippy::too_many_arguments)]
 pub fn main<ArgsT, ArgsIntoIterT, TestRunnerT>(
     command: Command,
     args: ArgsIntoIterT,
@@ -237,7 +237,7 @@ where
     let log_destination = LogDestination::default();
     let log = log_builder.build(log_destination.clone());
 
-    let (parent_config, collector_config) = config.into_parts();
+    let (parent_config, test_collector_config) = config.into_parts();
     let client = Client::new(
         bg_proc,
         parent_config.broker,
@@ -254,8 +254,14 @@ where
     )?;
 
     let (extra_options, _) = extra_options.into_parts();
-    let template_vars = TestRunnerT::get_template_vars(&collector_config, &directories)?;
-    let test_collector = TestRunnerT::build_test_collector(&client, &directories, &log, metadata)?;
+    let template_vars = TestRunnerT::get_template_vars(&test_collector_config, &directories)?;
+    let test_collector = TestRunnerT::build_test_collector(
+        &client,
+        test_collector_config,
+        &directories,
+        &log,
+        metadata,
+    )?;
     run_app_with_ui_multithreaded(
         log_destination,
         parent_config.timeout.map(Timeout::new),
@@ -271,7 +277,6 @@ where
         &directories.project,
         &directories.state,
         TestRunnerT::get_watch_exclude_paths(&directories),
-        collector_config,
         log,
         &client,
         TestRunnerT::TEST_METADATA_FILE_NAME,

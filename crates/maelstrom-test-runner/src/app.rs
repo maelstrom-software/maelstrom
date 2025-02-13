@@ -39,22 +39,16 @@ use watch::Watcher;
 type ArtifactM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Artifact;
 type ArtifactKeyM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::ArtifactKey;
 type CaseMetadataM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::CaseMetadata;
-type CollectOptionsM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Options;
 type PackageM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::Package;
 type PackageIdM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::PackageId;
 type TestFilterM<DepsT> = <<DepsT as Deps>::TestCollector as CollectTests>::TestFilter;
 type TestDbM<DepsT> = TestDb<ArtifactKeyM<DepsT>, CaseMetadataM<DepsT>>;
-type TestingOptionsM<DepsT> = TestingOptions<TestFilterM<DepsT>, CollectOptionsM<DepsT>>;
+type TestingOptionsM<DepsT> = TestingOptions<TestFilterM<DepsT>>;
 
 trait Deps {
     type TestCollector: CollectTests + Sync;
 
-    fn start_collection(
-        &self,
-        color: bool,
-        options: &CollectOptionsM<Self>,
-        packages: Vec<&PackageM<Self>>,
-    );
+    fn start_collection(&self, color: bool, packages: Vec<&PackageM<Self>>);
     fn get_packages(&self);
     fn add_job(&self, job_id: JobId, spec: JobSpec);
     fn list_tests(&self, artifact: ArtifactM<Self>);
@@ -63,10 +57,9 @@ trait Deps {
 }
 
 /// Immutable information used to control the testing invocation.
-struct TestingOptions<TestFilterT, CollectOptionsT> {
+struct TestingOptions<TestFilterT> {
     test_metadata: MetadataStore<TestFilterT>,
     filter: TestFilterT,
-    collector_options: CollectOptionsT,
     timeout_override: Option<Option<Timeout>>,
     stdout_color: bool,
     repeat: Repeat,
@@ -153,18 +146,10 @@ impl<'deps, 'scope, TestCollectorT: CollectTests + Sync>
 impl<TestCollectorT: CollectTests + Sync> Deps for MainAppDepsAdapter<'_, '_, TestCollectorT> {
     type TestCollector = TestCollectorT;
 
-    fn start_collection(
-        &self,
-        color: bool,
-        options: &CollectOptionsM<Self>,
-        packages: Vec<&PackageM<Self>>,
-    ) {
+    fn start_collection(&self, color: bool, packages: Vec<&PackageM<Self>>) {
         let sem = self.semaphore;
         let sender = self.main_app_sender.clone();
-        match self
-            .test_collector
-            .start(color, options, packages, &self.ui)
-        {
+        match self.test_collector.start(color, packages, &self.ui) {
             Ok((build_handle, artifact_stream)) => {
                 let build_handle = Arc::new(build_handle);
                 let killer = KillOnDrop::new(build_handle.clone());
@@ -310,7 +295,7 @@ fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender
 fn run_app_once<'scope, 'deps, TestCollectorT: CollectTests + Sync>(
     test_collector: &'deps TestCollectorT,
     test_db_store: &'deps TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
-    options: &'deps TestingOptions<TestCollectorT::TestFilter, TestCollectorT::Options>,
+    options: &'deps TestingOptions<TestCollectorT::TestFilter>,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     sem: &'deps Semaphore,
     ui: UiSender,
@@ -354,7 +339,7 @@ fn run_app_in_loop<TestCollectorT: CollectTests + Sync>(
     log: slog::Logger,
     test_db_store: TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
     project_dir: RootBuf<ProjectDir>,
-    options: TestingOptions<TestCollectorT::TestFilter, TestCollectorT::Options>,
+    options: TestingOptions<TestCollectorT::TestFilter>,
     watch: bool,
     watch_exclude_paths: Vec<PathBuf>,
     ui: UiSender,
@@ -416,7 +401,7 @@ fn run_app_in_loop<TestCollectorT: CollectTests + Sync>(
 /// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
 /// application on this thread using the UI until it is completed.
 #[allow(clippy::too_many_arguments)]
-pub fn run_app_with_ui_multithreaded<TestCollectorT, CollectorOptionsT>(
+pub fn run_app_with_ui_multithreaded<TestCollectorT: CollectTests + Sync>(
     log_destination: LogDestination,
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,
@@ -431,16 +416,12 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT, CollectorOptionsT>(
     project_dir: impl AsRef<Root<ProjectDir>>,
     state_dir: impl AsRef<Root<StateDir>>,
     mut watch_exclude_paths: Vec<PathBuf>,
-    collector_options: CollectorOptionsT,
     log: slog::Logger,
     client: &Client,
     test_metadata_file_name: &'static str,
     test_metadata_default_contents: &'static str,
     metadata_template_vars: TemplateVars,
-) -> Result<ExitCode>
-where
-    TestCollectorT: CollectTests<Options = CollectorOptionsT> + Sync,
-{
+) -> Result<ExitCode> {
     let fs = Fs::new();
 
     let project_dir = project_dir.as_ref().to_owned();
@@ -495,7 +476,6 @@ where
         TestingOptions {
             test_metadata: metadata_store,
             filter,
-            collector_options,
             timeout_override,
             stdout_color,
             repeat,
