@@ -1,6 +1,6 @@
 mod job_output;
 mod main_app;
-mod watch;
+pub mod watch;
 
 #[cfg(test)]
 mod tests;
@@ -15,11 +15,10 @@ use crate::{
 };
 use anyhow::Result;
 use maelstrom_base::Timeout;
-use maelstrom_client::{spec::JobSpec, Client, JobStatus, ProjectDir};
-use maelstrom_util::{process::ExitCode, root::RootBuf, sync::Event};
+use maelstrom_client::{spec::JobSpec, Client, JobStatus};
+use maelstrom_util::{process::ExitCode, sync::Event};
 use main_app::MainApp;
 use std::{
-    path::PathBuf,
     sync::{
         mpsc::{Receiver, Sender},
         Arc, Mutex,
@@ -27,7 +26,6 @@ use std::{
     time::Duration,
 };
 use std_semaphore::Semaphore;
-use watch::Watcher;
 
 type ArtifactM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::Artifact;
 type ArtifactKeyM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::ArtifactKey;
@@ -110,8 +108,6 @@ struct MainAppDepsAdapter<'deps, 'scope, TestCollectorT: TestCollector + Sync> {
     semaphore: &'deps Semaphore,
     client: &'deps Client,
 }
-
-const MAX_NUM_BACKGROUND_THREADS: isize = 200;
 
 impl<'deps, 'scope, TestCollectorT: TestCollector + Sync>
     MainAppDepsAdapter<'deps, 'scope, TestCollectorT>
@@ -285,7 +281,7 @@ fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender
     }
 }
 
-fn run_app_once<'scope, 'deps, TestCollectorT: TestCollector + Sync>(
+pub fn run_app_once<'scope, 'deps, TestCollectorT: TestCollector + Sync>(
     test_collector: &'deps TestCollectorT,
     test_db_store: &'deps TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
     options: &'deps TestingOptions<TestCollectorT::TestFilter>,
@@ -319,71 +315,6 @@ fn run_app_once<'scope, 'deps, TestCollectorT: TestCollector + Sync>(
             test_db_store.save(test_db)?;
 
             Ok(exit_code)
-        })();
-
-        done.set();
-        res
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
-    test_collector: &TestCollectorT,
-    log: slog::Logger,
-    test_db_store: TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
-    project_dir: RootBuf<ProjectDir>,
-    options: TestingOptions<TestCollectorT::TestFilter>,
-    watch: bool,
-    watch_exclude_paths: Vec<PathBuf>,
-    ui: UiSender,
-    client: &Client,
-) -> Result<ExitCode> {
-    // This is where the pytest runner builds pip packages.
-    test_collector.build_test_layers(options.test_metadata.get_all_images(), &ui)?;
-
-    let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
-    let done = Event::new();
-    let files_changed = Event::new();
-
-    std::thread::scope(|scope| {
-        let res = (|| -> Result<_> {
-            let watcher = Watcher::new(
-                scope,
-                log.clone(),
-                &project_dir,
-                &watch_exclude_paths,
-                &sem,
-                &done,
-                &files_changed,
-            );
-            if watch {
-                watcher.watch_for_changes()?;
-            }
-
-            loop {
-                let exit_code = run_app_once(
-                    test_collector,
-                    &test_db_store,
-                    &options,
-                    scope,
-                    &sem,
-                    ui.clone(),
-                    client,
-                )?;
-
-                if watch {
-                    client.restart()?;
-
-                    ui.send(UiMessage::UpdateEnqueueStatus(
-                        "waiting for changes...".into(),
-                    ));
-                    watcher.wait_for_changes();
-
-                    continue;
-                } else {
-                    break Ok(exit_code);
-                }
-            }
         })();
 
         done.set();

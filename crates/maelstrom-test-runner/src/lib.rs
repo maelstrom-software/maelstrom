@@ -14,6 +14,7 @@ pub mod fake_test_framework;
 pub use deps::*;
 
 use anyhow::{Context as _, Result};
+use app::watch::Watcher;
 use app::TestingOptions;
 use clap::{Args, Command};
 use config::IntoParts;
@@ -26,15 +27,18 @@ use maelstrom_util::{
     fs::Fs,
     process::ExitCode,
     root::RootBuf,
+    sync::Event,
 };
 use metadata::Store as MetadataStore;
 use std::{
     fmt::Debug,
     io::{self, IsTerminal as _},
+    path::PathBuf,
     str,
 };
+use std_semaphore::Semaphore;
 use test_db::TestDbStore;
-use ui::{Ui, UiKind, UiSender};
+use ui::{Ui, UiKind, UiMessage, UiSender};
 use util::{IsListing, ListTests, StdoutTty, UseColor};
 
 /// The listing mode of the test runner. This determines whether the test runner runs normally, or
@@ -377,7 +381,7 @@ fn main_inner<TestRunnerT: TestRunner>(
 
     let (ui_handle, ui) = ui.start_ui_thread(log_destination, log.clone());
 
-    let main_res = app::run_app_in_loop(
+    let main_res = run_app_in_loop(
         &test_collector,
         log,
         test_db_store,
@@ -408,4 +412,71 @@ fn test_filter_compile<TestCollectorT: TestCollector>(
     exclude: &[String],
 ) -> Result<TestCollectorT::TestFilter> {
     TestCollectorT::TestFilter::compile(include, exclude)
+}
+
+const MAX_NUM_BACKGROUND_THREADS: isize = 200;
+
+#[allow(clippy::too_many_arguments)]
+fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
+    test_collector: &TestCollectorT,
+    log: slog::Logger,
+    test_db_store: TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
+    project_dir: RootBuf<ProjectDir>,
+    options: TestingOptions<TestCollectorT::TestFilter>,
+    watch: bool,
+    watch_exclude_paths: Vec<PathBuf>,
+    ui: UiSender,
+    client: &Client,
+) -> Result<ExitCode> {
+    // This is where the pytest runner builds pip packages.
+    test_collector.build_test_layers(options.test_metadata.get_all_images(), &ui)?;
+
+    let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
+    let done = Event::new();
+    let files_changed = Event::new();
+
+    std::thread::scope(|scope| {
+        let res = (|| -> Result<_> {
+            let watcher = Watcher::new(
+                scope,
+                log.clone(),
+                &project_dir,
+                &watch_exclude_paths,
+                &sem,
+                &done,
+                &files_changed,
+            );
+            if watch {
+                watcher.watch_for_changes()?;
+            }
+
+            loop {
+                let exit_code = app::run_app_once(
+                    test_collector,
+                    &test_db_store,
+                    &options,
+                    scope,
+                    &sem,
+                    ui.clone(),
+                    client,
+                )?;
+
+                if watch {
+                    client.restart()?;
+
+                    ui.send(UiMessage::UpdateEnqueueStatus(
+                        "waiting for changes...".into(),
+                    ));
+                    watcher.wait_for_changes();
+
+                    continue;
+                } else {
+                    break Ok(exit_code);
+                }
+            }
+        })();
+
+        done.set();
+        res
+    })
 }
