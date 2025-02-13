@@ -1,3 +1,4 @@
+use anyhow::Result;
 use cargo_maelstrom::{
     cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
     cli::{ExtraCommandLineOptions, ListOptions},
@@ -22,9 +23,9 @@ use std::{
 };
 use tempfile::tempdir;
 
-fn spawn_bg_proc() -> ClientBgProcess {
+fn spawn_bg_proc() -> Result<ClientBgProcess> {
     let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_cargo-maelstrom"));
-    ClientBgProcess::new_from_bin(&bin_path, &["--client-bg-proc"]).unwrap()
+    ClientBgProcess::new_from_bin(&bin_path, &["--client-bg-proc"])
 }
 
 fn cmd(args: &[&str], current_dir: &Path) {
@@ -46,7 +47,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     let term = InMemoryTerm::new(50, 50);
 
     maelstrom_test_runner::main_for_test::<cargo_maelstrom::TestRunner>(
-        spawn_bg_proc(),
+        |_| spawn_bg_proc(),
         Config {
             parent: maelstrom_test_runner::config::Config {
                 broker: None,

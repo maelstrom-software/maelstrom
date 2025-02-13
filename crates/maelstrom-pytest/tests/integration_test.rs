@@ -16,9 +16,9 @@ use std::{
 };
 use tempfile::tempdir;
 
-fn spawn_bg_proc() -> ClientBgProcess {
+fn spawn_bg_proc() -> Result<ClientBgProcess> {
     let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-pytest"));
-    ClientBgProcess::new_from_bin(&bin_path, &["--client-bg-proc"]).unwrap()
+    ClientBgProcess::new_from_bin(&bin_path, &["--client-bg-proc"])
 }
 
 fn sh(script: &str, description: &str) -> Result<()> {
@@ -99,7 +99,7 @@ fn do_maelstrom_pytest_test(
     let term = InMemoryTerm::new(terminal_size.0, terminal_size.1);
 
     let exit_code = maelstrom_test_runner::main_for_test::<maelstrom_pytest::TestRunner>(
-        spawn_bg_proc(),
+        |_| spawn_bg_proc(),
         Config {
             parent: maelstrom_test_runner::config::Config {
                 broker: None,

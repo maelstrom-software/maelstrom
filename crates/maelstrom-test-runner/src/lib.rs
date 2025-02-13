@@ -215,12 +215,10 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
         }
     };
 
-    let bg_proc = ClientBgProcess::new_from_fork(parent_config.log_level)?;
-
     let stdout_tty = StdoutTty::from(io::stdout().is_terminal());
 
     main_part_2::<TestRunnerT>(
-        bg_proc,
+        ClientBgProcess::new_from_fork,
         config,
         extra_options,
         TestRunnerT::get_metadata_and_project_directory,
@@ -232,7 +230,7 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
 }
 
 pub fn main_for_test<TestRunnerT: TestRunner>(
-    bg_proc: ClientBgProcess,
+    client_bg_process_factory: impl FnOnce(LogLevel) -> Result<ClientBgProcess>,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     get_metadata_and_project_directory: impl FnOnce(
@@ -256,7 +254,7 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
     };
 
     main_part_2::<TestRunnerT>(
-        bg_proc,
+        client_bg_process_factory,
         config,
         extra_options,
         get_metadata_and_project_directory,
@@ -269,7 +267,7 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
 
 #[allow(clippy::too_many_arguments)]
 fn main_part_2<TestRunnerT: TestRunner>(
-    bg_proc: ClientBgProcess,
+    client_bg_process_factory: impl FnOnce(LogLevel) -> Result<ClientBgProcess>,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     get_metadata_and_project_directory: impl FnOnce(
@@ -284,6 +282,8 @@ fn main_part_2<TestRunnerT: TestRunner>(
     ui_factory: impl FnOnce(UiKind, IsListing, StdoutTty) -> Result<Box<dyn Ui>>,
 ) -> Result<ExitCode> {
     let parent_config = config.as_ref();
+
+    let client_bg_process = client_bg_process_factory(parent_config.log_level)?;
 
     let ui = ui_factory(
         parent_config.ui,
@@ -305,7 +305,7 @@ fn main_part_2<TestRunnerT: TestRunner>(
 
     let (parent_config, test_collector_config) = config.into_parts();
     let client = Client::new(
-        bg_proc,
+        client_bg_process,
         parent_config.broker,
         &directories.project,
         &directories.state,
