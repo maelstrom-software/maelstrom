@@ -197,7 +197,7 @@ where
         );
     }
 
-    let config_parent = config.as_ref();
+    let parent_config = config.as_ref();
 
     let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
         ListingMode::None => false.into(),
@@ -207,12 +207,12 @@ where
         }
         ListingMode::OtherWithUi => {
             let ui = ui::factory(
-                config_parent.ui,
+                parent_config.ui,
                 IsListing::from(true),
                 StdoutTty::from(io::stdout().is_terminal()),
             )?;
             let log_destination = LogDestination::default();
-            let log_builder = LoggerBuilder::DefaultLogger(config_parent.log_level);
+            let log_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
             let log = log_builder.build(log_destination.clone());
             let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log);
             let result = TestRunnerT::execute_listing_with_ui(&config, &extra_options, ui_sender);
@@ -221,11 +221,11 @@ where
         }
     };
 
-    let bg_proc = ClientBgProcess::new_from_fork(config_parent.log_level)?;
+    let bg_proc = ClientBgProcess::new_from_fork(parent_config.log_level)?;
 
     let stdout_tty = StdoutTty::from(io::stdout().is_terminal());
     let ui = ui::factory(
-        config_parent.ui,
+        parent_config.ui,
         IsListing::from(list_tests.as_bool()),
         stdout_tty,
     )?;
@@ -235,7 +235,7 @@ where
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
-    let log_builder = LoggerBuilder::DefaultLogger(config_parent.log_level);
+    let log_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
     let log_destination = LogDestination::default();
     let log = log_builder.build(log_destination.clone());
 
@@ -403,6 +403,101 @@ pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
     let (extra_options, _) = extra_options.into_parts();
     let test_collector =
         TestRunnerT::build_test_collector(&client, collector_config, &directories, &log, metadata)?;
+
+    run_app_with_ui_multithreaded(
+        log_destination,
+        parent_config.timeout.map(Timeout::new),
+        ui,
+        test_collector,
+        list_tests,
+        parent_config.repeat,
+        parent_config.stop_after,
+        UseColor::from(stdout_tty.as_bool()),
+        log,
+        &client,
+        TestRunnerT::TEST_METADATA_FILE_NAME,
+        TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        directories,
+        extra_options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn main_for_test_for_go<TestRunnerT: TestRunner>(
+    config: TestRunnerT::Config,
+    extra_options: TestRunnerT::ExtraCommandLineOptions,
+    bg_proc: ClientBgProcess,
+    logger: LoggerBuilder,
+    stdout_tty: StdoutTty,
+    ui: impl Ui,
+    project: &Root<ProjectDir>,
+    metadata: TestRunnerT::Metadata,
+) -> Result<ExitCode> {
+    let project = project.to_owned();
+    let hidden = project.join::<()>(".maelstrom-go-test");
+    let state = hidden.join("state");
+    let cache = hidden.join("cache");
+    let build = cache.join("test-binaries");
+    let directories = Directories {
+        build,
+        cache,
+        project,
+        state,
+    };
+
+    Fs.create_dir_all(&directories.state)?;
+    Fs.create_dir_all(&directories.cache)?;
+
+    let log_destination = LogDestination::default();
+    let log = logger.build(log_destination.clone());
+
+    let parent_config = config.as_ref();
+    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
+        ListingMode::None => false.into(),
+        ListingMode::Tests => true.into(),
+        ListingMode::OtherWithoutUi => {
+            return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
+        }
+        ListingMode::OtherWithUi => {
+            let ui = ui::factory(
+                parent_config.ui,
+                IsListing::from(true),
+                StdoutTty::from(io::stdout().is_terminal()),
+            )?;
+            let log_destination = LogDestination::default();
+            let log_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
+            let log = log_builder.build(log_destination.clone());
+            let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log);
+            let result = TestRunnerT::execute_listing_with_ui(&config, &extra_options, ui_sender);
+            ui_handle.join()?;
+            return result;
+        }
+    };
+
+    let (parent_config, test_collector_config) = config.into_parts();
+    let client = Client::new(
+        bg_proc,
+        parent_config.broker,
+        &directories.project,
+        &directories.state,
+        parent_config.container_image_depot_root,
+        &directories.cache,
+        parent_config.cache_size,
+        parent_config.inline_limit,
+        parent_config.slots,
+        parent_config.accept_invalid_remote_container_tls_certs,
+        parent_config.artifact_transfer_strategy,
+        log.clone(),
+    )?;
+
+    let (extra_options, _) = extra_options.into_parts();
+    let test_collector = TestRunnerT::build_test_collector(
+        &client,
+        test_collector_config,
+        &directories,
+        &log,
+        metadata,
+    )?;
 
     run_app_with_ui_multithreaded(
         log_destination,

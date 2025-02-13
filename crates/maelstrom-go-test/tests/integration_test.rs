@@ -53,7 +53,7 @@ fn do_maelstrom_go_test_test(
     let stdout_tty = StdoutTty::from(false);
     let ui = ui::SimpleUi::new(IsListing::from(false), stdout_tty, term.clone());
     let bg_proc = spawn_bg_proc();
-    let exit_code = maelstrom_go_test::main_for_test(
+    let exit_code = maelstrom_test_runner::main_for_test_for_go::<maelstrom_go_test::TestRunner>(
         config,
         extra_options,
         bg_proc,
@@ -61,6 +61,7 @@ fn do_maelstrom_go_test_test(
         stdout_tty,
         ui,
         Root::<ProjectDir>::new(project_dir),
+        (),
     )
     .unwrap();
 
