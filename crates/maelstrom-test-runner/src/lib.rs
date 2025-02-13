@@ -25,7 +25,7 @@ use maelstrom_util::{
     config::{common::LogLevel, Config},
     fs::Fs,
     process::ExitCode,
-    root::{Root, RootBuf},
+    root::RootBuf,
 };
 use std::{
     fmt::Debug,
@@ -268,14 +268,13 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
 
 #[allow(clippy::too_many_arguments)]
 pub fn main_for_test_for_go_and_pytest<TestRunnerT: TestRunner>(
+    bg_proc: ClientBgProcess,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
-    bg_proc: ClientBgProcess,
     logger_builder: LoggerBuilder,
-    stdout_tty: StdoutTty,
-    ui: impl Ui,
-    project_dir: &Root<ProjectDir>,
     metadata: TestRunnerT::Metadata,
+    project_dir: RootBuf<ProjectDir>,
+    ui: impl Ui,
 ) -> Result<ExitCode> {
     let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
         ListingMode::None => false.into(),
@@ -292,10 +291,10 @@ pub fn main_for_test_for_go_and_pytest<TestRunnerT: TestRunner>(
         bg_proc,
         config,
         extra_options,
-        |_| Ok((metadata, project_dir.to_owned())),
+        |_| Ok((metadata, project_dir)),
         list_tests,
         |_| logger_builder,
-        stdout_tty,
+        StdoutTty::from(false),
         ui,
     )
 }

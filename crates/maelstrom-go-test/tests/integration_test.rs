@@ -1,5 +1,5 @@
 use indicatif::InMemoryTerm;
-use maelstrom_client::{ClientBgProcess, ProjectDir};
+use maelstrom_client::ClientBgProcess;
 use maelstrom_go_test::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
 use maelstrom_test_runner::{
     ui,
@@ -9,7 +9,7 @@ use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::ExitCode,
-    root::{Root, RootBuf},
+    root::RootBuf,
 };
 use regex::Regex;
 use std::path::{Path, PathBuf};
@@ -55,14 +55,13 @@ fn do_maelstrom_go_test_test(
     let bg_proc = spawn_bg_proc();
     let exit_code =
         maelstrom_test_runner::main_for_test_for_go_and_pytest::<maelstrom_go_test::TestRunner>(
+            bg_proc,
             config,
             extra_options,
-            bg_proc,
             logger,
-            stdout_tty,
-            ui,
-            Root::<ProjectDir>::new(project_dir),
             (),
+            RootBuf::new(project_dir.to_owned()),
+            ui,
         )
         .unwrap();
 
