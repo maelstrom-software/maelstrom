@@ -298,16 +298,7 @@ pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
         }
     };
 
-    let project = project_dir.to_owned();
-    let build = project.join(".maelstrom-pytest");
-    let cache = build.join("cache");
-    let state = build.join("state");
-    let directories = Directories {
-        build,
-        cache,
-        project,
-        state,
-    };
+    let directories = TestRunnerT::get_directories(&metadata, project_dir.to_owned());
 
     main_part_2::<TestRunnerT>(
         bg_proc,
@@ -330,7 +321,7 @@ pub fn main_for_test_for_go<TestRunnerT: TestRunner>(
     logger_builder: LoggerBuilder,
     stdout_tty: StdoutTty,
     ui: impl Ui,
-    project: &Root<ProjectDir>,
+    project_dir: &Root<ProjectDir>,
     metadata: TestRunnerT::Metadata,
 ) -> Result<ExitCode> {
     let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
@@ -344,17 +335,7 @@ pub fn main_for_test_for_go<TestRunnerT: TestRunner>(
         }
     };
 
-    let project = project.to_owned();
-    let hidden = project.join::<()>(".maelstrom-go-test");
-    let state = hidden.join("state");
-    let cache = hidden.join("cache");
-    let build = cache.join("test-binaries");
-    let directories = Directories {
-        build,
-        cache,
-        project,
-        state,
-    };
+    let directories = TestRunnerT::get_directories(&metadata, project_dir.to_owned());
 
     main_part_2::<TestRunnerT>(
         bg_proc,
