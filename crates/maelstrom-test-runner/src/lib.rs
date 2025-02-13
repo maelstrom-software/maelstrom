@@ -434,7 +434,6 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
     // This is where the pytest runner builds pip packages.
     test_collector.build_test_layers(testing_options.test_metadata.get_all_images(), &ui_sender)?;
 
-    let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
     let done = Event::new();
     let files_changed = Event::new();
 
@@ -445,7 +444,6 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
                 log.clone(),
                 &directories.project,
                 &watch_exclude_paths,
-                &sem,
                 &done,
                 &files_changed,
             );
@@ -458,8 +456,6 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
                     &test_collector,
                     &test_db_store,
                     &testing_options,
-                    scope,
-                    &sem,
                     ui_sender.clone(),
                     &client,
                 )?;
@@ -484,20 +480,19 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
     })
 }
 
-fn run_app_once<'scope, 'deps, TestCollectorT: TestCollector + Sync>(
-    test_collector: &'deps TestCollectorT,
-    test_db_store: &'deps TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
-    options: &'deps TestingOptions<TestCollectorT::TestFilter>,
-    scope: &'scope std::thread::Scope<'scope, 'deps>,
-    sem: &'deps Semaphore,
+fn run_app_once<TestCollectorT: TestCollector + Sync>(
+    test_collector: &TestCollectorT,
+    test_db_store: &TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
+    options: &TestingOptions<TestCollectorT::TestFilter>,
     ui: UiSender,
-    client: &'deps Client,
+    client: &Client,
 ) -> Result<ExitCode> {
     let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
 
     let done = Event::new();
-    std::thread::scope(|inner_scope| {
-        inner_scope.spawn(|| introspect_loop(&done, client, ui.clone()));
+    let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
+    std::thread::scope(|scope| {
+        scope.spawn(|| introspect_loop(&done, client, ui.clone()));
 
         let res = (|| -> Result<_> {
             let deps = MainAppDepsAdapter::new(
@@ -505,7 +500,7 @@ fn run_app_once<'scope, 'deps, TestCollectorT: TestCollector + Sync>(
                 scope,
                 main_app_sender.clone(),
                 ui.clone(),
-                sem,
+                &sem,
                 client,
             );
 

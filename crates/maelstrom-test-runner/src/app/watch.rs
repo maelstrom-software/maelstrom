@@ -7,7 +7,6 @@ use notify::{
 };
 use slog::{debug, Logger};
 use std::{collections::BTreeSet, path::PathBuf, sync::mpsc, thread::Scope, time::Duration};
-use std_semaphore::Semaphore;
 
 fn process_watch_events(
     events: impl IntoIterator<Item = NotifyEvent>,
@@ -36,7 +35,6 @@ pub struct Watcher<'deps, 'scope> {
     log: Logger,
     project_dir: &'deps Root<ProjectDir>,
     watch_exclude_paths: &'deps Vec<PathBuf>,
-    semaphore: &'deps Semaphore,
     done: &'deps SyncEvent,
     files_changed: &'deps SyncEvent,
 }
@@ -47,7 +45,6 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
         log: Logger,
         project_dir: &'deps Root<ProjectDir>,
         watch_exclude_paths: &'deps Vec<PathBuf>,
-        semaphore: &'deps Semaphore,
         done: &'deps SyncEvent,
         files_changed: &'deps SyncEvent,
     ) -> Self {
@@ -56,14 +53,12 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
             log,
             project_dir,
             watch_exclude_paths,
-            semaphore,
             done,
             files_changed,
         }
     }
 
     pub fn watch_for_changes(&self) -> Result<()> {
-        let sem = self.semaphore;
         let project_dir = self.project_dir;
         let done = self.done;
         let files_changed = self.files_changed;
@@ -75,8 +70,6 @@ impl<'deps, 'scope> Watcher<'deps, 'scope> {
         watcher.watch(project_dir.as_ref(), RecursiveMode::Recursive)?;
 
         self.scope.spawn(move || {
-            let _guard = sem.access();
-
             // This loop attempts to batch up the events which happen around the same time. This
             // is acting as a kind of debounce so we don't kick off two back-to-back test
             // invocations every time we get a flurry of changes.
