@@ -255,12 +255,9 @@ where
         parent_config.timeout.map(Timeout::new),
         ui,
         &test_collector,
-        extra_options.include,
-        extra_options.exclude,
         list_tests,
         parent_config.repeat,
         parent_config.stop_after,
-        extra_options.watch,
         stdout_is_tty,
         &directories.project,
         &directories.state,
@@ -268,5 +265,6 @@ where
         &client,
         TestRunnerT::TEST_METADATA_FILE_NAME,
         TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        extra_options,
     )
 }

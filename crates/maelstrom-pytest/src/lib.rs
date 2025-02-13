@@ -615,12 +615,9 @@ pub fn main_for_test(
         config.parent.timeout.map(Timeout::new),
         ui,
         &test_collector,
-        extra_options.parent.include,
-        extra_options.parent.exclude,
         list_tests,
         config.parent.repeat,
         config.parent.stop_after,
-        extra_options.parent.watch,
         stdout_is_tty,
         project_dir,
         &directories.state,
@@ -628,6 +625,7 @@ pub fn main_for_test(
         &client,
         TestRunner::TEST_METADATA_FILE_NAME,
         TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        extra_options.parent,
     )
 }
 

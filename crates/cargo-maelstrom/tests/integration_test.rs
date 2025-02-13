@@ -144,12 +144,9 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             parent_config.timeout.map(Timeout::new),
             ui,
             &test_collector,
-            extra_options.include,
-            extra_options.exclude,
             list_tests,
             parent_config.repeat,
             parent_config.stop_after,
-            extra_options.watch,
             false,
             &directories.project,
             &directories.state,
@@ -157,6 +154,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             &client,
             cargo_maelstrom::TestRunner::TEST_METADATA_FILE_NAME,
             cargo_maelstrom::TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+            extra_options,
         )
     })()
     .unwrap();

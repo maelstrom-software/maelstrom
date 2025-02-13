@@ -6,7 +6,7 @@ mod watch;
 mod tests;
 
 use crate::{
-    config::{Repeat, StopAfter},
+    config::{ExtraCommandLineOptions, Repeat, StopAfter},
     deps::{KillOnDrop, TestArtifact as _, TestCollector, TestFilter as _, Wait as _, WaitStatus},
     log::LogDestination,
     metadata::Store as MetadataStore,
@@ -405,12 +405,9 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,
     test_collector: &TestCollectorT,
-    include_filter: Vec<String>,
-    exclude_filter: Vec<String>,
     list_tests: ListTests,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
-    watch: bool,
     stdout_color: bool,
     project_dir: impl AsRef<Root<ProjectDir>>,
     state_dir: impl AsRef<Root<StateDir>>,
@@ -418,6 +415,7 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
     client: &Client,
     test_metadata_file_name: &'static str,
     test_metadata_default_contents: &'static str,
+    extra_options: ExtraCommandLineOptions,
 ) -> Result<ExitCode> {
     let fs = Fs::new();
 
@@ -455,7 +453,8 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
 
     let test_db_store = TestDbStore::new(fs, &state_dir);
 
-    let filter = <TestCollectorT::TestFilter>::compile(&include_filter, &exclude_filter)?;
+    let filter =
+        <TestCollectorT::TestFilter>::compile(&extra_options.include, &extra_options.exclude)?;
 
     let watch_exclude_paths = test_collector
         .get_paths_to_exclude_from_watch()
@@ -484,7 +483,7 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
             stop_after,
             list_tests,
         },
-        watch,
+        extra_options.watch,
         watch_exclude_paths,
         ui,
         client,
