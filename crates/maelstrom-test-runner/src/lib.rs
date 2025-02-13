@@ -11,7 +11,6 @@ pub mod util;
 #[cfg(test)]
 pub mod fake_test_framework;
 
-pub use app::run_app_with_ui_multithreaded;
 pub use deps::*;
 
 use anyhow::Result;
@@ -313,7 +312,7 @@ fn main_inner<TestRunnerT: TestRunner>(
         metadata,
     )?;
 
-    run_app_with_ui_multithreaded(
+    app::run_app_with_ui_multithreaded(
         log_destination,
         parent_config.timeout.map(Timeout::new),
         ui,
