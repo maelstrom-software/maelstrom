@@ -13,16 +13,12 @@ use crate::{
     test_db::{TestDb, TestDbStore},
     ui::{Ui, UiJobId as JobId, UiMessage, UiSender},
     util::ListTests,
+    Directories,
 };
 use anyhow::{Context as _, Result};
 use maelstrom_base::Timeout;
-use maelstrom_client::{spec::JobSpec, Client, JobStatus, ProjectDir, StateDir};
-use maelstrom_util::{
-    fs::Fs,
-    process::ExitCode,
-    root::{Root, RootBuf},
-    sync::Event,
-};
+use maelstrom_client::{spec::JobSpec, Client, JobStatus, ProjectDir};
+use maelstrom_util::{fs::Fs, process::ExitCode, root::RootBuf, sync::Event};
 use main_app::MainApp;
 use std::{
     path::PathBuf,
@@ -409,20 +405,17 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
     repeat: Repeat,
     stop_after: Option<StopAfter>,
     stdout_color: bool,
-    project_dir: impl AsRef<Root<ProjectDir>>,
-    state_dir: impl AsRef<Root<StateDir>>,
     log: slog::Logger,
     client: &Client,
     test_metadata_file_name: &'static str,
     test_metadata_default_contents: &'static str,
+    directories: Directories,
     extra_options: ExtraCommandLineOptions,
 ) -> Result<ExitCode> {
     let fs = Fs::new();
 
-    let project_dir = project_dir.as_ref().to_owned();
-
     let metadata_template_variables = test_collector.get_template_variables()?;
-    let metadata_path = project_dir.join::<()>(test_metadata_file_name);
+    let metadata_path = directories.project.join::<()>(test_metadata_file_name);
     let metadata_store = if let Some(contents) = fs.read_to_string_if_exists(&metadata_path)? {
         MetadataStore::load(&contents, &metadata_template_variables)
             .with_context(|| format!("parsing metadata file {}", metadata_path.display()))?
@@ -451,7 +444,7 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
         client.add_container(name.clone(), spec.clone())?;
     }
 
-    let test_db_store = TestDbStore::new(fs, &state_dir);
+    let test_db_store = TestDbStore::new(fs, &directories.state);
 
     let filter =
         <TestCollectorT::TestFilter>::compile(&extra_options.include, &extra_options.exclude)?;
@@ -460,10 +453,11 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
         .get_paths_to_exclude_from_watch()
         .into_iter()
         .chain([
-            project_dir
+            directories
+                .project
                 .to_path_buf()
                 .join(maelstrom_container::TAG_FILE_NAME),
-            project_dir.to_path_buf().join(".git"),
+            directories.project.to_path_buf().join(".git"),
         ])
         .collect();
 
@@ -473,7 +467,7 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
         test_collector,
         log,
         test_db_store,
-        project_dir,
+        directories.project,
         TestingOptions {
             test_metadata: metadata_store,
             filter,

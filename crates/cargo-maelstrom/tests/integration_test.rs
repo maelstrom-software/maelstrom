@@ -148,12 +148,11 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             parent_config.repeat,
             parent_config.stop_after,
             false,
-            &directories.project,
-            &directories.state,
             log,
             &client,
             cargo_maelstrom::TestRunner::TEST_METADATA_FILE_NAME,
             cargo_maelstrom::TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+            directories,
             extra_options,
         )
     })()

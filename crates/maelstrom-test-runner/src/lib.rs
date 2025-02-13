@@ -259,12 +259,11 @@ where
         parent_config.repeat,
         parent_config.stop_after,
         stdout_is_tty,
-        &directories.project,
-        &directories.state,
         log,
         &client,
         TestRunnerT::TEST_METADATA_FILE_NAME,
         TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        directories,
         extra_options,
     )
 }

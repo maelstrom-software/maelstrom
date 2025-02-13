@@ -619,12 +619,11 @@ pub fn main_for_test(
         config.parent.repeat,
         config.parent.stop_after,
         stdout_is_tty,
-        project_dir,
-        &directories.state,
         log,
         &client,
         TestRunner::TEST_METADATA_FILE_NAME,
         TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        directories,
         extra_options.parent,
     )
 }
