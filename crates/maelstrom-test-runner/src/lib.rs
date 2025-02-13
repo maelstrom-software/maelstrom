@@ -225,18 +225,17 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
     )?;
 
     let (metadata, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
-    let directories = TestRunnerT::get_directories(&metadata, project_dir);
 
     let logger_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
 
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
-        directories,
         extra_options,
         list_tests,
         logger_builder,
         metadata,
+        project_dir,
         stdout_tty,
         ui,
     )
@@ -261,16 +260,15 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
     };
 
     let (metadata, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
-    let directories = TestRunnerT::get_directories(&metadata, project_dir);
 
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
-        directories,
         extra_options,
         list_tests,
         logger_builder,
         metadata,
+        project_dir,
         StdoutTty::from(false),
         ui,
     )
@@ -298,16 +296,14 @@ pub fn main_for_test_for_go_and_pytest<TestRunnerT: TestRunner>(
         }
     };
 
-    let directories = TestRunnerT::get_directories(&metadata, project_dir.to_owned());
-
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
-        directories,
         extra_options,
         list_tests,
         logger_builder,
         metadata,
+        project_dir.to_owned(),
         stdout_tty,
         ui,
     )
@@ -317,14 +313,16 @@ pub fn main_for_test_for_go_and_pytest<TestRunnerT: TestRunner>(
 fn main_part_2<TestRunnerT: TestRunner>(
     bg_proc: ClientBgProcess,
     config: TestRunnerT::Config,
-    directories: Directories,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     list_tests: ListTests,
     logger_builder: LoggerBuilder,
     metadata: TestRunnerT::Metadata,
+    project_dir: RootBuf<ProjectDir>,
     stdout_tty: StdoutTty,
     ui: impl Ui,
 ) -> Result<ExitCode> {
+    let directories = TestRunnerT::get_directories(&metadata, project_dir);
+
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
