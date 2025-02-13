@@ -284,6 +284,12 @@ fn main_inner<TestRunnerT: TestRunner>(
 
     let client_bg_process = client_bg_process_factory(parent_config.log_level)?;
 
+    let ui = ui_factory(
+        parent_config.ui,
+        IsListing::from(list_tests.as_bool()),
+        stdout_tty,
+    )?;
+
     let (metadata, project_dir) = get_metadata_and_project_directory(&config)?;
     let directories = TestRunnerT::get_directories(&metadata, project_dir);
     let (parent_config, test_collector_config) = config.into_parts();
@@ -295,12 +301,6 @@ fn main_inner<TestRunnerT: TestRunner>(
     let logger_builder = logger_builder_builder(parent_config.log_level);
     let log_destination = LogDestination::default();
     let log = logger_builder.build(log_destination.clone());
-
-    let ui = ui_factory(
-        parent_config.ui,
-        IsListing::from(list_tests.as_bool()),
-        stdout_tty,
-    )?;
 
     let client = Client::new(
         client_bg_process,
