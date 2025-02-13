@@ -227,9 +227,6 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
     let (metadata, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
     let directories = TestRunnerT::get_directories(&metadata, project_dir);
 
-    Fs.create_dir_all(&directories.state)?;
-    Fs.create_dir_all(&directories.cache)?;
-
     let logger_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
 
     main_part_2::<TestRunnerT>(
@@ -265,9 +262,6 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
 
     let (metadata, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
     let directories = TestRunnerT::get_directories(&metadata, project_dir);
-
-    Fs.create_dir_all(&directories.state)?;
-    Fs.create_dir_all(&directories.cache)?;
 
     main_part_2::<TestRunnerT>(
         bg_proc,
@@ -314,9 +308,6 @@ pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
         project,
         state,
     };
-
-    Fs.create_dir_all(&directories.state)?;
-    Fs.create_dir_all(&directories.cache)?;
 
     main_part_2::<TestRunnerT>(
         bg_proc,
@@ -365,9 +356,6 @@ pub fn main_for_test_for_go<TestRunnerT: TestRunner>(
         state,
     };
 
-    Fs.create_dir_all(&directories.state)?;
-    Fs.create_dir_all(&directories.cache)?;
-
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
@@ -393,6 +381,9 @@ fn main_part_2<TestRunnerT: TestRunner>(
     stdout_tty: StdoutTty,
     ui: impl Ui,
 ) -> Result<ExitCode> {
+    Fs.create_dir_all(&directories.state)?;
+    Fs.create_dir_all(&directories.cache)?;
+
     let log_destination = LogDestination::default();
     let log = logger_builder.build(log_destination.clone());
 
