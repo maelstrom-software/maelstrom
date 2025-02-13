@@ -130,7 +130,7 @@ fn do_maelstrom_pytest_test(
     );
     let bg_proc = spawn_bg_proc();
     let exit_code =
-        maelstrom_test_runner::main_for_test_for_pytest::<maelstrom_pytest::TestRunner>(
+        maelstrom_test_runner::main_for_test_for_go_and_pytest::<maelstrom_pytest::TestRunner>(
             config,
             extra_options,
             bg_proc,

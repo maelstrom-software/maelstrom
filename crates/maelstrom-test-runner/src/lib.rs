@@ -277,44 +277,7 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
-    config: TestRunnerT::Config,
-    extra_options: TestRunnerT::ExtraCommandLineOptions,
-    bg_proc: ClientBgProcess,
-    logger_builder: LoggerBuilder,
-    stdout_tty: StdoutTty,
-    ui: impl Ui,
-    project_dir: &Root<ProjectDir>,
-    metadata: TestRunnerT::Metadata,
-) -> Result<ExitCode> {
-    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
-        ListingMode::None => false.into(),
-        ListingMode::Tests => true.into(),
-        ListingMode::OtherWithoutUi => {
-            unreachable!("maelstrom-pytest doesn't use this");
-        }
-        ListingMode::OtherWithUi => {
-            unreachable!("maelstrom-pytest doesn't use this");
-        }
-    };
-
-    let directories = TestRunnerT::get_directories(&metadata, project_dir.to_owned());
-
-    main_part_2::<TestRunnerT>(
-        bg_proc,
-        config,
-        directories,
-        extra_options,
-        list_tests,
-        logger_builder,
-        metadata,
-        stdout_tty,
-        ui,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn main_for_test_for_go<TestRunnerT: TestRunner>(
+pub fn main_for_test_for_go_and_pytest<TestRunnerT: TestRunner>(
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
