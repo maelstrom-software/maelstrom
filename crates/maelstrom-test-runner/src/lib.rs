@@ -32,7 +32,7 @@ use std::{
     io::{self, IsTerminal as _},
     str,
 };
-use ui::{Ui, UiSender};
+use ui::{Ui, UiKind, UiSender};
 use util::{IsListing, ListTests, StdoutTty, UseColor};
 
 /// The listing mode of the test runner. This determines whether the test runner runs normally, or
@@ -218,11 +218,6 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
     let bg_proc = ClientBgProcess::new_from_fork(parent_config.log_level)?;
 
     let stdout_tty = StdoutTty::from(io::stdout().is_terminal());
-    let ui = ui::factory(
-        parent_config.ui,
-        IsListing::from(list_tests.as_bool()),
-        stdout_tty,
-    )?;
 
     main_part_2::<TestRunnerT>(
         bg_proc,
@@ -232,7 +227,7 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
         list_tests,
         LoggerBuilder::DefaultLogger,
         stdout_tty,
-        ui,
+        ui::factory,
     )
 }
 
@@ -268,7 +263,7 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
         list_tests,
         |_| logger_builder,
         StdoutTty::from(false),
-        ui,
+        |_, _, _| Ok(Box::new(ui)),
     )
 }
 
@@ -286,11 +281,17 @@ fn main_part_2<TestRunnerT: TestRunner>(
     list_tests: ListTests,
     logger_builder_builder: impl FnOnce(LogLevel) -> LoggerBuilder,
     stdout_tty: StdoutTty,
-    ui: impl Ui,
+    ui_factory: impl FnOnce(UiKind, IsListing, StdoutTty) -> Result<Box<dyn Ui>>,
 ) -> Result<ExitCode> {
-    let (metadata, project_dir) = get_metadata_and_project_directory(&config)?;
-
     let parent_config = config.as_ref();
+
+    let ui = ui_factory(
+        parent_config.ui,
+        IsListing::from(list_tests.as_bool()),
+        stdout_tty,
+    )?;
+
+    let (metadata, project_dir) = get_metadata_and_project_directory(&config)?;
 
     let logger_builder = logger_builder_builder(parent_config.log_level);
 
