@@ -158,7 +158,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             &client,
             cargo_maelstrom::TestRunner::TEST_METADATA_FILE_NAME,
             cargo_maelstrom::TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-            test_collector.get_template_vars()?,
+            test_collector.get_template_variables()?,
         )
     })()
     .unwrap();

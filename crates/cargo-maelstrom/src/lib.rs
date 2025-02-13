@@ -320,7 +320,7 @@ impl TestCollector for CargoTestCollector {
         vec![self.build_dir.clone().into_path_buf()]
     }
 
-    fn get_template_vars(&self) -> Result<TemplateVariables> {
+    fn get_template_variables(&self) -> Result<TemplateVariables> {
         let profile = self
             .config
             .compilation_options

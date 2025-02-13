@@ -1186,7 +1186,7 @@ impl<'de> Deserialize<'de> for LayerSpec {
 }
 
 impl LayerSpec {
-    pub fn replace_template_vars(&mut self, vars: &TemplateVariables) -> Result<()> {
+    pub fn replace_template_variables(&mut self, vars: &TemplateVariables) -> Result<()> {
         match self {
             Self::Tar(TarLayerSpec { path }) => *path = vars.replace(path)?.into(),
             Self::Glob(GlobLayerSpec { glob, .. }) => *glob = vars.replace(glob)?,
@@ -3172,14 +3172,14 @@ mod tests {
             }
         }
 
-        mod replace_template_vars {
+        mod replace_template_variables {
             use super::*;
 
             #[track_caller]
-            fn replace_template_vars_test(toml: &str, expected: LayerSpec) {
+            fn replace_template_variables_test(toml: &str, expected: LayerSpec) {
                 let mut actual: LayerSpec = parse_toml(toml);
                 actual
-                    .replace_template_vars(&TemplateVariables::new([
+                    .replace_template_variables(&TemplateVariables::new([
                         ("foo", "foo-value"),
                         ("bar", "bar-value"),
                     ]))
@@ -3189,7 +3189,7 @@ mod tests {
 
             #[test]
             fn tar() {
-                replace_template_vars_test(
+                replace_template_variables_test(
                     indoc! {r#"
                         tar = "<foo>/<bar>/baz.tar"
                     "#},
@@ -3199,7 +3199,7 @@ mod tests {
 
             #[test]
             fn glob() {
-                replace_template_vars_test(
+                replace_template_variables_test(
                     indoc! {r#"
                         glob = "<foo>/<bar>/*.tar"
                         strip_prefix = "<foo>/"
@@ -3215,7 +3215,7 @@ mod tests {
 
             #[test]
             fn paths() {
-                replace_template_vars_test(
+                replace_template_variables_test(
                     indoc! {r#"
                         paths = ["<foo>/foo.tar", "<bar>/bar.tar"]
                         strip_prefix = "<foo>/"
@@ -3231,7 +3231,7 @@ mod tests {
 
             #[test]
             fn stubs() {
-                replace_template_vars_test(
+                replace_template_variables_test(
                     indoc! {r#"
                         stubs = ["<foo>/foo/", "<bar>/bar/"]
                     "#},
@@ -3241,7 +3241,7 @@ mod tests {
 
             #[test]
             fn symlinks() {
-                replace_template_vars_test(
+                replace_template_variables_test(
                     indoc! {r#"
                         symlinks = [ { link = "<foo>/symlink", target = "<bar>/target"} ]
                     "#},

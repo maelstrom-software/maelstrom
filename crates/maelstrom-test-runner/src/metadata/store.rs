@@ -41,7 +41,7 @@ where
             match &mut directive.container {
                 DirectiveContainer::Override(ContainerSpec { layers, .. }) => {
                     for layer in layers {
-                        layer.replace_template_vars(vars)?;
+                        layer.replace_template_variables(vars)?;
                     }
                 }
                 DirectiveContainer::Augment(DirectiveContainerAugment {
@@ -51,11 +51,11 @@ where
                 }) => {
                     if let Some(layers) = layers {
                         for layer in layers {
-                            layer.replace_template_vars(vars)?;
+                            layer.replace_template_variables(vars)?;
                         }
                     }
                     for added_layer in added_layers {
-                        added_layer.replace_template_vars(vars)?;
+                        added_layer.replace_template_variables(vars)?;
                     }
                 }
             }
@@ -64,7 +64,7 @@ where
         for container in contents.containers.values_mut() {
             let ContainerSpec { layers, .. } = container;
             for layer in layers {
-                layer.replace_template_vars(vars)?;
+                layer.replace_template_variables(vars)?;
             }
         }
 
@@ -317,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn template_vars() {
+    fn template_variables() {
         let store = Store::<SimpleFilter>::load(
             indoc! {r#"
                 [[directives]]

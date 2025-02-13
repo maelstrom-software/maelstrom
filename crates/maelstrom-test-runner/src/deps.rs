@@ -253,7 +253,7 @@ pub trait TestCollector {
     }
 
     /// Return any template variables to make available to test metadata.
-    fn get_template_vars(&self) -> Result<TemplateVariables> {
+    fn get_template_variables(&self) -> Result<TemplateVariables> {
         Ok(Default::default())
     }
 }
