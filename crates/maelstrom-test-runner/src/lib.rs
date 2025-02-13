@@ -191,36 +191,11 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
         );
     }
 
-    let parent_config = config.as_ref();
-
-    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
-        ListingMode::None => false.into(),
-        ListingMode::Tests => true.into(),
-        ListingMode::OtherWithoutUi => {
-            return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
-        }
-        ListingMode::OtherWithUi => {
-            let ui = ui::factory(
-                parent_config.ui,
-                IsListing::from(true),
-                StdoutTty::from(io::stdout().is_terminal()),
-            )?;
-            let log_destination = LogDestination::default();
-            let log_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
-            let log = log_builder.build(log_destination.clone());
-            let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log);
-            let result = TestRunnerT::execute_listing_with_ui(&config, &extra_options, ui_sender);
-            ui_handle.join()?;
-            return result;
-        }
-    };
-
     main_part_2::<TestRunnerT>(
         ClientBgProcess::new_from_fork,
         config,
         extra_options,
         TestRunnerT::get_metadata_and_project_directory,
-        list_tests,
         LoggerBuilder::DefaultLogger,
         StdoutTty::from(io::stdout().is_terminal()),
         ui::factory,
@@ -240,23 +215,11 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
     logger_builder: LoggerBuilder,
     ui_factory: impl FnOnce(UiKind, IsListing, StdoutTty) -> Result<Box<dyn Ui>>,
 ) -> Result<ExitCode> {
-    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
-        ListingMode::None => false.into(),
-        ListingMode::Tests => true.into(),
-        ListingMode::OtherWithoutUi => {
-            return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
-        }
-        ListingMode::OtherWithUi => {
-            unreachable!("cargo-maelstrom doesn't use this");
-        }
-    };
-
     main_part_2::<TestRunnerT>(
         client_bg_process_factory,
         config,
         extra_options,
         get_metadata_and_project_directory,
-        list_tests,
         |_| logger_builder,
         StdoutTty::from(false),
         ui_factory,
@@ -274,12 +237,33 @@ fn main_part_2<TestRunnerT: TestRunner>(
         TestRunnerT::Metadata,
         RootBuf<ProjectDir>,
     )>,
-    list_tests: ListTests,
     logger_builder_builder: impl FnOnce(LogLevel) -> LoggerBuilder,
     stdout_tty: StdoutTty,
     ui_factory: impl FnOnce(UiKind, IsListing, StdoutTty) -> Result<Box<dyn Ui>>,
 ) -> Result<ExitCode> {
     let parent_config = config.as_ref();
+
+    let list_tests = match TestRunnerT::get_listing_mode(&extra_options) {
+        ListingMode::None => ListTests::from(false),
+        ListingMode::Tests => ListTests::from(true),
+        ListingMode::OtherWithoutUi => {
+            return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
+        }
+        ListingMode::OtherWithUi => {
+            let ui = ui_factory(
+                parent_config.ui,
+                IsListing::from(true),
+                StdoutTty::from(io::stdout().is_terminal()),
+            )?;
+            let logger_builder = logger_builder_builder(parent_config.log_level);
+            let log_destination = LogDestination::default();
+            let log = logger_builder.build(log_destination.clone());
+            let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log);
+            let result = TestRunnerT::execute_listing_with_ui(&config, &extra_options, ui_sender);
+            ui_handle.join()?;
+            return result;
+        }
+    };
 
     let client_bg_process = client_bg_process_factory(parent_config.log_level)?;
 
