@@ -215,8 +215,6 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
         }
     };
 
-    let stdout_tty = StdoutTty::from(io::stdout().is_terminal());
-
     main_part_2::<TestRunnerT>(
         ClientBgProcess::new_from_fork,
         config,
@@ -224,7 +222,7 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
         TestRunnerT::get_metadata_and_project_directory,
         list_tests,
         LoggerBuilder::DefaultLogger,
-        stdout_tty,
+        StdoutTty::from(io::stdout().is_terminal()),
         ui::factory,
     )
 }
