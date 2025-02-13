@@ -1,7 +1,7 @@
 mod multi_gauge;
 
 use super::{CompletedJob, JobStatuses, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
-use crate::util::StdoutTty;
+use crate::util::{IsListing, StdoutTty};
 use anyhow::{bail, Result};
 use derive_more::From;
 use indicatif::HumanBytes;
@@ -375,8 +375,8 @@ pub struct FancyUi {
 }
 
 impl FancyUi {
-    pub fn new(list: bool, stdout_tty: StdoutTty) -> Result<Self> {
-        if list {
+    pub fn new(is_listing: IsListing, stdout_tty: StdoutTty) -> Result<Self> {
+        if is_listing.as_bool() {
             bail!("`--ui fancy` doesn't support listing");
         }
         if !stdout_tty.as_bool() {
@@ -520,7 +520,7 @@ impl FancyUi {
         disable_raw_mode()?;
         stdout().write_all(self.collection_output.as_bytes())?;
 
-        *self = Self::new(false /* list */, StdoutTty::from(true)).unwrap();
+        *self = Self::new(IsListing::from(false), StdoutTty::from(true)).unwrap();
         self.blank = true;
         self.height = height;
 

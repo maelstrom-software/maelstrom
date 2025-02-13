@@ -1,7 +1,7 @@
 mod progress;
 
 use super::{JobStatuses, Terminal, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
-use crate::util::{StdoutTty, UseColor};
+use crate::util::{IsListing, StdoutTty, UseColor};
 use anyhow::Result;
 use colored::Colorize as _;
 use derive_more::From;
@@ -36,11 +36,11 @@ impl<TermT> SimpleUi<TermT>
 where
     TermT: Terminal,
 {
-    pub fn new(list: bool, stdout_tty: StdoutTty, term: TermT) -> Self
+    pub fn new(is_listing: IsListing, stdout_tty: StdoutTty, term: TermT) -> Self
     where
         TermT: Terminal,
     {
-        let prog_impl = if list {
+        let prog_impl = if is_listing.as_bool() {
             if stdout_tty.as_bool() {
                 TestListingProgress::new(term, "starting...").into()
             } else {

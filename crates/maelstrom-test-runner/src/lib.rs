@@ -29,7 +29,7 @@ use std::{
     str,
 };
 use ui::{Ui, UiSender};
-use util::{ListTests, StdoutTty, UseColor};
+use util::{IsListing, ListTests, StdoutTty, UseColor};
 
 /// The listing mode of the test runner. This determines whether the test runner runs normally, or
 /// instead lists tests, binaries, packages, etc.
@@ -203,7 +203,7 @@ where
         ListingMode::OtherWithUi => {
             let ui = ui::factory(
                 config_parent.ui,
-                true,
+                IsListing::from(true),
                 StdoutTty::from(io::stdout().is_terminal()),
             )?;
             let log_destination = LogDestination::default();
@@ -219,7 +219,11 @@ where
     let bg_proc = ClientBgProcess::new_from_fork(config_parent.log_level)?;
 
     let stdout_tty = StdoutTty::from(io::stdout().is_terminal());
-    let ui = ui::factory(config_parent.ui, list_tests.as_bool(), stdout_tty)?;
+    let ui = ui::factory(
+        config_parent.ui,
+        IsListing::from(list_tests.as_bool()),
+        stdout_tty,
+    )?;
 
     let (metadata, directories) = TestRunnerT::get_metadata_and_directories(&config)?;
 

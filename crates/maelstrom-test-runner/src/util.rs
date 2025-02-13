@@ -29,6 +29,15 @@ impl ListTests {
     }
 }
 
+#[derive(Clone, Copy, Debug, derive_more::Display, Eq, From, PartialEq)]
+pub struct IsListing(bool);
+
+impl IsListing {
+    pub fn as_bool(self) -> bool {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, From, PartialEq)]
 pub struct StdoutTty(bool);
 

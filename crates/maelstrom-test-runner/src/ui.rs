@@ -4,7 +4,7 @@ mod simple;
 
 use crate::{
     log::LogDestination,
-    util::{NotRunEstimate, StdoutTty},
+    util::{IsListing, NotRunEstimate, StdoutTty},
 };
 use anyhow::Result;
 use derive_more::{Debug, From, Into};
@@ -395,24 +395,24 @@ fn ui_kind_parsing_and_fmt() {
     }
 }
 
-pub fn factory(kind: UiKind, list: bool, stdout_tty: StdoutTty) -> Result<Box<dyn Ui>> {
+pub fn factory(kind: UiKind, is_listing: IsListing, stdout_tty: StdoutTty) -> Result<Box<dyn Ui>> {
     Ok(match kind {
         UiKind::Simple => Box::new(SimpleUi::new(
-            list,
+            is_listing,
             stdout_tty,
             console::Term::buffered_stdout(),
         )),
-        UiKind::Fancy => Box::new(fancy::FancyUi::new(list, stdout_tty)?),
+        UiKind::Fancy => Box::new(fancy::FancyUi::new(is_listing, stdout_tty)?),
         UiKind::Quiet => Box::new(quiet::QuietUi::new(
-            list,
+            is_listing,
             stdout_tty,
             console::Term::buffered_stdout(),
         )?),
         UiKind::Auto => {
-            if list || !stdout_tty.as_bool() {
-                factory(UiKind::Simple, list, stdout_tty)?
+            if is_listing.as_bool() || !stdout_tty.as_bool() {
+                factory(UiKind::Simple, is_listing, stdout_tty)?
             } else {
-                factory(UiKind::Fancy, list, stdout_tty)?
+                factory(UiKind::Fancy, is_listing, stdout_tty)?
             }
         }
     })

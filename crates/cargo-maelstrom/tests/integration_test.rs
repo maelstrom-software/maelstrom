@@ -11,7 +11,7 @@ use maelstrom_test_runner::{
     config::IntoParts as _,
     log::LogDestination,
     run_app_with_ui_multithreaded, ui,
-    util::{ListTests, StdoutTty, UseColor},
+    util::{IsListing, ListTests, StdoutTty, UseColor},
     ListingMode, TestRunner as _,
 };
 use maelstrom_util::{
@@ -90,7 +90,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
 
     let bg_proc = spawn_bg_proc();
 
-    let ui = ui::SimpleUi::new(false, StdoutTty::from(false), term.clone());
+    let ui = ui::SimpleUi::new(IsListing::from(false), StdoutTty::from(false), term.clone());
 
     (|| {
         let list_tests: ListTests =

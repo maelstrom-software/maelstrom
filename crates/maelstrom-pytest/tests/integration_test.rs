@@ -3,7 +3,10 @@ use indicatif::InMemoryTerm;
 use maelstrom_client::{ClientBgProcess, ProjectDir};
 use maelstrom_container::local_registry;
 use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
-use maelstrom_test_runner::{ui, util::StdoutTty};
+use maelstrom_test_runner::{
+    ui,
+    util::{IsListing, StdoutTty},
+};
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
@@ -120,7 +123,11 @@ fn do_maelstrom_pytest_test(
     let logger = LoggerBuilder::GivenLogger(log.clone());
 
     let stdout_tty = StdoutTty::from(false);
-    let ui = ui::SimpleUi::new(extra_options.list, stdout_tty, term.clone());
+    let ui = ui::SimpleUi::new(
+        IsListing::from(extra_options.list),
+        stdout_tty,
+        term.clone(),
+    );
     let bg_proc = spawn_bg_proc();
     let exit_code = maelstrom_pytest::main_for_test(
         config,
