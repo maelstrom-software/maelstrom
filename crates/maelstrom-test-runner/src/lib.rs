@@ -191,7 +191,7 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
         );
     }
 
-    main_part_2::<TestRunnerT>(
+    main_inner::<TestRunnerT>(
         ClientBgProcess::new_from_fork,
         config,
         extra_options,
@@ -215,7 +215,7 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
     logger_builder: LoggerBuilder,
     ui_factory: impl FnOnce(UiKind, IsListing, StdoutTty) -> Result<Box<dyn Ui>>,
 ) -> Result<ExitCode> {
-    main_part_2::<TestRunnerT>(
+    main_inner::<TestRunnerT>(
         client_bg_process_factory,
         config,
         extra_options,
@@ -227,7 +227,7 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn main_part_2<TestRunnerT: TestRunner>(
+fn main_inner<TestRunnerT: TestRunner>(
     client_bg_process_factory: impl FnOnce(LogLevel) -> Result<ClientBgProcess>,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
