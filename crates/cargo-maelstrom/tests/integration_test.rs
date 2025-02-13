@@ -8,8 +8,11 @@ use indicatif::InMemoryTerm;
 use maelstrom_base::Timeout;
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_test_runner::{
-    config::IntoParts as _, log::LogDestination, run_app_with_ui_multithreaded, ui,
-    util::ListTests, ListingMode, TestRunner as _,
+    config::IntoParts as _,
+    log::LogDestination,
+    run_app_with_ui_multithreaded, ui,
+    util::{ListTests, StdoutTty, UseColor},
+    ListingMode, TestRunner as _,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -87,7 +90,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
 
     let bg_proc = spawn_bg_proc();
 
-    let ui = ui::SimpleUi::new(false, false, term.clone());
+    let ui = ui::SimpleUi::new(false, StdoutTty::from(false), term.clone());
 
     (|| {
         let list_tests: ListTests =
@@ -143,11 +146,11 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             log_destination,
             parent_config.timeout.map(Timeout::new),
             ui,
-            &test_collector,
+            test_collector,
             list_tests,
             parent_config.repeat,
             parent_config.stop_after,
-            false,
+            UseColor::from(false),
             log,
             &client,
             cargo_maelstrom::TestRunner::TEST_METADATA_FILE_NAME,

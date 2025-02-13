@@ -1,4 +1,4 @@
-use crate::{metadata::Metadata, ui};
+use crate::{metadata::Metadata, ui, util::UseColor};
 use anyhow::Result;
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_client::spec::{ImageRef, LayerSpec};
@@ -223,7 +223,7 @@ pub trait TestCollector {
     /// This function should not block for any long amount of time.
     fn start(
         &self,
-        color: bool,
+        use_color: UseColor,
         packages: Vec<&Self::Package>,
         ui: &ui::UiSender,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;

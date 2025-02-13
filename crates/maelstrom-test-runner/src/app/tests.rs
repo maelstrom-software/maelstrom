@@ -11,7 +11,7 @@ use crate::{
         UiJobEnqueued, UiJobId as JobId, UiJobResult, UiJobStatus, UiJobSummary, UiJobUpdate,
         UiMessage,
     },
-    util::NotRunEstimate,
+    util::{NotRunEstimate, UseColor},
     NoCaseMetadata, StringArtifactKey, WaitStatus,
 };
 use anyhow::anyhow;
@@ -42,7 +42,7 @@ enum TestMessage {
     },
     GetPackages,
     StartCollection {
-        color: bool,
+        use_color: UseColor,
         packages: Vec<FakeTestPackage>,
     },
     SendUiMsg {
@@ -62,10 +62,10 @@ struct TestDeps(RefCell<TestState>);
 impl Deps for TestDeps {
     type TestCollector = TestCollector;
 
-    fn start_collection(&self, color: bool, packages: Vec<&FakeTestPackage>) {
+    fn start_collection(&self, use_color: UseColor, packages: Vec<&FakeTestPackage>) {
         let mut self_ = self.0.borrow_mut();
         self_.messages.push(TestMessage::StartCollection {
-            color,
+            use_color,
             packages: packages.into_iter().cloned().collect(),
         });
     }
@@ -274,8 +274,8 @@ fn default_testing_options() -> TestingOptions<FakeTestFilter> {
         test_metadata: default_metadata(),
         filter: SimpleFilter::All.into(),
         timeout_override: None,
-        stdout_color: false,
-        repeat: Repeat::try_from(1).unwrap(),
+        use_color: false.into(),
+        repeat: 1.try_into().unwrap(),
         stop_after: None,
         list_tests: false.into(),
     }
@@ -467,7 +467,7 @@ macro_rules! test_output_test_inner {
             };
             Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
                 StartCollection {
-                    color: false,
+                    use_color: false.into(),
                     packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
                 }
             };
@@ -585,7 +585,7 @@ macro_rules! test_db_test {
                 packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
             } => {
                 StartCollection {
-                    color: false,
+                    use_color: false.into(),
                     packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
                 },
                 SendUiMsg {
@@ -754,7 +754,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", [])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", [])]
         }
     };
@@ -776,7 +776,7 @@ script_test_with_error_simex! {
 
 script_test! {
     stdout_color_passed_to_start_collection,
-    @ stdout_color = true,
+    @ use_color = true.into(),
     expected_test_db_out = [],
     Start => {
         SendUiMsg {
@@ -786,7 +786,7 @@ script_test! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", [])] } => {
         StartCollection {
-            color: true,
+            use_color: true.into(),
             packages: vec![fake_pkg("foo_pkg", [])]
         }
     };
@@ -819,7 +819,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -864,7 +864,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -909,7 +909,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])]
         }
     };
@@ -957,7 +957,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])]
         }
     };
@@ -1001,7 +1001,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -1483,7 +1483,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -1574,7 +1574,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -1662,7 +1662,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -1746,7 +1746,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -1828,7 +1828,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -1898,7 +1898,7 @@ script_test_with_error_simex! {
         packages: vec![fake_pkg("foo_pkg", ["foo_test"]), fake_pkg("bar_pkg", ["bar_test"])]
     } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("bar_pkg", ["bar_test"])]
         }
     };
@@ -1972,7 +1972,7 @@ script_test_with_error_simex! {
         packages: vec![fake_pkg("foo_pkg", ["foo_test"]), fake_pkg("bar_pkg", ["bar_test"])]
     } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("bar_pkg", ["bar_test"])]
         }
     };
@@ -2064,7 +2064,7 @@ script_test_with_error_simex! {
         packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
     } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         },
         SendUiMsg {
@@ -2261,7 +2261,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -2390,7 +2390,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -2531,7 +2531,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -2627,7 +2627,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -2732,7 +2732,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -2815,7 +2815,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -2886,7 +2886,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -2984,7 +2984,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test", "bar_test"])]
         },
         SendUiMsg {
@@ -3066,7 +3066,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -3144,7 +3144,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -3244,7 +3244,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -3337,7 +3337,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -3382,7 +3382,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -3426,7 +3426,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -3466,7 +3466,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };
@@ -3509,7 +3509,7 @@ script_test_with_error_simex! {
     };
     Packages { packages: vec![fake_pkg("foo_pkg", ["foo_test"])] } => {
         StartCollection {
-            color: false,
+            use_color: false.into(),
             packages: vec![fake_pkg("foo_pkg", ["foo_test"])]
         }
     };

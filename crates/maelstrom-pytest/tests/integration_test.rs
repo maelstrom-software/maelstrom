@@ -3,15 +3,17 @@ use indicatif::InMemoryTerm;
 use maelstrom_client::{ClientBgProcess, ProjectDir};
 use maelstrom_container::local_registry;
 use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
-use maelstrom_test_runner::ui;
+use maelstrom_test_runner::{ui, util::StdoutTty};
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
 };
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::{
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 use tempfile::tempdir;
 
 fn spawn_bg_proc() -> ClientBgProcess {
@@ -52,7 +54,7 @@ fn do_maelstrom_pytest_test(
     source_contents: &str,
     extra_options: ExtraCommandLineOptions,
     terminal_size: (u16, u16),
-) -> (String, String, ExitCode) {
+) -> (String, ExitCode) {
     maybe_install_pytest();
 
     let fs = Fs::new();
@@ -117,26 +119,21 @@ fn do_maelstrom_pytest_test(
 
     let logger = LoggerBuilder::GivenLogger(log.clone());
 
-    let ui = ui::SimpleUi::new(extra_options.list, false, term.clone());
-    let mut stderr = vec![];
+    let stdout_tty = StdoutTty::from(false);
+    let ui = ui::SimpleUi::new(extra_options.list, stdout_tty, term.clone());
     let bg_proc = spawn_bg_proc();
     let exit_code = maelstrom_pytest::main_for_test(
         config,
         extra_options,
         bg_proc,
         logger,
-        false,
+        stdout_tty,
         ui,
-        &mut stderr,
         Root::<ProjectDir>::new(&project_dir),
     )
     .unwrap();
 
-    (
-        term.contents(),
-        String::from_utf8(stderr).unwrap(),
-        exit_code,
-    )
+    (term.contents(), exit_code)
 }
 
 fn do_maelstrom_pytest_test_success(
@@ -144,10 +141,9 @@ fn do_maelstrom_pytest_test_success(
     extra_options: ExtraCommandLineOptions,
     terminal_size: (u16, u16),
 ) -> String {
-    let (contents, stderr, exit_code) =
+    let (contents, exit_code) =
         do_maelstrom_pytest_test(source_contents, extra_options, terminal_size);
     assert_eq!(exit_code, ExitCode::SUCCESS);
-    assert_eq!(stderr, "");
     contents
 }
 
@@ -185,7 +181,7 @@ fn test_simple_success() {
 
 #[test]
 fn test_simple_failure() {
-    let (contents, stderr, exit_code) = do_maelstrom_pytest_test(
+    let (contents, exit_code) = do_maelstrom_pytest_test(
         &indoc::indoc! {"
             def test_error():
                 raise Exception('test error')
@@ -199,7 +195,6 @@ fn test_simple_failure() {
         },
         (50, 50),
     );
-    assert_eq!(stderr, "");
     assert_eq!(exit_code, ExitCode::from(1));
 
     let first_line = contents.split("\n").next().unwrap();
@@ -230,7 +225,7 @@ fn test_simple_failure() {
 
 #[test]
 fn test_collection_failure() {
-    let (contents, _, exit_code) = do_maelstrom_pytest_test(
+    let (contents, exit_code) = do_maelstrom_pytest_test(
         &indoc::indoc! {"
             raise Exception('import error')
         "},

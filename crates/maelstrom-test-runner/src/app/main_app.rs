@@ -167,9 +167,9 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
             .collect();
 
         if !self.packages.is_empty() {
-            let color = self.options.stdout_color;
+            let use_color = self.options.use_color;
             let packages: Vec<_> = self.packages.values().collect();
-            self.deps.start_collection(color, packages);
+            self.deps.start_collection(use_color, packages);
         } else {
             self.collection_finished = true;
         }

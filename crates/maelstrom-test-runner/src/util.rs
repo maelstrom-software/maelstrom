@@ -20,10 +20,28 @@ impl Display for NotRunEstimate {
     }
 }
 
-#[derive(Clone, Copy, derive_more::Debug, derive_more::Display, Eq, From, PartialEq)]
+#[derive(Clone, Copy, Debug, derive_more::Display, Eq, From, PartialEq)]
 pub struct ListTests(bool);
 
 impl ListTests {
+    pub fn as_bool(self) -> bool {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, From, PartialEq)]
+pub struct StdoutTty(bool);
+
+impl StdoutTty {
+    pub fn as_bool(self) -> bool {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, From, PartialEq)]
+pub struct UseColor(bool);
+
+impl UseColor {
     pub fn as_bool(self) -> bool {
         self.0
     }

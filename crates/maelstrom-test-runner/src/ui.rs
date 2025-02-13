@@ -2,20 +2,26 @@ mod fancy;
 mod quiet;
 mod simple;
 
-use crate::{log::LogDestination, util::NotRunEstimate};
+use crate::{
+    log::LogDestination,
+    util::{NotRunEstimate, StdoutTty},
+};
 use anyhow::Result;
-use derive_more::Debug;
-use derive_more::{From, Into};
+use derive_more::{Debug, From, Into};
 use maelstrom_base::stats::{JobState, JobStateCounts};
 use maelstrom_client::{IntrospectResponse, JobRunningStatus};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Weak};
-use std::time::Duration;
-use std::time::Instant;
-use std::{fmt, str};
+use std::{
+    collections::HashMap,
+    fmt,
+    panic::{RefUnwindSafe, UnwindSafe},
+    str,
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc, Weak,
+    },
+    time::{Duration, Instant},
+};
 use strum::EnumIter;
 
 pub use quiet::QuietUi;
@@ -389,24 +395,24 @@ fn ui_kind_parsing_and_fmt() {
     }
 }
 
-pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool) -> Result<Box<dyn Ui>> {
+pub fn factory(kind: UiKind, list: bool, stdout_tty: StdoutTty) -> Result<Box<dyn Ui>> {
     Ok(match kind {
         UiKind::Simple => Box::new(SimpleUi::new(
             list,
-            stdout_is_tty,
+            stdout_tty,
             console::Term::buffered_stdout(),
         )),
-        UiKind::Fancy => Box::new(fancy::FancyUi::new(list, stdout_is_tty)?),
+        UiKind::Fancy => Box::new(fancy::FancyUi::new(list, stdout_tty)?),
         UiKind::Quiet => Box::new(quiet::QuietUi::new(
             list,
-            stdout_is_tty,
+            stdout_tty,
             console::Term::buffered_stdout(),
         )?),
         UiKind::Auto => {
-            if list || !stdout_is_tty {
-                factory(UiKind::Simple, list, stdout_is_tty)?
+            if list || !stdout_tty.as_bool() {
+                factory(UiKind::Simple, list, stdout_tty)?
             } else {
-                factory(UiKind::Fancy, list, stdout_is_tty)?
+                factory(UiKind::Fancy, list, stdout_tty)?
             }
         }
     })

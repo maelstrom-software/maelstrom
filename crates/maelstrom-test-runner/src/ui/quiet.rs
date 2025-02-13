@@ -1,4 +1,5 @@
 use super::{Terminal, Ui, UiJobSummary, UiMessage};
+use crate::util::StdoutTty;
 use anyhow::{bail, Result};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::sync::mpsc::Receiver;
@@ -22,12 +23,12 @@ impl<TermT> QuietUi<TermT>
 where
     TermT: Terminal,
 {
-    pub fn new(list: bool, stdout_is_tty: bool, term: TermT) -> Result<Self> {
+    pub fn new(list: bool, stdout_tty: StdoutTty, term: TermT) -> Result<Self> {
         if list {
             bail!("`--ui quiet` doesn't support listing");
         }
         Ok(Self {
-            progress_bar: stdout_is_tty.then(|| create_bar(term.clone())),
+            progress_bar: stdout_tty.as_bool().then(|| create_bar(term.clone())),
             term,
         })
     }

@@ -17,9 +17,9 @@ use maelstrom_client::{
     Client,
 };
 use maelstrom_test_runner::{
-    metadata::Metadata, ui::UiSender, BuildDir, Directories, ListingMode, NoCaseMetadata,
-    TestArtifact, TestArtifactKey, TestCollector, TestFilter, TestPackage, TestPackageId, Wait,
-    WaitStatus,
+    metadata::Metadata, ui::UiSender, util::UseColor, BuildDir, Directories, ListingMode,
+    NoCaseMetadata, TestArtifact, TestArtifactKey, TestCollector, TestFilter, TestPackage,
+    TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{
     process::ExitCode,
@@ -274,13 +274,13 @@ impl TestCollector for CargoTestCollector {
 
     fn start(
         &self,
-        color: bool,
+        use_color: UseColor,
         packages: Vec<&CargoPackage>,
         ui: &UiSender,
     ) -> Result<(cargo::WaitHandle, CargoTestArtifactStream)> {
         let packages: Vec<_> = packages.into_iter().map(|p| &p.0).collect();
         let (handle, stream) = cargo::run_cargo_test(
-            color,
+            use_color,
             &self.config.feature_selection_options,
             &self.config.compilation_options,
             &self.config.manifest_options,

@@ -24,6 +24,7 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiMessage, UiSender},
+    util::{StdoutTty, UseColor},
     BuildDir, Directories, ListingMode, TestArtifact, TestArtifactKey, TestCaseMetadata,
     TestCollector, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
 };
@@ -40,7 +41,7 @@ use std::{
         HashSet,
         {hash_map::Entry, HashMap},
     },
-    fmt, io,
+    fmt,
     os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
     str::FromStr,
@@ -426,13 +427,13 @@ impl TestCollector for PytestTestCollector<'_> {
 
     fn start(
         &self,
-        color: bool,
+        use_color: UseColor,
         _packages: Vec<&PytestPackage>,
         _ui: &UiSender,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
         let test_layers = self.test_layers.lock().unwrap().clone();
         let (handle, stream) = pytest::pytest_collect_tests(
-            color,
+            use_color,
             &self.config,
             &self.directories.project,
             &self.directories.build,
@@ -566,9 +567,8 @@ pub fn main_for_test(
     extra_options: cli::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
     logger: LoggerBuilder,
-    stdout_is_tty: bool,
+    stdout_tty: StdoutTty,
     ui: impl Ui,
-    _stderr: impl io::Write,
     project_dir: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
     let log_destination = LogDestination::default();
@@ -614,11 +614,11 @@ pub fn main_for_test(
         log_destination,
         config.parent.timeout.map(Timeout::new),
         ui,
-        &test_collector,
+        test_collector,
         list_tests,
         config.parent.repeat,
         config.parent.stop_after,
-        stdout_is_tty,
+        UseColor::from(stdout_tty.as_bool()),
         log,
         &client,
         TestRunner::TEST_METADATA_FILE_NAME,

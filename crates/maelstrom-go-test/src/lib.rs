@@ -22,6 +22,7 @@ use maelstrom_test_runner::{
     metadata::Metadata,
     run_app_with_ui_multithreaded,
     ui::{Ui, UiSender},
+    util::{StdoutTty, UseColor},
     BuildDir, Directories, ListingMode, NoCaseMetadata, TestArtifact, TestArtifactKey,
     TestCollector, TestFilter, TestPackage, TestPackageId, TestRunner as _, Wait, WaitStatus,
 };
@@ -31,7 +32,7 @@ use maelstrom_util::{
     process::ExitCode,
     root::{Root, RootBuf},
 };
-use std::{fmt, io, path::Path, str::FromStr};
+use std::{fmt, path::Path, str::FromStr};
 
 #[allow(clippy::too_many_arguments)]
 fn create_client_for_test(
@@ -377,7 +378,7 @@ impl TestCollector for GoTestCollector {
 
     fn start(
         &self,
-        _color: bool,
+        _use_color: UseColor,
         packages: Vec<&GoPackage>,
         ui: &UiSender,
     ) -> Result<(go_test::WaitHandle, TestArtifactStream)> {
@@ -685,9 +686,8 @@ pub fn main_for_test(
     extra_options: cli::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
     logger: LoggerBuilder,
-    stdout_is_tty: bool,
+    stdout_tty: StdoutTty,
     ui: impl Ui,
-    _stderr: impl io::Write,
     project: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
     let project = project.to_owned();
@@ -746,11 +746,11 @@ pub fn main_for_test(
             log_destination,
             config.parent.timeout.map(Timeout::new),
             ui,
-            &test_collector,
+            test_collector,
             list_tests,
             config.parent.repeat,
             config.parent.stop_after,
-            stdout_is_tty,
+            UseColor::from(stdout_tty.as_bool()),
             log,
             &client,
             TestRunner::TEST_METADATA_FILE_NAME,

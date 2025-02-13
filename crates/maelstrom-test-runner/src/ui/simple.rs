@@ -1,6 +1,7 @@
 mod progress;
 
 use super::{JobStatuses, Terminal, Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
+use crate::util::{StdoutTty, UseColor};
 use anyhow::Result;
 use colored::Colorize as _;
 use derive_more::From;
@@ -9,10 +10,12 @@ use progress::{
     TestListingProgressNoSpinner,
 };
 use slog::Drain as _;
-use std::cell::RefCell;
-use std::io::{self, Write as _};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::{
+    cell::RefCell,
+    io::{self, Write as _},
+    sync::mpsc::{Receiver, RecvTimeoutError},
+    time::{Duration, Instant},
+};
 use unicode_truncate::UnicodeTruncateStr as _;
 use unicode_width::UnicodeWidthStr as _;
 
@@ -26,31 +29,31 @@ enum ProgressImpl<TermT> {
 
 pub struct SimpleUi<TermT> {
     prog_impl: ProgressImpl<TermT>,
-    stdout_is_tty: bool,
+    stdout_tty: StdoutTty,
 }
 
 impl<TermT> SimpleUi<TermT>
 where
     TermT: Terminal,
 {
-    pub fn new(list: bool, stdout_is_tty: bool, term: TermT) -> Self
+    pub fn new(list: bool, stdout_tty: StdoutTty, term: TermT) -> Self
     where
         TermT: Terminal,
     {
         let prog_impl = if list {
-            if stdout_is_tty {
+            if stdout_tty.as_bool() {
                 TestListingProgress::new(term, "starting...").into()
             } else {
                 TestListingProgressNoSpinner::new(term).into()
             }
-        } else if stdout_is_tty {
+        } else if stdout_tty.as_bool() {
             MultipleProgressBars::new(term, "starting...").into()
         } else {
             NoBar::new(term).into()
         };
         Self {
             prog_impl,
-            stdout_is_tty,
+            stdout_tty,
         }
     }
 }
@@ -61,12 +64,12 @@ where
 {
     fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {
         match &mut self.prog_impl {
-            ProgressImpl::TestListingProgress(p) => run_simple_ui(p, recv, self.stdout_is_tty),
+            ProgressImpl::TestListingProgress(p) => run_simple_ui(p, recv, self.stdout_tty),
             ProgressImpl::TestListingProgressNoSpinner(p) => {
-                run_simple_ui(p, recv, self.stdout_is_tty)
+                run_simple_ui(p, recv, self.stdout_tty)
             }
-            ProgressImpl::MultipleProgressBars(p) => run_simple_ui(p, recv, self.stdout_is_tty),
-            ProgressImpl::NoBar(p) => run_simple_ui(p, recv, self.stdout_is_tty),
+            ProgressImpl::MultipleProgressBars(p) => run_simple_ui(p, recv, self.stdout_tty),
+            ProgressImpl::NoBar(p) => run_simple_ui(p, recv, self.stdout_tty),
         }
     }
 }
@@ -134,14 +137,14 @@ pub struct ProgressSlogRecordDecorator<'a, ProgressIndicatorT> {
     level: slog::Level,
     prog: &'a mut ProgressIndicatorT,
     line: String,
-    use_color: bool,
+    use_color: UseColor,
 }
 
 impl<'a, ProgressIndicatorT> ProgressSlogRecordDecorator<'a, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
-    pub fn new(level: slog::Level, prog: &'a mut ProgressIndicatorT, use_color: bool) -> Self {
+    pub fn new(level: slog::Level, prog: &'a mut ProgressIndicatorT, use_color: UseColor) -> Self {
         Self {
             level,
             prog,
@@ -176,7 +179,7 @@ where
     ProgressIndicatorT: ProgressIndicator,
 {
     fn reset(&mut self) -> io::Result<()> {
-        if !self.use_color {
+        if !self.use_color.as_bool() {
             return Ok(());
         }
 
@@ -184,7 +187,7 @@ where
     }
 
     fn start_level(&mut self) -> io::Result<()> {
-        if !self.use_color {
+        if !self.use_color.as_bool() {
             return Ok(());
         }
 
@@ -202,7 +205,7 @@ where
     }
 
     fn start_key(&mut self) -> io::Result<()> {
-        if !self.use_color {
+        if !self.use_color.as_bool() {
             return Ok(());
         }
 
@@ -210,7 +213,7 @@ where
     }
 
     fn start_msg(&mut self) -> io::Result<()> {
-        if !self.use_color {
+        if !self.use_color.as_bool() {
             return Ok(());
         }
 
@@ -220,11 +223,11 @@ where
 
 struct ProgressSlogDecorator<'a, ProgressIndicatorT> {
     prog: RefCell<&'a mut ProgressIndicatorT>,
-    use_color: bool,
+    use_color: UseColor,
 }
 
 impl<'a, ProgressIndicatorT> ProgressSlogDecorator<'a, ProgressIndicatorT> {
-    fn new(prog: &'a mut ProgressIndicatorT, use_color: bool) -> Self {
+    fn new(prog: &'a mut ProgressIndicatorT, use_color: UseColor) -> Self {
         Self {
             prog: RefCell::new(prog),
             use_color,
@@ -254,7 +257,7 @@ where
 fn run_simple_ui<ProgressIndicatorT>(
     prog: &mut ProgressIndicatorT,
     recv: Receiver<UiMessage>,
-    stdout_is_tty: bool,
+    stdout_tty: StdoutTty,
 ) -> Result<()>
 where
     ProgressIndicatorT: ProgressIndicator,
@@ -274,7 +277,8 @@ where
                 UiMessage::BuildOutputLine(_) => {}
                 UiMessage::BuildOutputChunk(_) => {}
                 UiMessage::SlogRecord(r) => {
-                    let slog_dec = ProgressSlogDecorator::new(prog, stdout_is_tty);
+                    let slog_dec =
+                        ProgressSlogDecorator::new(prog, UseColor::from(stdout_tty.as_bool()));
                     let slog_drain = slog_term::FullFormat::new(slog_dec).build().fuse();
                     let _ = r.0.log_to(&slog_drain);
                 }

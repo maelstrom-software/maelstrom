@@ -1,7 +1,7 @@
 use indicatif::InMemoryTerm;
 use maelstrom_client::{ClientBgProcess, ProjectDir};
 use maelstrom_go_test::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
-use maelstrom_test_runner::ui;
+use maelstrom_test_runner::{ui, util::StdoutTty};
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
@@ -47,24 +47,19 @@ fn do_maelstrom_go_test_test(
     let log = maelstrom_util::log::test_logger();
     let logger = LoggerBuilder::GivenLogger(log.clone());
 
-    let ui = ui::SimpleUi::new(false, false, term.clone());
-    let mut stderr = vec![];
+    let stdout_tty = StdoutTty::from(false);
+    let ui = ui::SimpleUi::new(false, stdout_tty, term.clone());
     let bg_proc = spawn_bg_proc();
     let exit_code = maelstrom_go_test::main_for_test(
         config,
         extra_options,
         bg_proc,
         logger,
-        false,
+        stdout_tty,
         ui,
-        &mut stderr,
         Root::<ProjectDir>::new(project_dir),
     )
     .unwrap();
-
-    if exit_code != ExitCode::SUCCESS {
-        println!("stderr = {}", String::from_utf8(stderr).unwrap());
-    }
 
     assert!(
         exit_code == expected_exit_code,

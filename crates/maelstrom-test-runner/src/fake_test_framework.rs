@@ -1,6 +1,7 @@
 use crate::{
-    metadata::Metadata, ui, BuildDir, NoCaseMetadata, SimpleFilter, StringArtifactKey,
-    StringPackage, TestArtifact, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
+    metadata::Metadata, ui, util::UseColor, BuildDir, NoCaseMetadata, SimpleFilter,
+    StringArtifactKey, StringPackage, TestArtifact, TestFilter, TestPackage, TestPackageId, Wait,
+    WaitStatus,
 };
 use anyhow::Result;
 use derive_more::From;
@@ -275,7 +276,7 @@ impl crate::TestCollector for TestCollector {
 
     fn start(
         &self,
-        _color: bool,
+        _use_color: UseColor,
         packages: Vec<&FakeTestPackage>,
         _ui: &ui::UiSender,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)> {

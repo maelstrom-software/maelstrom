@@ -4,14 +4,18 @@ use maelstrom_client::{
     spec::{ImageRef, LayerSpec},
     ProjectDir,
 };
-use maelstrom_test_runner::WaitStatus;
+use maelstrom_test_runner::{util::UseColor, WaitStatus};
 use maelstrom_util::{process::ExitCode, root::Root};
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::os::unix::process::ExitStatusExt as _;
-use std::path::Path;
-use std::process::{Command, Stdio};
-use std::{io::Read as _, sync::Mutex, thread};
+use std::{
+    collections::HashMap,
+    io::Read as _,
+    os::unix::process::ExitStatusExt as _,
+    path::Path,
+    process::{Command, Stdio},
+    sync::Mutex,
+    thread,
+};
 
 pub struct WaitHandle(Mutex<Option<WaitStatus>>);
 
@@ -115,7 +119,7 @@ struct PytestCase {
 }
 
 pub fn pytest_collect_tests(
-    _color: bool,
+    _use_color: UseColor,
     pytest_options: &PytestConfig,
     project_dir: &Root<ProjectDir>,
     build_dir: &Root<BuildDir>,

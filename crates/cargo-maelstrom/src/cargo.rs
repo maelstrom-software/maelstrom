@@ -8,17 +8,18 @@ use maelstrom_linux as linux;
 use maelstrom_macro::Config;
 use maelstrom_test_runner::{
     ui::{UiMessage, UiWeakSender},
+    util::UseColor,
     WaitStatus,
 };
 use maelstrom_util::{process::ExitCode, tty::open_pseudoterminal};
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
-use std::process::Command;
 use std::{
+    collections::{HashMap, HashSet},
     ffi::{CString, OsString},
     io::{self, BufReader, Read as _},
     iter,
     path::{Path, PathBuf},
+    process::Command,
     str,
     sync::Mutex,
     thread,
@@ -342,7 +343,7 @@ fn handle_cargo_tty(tty: linux::OwnedFd, ui: UiWeakSender) -> Result<String> {
 }
 
 pub fn run_cargo_test(
-    color: bool,
+    use_color: UseColor,
     feature_selection_options: &FeatureSelectionOptions,
     compilation_options: &CompilationOptions,
     manifest_options: &ManifestOptions,
@@ -354,7 +355,15 @@ pub fn run_cargo_test(
         "test".into(),
         "--no-run".into(),
         "--message-format=json-render-diagnostics".into(),
-        format!("--color={}", if color { "always" } else { "never" }).into(),
+        format!(
+            "--color={}",
+            if use_color.as_bool() {
+                "always"
+            } else {
+                "never"
+            }
+        )
+        .into(),
     ];
     args.extend(feature_selection_options.iter().map(|a| a.into()));
     args.extend(compilation_options.iter());

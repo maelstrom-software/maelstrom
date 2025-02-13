@@ -12,7 +12,7 @@ use crate::{
     metadata::Store as MetadataStore,
     test_db::{TestDb, TestDbStore},
     ui::{Ui, UiJobId as JobId, UiMessage, UiSender},
-    util::ListTests,
+    util::{ListTests, UseColor},
     Directories,
 };
 use anyhow::{Context as _, Result};
@@ -43,7 +43,7 @@ type TestingOptionsM<DepsT> = TestingOptions<TestFilterM<DepsT>>;
 trait Deps {
     type TestCollector: TestCollector + Sync;
 
-    fn start_collection(&self, color: bool, packages: Vec<&PackageM<Self>>);
+    fn start_collection(&self, use_color: UseColor, packages: Vec<&PackageM<Self>>);
     fn get_packages(&self);
     fn add_job(&self, job_id: JobId, spec: JobSpec);
     fn list_tests(&self, artifact: ArtifactM<Self>);
@@ -56,7 +56,7 @@ struct TestingOptions<TestFilterT> {
     test_metadata: MetadataStore<TestFilterT>,
     filter: TestFilterT,
     timeout_override: Option<Option<Timeout>>,
-    stdout_color: bool,
+    use_color: UseColor,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
     list_tests: ListTests,
@@ -141,10 +141,10 @@ impl<'deps, 'scope, TestCollectorT: TestCollector + Sync>
 impl<TestCollectorT: TestCollector + Sync> Deps for MainAppDepsAdapter<'_, '_, TestCollectorT> {
     type TestCollector = TestCollectorT;
 
-    fn start_collection(&self, color: bool, packages: Vec<&PackageM<Self>>) {
+    fn start_collection(&self, use_color: UseColor, packages: Vec<&PackageM<Self>>) {
         let sem = self.semaphore;
         let sender = self.main_app_sender.clone();
-        match self.test_collector.start(color, packages, &self.ui) {
+        match self.test_collector.start(use_color, packages, &self.ui) {
             Ok((build_handle, artifact_stream)) => {
                 let build_handle = Arc::new(build_handle);
                 let killer = KillOnDrop::new(build_handle.clone());
@@ -400,11 +400,11 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
     log_destination: LogDestination,
     timeout_override: Option<Option<Timeout>>,
     ui: impl Ui,
-    test_collector: &TestCollectorT,
+    test_collector: TestCollectorT,
     list_tests: ListTests,
     repeat: Repeat,
     stop_after: Option<StopAfter>,
-    stdout_color: bool,
+    use_color: UseColor,
     log: slog::Logger,
     client: &Client,
     test_metadata_file_name: &'static str,
@@ -464,7 +464,7 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
     let (ui_handle, ui) = ui.start_ui_thread(log_destination, log.clone());
 
     let main_res = run_app_in_loop(
-        test_collector,
+        &test_collector,
         log,
         test_db_store,
         directories.project,
@@ -472,7 +472,7 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
             test_metadata: metadata_store,
             filter,
             timeout_override,
-            stdout_color,
+            use_color,
             repeat,
             stop_after,
             list_tests,
