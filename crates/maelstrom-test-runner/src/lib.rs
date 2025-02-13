@@ -28,7 +28,6 @@ use maelstrom_util::{
     root::{Root, RootBuf},
 };
 use std::{
-    ffi::OsString,
     fmt::Debug,
     io::{self, IsTerminal as _},
     str,
@@ -168,16 +167,7 @@ pub trait TestRunner {
 /// underlying function.
 ///
 /// Mostly it deals with the `--init` and `--client-bg-proc` flags
-pub fn main<ArgsT, ArgsIntoIterT, TestRunnerT>(
-    command: Command,
-    args: ArgsIntoIterT,
-    _test_runner: TestRunnerT,
-) -> Result<ExitCode>
-where
-    ArgsIntoIterT: IntoIterator<Item = ArgsT>,
-    ArgsT: Into<OsString> + Clone,
-    TestRunnerT: TestRunner,
-{
+pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Result<ExitCode> {
     let (config, extra_options): (TestRunnerT::Config, TestRunnerT::ExtraCommandLineOptions) =
         maelstrom_util::config::new_config_with_extra_from_args(
             command,

@@ -9,5 +9,5 @@ pub fn main() -> Result<ExitCode> {
     if args.len() > 1 && args[0].ends_with(format!("cargo-{}", args[1]).as_str()) {
         args.remove(1);
     }
-    maelstrom_test_runner::main(command!(), args, TestRunner)
+    maelstrom_test_runner::main::<TestRunner>(command!(), args)
 }
