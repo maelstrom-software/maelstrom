@@ -224,16 +224,13 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
         stdout_tty,
     )?;
 
-    let (metadata, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
-
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
         extra_options,
+        TestRunnerT::get_metadata_and_project_directory,
         list_tests,
         LoggerBuilder::DefaultLogger,
-        metadata,
-        project_dir,
         stdout_tty,
         ui,
     )
@@ -257,16 +254,13 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
         }
     };
 
-    let (metadata, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
-
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
         extra_options,
+        TestRunnerT::get_metadata_and_project_directory,
         list_tests,
         |_| logger_builder,
-        metadata,
-        project_dir,
         StdoutTty::from(false),
         ui,
     )
@@ -298,10 +292,9 @@ pub fn main_for_test_for_go_and_pytest<TestRunnerT: TestRunner>(
         bg_proc,
         config,
         extra_options,
+        |_| Ok((metadata, project_dir.to_owned())),
         list_tests,
         |_| logger_builder,
-        metadata,
-        project_dir.to_owned(),
         stdout_tty,
         ui,
     )
@@ -312,13 +305,19 @@ fn main_part_2<TestRunnerT: TestRunner>(
     bg_proc: ClientBgProcess,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
+    get_metadata_and_project_directory: impl FnOnce(
+        &TestRunnerT::Config,
+    ) -> Result<(
+        TestRunnerT::Metadata,
+        RootBuf<ProjectDir>,
+    )>,
     list_tests: ListTests,
     logger_builder_builder: impl FnOnce(LogLevel) -> LoggerBuilder,
-    metadata: TestRunnerT::Metadata,
-    project_dir: RootBuf<ProjectDir>,
     stdout_tty: StdoutTty,
     ui: impl Ui,
 ) -> Result<ExitCode> {
+    let (metadata, project_dir) = get_metadata_and_project_directory(&config)?;
+
     let parent_config = config.as_ref();
 
     let logger_builder = logger_builder_builder(parent_config.log_level);
