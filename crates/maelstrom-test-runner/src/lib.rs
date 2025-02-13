@@ -257,6 +257,10 @@ fn main_inner<TestRunnerT: TestRunner>(
 ) -> Result<ExitCode> {
     let parent_config = config.as_ref();
 
+    let logger_builder = logger_builder_builder(parent_config.log_level);
+    let log_destination = LogDestination::default();
+    let log = logger_builder.build(log_destination.clone());
+
     // Deal with other test listings.
     let list_tests = match TestRunnerT::get_listing_mode(&extra_options) {
         ListingMode::None => ListTests::from(false),
@@ -270,9 +274,6 @@ fn main_inner<TestRunnerT: TestRunner>(
                 IsListing::from(true),
                 StdoutTty::from(io::stdout().is_terminal()),
             )?;
-            let logger_builder = logger_builder_builder(parent_config.log_level);
-            let log_destination = LogDestination::default();
-            let log = logger_builder.build(log_destination.clone());
             let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log);
             let result = TestRunnerT::execute_listing_with_ui(&config, &extra_options, ui_sender);
             ui_handle.join()?;
@@ -297,10 +298,6 @@ fn main_inner<TestRunnerT: TestRunner>(
 
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
-
-    let logger_builder = logger_builder_builder(parent_config.log_level);
-    let log_destination = LogDestination::default();
-    let log = logger_builder.build(log_destination.clone());
 
     let client = Client::new(
         client_bg_process,
