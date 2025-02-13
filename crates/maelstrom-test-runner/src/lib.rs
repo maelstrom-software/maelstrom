@@ -236,10 +236,16 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
     )
 }
 
-pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
+pub fn main_for_test<TestRunnerT: TestRunner>(
     bg_proc: ClientBgProcess,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
+    get_metadata_and_project_directory: impl FnOnce(
+        &TestRunnerT::Config,
+    ) -> Result<(
+        TestRunnerT::Metadata,
+        RootBuf<ProjectDir>,
+    )>,
     logger_builder: LoggerBuilder,
     ui: impl Ui,
 ) -> Result<ExitCode> {
@@ -258,40 +264,7 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
         bg_proc,
         config,
         extra_options,
-        TestRunnerT::get_metadata_and_project_directory,
-        list_tests,
-        |_| logger_builder,
-        StdoutTty::from(false),
-        ui,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn main_for_test_for_go_and_pytest<TestRunnerT: TestRunner>(
-    bg_proc: ClientBgProcess,
-    config: TestRunnerT::Config,
-    extra_options: TestRunnerT::ExtraCommandLineOptions,
-    logger_builder: LoggerBuilder,
-    metadata: TestRunnerT::Metadata,
-    project_dir: RootBuf<ProjectDir>,
-    ui: impl Ui,
-) -> Result<ExitCode> {
-    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
-        ListingMode::None => false.into(),
-        ListingMode::Tests => true.into(),
-        ListingMode::OtherWithoutUi => {
-            return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
-        }
-        ListingMode::OtherWithUi => {
-            unreachable!("go-test tests don't use this");
-        }
-    };
-
-    main_part_2::<TestRunnerT>(
-        bg_proc,
-        config,
-        extra_options,
-        |_| Ok((metadata, project_dir)),
+        get_metadata_and_project_directory,
         list_tests,
         |_| logger_builder,
         StdoutTty::from(false),

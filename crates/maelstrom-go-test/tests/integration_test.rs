@@ -47,23 +47,20 @@ fn do_maelstrom_go_test_test(
     };
     let term = InMemoryTerm::new(50, 50);
 
-    let log = maelstrom_util::log::test_logger();
-    let logger = LoggerBuilder::GivenLogger(log.clone());
+    let logger_builder = LoggerBuilder::GivenLogger(maelstrom_util::log::test_logger());
 
     let stdout_tty = StdoutTty::from(false);
     let ui = ui::SimpleUi::new(IsListing::from(false), stdout_tty, term.clone());
     let bg_proc = spawn_bg_proc();
-    let exit_code =
-        maelstrom_test_runner::main_for_test_for_go_and_pytest::<maelstrom_go_test::TestRunner>(
-            bg_proc,
-            config,
-            extra_options,
-            logger,
-            (),
-            RootBuf::new(project_dir.to_owned()),
-            ui,
-        )
-        .unwrap();
+    let exit_code = maelstrom_test_runner::main_for_test::<maelstrom_go_test::TestRunner>(
+        bg_proc,
+        config,
+        extra_options,
+        |_| Ok(((), RootBuf::new(project_dir.to_owned()))),
+        logger_builder,
+        ui,
+    )
+    .unwrap();
 
     assert!(
         exit_code == expected_exit_code,

@@ -9,6 +9,7 @@ use maelstrom_client::ClientBgProcess;
 use maelstrom_test_runner::{
     ui,
     util::{IsListing, StdoutTty},
+    TestRunner as _,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -88,10 +89,11 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
 
     let ui = ui::SimpleUi::new(IsListing::from(false), StdoutTty::from(false), term.clone());
 
-    maelstrom_test_runner::main_for_test_for_cargo::<cargo_maelstrom::TestRunner>(
+    maelstrom_test_runner::main_for_test::<cargo_maelstrom::TestRunner>(
         bg_proc,
         config,
         extra_options,
+        cargo_maelstrom::TestRunner::get_metadata_and_project_directory,
         logger_builder,
         ui,
     )

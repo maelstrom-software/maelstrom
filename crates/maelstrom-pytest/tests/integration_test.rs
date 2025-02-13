@@ -120,7 +120,7 @@ fn do_maelstrom_pytest_test(
     };
     let term = InMemoryTerm::new(terminal_size.0, terminal_size.1);
 
-    let logger = LoggerBuilder::GivenLogger(log.clone());
+    let logger_builder = LoggerBuilder::GivenLogger(log);
 
     let stdout_tty = StdoutTty::from(false);
     let ui = ui::SimpleUi::new(
@@ -129,17 +129,15 @@ fn do_maelstrom_pytest_test(
         term.clone(),
     );
     let bg_proc = spawn_bg_proc();
-    let exit_code =
-        maelstrom_test_runner::main_for_test_for_go_and_pytest::<maelstrom_pytest::TestRunner>(
-            bg_proc,
-            config,
-            extra_options,
-            logger,
-            (),
-            RootBuf::new(project_dir.to_owned()),
-            ui,
-        )
-        .unwrap();
+    let exit_code = maelstrom_test_runner::main_for_test::<maelstrom_pytest::TestRunner>(
+        bg_proc,
+        config,
+        extra_options,
+        |_| Ok(((), RootBuf::new(project_dir.to_owned()))),
+        logger_builder,
+        ui,
+    )
+    .unwrap();
 
     (term.contents(), exit_code)
 }
