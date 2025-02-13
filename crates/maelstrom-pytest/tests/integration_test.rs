@@ -3,10 +3,7 @@ use indicatif::InMemoryTerm;
 use maelstrom_client::ClientBgProcess;
 use maelstrom_container::local_registry;
 use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
-use maelstrom_test_runner::{
-    ui,
-    util::{IsListing, StdoutTty},
-};
+use maelstrom_test_runner::ui::{SimpleUi, UiKind};
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
@@ -99,43 +96,37 @@ fn do_maelstrom_pytest_test(
     )
     .unwrap();
 
-    let container_image_depot_root = RootBuf::new(temp_dir.path().join("container"));
-
-    let config = Config {
-        parent: maelstrom_test_runner::config::Config {
-            broker: None,
-            log_level: LogLevel::Debug,
-            container_image_depot_root,
-            timeout: None,
-            cache_size: CacheSize::default(),
-            inline_limit: InlineLimit::default(),
-            slots: Slots::default(),
-            accept_invalid_remote_container_tls_certs: true.into(),
-            ui: ui::UiKind::Simple,
-            repeat: Default::default(),
-            stop_after: None,
-            artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
-        },
-        pytest: Default::default(),
-    };
     let term = InMemoryTerm::new(terminal_size.0, terminal_size.1);
 
-    let logger_builder = LoggerBuilder::GivenLogger(log);
-
-    let stdout_tty = StdoutTty::from(false);
-    let ui = ui::SimpleUi::new(
-        IsListing::from(extra_options.list),
-        stdout_tty,
-        term.clone(),
-    );
-    let bg_proc = spawn_bg_proc();
     let exit_code = maelstrom_test_runner::main_for_test::<maelstrom_pytest::TestRunner>(
-        bg_proc,
-        config,
+        spawn_bg_proc(),
+        Config {
+            parent: maelstrom_test_runner::config::Config {
+                broker: None,
+                log_level: LogLevel::Debug,
+                container_image_depot_root: RootBuf::new(temp_dir.path().join("container")),
+                timeout: None,
+                cache_size: CacheSize::default(),
+                inline_limit: InlineLimit::default(),
+                slots: Slots::default(),
+                accept_invalid_remote_container_tls_certs: true.into(),
+                ui: UiKind::Simple,
+                repeat: Default::default(),
+                stop_after: None,
+                artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
+            },
+            pytest: Default::default(),
+        },
         extra_options,
         |_| Ok(((), RootBuf::new(project_dir.to_owned()))),
-        logger_builder,
-        ui,
+        LoggerBuilder::GivenLogger(log),
+        |_, is_listing, stdout_tty| {
+            Ok(Box::new(SimpleUi::new(
+                is_listing,
+                stdout_tty,
+                term.clone(),
+            )))
+        },
     )
     .unwrap();
 

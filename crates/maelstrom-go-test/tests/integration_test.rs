@@ -1,10 +1,7 @@
 use indicatif::InMemoryTerm;
 use maelstrom_client::ClientBgProcess;
 use maelstrom_go_test::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
-use maelstrom_test_runner::{
-    ui,
-    util::{IsListing, StdoutTty},
-};
+use maelstrom_test_runner::ui::{self, SimpleUi};
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
@@ -26,39 +23,37 @@ fn do_maelstrom_go_test_test(
     extra_options: ExtraCommandLineOptions,
     expected_exit_code: ExitCode,
 ) -> String {
-    let container_image_depot_root = RootBuf::new(temp_dir.path().join("container"));
-
-    let config = Config {
-        parent: maelstrom_test_runner::config::Config {
-            broker: None,
-            log_level: LogLevel::Debug,
-            container_image_depot_root,
-            timeout: None,
-            cache_size: CacheSize::default(),
-            inline_limit: InlineLimit::default(),
-            slots: Slots::default(),
-            accept_invalid_remote_container_tls_certs: true.into(),
-            ui: ui::UiKind::Simple,
-            repeat: Default::default(),
-            stop_after: None,
-            artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
-        },
-        go_test: Default::default(),
-    };
     let term = InMemoryTerm::new(50, 50);
 
-    let logger_builder = LoggerBuilder::GivenLogger(maelstrom_util::log::test_logger());
-
-    let stdout_tty = StdoutTty::from(false);
-    let ui = ui::SimpleUi::new(IsListing::from(false), stdout_tty, term.clone());
-    let bg_proc = spawn_bg_proc();
     let exit_code = maelstrom_test_runner::main_for_test::<maelstrom_go_test::TestRunner>(
-        bg_proc,
-        config,
+        spawn_bg_proc(),
+        Config {
+            parent: maelstrom_test_runner::config::Config {
+                broker: None,
+                log_level: LogLevel::Debug,
+                container_image_depot_root: RootBuf::new(temp_dir.path().join("container")),
+                timeout: None,
+                cache_size: CacheSize::default(),
+                inline_limit: InlineLimit::default(),
+                slots: Slots::default(),
+                accept_invalid_remote_container_tls_certs: true.into(),
+                ui: ui::UiKind::Simple,
+                repeat: Default::default(),
+                stop_after: None,
+                artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
+            },
+            go_test: Default::default(),
+        },
         extra_options,
         |_| Ok(((), RootBuf::new(project_dir.to_owned()))),
-        logger_builder,
-        ui,
+        LoggerBuilder::GivenLogger(maelstrom_util::log::test_logger()),
+        |_, is_listing, stdout_tty| {
+            Ok(Box::new(SimpleUi::new(
+                is_listing,
+                stdout_tty,
+                term.clone(),
+            )))
+        },
     )
     .unwrap();
 

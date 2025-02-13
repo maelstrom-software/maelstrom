@@ -7,8 +7,7 @@ use cargo_maelstrom::{
 use indicatif::InMemoryTerm;
 use maelstrom_client::ClientBgProcess;
 use maelstrom_test_runner::{
-    ui,
-    util::{IsListing, StdoutTty},
+    ui::{SimpleUi, UiKind},
     TestRunner as _,
 };
 use maelstrom_util::{
@@ -44,58 +43,57 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     fs.write(temp_dir.path().join("project/src/lib.rs"), source_contents)
         .unwrap();
 
-    let config = Config {
-        parent: maelstrom_test_runner::config::Config {
-            broker: None,
-            log_level: LogLevel::Debug,
-            container_image_depot_root: RootBuf::new(PathBuf::from(".cache/maelstrom/container")),
-            timeout: None,
-            cache_size: CacheSize::default(),
-            inline_limit: InlineLimit::default(),
-            slots: Slots::default(),
-            accept_invalid_remote_container_tls_certs: true.into(),
-            ui: ui::UiKind::Simple,
-            repeat: Default::default(),
-            stop_after: None,
-            artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
-        },
-        cargo: CargoConfig {
-            feature_selection_options: FeatureSelectionOptions::default(),
-            compilation_options: CompilationOptions::default(),
-            manifest_options: ManifestOptions {
-                manifest_path: Some(temp_dir.path().join("project/Cargo.toml")),
-                ..Default::default()
-            },
-            extra_test_binary_args: vec![],
-        },
-    };
-    let extra_options = ExtraCommandLineOptions {
-        parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
-            include: vec!["all".into()],
-            ..Default::default()
-        },
-        list: ListOptions {
-            tests: false,
-            binaries: false,
-            packages: false,
-        },
-    };
     let term = InMemoryTerm::new(50, 50);
 
-    let log = maelstrom_util::log::test_logger();
-    let logger_builder = LoggerBuilder::GivenLogger(log.clone());
-
-    let bg_proc = spawn_bg_proc();
-
-    let ui = ui::SimpleUi::new(IsListing::from(false), StdoutTty::from(false), term.clone());
-
     maelstrom_test_runner::main_for_test::<cargo_maelstrom::TestRunner>(
-        bg_proc,
-        config,
-        extra_options,
+        spawn_bg_proc(),
+        Config {
+            parent: maelstrom_test_runner::config::Config {
+                broker: None,
+                log_level: LogLevel::Debug,
+                container_image_depot_root: RootBuf::new(PathBuf::from(
+                    ".cache/maelstrom/container",
+                )),
+                timeout: None,
+                cache_size: CacheSize::default(),
+                inline_limit: InlineLimit::default(),
+                slots: Slots::default(),
+                accept_invalid_remote_container_tls_certs: true.into(),
+                ui: UiKind::Simple,
+                repeat: Default::default(),
+                stop_after: None,
+                artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
+            },
+            cargo: CargoConfig {
+                feature_selection_options: FeatureSelectionOptions::default(),
+                compilation_options: CompilationOptions::default(),
+                manifest_options: ManifestOptions {
+                    manifest_path: Some(temp_dir.path().join("project/Cargo.toml")),
+                    ..Default::default()
+                },
+                extra_test_binary_args: vec![],
+            },
+        },
+        ExtraCommandLineOptions {
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                ..Default::default()
+            },
+            list: ListOptions {
+                tests: false,
+                binaries: false,
+                packages: false,
+            },
+        },
         cargo_maelstrom::TestRunner::get_metadata_and_project_directory,
-        logger_builder,
-        ui,
+        LoggerBuilder::GivenLogger(maelstrom_util::log::test_logger()),
+        |_, is_listing, stdout_tty| {
+            Ok(Box::new(SimpleUi::new(
+                is_listing,
+                stdout_tty,
+                term.clone(),
+            )))
+        },
     )
     .unwrap();
 

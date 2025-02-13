@@ -242,7 +242,7 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
         RootBuf<ProjectDir>,
     )>,
     logger_builder: LoggerBuilder,
-    ui: impl Ui,
+    ui_factory: impl FnOnce(UiKind, IsListing, StdoutTty) -> Result<Box<dyn Ui>>,
 ) -> Result<ExitCode> {
     let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
         ListingMode::None => false.into(),
@@ -263,7 +263,7 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
         list_tests,
         |_| logger_builder,
         StdoutTty::from(false),
-        |_, _, _| Ok(Box::new(ui)),
+        ui_factory,
     )
 }
 
