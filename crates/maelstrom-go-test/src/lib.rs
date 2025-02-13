@@ -761,7 +761,6 @@ pub fn main_for_test(
             &client,
             TestRunner::TEST_METADATA_FILE_NAME,
             TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-            test_collector.get_template_variables()?,
         )
     }
 }

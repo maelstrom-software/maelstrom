@@ -269,6 +269,5 @@ where
         &client,
         TestRunnerT::TEST_METADATA_FILE_NAME,
         TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-        test_collector.get_template_variables()?,
     )
 }
