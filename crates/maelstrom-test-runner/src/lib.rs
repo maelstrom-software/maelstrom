@@ -36,6 +36,8 @@ use metadata::Store as MetadataStore;
 use std::{
     fmt::Debug,
     io::{self, IsTerminal as _},
+    ops::ControlFlow,
+    path::PathBuf,
     str,
     sync::mpsc::Receiver,
     time::Duration,
@@ -408,7 +410,6 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
         &extra_options.exclude,
     )?;
 
-    // XXX should move up, shouldn't depend on TestCollector.
     let watch_exclude_paths = test_collector
         .get_paths_to_exclude_from_watch()
         .into_iter()
@@ -434,53 +435,89 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
     // This is where the pytest runner builds pip packages.
     test_collector.build_test_layers(testing_options.test_metadata.get_all_images(), &ui_sender)?;
 
+    loop {
+        match run_app_once(
+            &client,
+            &directories,
+            &extra_options,
+            log.clone(),
+            &test_collector,
+            &test_db_store,
+            &testing_options,
+            ui_sender.clone(),
+            &watch_exclude_paths,
+        ) {
+            ControlFlow::Break(result) => {
+                break result;
+            }
+            ControlFlow::Continue(()) => {
+                continue;
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_app_once<TestCollectorT: TestCollector + Sync>(
+    client: &Client,
+    directories: &Directories,
+    extra_options: &config::ExtraCommandLineOptions,
+    log: slog::Logger,
+    test_collector: &TestCollectorT,
+    test_db_store: &TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
+    testing_options: &TestingOptions<TestCollectorT::TestFilter>,
+    ui_sender: UiSender,
+    watch_exclude_paths: &Vec<PathBuf>,
+) -> ControlFlow<Result<ExitCode>> {
     let done = Event::new();
     let files_changed = Event::new();
 
     std::thread::scope(|scope| {
-        let res = (|| -> Result<_> {
+        let result = (|| -> ControlFlow<Result<_>> {
             let watcher = Watcher::new(
                 scope,
                 log.clone(),
                 &directories.project,
-                &watch_exclude_paths,
+                watch_exclude_paths,
                 &done,
                 &files_changed,
             );
             if extra_options.watch {
-                watcher.watch_for_changes()?;
+                if let Err(err) = watcher.watch_for_changes() {
+                    return ControlFlow::Break(Err(err));
+                }
             }
 
-            loop {
-                let exit_code = run_app_once(
-                    &test_collector,
-                    &test_db_store,
-                    &testing_options,
-                    ui_sender.clone(),
-                    &client,
-                )?;
+            let result = run_app_once_inner(
+                test_collector,
+                test_db_store,
+                testing_options,
+                ui_sender.clone(),
+                client,
+            );
 
-                if extra_options.watch {
-                    client.restart()?;
-
-                    ui_sender.send(UiMessage::UpdateEnqueueStatus(
-                        "waiting for changes...".into(),
-                    ));
-                    watcher.wait_for_changes();
-
-                    continue;
-                } else {
-                    break Ok(exit_code);
+            if extra_options.watch {
+                if let Err(err) = client.restart() {
+                    return ControlFlow::Break(Err(err));
                 }
+
+                ui_sender.send(UiMessage::UpdateEnqueueStatus(
+                    "waiting for changes...".into(),
+                ));
+                watcher.wait_for_changes();
+
+                ControlFlow::Continue(())
+            } else {
+                ControlFlow::Break(result)
             }
         })();
 
         done.set();
-        res
+        result
     })
 }
 
-fn run_app_once<TestCollectorT: TestCollector + Sync>(
+fn run_app_once_inner<TestCollectorT: TestCollector + Sync>(
     test_collector: &TestCollectorT,
     test_db_store: &TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
     options: &TestingOptions<TestCollectorT::TestFilter>,
