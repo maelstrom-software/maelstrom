@@ -36,7 +36,6 @@ use metadata::Store as MetadataStore;
 use std::{
     fmt::Debug,
     io::{self, IsTerminal as _},
-    path::PathBuf,
     str,
     sync::mpsc::Receiver,
     time::Duration,
@@ -290,7 +289,48 @@ fn main_inner<TestRunnerT: TestRunner>(
         IsListing::from(list_tests.as_bool()),
         stdout_tty,
     )?;
+    let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log.clone());
 
+    let result = main_with_ui_thread::<TestRunnerT>(
+        client_bg_process,
+        config,
+        extra_options,
+        get_metadata_and_project_directory,
+        list_tests,
+        log,
+        stdout_tty,
+        ui_sender,
+    );
+    ui_handle.join()?;
+    result
+}
+
+fn test_filter_compile<TestCollectorT: TestCollector>(
+    _test_collector: &TestCollectorT,
+    include: &[String],
+    exclude: &[String],
+) -> Result<TestCollectorT::TestFilter> {
+    TestCollectorT::TestFilter::compile(include, exclude)
+}
+
+const MAX_NUM_BACKGROUND_THREADS: isize = 200;
+
+#[allow(clippy::too_many_arguments)]
+fn main_with_ui_thread<TestRunnerT: TestRunner>(
+    client_bg_process: ClientBgProcess,
+    config: TestRunnerT::Config,
+    extra_options: TestRunnerT::ExtraCommandLineOptions,
+    get_metadata_and_project_directory: impl FnOnce(
+        &TestRunnerT::Config,
+    ) -> Result<(
+        TestRunnerT::Metadata,
+        RootBuf<ProjectDir>,
+    )>,
+    list_tests: ListTests,
+    log: slog::Logger,
+    stdout_tty: StdoutTty,
+    ui_sender: UiSender,
+) -> Result<ExitCode> {
     let (metadata, project_dir) = get_metadata_and_project_directory(&config)?;
     let directories = TestRunnerT::get_directories(&metadata, project_dir);
     let (parent_config, test_collector_config) = config.into_parts();
@@ -379,54 +419,18 @@ fn main_inner<TestRunnerT: TestRunner>(
         ])
         .collect();
 
-    let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log.clone());
-    let result = main_with_ui_thread(
-        &test_collector,
-        log,
-        test_db_store,
-        directories.project,
-        TestingOptions {
-            test_metadata: metadata_store,
-            filter,
-            timeout_override: parent_config.timeout.map(Timeout::new),
-            use_color: UseColor::from(stdout_tty.as_bool()),
-            repeat: parent_config.repeat,
-            stop_after: parent_config.stop_after,
-            list_tests,
-        },
-        extra_options.watch,
-        watch_exclude_paths,
-        ui_sender,
-        &client,
-    );
-    ui_handle.join()?;
-    result
-}
+    let testing_options = TestingOptions {
+        test_metadata: metadata_store,
+        filter,
+        timeout_override: parent_config.timeout.map(Timeout::new),
+        use_color: UseColor::from(stdout_tty.as_bool()),
+        repeat: parent_config.repeat,
+        stop_after: parent_config.stop_after,
+        list_tests,
+    };
 
-fn test_filter_compile<TestCollectorT: TestCollector>(
-    _test_collector: &TestCollectorT,
-    include: &[String],
-    exclude: &[String],
-) -> Result<TestCollectorT::TestFilter> {
-    TestCollectorT::TestFilter::compile(include, exclude)
-}
-
-const MAX_NUM_BACKGROUND_THREADS: isize = 200;
-
-#[allow(clippy::too_many_arguments)]
-fn main_with_ui_thread<TestCollectorT: TestCollector + Sync>(
-    test_collector: &TestCollectorT,
-    log: slog::Logger,
-    test_db_store: TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
-    project_dir: RootBuf<ProjectDir>,
-    options: TestingOptions<TestCollectorT::TestFilter>,
-    watch: bool,
-    watch_exclude_paths: Vec<PathBuf>,
-    ui_sender: UiSender,
-    client: &Client,
-) -> Result<ExitCode> {
     // This is where the pytest runner builds pip packages.
-    test_collector.build_test_layers(options.test_metadata.get_all_images(), &ui_sender)?;
+    test_collector.build_test_layers(testing_options.test_metadata.get_all_images(), &ui_sender)?;
 
     let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
     let done = Event::new();
@@ -437,28 +441,28 @@ fn main_with_ui_thread<TestCollectorT: TestCollector + Sync>(
             let watcher = Watcher::new(
                 scope,
                 log.clone(),
-                &project_dir,
+                &directories.project,
                 &watch_exclude_paths,
                 &sem,
                 &done,
                 &files_changed,
             );
-            if watch {
+            if extra_options.watch {
                 watcher.watch_for_changes()?;
             }
 
             loop {
                 let exit_code = run_app_once(
-                    test_collector,
+                    &test_collector,
                     &test_db_store,
-                    &options,
+                    &testing_options,
                     scope,
                     &sem,
                     ui_sender.clone(),
-                    client,
+                    &client,
                 )?;
 
-                if watch {
+                if extra_options.watch {
                     client.restart()?;
 
                     ui_sender.send(UiMessage::UpdateEnqueueStatus(
