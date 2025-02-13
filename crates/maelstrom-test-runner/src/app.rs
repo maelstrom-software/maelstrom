@@ -6,19 +6,17 @@ mod watch;
 mod tests;
 
 use crate::{
-    config::{ExtraCommandLineOptions, Repeat, StopAfter},
-    deps::{KillOnDrop, TestArtifact as _, TestCollector, TestFilter as _, Wait as _, WaitStatus},
-    log::LogDestination,
+    config::{Repeat, StopAfter},
+    deps::{KillOnDrop, TestArtifact as _, TestCollector, Wait as _, WaitStatus},
     metadata::Store as MetadataStore,
     test_db::{TestDb, TestDbStore},
-    ui::{Ui, UiJobId as JobId, UiMessage, UiSender},
+    ui::{UiJobId as JobId, UiMessage, UiSender},
     util::{ListTests, UseColor},
-    Directories,
 };
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use maelstrom_base::Timeout;
 use maelstrom_client::{spec::JobSpec, Client, JobStatus, ProjectDir};
-use maelstrom_util::{fs::Fs, process::ExitCode, root::RootBuf, sync::Event};
+use maelstrom_util::{process::ExitCode, root::RootBuf, sync::Event};
 use main_app::MainApp;
 use std::{
     path::PathBuf,
@@ -52,14 +50,14 @@ trait Deps {
 }
 
 /// Immutable information used to control the testing invocation.
-struct TestingOptions<TestFilterT> {
-    test_metadata: MetadataStore<TestFilterT>,
-    filter: TestFilterT,
-    timeout_override: Option<Option<Timeout>>,
-    use_color: UseColor,
-    repeat: Repeat,
-    stop_after: Option<StopAfter>,
-    list_tests: ListTests,
+pub struct TestingOptions<TestFilterT> {
+    pub test_metadata: MetadataStore<TestFilterT>,
+    pub filter: TestFilterT,
+    pub timeout_override: Option<Option<Timeout>>,
+    pub use_color: UseColor,
+    pub repeat: Repeat,
+    pub stop_after: Option<StopAfter>,
+    pub list_tests: ListTests,
 }
 
 enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static> {
@@ -329,7 +327,7 @@ fn run_app_once<'scope, 'deps, TestCollectorT: TestCollector + Sync>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
+pub fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
     test_collector: &TestCollectorT,
     log: slog::Logger,
     test_db_store: TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
@@ -391,99 +389,4 @@ fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
         done.set();
         res
     })
-}
-
-/// Run the given [`Ui`] implementation on a background thread, and run the main test-runner
-/// application on this thread using the UI until it is completed.
-#[allow(clippy::too_many_arguments)]
-pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
-    log_destination: LogDestination,
-    timeout_override: Option<Option<Timeout>>,
-    ui: impl Ui,
-    test_collector: TestCollectorT,
-    list_tests: ListTests,
-    repeat: Repeat,
-    stop_after: Option<StopAfter>,
-    use_color: UseColor,
-    log: slog::Logger,
-    client: &Client,
-    test_metadata_file_name: &'static str,
-    test_metadata_default_contents: &'static str,
-    directories: Directories,
-    extra_options: ExtraCommandLineOptions,
-) -> Result<ExitCode> {
-    let fs = Fs::new();
-
-    let metadata_template_variables = test_collector.get_template_variables()?;
-    let metadata_path = directories.project.join::<()>(test_metadata_file_name);
-    let metadata_store = if let Some(contents) = fs.read_to_string_if_exists(&metadata_path)? {
-        MetadataStore::load(&contents, &metadata_template_variables)
-            .with_context(|| format!("parsing metadata file {}", metadata_path.display()))?
-    } else {
-        MetadataStore::load(test_metadata_default_contents, &metadata_template_variables)
-            .expect("embedded default test metadata TOML to be valid")
-    };
-
-    // TODO: There are a few things wrong with this from an efficiency point of view.
-    //
-    // First, we're doing everything serially with synchronous RPCs. We could fix that by
-    // sending all of the RPCs in parallel and then waiting for them all to complete.
-    //
-    // Second, we're blocking the rest of startup by doing this here. We could fix that by
-    // pushing this logic into the main app and have it not enqueue any jobs until all of the
-    // containers have been registered.
-    //
-    // Third, we're unnecessarily registering all containers that we find in in the
-    // configuration file. We could fix that by only registering containers when we need them.
-    // We'd block sending jobs to the client until all of the required containers were
-    // registered. The downside of this "fix" is that it's probably overkill, and it could hurt
-    // performance. If we implemented the fix above in the second point, we'd be registering
-    // all of the containers while we were doing other startup. In all likelihood, the number
-    // of containers would be small and we'd be done long before we started submitting jobs.
-    for (name, spec) in metadata_store.containers() {
-        client.add_container(name.clone(), spec.clone())?;
-    }
-
-    let test_db_store = TestDbStore::new(fs, &directories.state);
-
-    let filter =
-        <TestCollectorT::TestFilter>::compile(&extra_options.include, &extra_options.exclude)?;
-
-    let watch_exclude_paths = test_collector
-        .get_paths_to_exclude_from_watch()
-        .into_iter()
-        .chain([
-            directories
-                .project
-                .to_path_buf()
-                .join(maelstrom_container::TAG_FILE_NAME),
-            directories.project.to_path_buf().join(".git"),
-        ])
-        .collect();
-
-    let (ui_handle, ui) = ui.start_ui_thread(log_destination, log.clone());
-
-    let main_res = run_app_in_loop(
-        &test_collector,
-        log,
-        test_db_store,
-        directories.project,
-        TestingOptions {
-            test_metadata: metadata_store,
-            filter,
-            timeout_override,
-            use_color,
-            repeat,
-            stop_after,
-            list_tests,
-        },
-        extra_options.watch,
-        watch_exclude_paths,
-        ui,
-        client,
-    );
-    ui_handle.join()?;
-
-    let exit_code = main_res?;
-    Ok(exit_code)
 }

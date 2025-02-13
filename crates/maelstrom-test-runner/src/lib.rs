@@ -13,7 +13,8 @@ pub mod fake_test_framework;
 
 pub use deps::*;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
+use app::TestingOptions;
 use clap::{Args, Command};
 use config::IntoParts;
 use derive_more::{From, Into};
@@ -26,11 +27,13 @@ use maelstrom_util::{
     process::ExitCode,
     root::RootBuf,
 };
+use metadata::Store as MetadataStore;
 use std::{
     fmt::Debug,
     io::{self, IsTerminal as _},
     str,
 };
+use test_db::TestDbStore;
 use ui::{Ui, UiKind, UiSender};
 use util::{IsListing, ListTests, StdoutTty, UseColor};
 
@@ -312,20 +315,97 @@ fn main_inner<TestRunnerT: TestRunner>(
         metadata,
     )?;
 
-    app::run_app_with_ui_multithreaded(
-        log_destination,
-        parent_config.timeout.map(Timeout::new),
-        ui,
-        test_collector,
-        list_tests,
-        parent_config.repeat,
-        parent_config.stop_after,
-        UseColor::from(stdout_tty.as_bool()),
+    let timeout_override = parent_config.timeout.map(Timeout::new);
+    let repeat = parent_config.repeat;
+    let stop_after = parent_config.stop_after;
+    let use_color = UseColor::from(stdout_tty.as_bool());
+    let client = &client;
+    let test_metadata_file_name = TestRunnerT::TEST_METADATA_FILE_NAME;
+    let test_metadata_default_contents = TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS;
+
+    let fs = Fs::new();
+
+    let metadata_template_variables = test_collector.get_template_variables()?;
+    let metadata_path = directories.project.join::<()>(test_metadata_file_name);
+    let metadata_store = if let Some(contents) = fs.read_to_string_if_exists(&metadata_path)? {
+        MetadataStore::load(&contents, &metadata_template_variables)
+            .with_context(|| format!("parsing metadata file {}", metadata_path.display()))?
+    } else {
+        MetadataStore::load(test_metadata_default_contents, &metadata_template_variables)
+            .expect("embedded default test metadata TOML to be valid")
+    };
+
+    // TODO: There are a few things wrong with this from an efficiency point of view.
+    //
+    // First, we're doing everything serially with synchronous RPCs. We could fix that by
+    // sending all of the RPCs in parallel and then waiting for them all to complete.
+    //
+    // Second, we're blocking the rest of startup by doing this here. We could fix that by
+    // pushing this logic into the main app and have it not enqueue any jobs until all of the
+    // containers have been registered.
+    //
+    // Third, we're unnecessarily registering all containers that we find in in the
+    // configuration file. We could fix that by only registering containers when we need them.
+    // We'd block sending jobs to the client until all of the required containers were
+    // registered. The downside of this "fix" is that it's probably overkill, and it could hurt
+    // performance. If we implemented the fix above in the second point, we'd be registering
+    // all of the containers while we were doing other startup. In all likelihood, the number
+    // of containers would be small and we'd be done long before we started submitting jobs.
+    for (name, spec) in metadata_store.containers() {
+        client.add_container(name.clone(), spec.clone())?;
+    }
+
+    let test_db_store = TestDbStore::new(fs, &directories.state);
+
+    let filter = test_filter_compile(
+        &test_collector,
+        &extra_options.include,
+        &extra_options.exclude,
+    )?;
+
+    let watch_exclude_paths = test_collector
+        .get_paths_to_exclude_from_watch()
+        .into_iter()
+        .chain([
+            directories
+                .project
+                .to_path_buf()
+                .join(maelstrom_container::TAG_FILE_NAME),
+            directories.project.to_path_buf().join(".git"),
+        ])
+        .collect();
+
+    let (ui_handle, ui) = ui.start_ui_thread(log_destination, log.clone());
+
+    let main_res = app::run_app_in_loop(
+        &test_collector,
         log,
-        &client,
-        TestRunnerT::TEST_METADATA_FILE_NAME,
-        TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-        directories,
-        extra_options,
-    )
+        test_db_store,
+        directories.project,
+        TestingOptions {
+            test_metadata: metadata_store,
+            filter,
+            timeout_override,
+            use_color,
+            repeat,
+            stop_after,
+            list_tests,
+        },
+        extra_options.watch,
+        watch_exclude_paths,
+        ui,
+        client,
+    );
+    ui_handle.join()?;
+
+    let exit_code = main_res?;
+    Ok(exit_code)
+}
+
+fn test_filter_compile<TestCollectorT: TestCollector>(
+    _test_collector: &TestCollectorT,
+    include: &[String],
+    exclude: &[String],
+) -> Result<TestCollectorT::TestFilter> {
+    TestCollectorT::TestFilter::compile(include, exclude)
 }
