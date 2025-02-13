@@ -401,12 +401,14 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
 
     let test_db_store = TestDbStore::new(fs, &directories.state);
 
+    // XXX should move up, shouldn't depend on TestCollector.
     let filter = test_filter_compile(
         &test_collector,
         &extra_options.include,
         &extra_options.exclude,
     )?;
 
+    // XXX should move up, shouldn't depend on TestCollector.
     let watch_exclude_paths = test_collector
         .get_paths_to_exclude_from_watch()
         .into_iter()
