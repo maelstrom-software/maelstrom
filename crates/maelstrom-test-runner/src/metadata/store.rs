@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use maelstrom_client::spec::{
     ContainerParent, ContainerRef, ContainerSpec, ContainerUse, ImageRef, ImageUse,
 };
-use maelstrom_util::template::TemplateVars;
+use maelstrom_util::template::TemplateVariables;
 use serde::Deserialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -34,7 +34,7 @@ impl<TestFilterT: TestFilter> Store<TestFilterT>
 where
     TestFilterT::Err: Display,
 {
-    pub fn load(contents: &str, vars: &TemplateVars) -> Result<Self> {
+    pub fn load(contents: &str, vars: &TemplateVariables) -> Result<Self> {
         let mut contents: FileContents<TestFilterT> = toml::from_str(contents)?;
 
         for directive in &mut contents.directives {
@@ -334,7 +334,7 @@ mod tests {
                 image = "image1"
                 added_layers = [ { tar = "<foo>.tar" } ]
             "#},
-            &TemplateVars::new([("foo", "bar")]),
+            &TemplateVariables::new([("foo", "bar")]),
         )
         .unwrap();
         assert_eq!(

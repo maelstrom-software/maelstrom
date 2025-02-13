@@ -24,7 +24,7 @@ use maelstrom_test_runner::{
 use maelstrom_util::{
     process::ExitCode,
     root::{Root, RootBuf},
-    template::TemplateVars,
+    template::TemplateVariables,
 };
 use pattern::ArtifactKind;
 use std::{
@@ -320,7 +320,7 @@ impl TestCollector for CargoTestCollector {
         vec![self.build_dir.clone().into_path_buf()]
     }
 
-    fn get_template_vars(&self) -> Result<TemplateVars> {
+    fn get_template_vars(&self) -> Result<TemplateVariables> {
         let profile = self
             .config
             .compilation_options
@@ -334,7 +334,7 @@ impl TestCollector for CargoTestCollector {
         let build_dir = target
             .to_str()
             .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
-        Ok(TemplateVars::new([("build-dir", build_dir)]))
+        Ok(TemplateVariables::new([("build-dir", build_dir)]))
     }
 }
 

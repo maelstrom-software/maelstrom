@@ -24,16 +24,16 @@ fn template_re() -> &'static Regex {
 }
 
 #[derive(Default)]
-pub struct TemplateVars(HashMap<String, String>);
+pub struct TemplateVariables(HashMap<String, String>);
 
-impl TemplateVars {
+impl TemplateVariables {
     pub fn new<I, K, V>(iter: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
         K: Into<String>,
         V: Into<String>,
     {
-        TemplateVars(HashMap::from_iter(iter.into_iter().map(|(k, v)| {
+        TemplateVariables(HashMap::from_iter(iter.into_iter().map(|(k, v)| {
             let k = k.into();
             validate_ident(&k);
             (k, v.into())
@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn ident_valid() {
-        TemplateVars::new([
+        TemplateVariables::new([
             // Dash okay.
             ("foo-bar", ""),
             // Mixed case okay. Numbers okay if not at beginning.
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     #[should_panic(expected = r#"invalid identifier "foo_bar""#)]
     fn ident_invalid_has_underscore() {
-        TemplateVars::new([
+        TemplateVariables::new([
             // No underscore.
             ("foo_bar", ""),
         ]);
@@ -104,20 +104,20 @@ mod tests {
     #[test]
     #[should_panic(expected = r#"invalid identifier "1foo-bar""#)]
     fn ident_invalid_starts_with_number() {
-        TemplateVars::new([
+        TemplateVariables::new([
             // Can't start with number.
             ("1foo-bar", ""),
         ]);
     }
 
     fn template_success_test(key: &str, value: &str, template: &str, expected: &str) {
-        let vars = TemplateVars::new([(key, value)]);
+        let vars = TemplateVariables::new([(key, value)]);
         let actual = vars.replace(template).unwrap();
         assert_eq!(expected, &actual);
     }
 
     fn template_failure_test(key: &str, value: &str, template: &str, expected_error: &str) {
-        let vars = TemplateVars::new([(key, value)]);
+        let vars = TemplateVariables::new([(key, value)]);
         let err = vars.replace(template).unwrap_err();
         assert_eq!(expected_error, err.to_string());
     }
@@ -131,7 +131,8 @@ mod tests {
 
     #[test]
     fn template_replace_many() {
-        let vars = TemplateVars::new([("food", "apple pie"), ("drink", "coke"), ("name", "bob")]);
+        let vars =
+            TemplateVariables::new([("food", "apple pie"), ("drink", "coke"), ("name", "bob")]);
         let template = "echo '<name> ate <food> while drinking <drink>' > message";
         let actual = vars.replace(template).unwrap();
         assert_eq!(

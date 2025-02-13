@@ -14,7 +14,7 @@ use maelstrom_base::{
     CaptureFileSystemChanges, GroupId, JobMount, JobMountForTomlAndJson, JobNetwork, JobTty,
     Timeout, UserId, Utf8PathBuf,
 };
-use maelstrom_util::template::TemplateVars;
+use maelstrom_util::template::TemplateVariables;
 use serde::{
     de::{Deserializer, Error as _},
     Deserialize, Serialize,
@@ -1186,7 +1186,7 @@ impl<'de> Deserialize<'de> for LayerSpec {
 }
 
 impl LayerSpec {
-    pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
+    pub fn replace_template_vars(&mut self, vars: &TemplateVariables) -> Result<()> {
         match self {
             Self::Tar(TarLayerSpec { path }) => *path = vars.replace(path)?.into(),
             Self::Glob(GlobLayerSpec { glob, .. }) => *glob = vars.replace(glob)?,
@@ -3179,7 +3179,7 @@ mod tests {
             fn replace_template_vars_test(toml: &str, expected: LayerSpec) {
                 let mut actual: LayerSpec = parse_toml(toml);
                 actual
-                    .replace_template_vars(&TemplateVars::new([
+                    .replace_template_vars(&TemplateVariables::new([
                         ("foo", "foo-value"),
                         ("bar", "bar-value"),
                     ]))

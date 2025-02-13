@@ -2,7 +2,7 @@ use crate::{metadata::Metadata, ui};
 use anyhow::Result;
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_client::spec::{ImageRef, LayerSpec};
-use maelstrom_util::{process::ExitCode, template::TemplateVars};
+use maelstrom_util::{process::ExitCode, template::TemplateVariables};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -253,7 +253,7 @@ pub trait TestCollector {
     }
 
     /// Return any template variables to make available to test metadata.
-    fn get_template_vars(&self) -> Result<TemplateVars> {
+    fn get_template_vars(&self) -> Result<TemplateVariables> {
         Ok(Default::default())
     }
 }

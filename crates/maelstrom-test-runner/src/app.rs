@@ -22,7 +22,7 @@ use maelstrom_util::{
     process::ExitCode,
     root::{Root, RootBuf},
     sync::Event,
-    template::TemplateVars,
+    template::TemplateVariables,
 };
 use main_app::MainApp;
 use std::{
@@ -420,7 +420,7 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
     client: &Client,
     test_metadata_file_name: &'static str,
     test_metadata_default_contents: &'static str,
-    metadata_template_vars: TemplateVars,
+    metadata_template_vars: TemplateVariables,
 ) -> Result<ExitCode> {
     let fs = Fs::new();
 
