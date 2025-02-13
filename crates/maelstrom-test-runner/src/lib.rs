@@ -264,7 +264,6 @@ where
         stdout_is_tty,
         &directories.project,
         &directories.state,
-        test_collector.get_paths_to_exclude_from_watch(),
         log,
         &client,
         TestRunnerT::TEST_METADATA_FILE_NAME,

@@ -756,7 +756,6 @@ pub fn main_for_test(
             stdout_is_tty,
             &directories.project,
             &directories.state,
-            vec![],
             log,
             &client,
             TestRunner::TEST_METADATA_FILE_NAME,

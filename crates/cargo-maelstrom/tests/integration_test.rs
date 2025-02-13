@@ -9,7 +9,7 @@ use maelstrom_base::Timeout;
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_test_runner::{
     config::IntoParts as _, log::LogDestination, run_app_with_ui_multithreaded, ui,
-    util::ListTests, ListingMode, TestCollector as _, TestRunner as _,
+    util::ListTests, ListingMode, TestRunner as _,
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -153,7 +153,6 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             false,
             &directories.project,
             &directories.state,
-            test_collector.get_paths_to_exclude_from_watch(),
             log,
             &client,
             cargo_maelstrom::TestRunner::TEST_METADATA_FILE_NAME,

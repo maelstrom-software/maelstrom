@@ -624,7 +624,6 @@ pub fn main_for_test(
         stdout_is_tty,
         project_dir,
         &directories.state,
-        vec![directories.build.into_path_buf()],
         log,
         &client,
         TestRunner::TEST_METADATA_FILE_NAME,

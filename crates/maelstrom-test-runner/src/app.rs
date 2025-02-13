@@ -397,7 +397,7 @@ fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
     })
 }
 
-/// Run the given `[Ui]` implementation on a background thread, and run the main test-runner
+/// Run the given [`Ui`] implementation on a background thread, and run the main test-runner
 /// application on this thread using the UI until it is completed.
 #[allow(clippy::too_many_arguments)]
 pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
@@ -414,7 +414,6 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
     stdout_color: bool,
     project_dir: impl AsRef<Root<ProjectDir>>,
     state_dir: impl AsRef<Root<StateDir>>,
-    mut watch_exclude_paths: Vec<PathBuf>,
     log: slog::Logger,
     client: &Client,
     test_metadata_file_name: &'static str,
@@ -458,12 +457,16 @@ pub fn run_app_with_ui_multithreaded<TestCollectorT: TestCollector + Sync>(
 
     let filter = <TestCollectorT::TestFilter>::compile(&include_filter, &exclude_filter)?;
 
-    watch_exclude_paths.push(
-        project_dir
-            .to_path_buf()
-            .join(maelstrom_container::TAG_FILE_NAME),
-    );
-    watch_exclude_paths.push(project_dir.to_path_buf().join(".git"));
+    let watch_exclude_paths = test_collector
+        .get_paths_to_exclude_from_watch()
+        .into_iter()
+        .chain([
+            project_dir
+                .to_path_buf()
+                .join(maelstrom_container::TAG_FILE_NAME),
+            project_dir.to_path_buf().join(".git"),
+        ])
+        .collect();
 
     let (ui_handle, ui) = ui.start_ui_thread(log_destination, log.clone());
 
