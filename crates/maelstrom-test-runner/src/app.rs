@@ -1,5 +1,5 @@
 mod job_output;
-mod main_app;
+pub mod main_app;
 pub mod watch;
 
 #[cfg(test)]
@@ -9,22 +9,14 @@ use crate::{
     config::{Repeat, StopAfter},
     deps::{KillOnDrop, TestArtifact as _, TestCollector, Wait as _, WaitStatus},
     metadata::Store as MetadataStore,
-    test_db::{TestDb, TestDbStore},
+    test_db::TestDb,
     ui::{UiJobId as JobId, UiMessage, UiSender},
     util::{ListTests, UseColor},
 };
 use anyhow::Result;
 use maelstrom_base::Timeout;
 use maelstrom_client::{spec::JobSpec, Client, JobStatus};
-use maelstrom_util::{process::ExitCode, sync::Event};
-use main_app::MainApp;
-use std::{
-    sync::{
-        mpsc::{Receiver, Sender},
-        Arc, Mutex,
-    },
-    time::Duration,
-};
+use std::sync::{mpsc::Sender, Arc, Mutex};
 use std_semaphore::Semaphore;
 
 type ArtifactM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::Artifact;
@@ -33,10 +25,10 @@ type CaseMetadataM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::C
 type PackageM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::Package;
 type PackageIdM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::PackageId;
 type TestFilterM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::TestFilter;
-type TestDbM<DepsT> = TestDb<ArtifactKeyM<DepsT>, CaseMetadataM<DepsT>>;
+pub type TestDbM<DepsT> = TestDb<ArtifactKeyM<DepsT>, CaseMetadataM<DepsT>>;
 type TestingOptionsM<DepsT> = TestingOptions<TestFilterM<DepsT>>;
 
-trait Deps {
+pub trait Deps {
     type TestCollector: TestCollector + Sync;
 
     fn start_collection(&self, use_color: UseColor, packages: Vec<&PackageM<Self>>);
@@ -58,7 +50,7 @@ pub struct TestingOptions<TestFilterT> {
     pub list_tests: ListTests,
 }
 
-enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static> {
+pub enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'static> {
     Start,
     Packages {
         packages: Vec<PackageT>,
@@ -83,10 +75,10 @@ enum MainAppMessage<PackageT: 'static, ArtifactT: 'static, CaseMetadataT: 'stati
     },
 }
 
-type MainAppMessageM<DepsT> =
+pub type MainAppMessageM<DepsT> =
     MainAppMessage<PackageM<DepsT>, ArtifactM<DepsT>, CaseMetadataM<DepsT>>;
 
-enum ControlMessage<MessageT> {
+pub enum ControlMessage<MessageT> {
     Shutdown,
     App { msg: MessageT },
 }
@@ -99,7 +91,7 @@ impl<MessageT> From<MessageT> for ControlMessage<MessageT> {
 
 type WaitM<DepsT> = <<DepsT as Deps>::TestCollector as TestCollector>::BuildHandle;
 
-struct MainAppDepsAdapter<'deps, 'scope, TestCollectorT: TestCollector + Sync> {
+pub struct MainAppDepsAdapter<'deps, 'scope, TestCollectorT: TestCollector + Sync> {
     test_collector: &'deps TestCollectorT,
     scope: &'scope std::thread::Scope<'scope, 'deps>,
     main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
@@ -112,7 +104,7 @@ struct MainAppDepsAdapter<'deps, 'scope, TestCollectorT: TestCollector + Sync> {
 impl<'deps, 'scope, TestCollectorT: TestCollector + Sync>
     MainAppDepsAdapter<'deps, 'scope, TestCollectorT>
 {
-    fn new(
+    pub fn new(
         test_collector: &'deps TestCollectorT,
         scope: &'scope std::thread::Scope<'scope, 'deps>,
         main_app_sender: Sender<ControlMessage<MainAppMessageM<Self>>>,
@@ -247,77 +239,4 @@ impl<TestCollectorT: TestCollector + Sync> Deps for MainAppDepsAdapter<'_, '_, T
     fn send_ui_msg(&self, msg: UiMessage) {
         self.ui.send(msg);
     }
-}
-
-fn main_app_channel_reader<DepsT: Deps>(
-    mut app: MainApp<DepsT>,
-    main_app_receiver: &Receiver<ControlMessage<MainAppMessageM<DepsT>>>,
-) -> Result<(ExitCode, TestDbM<DepsT>)> {
-    loop {
-        match main_app_receiver.recv()? {
-            ControlMessage::Shutdown => {
-                let (exit_code, test_db) = app.main_return_value()?;
-                break Ok((exit_code, test_db));
-            }
-            ControlMessage::App { msg } => {
-                app.receive_message(msg);
-            }
-        }
-    }
-}
-
-/// Grab introspect data from the client process periodically and send it to the UI. Exit when the
-/// done event has been set.
-fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender) {
-    loop {
-        let Ok(introspect_resp) = client.introspect() else {
-            break;
-        };
-        ui.send(UiMessage::UpdateIntrospectState(introspect_resp));
-
-        if !done.wait_timeout(Duration::from_millis(500)).timed_out() {
-            break;
-        }
-    }
-}
-
-pub fn run_app_once<'scope, 'deps, TestCollectorT: TestCollector + Sync>(
-    test_collector: &'deps TestCollectorT,
-    test_db_store: &'deps TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
-    options: &'deps TestingOptions<TestCollectorT::TestFilter>,
-    scope: &'scope std::thread::Scope<'scope, 'deps>,
-    sem: &'deps Semaphore,
-    ui: UiSender,
-    client: &'deps Client,
-) -> Result<ExitCode> {
-    let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
-
-    let done = Event::new();
-    std::thread::scope(|inner_scope| {
-        inner_scope.spawn(|| introspect_loop(&done, client, ui.clone()));
-
-        let res = (|| -> Result<_> {
-            let deps = MainAppDepsAdapter::new(
-                test_collector,
-                scope,
-                main_app_sender.clone(),
-                ui.clone(),
-                sem,
-                client,
-            );
-
-            main_app_sender.send(MainAppMessage::Start.into()).unwrap();
-
-            let test_db = test_db_store.load()?;
-            let app = MainApp::new(&deps, options, test_db);
-
-            let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
-            test_db_store.save(test_db)?;
-
-            Ok(exit_code)
-        })();
-
-        done.set();
-        res
-    })
 }

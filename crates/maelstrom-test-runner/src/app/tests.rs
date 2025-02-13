@@ -1,4 +1,4 @@
-use super::{Deps, MainApp, MainAppMessage::*, MainAppMessageM, TestingOptions};
+use super::{main_app::MainApp, Deps, MainAppMessage::*, MainAppMessageM, TestingOptions};
 use crate::{
     config::{Repeat, StopAfter},
     deps::SimpleFilter,

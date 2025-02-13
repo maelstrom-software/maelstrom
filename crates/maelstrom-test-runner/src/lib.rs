@@ -14,8 +14,11 @@ pub mod fake_test_framework;
 pub use deps::*;
 
 use anyhow::{Context as _, Result};
-use app::watch::Watcher;
 use app::TestingOptions;
+use app::{
+    main_app::MainApp, watch::Watcher, ControlMessage, Deps, MainAppDepsAdapter, MainAppMessage,
+    MainAppMessageM, TestDbM,
+};
 use clap::{Args, Command};
 use config::IntoParts;
 use derive_more::{From, Into};
@@ -35,6 +38,8 @@ use std::{
     io::{self, IsTerminal as _},
     path::PathBuf,
     str,
+    sync::mpsc::Receiver,
+    time::Duration,
 };
 use std_semaphore::Semaphore;
 use test_db::TestDbStore;
@@ -451,7 +456,7 @@ fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
             }
 
             loop {
-                let exit_code = app::run_app_once(
+                let exit_code = run_app_once(
                     test_collector,
                     &test_db_store,
                     &options,
@@ -479,4 +484,77 @@ fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
         done.set();
         res
     })
+}
+
+fn run_app_once<'scope, 'deps, TestCollectorT: TestCollector + Sync>(
+    test_collector: &'deps TestCollectorT,
+    test_db_store: &'deps TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
+    options: &'deps TestingOptions<TestCollectorT::TestFilter>,
+    scope: &'scope std::thread::Scope<'scope, 'deps>,
+    sem: &'deps Semaphore,
+    ui: UiSender,
+    client: &'deps Client,
+) -> Result<ExitCode> {
+    let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
+
+    let done = Event::new();
+    std::thread::scope(|inner_scope| {
+        inner_scope.spawn(|| introspect_loop(&done, client, ui.clone()));
+
+        let res = (|| -> Result<_> {
+            let deps = MainAppDepsAdapter::new(
+                test_collector,
+                scope,
+                main_app_sender.clone(),
+                ui.clone(),
+                sem,
+                client,
+            );
+
+            main_app_sender.send(MainAppMessage::Start.into()).unwrap();
+
+            let test_db = test_db_store.load()?;
+            let app = MainApp::new(&deps, options, test_db);
+
+            let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
+            test_db_store.save(test_db)?;
+
+            Ok(exit_code)
+        })();
+
+        done.set();
+        res
+    })
+}
+
+/// Grab introspect data from the client process periodically and send it to the UI. Exit when the
+/// done event has been set.
+fn introspect_loop(done: &Event, client: &maelstrom_client::Client, ui: UiSender) {
+    loop {
+        let Ok(introspect_resp) = client.introspect() else {
+            break;
+        };
+        ui.send(UiMessage::UpdateIntrospectState(introspect_resp));
+
+        if !done.wait_timeout(Duration::from_millis(500)).timed_out() {
+            break;
+        }
+    }
+}
+
+fn main_app_channel_reader<DepsT: Deps>(
+    mut app: MainApp<DepsT>,
+    main_app_receiver: &Receiver<ControlMessage<MainAppMessageM<DepsT>>>,
+) -> Result<(ExitCode, TestDbM<DepsT>)> {
+    loop {
+        match main_app_receiver.recv()? {
+            ControlMessage::Shutdown => {
+                let (exit_code, test_db) = app.main_return_value()?;
+                break Ok((exit_code, test_db));
+            }
+            ControlMessage::App { msg } => {
+                app.receive_message(msg);
+            }
+        }
+    }
 }
