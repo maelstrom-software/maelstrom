@@ -15,7 +15,7 @@ use maelstrom_base::{
 use maelstrom_client::{
     glob_layer_spec, job_spec,
     spec::{ContainerParent, ImageRef, LayerSpec, PathsLayerSpec, PrefixOptions, StubsLayerSpec},
-    Client,
+    Client, ProjectDir,
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_test_runner::{
@@ -531,20 +531,20 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         }
     }
 
-    fn get_metadata_and_directories(_config: &Config) -> Result<((), Directories)> {
-        let project = RootBuf::new(Path::new(".").canonicalize()?);
+    fn get_metadata_and_project_directory(_config: &Config) -> Result<((), RootBuf<ProjectDir>)> {
+        Ok(((), RootBuf::new(Path::new(".").canonicalize()?)))
+    }
+
+    fn get_directories(_metadata: &(), project: RootBuf<ProjectDir>) -> Directories {
         let build = project.join(".maelstrom-pytest");
         let cache = build.join("cache");
         let state = build.join("state");
-        Ok((
-            (),
-            Directories {
-                build,
-                cache,
-                project,
-                state,
-            },
-        ))
+        Directories {
+            build,
+            cache,
+            project,
+            state,
+        }
     }
 
     fn build_test_collector<'client>(

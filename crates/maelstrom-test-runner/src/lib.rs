@@ -149,9 +149,13 @@ pub trait TestRunner {
         unimplemented!()
     }
 
-    /// Return the directories and metadata for the project.
-    fn get_metadata_and_directories(config: &Self::Config)
-        -> Result<(Self::Metadata, Directories)>;
+    /// Return the metadata for the project and the project directory.
+    fn get_metadata_and_project_directory(
+        config: &Self::Config,
+    ) -> Result<(Self::Metadata, RootBuf<ProjectDir>)>;
+
+    /// Return the directories computed from the metadata and project directory.
+    fn get_directories(metadata: &Self::Metadata, project_dir: RootBuf<ProjectDir>) -> Directories;
 
     /// Build the test collector. This will be used for the rest of the execution.
     fn build_test_collector<'client>(
@@ -179,9 +183,9 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
     if extra_options.as_ref().client_bg_proc {
         return alternative_mains::client_bg_proc();
     } else if extra_options.as_ref().init {
-        let (_, directories) = TestRunnerT::get_metadata_and_directories(&config)?;
+        let (_, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
         return alternative_mains::init(
-            &directories.project,
+            &project_dir,
             TestRunnerT::TEST_METADATA_FILE_NAME,
             TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
         );
@@ -220,7 +224,8 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
         stdout_tty,
     )?;
 
-    let (metadata, directories) = TestRunnerT::get_metadata_and_directories(&config)?;
+    let (metadata, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
+    let directories = TestRunnerT::get_directories(&metadata, project_dir);
 
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
@@ -261,7 +266,8 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
         }
     };
 
-    let (metadata, directories) = TestRunnerT::get_metadata_and_directories(&config)?;
+    let (metadata, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
+    let directories = TestRunnerT::get_directories(&metadata, project_dir);
 
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;

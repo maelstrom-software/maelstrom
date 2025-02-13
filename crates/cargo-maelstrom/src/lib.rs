@@ -14,7 +14,7 @@ use maelstrom_base::{Utf8Path, Utf8PathBuf};
 use maelstrom_client::{
     shared_library_dependencies_layer_spec,
     spec::{LayerSpec, PathsLayerSpec, PrefixOptions},
-    Client,
+    Client, ProjectDir,
 };
 use maelstrom_test_runner::{
     metadata::Metadata, ui::UiSender, util::UseColor, BuildDir, Directories, ListingMode,
@@ -435,22 +435,28 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         }
     }
 
-    fn get_metadata_and_directories(config: &Config) -> Result<(CargoMetadata, Directories)> {
+    fn get_metadata_and_project_directory(
+        config: &Config,
+    ) -> Result<(CargoMetadata, RootBuf<ProjectDir>)> {
         let cargo_metadata = Self::get_cargo_metadata(config)?;
         let project = Root::new(cargo_metadata.workspace_root.as_std_path()).to_owned();
+        Ok((cargo_metadata, project))
+    }
+
+    fn get_directories(
+        cargo_metadata: &CargoMetadata,
+        project: RootBuf<ProjectDir>,
+    ) -> Directories {
         let build = Root::new(cargo_metadata.target_directory.as_std_path()).to_owned();
         let maelstrom_target = build.join::<MaelstromTargetDir>("maelstrom");
         let state = maelstrom_target.join("state");
         let cache = maelstrom_target.join("cache");
-        Ok((
-            cargo_metadata,
-            Directories {
-                build,
-                cache,
-                state,
-                project,
-            },
-        ))
+        Directories {
+            build,
+            cache,
+            state,
+            project,
+        }
     }
 
     fn build_test_collector(

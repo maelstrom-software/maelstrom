@@ -672,7 +672,8 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         assert!(!extra_options.list.tests);
         assert!(extra_options.list.packages);
 
-        let (_, directories) = Self::get_metadata_and_directories(config)?;
+        let (metadata, project_dir) = Self::get_metadata_and_project_directory(config)?;
+        let directories = Self::get_directories(&metadata, project_dir);
 
         Fs.create_dir_all(&directories.cache)?;
 
@@ -685,21 +686,21 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         )
     }
 
-    fn get_metadata_and_directories(_config: &Config) -> Result<((), Directories)> {
-        let project = RootBuf::new(go_test::get_module_root()?);
+    fn get_metadata_and_project_directory(_config: &Config) -> Result<((), RootBuf<ProjectDir>)> {
+        Ok(((), RootBuf::new(go_test::get_module_root()?)))
+    }
+
+    fn get_directories(_metadata: &(), project: RootBuf<ProjectDir>) -> Directories {
         let hidden = project.join::<HiddenDir>(".maelstrom-go-test");
         let cache = hidden.join("cache");
         let build = cache.join("test-binaries");
         let state = hidden.join("state");
-        Ok((
-            (),
-            Directories {
-                build,
-                cache,
-                project,
-                state,
-            },
-        ))
+        Directories {
+            build,
+            cache,
+            project,
+            state,
+        }
     }
 
     fn build_test_collector(
