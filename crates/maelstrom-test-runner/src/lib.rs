@@ -22,7 +22,7 @@ use log::{LogDestination, LoggerBuilder};
 use maelstrom_base::Timeout;
 use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
 use maelstrom_util::{
-    config::Config,
+    config::{common::LogLevel, Config},
     fs::Fs,
     process::ExitCode,
     root::{Root, RootBuf},
@@ -226,14 +226,12 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
 
     let (metadata, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
 
-    let logger_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
-
     main_part_2::<TestRunnerT>(
         bg_proc,
         config,
         extra_options,
         list_tests,
-        logger_builder,
+        LoggerBuilder::DefaultLogger,
         metadata,
         project_dir,
         stdout_tty,
@@ -266,7 +264,7 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
         config,
         extra_options,
         list_tests,
-        logger_builder,
+        |_| logger_builder,
         metadata,
         project_dir,
         StdoutTty::from(false),
@@ -301,7 +299,7 @@ pub fn main_for_test_for_go_and_pytest<TestRunnerT: TestRunner>(
         config,
         extra_options,
         list_tests,
-        logger_builder,
+        |_| logger_builder,
         metadata,
         project_dir.to_owned(),
         stdout_tty,
@@ -315,12 +313,16 @@ fn main_part_2<TestRunnerT: TestRunner>(
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     list_tests: ListTests,
-    logger_builder: LoggerBuilder,
+    logger_builder_builder: impl FnOnce(LogLevel) -> LoggerBuilder,
     metadata: TestRunnerT::Metadata,
     project_dir: RootBuf<ProjectDir>,
     stdout_tty: StdoutTty,
     ui: impl Ui,
 ) -> Result<ExitCode> {
+    let parent_config = config.as_ref();
+
+    let logger_builder = logger_builder_builder(parent_config.log_level);
+
     let directories = TestRunnerT::get_directories(&metadata, project_dir);
 
     Fs.create_dir_all(&directories.state)?;
