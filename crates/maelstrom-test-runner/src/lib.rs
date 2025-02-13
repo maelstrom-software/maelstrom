@@ -225,49 +225,21 @@ pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Res
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
-    let log_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
+    let logger_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
     let log_destination = LogDestination::default();
-    let log = log_builder.build(log_destination.clone());
+    let log = logger_builder.build(log_destination.clone());
 
-    let (parent_config, test_collector_config) = config.into_parts();
-    let client = Client::new(
+    main_part_2::<TestRunnerT>(
         bg_proc,
-        parent_config.broker,
-        &directories.project,
-        &directories.state,
-        parent_config.container_image_depot_root,
-        &directories.cache,
-        parent_config.cache_size,
-        parent_config.inline_limit,
-        parent_config.slots,
-        parent_config.accept_invalid_remote_container_tls_certs,
-        parent_config.artifact_transfer_strategy,
-        log.clone(),
-    )?;
-
-    let (extra_options, _) = extra_options.into_parts();
-    let test_collector = TestRunnerT::build_test_collector(
-        &client,
-        test_collector_config,
-        &directories,
-        &log,
-        metadata,
-    )?;
-    run_app_with_ui_multithreaded(
-        log_destination,
-        parent_config.timeout.map(Timeout::new),
-        ui,
-        test_collector,
-        list_tests,
-        parent_config.repeat,
-        parent_config.stop_after,
-        UseColor::from(stdout_tty.as_bool()),
-        log,
-        &client,
-        TestRunnerT::TEST_METADATA_FILE_NAME,
-        TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        config,
         directories,
         extra_options,
+        list_tests,
+        log,
+        log_destination,
+        metadata,
+        stdout_tty,
+        ui,
     )
 }
 
@@ -297,41 +269,17 @@ pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
     let log_destination = LogDestination::default();
     let log = logger_builder.build(log_destination.clone());
 
-    let (parent_config, collector_config) = config.into_parts();
-    let client = Client::new(
+    main_part_2::<TestRunnerT>(
         bg_proc,
-        parent_config.broker,
-        &directories.project,
-        &directories.state,
-        parent_config.container_image_depot_root,
-        &directories.cache,
-        parent_config.cache_size,
-        parent_config.inline_limit,
-        parent_config.slots,
-        parent_config.accept_invalid_remote_container_tls_certs,
-        parent_config.artifact_transfer_strategy,
-        log.clone(),
-    )?;
-
-    let (extra_options, _) = extra_options.into_parts();
-    let test_collector =
-        TestRunnerT::build_test_collector(&client, collector_config, &directories, &log, metadata)?;
-
-    run_app_with_ui_multithreaded(
-        log_destination,
-        parent_config.timeout.map(Timeout::new),
-        ui,
-        test_collector,
-        list_tests,
-        parent_config.repeat,
-        parent_config.stop_after,
-        UseColor::from(false),
-        log,
-        &client,
-        TestRunnerT::TEST_METADATA_FILE_NAME,
-        TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        config,
         directories,
         extra_options,
+        list_tests,
+        log,
+        log_destination,
+        metadata,
+        StdoutTty::from(false),
+        ui,
     )
 }
 
@@ -346,9 +294,6 @@ pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
     project_dir: &Root<ProjectDir>,
     metadata: TestRunnerT::Metadata,
 ) -> Result<ExitCode> {
-    let log_destination = LogDestination::default();
-    let log = logger.build(log_destination.clone());
-
     let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
         ListingMode::None => false.into(),
         ListingMode::Tests => true.into(),
@@ -356,7 +301,7 @@ pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
             unreachable!("maelstrom-pytest doesn't use this");
         }
         ListingMode::OtherWithUi => {
-            unreachable!("cargo-maelstrom doesn't use this");
+            unreachable!("maelstrom-pytest doesn't use this");
         }
     };
 
@@ -374,41 +319,20 @@ pub fn main_for_test_for_pytest<TestRunnerT: TestRunner>(
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
-    let (parent_config, collector_config) = config.into_parts();
-    let client = Client::new(
+    let log_destination = LogDestination::default();
+    let log = logger.build(log_destination.clone());
+
+    main_part_2::<TestRunnerT>(
         bg_proc,
-        parent_config.broker,
-        &directories.project,
-        &directories.state,
-        parent_config.container_image_depot_root,
-        &directories.cache,
-        parent_config.cache_size,
-        parent_config.inline_limit,
-        parent_config.slots,
-        parent_config.accept_invalid_remote_container_tls_certs,
-        parent_config.artifact_transfer_strategy,
-        log.clone(),
-    )?;
-
-    let (extra_options, _) = extra_options.into_parts();
-    let test_collector =
-        TestRunnerT::build_test_collector(&client, collector_config, &directories, &log, metadata)?;
-
-    run_app_with_ui_multithreaded(
-        log_destination,
-        parent_config.timeout.map(Timeout::new),
-        ui,
-        test_collector,
-        list_tests,
-        parent_config.repeat,
-        parent_config.stop_after,
-        UseColor::from(stdout_tty.as_bool()),
-        log,
-        &client,
-        TestRunnerT::TEST_METADATA_FILE_NAME,
-        TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        config,
         directories,
         extra_options,
+        list_tests,
+        log,
+        log_destination,
+        metadata,
+        stdout_tty,
+        ui,
     )
 }
 
@@ -417,12 +341,23 @@ pub fn main_for_test_for_go<TestRunnerT: TestRunner>(
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
-    logger: LoggerBuilder,
+    logger_builder: LoggerBuilder,
     stdout_tty: StdoutTty,
     ui: impl Ui,
     project: &Root<ProjectDir>,
     metadata: TestRunnerT::Metadata,
 ) -> Result<ExitCode> {
+    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
+        ListingMode::None => false.into(),
+        ListingMode::Tests => true.into(),
+        ListingMode::OtherWithoutUi => {
+            return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
+        }
+        ListingMode::OtherWithUi => {
+            unreachable!("go-test tests don't use this");
+        }
+    };
+
     let project = project.to_owned();
     let hidden = project.join::<()>(".maelstrom-go-test");
     let state = hidden.join("state");
@@ -439,31 +374,35 @@ pub fn main_for_test_for_go<TestRunnerT: TestRunner>(
     Fs.create_dir_all(&directories.cache)?;
 
     let log_destination = LogDestination::default();
-    let log = logger.build(log_destination.clone());
+    let log = logger_builder.build(log_destination.clone());
 
-    let parent_config = config.as_ref();
-    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
-        ListingMode::None => false.into(),
-        ListingMode::Tests => true.into(),
-        ListingMode::OtherWithoutUi => {
-            return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
-        }
-        ListingMode::OtherWithUi => {
-            let ui = ui::factory(
-                parent_config.ui,
-                IsListing::from(true),
-                StdoutTty::from(io::stdout().is_terminal()),
-            )?;
-            let log_destination = LogDestination::default();
-            let log_builder = LoggerBuilder::DefaultLogger(parent_config.log_level);
-            let log = log_builder.build(log_destination.clone());
-            let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log);
-            let result = TestRunnerT::execute_listing_with_ui(&config, &extra_options, ui_sender);
-            ui_handle.join()?;
-            return result;
-        }
-    };
+    main_part_2::<TestRunnerT>(
+        bg_proc,
+        config,
+        directories,
+        extra_options,
+        list_tests,
+        log,
+        log_destination,
+        metadata,
+        stdout_tty,
+        ui,
+    )
+}
 
+#[allow(clippy::too_many_arguments)]
+fn main_part_2<TestRunnerT: TestRunner>(
+    bg_proc: ClientBgProcess,
+    config: TestRunnerT::Config,
+    directories: Directories,
+    extra_options: TestRunnerT::ExtraCommandLineOptions,
+    list_tests: ListTests,
+    log: slog::Logger,
+    log_destination: LogDestination,
+    metadata: TestRunnerT::Metadata,
+    stdout_tty: StdoutTty,
+    ui: impl Ui,
+) -> Result<ExitCode> {
     let (parent_config, test_collector_config) = config.into_parts();
     let client = Client::new(
         bg_proc,
