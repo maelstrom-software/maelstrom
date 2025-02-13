@@ -812,31 +812,31 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = ();
 
-    fn get_base_directories_prefix(&self) -> &'static str {
+    fn get_base_directories_prefix() -> &'static str {
         "maelstrom/maelstrom-go-test"
     }
 
-    fn get_environment_variable_prefix(&self) -> &'static str {
+    fn get_environment_variable_prefix() -> &'static str {
         "MAELSTROM_GO_TEST"
     }
 
-    fn get_test_metadata_file_name(&self) -> &str {
+    fn get_test_metadata_file_name() -> &'static str {
         crate::TEST_METADATA_FILE_NAME
     }
 
-    fn get_test_metadata_default_contents(&self) -> &str {
+    fn get_test_metadata_default_contents() -> &'static str {
         crate::DEFAULT_TEST_METADATA_CONTENTS
     }
 
-    fn get_project_directory(&self, _: &Config) -> Result<Utf8PathBuf> {
+    fn get_project_directory(_: &Config) -> Result<Utf8PathBuf> {
         Ok(".".into())
     }
 
-    fn is_list(&self, extra_options: &ExtraCommandLineOptions) -> bool {
+    fn is_list(extra_options: &ExtraCommandLineOptions) -> bool {
         extra_options.list.any()
     }
 
-    fn get_directories_and_metadata(&self, _config: &Config) -> Result<(Directories, ())> {
+    fn get_directories_and_metadata(_config: &Config) -> Result<(Directories, ())> {
         let project = RootBuf::new(go_test::get_module_root()?);
         let hidden = project.join::<HiddenDir>(".maelstrom-go-test");
         let cache = hidden.join("cache");
@@ -854,13 +854,12 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     }
 
     fn execute_alternative_main(
-        &self,
         config: &Config,
         extra_options: &ExtraCommandLineOptions,
         start_ui: impl FnOnce() -> (UiHandle, UiSender),
     ) -> Option<Result<ExitCode>> {
         extra_options.list.packages.then(|| {
-            let (directories, _) = self.get_directories_and_metadata(config)?;
+            let (directories, _) = Self::get_directories_and_metadata(config)?;
 
             Fs.create_dir_all(&directories.cache)?;
 
@@ -881,7 +880,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     }
 
     fn main(
-        &self,
         config: Config,
         extra_options: ExtraCommandLineOptions,
         bg_proc: ClientBgProcess,
@@ -895,11 +893,11 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             let log = logger.build(logging_output.clone());
             ui.take().unwrap().start_ui_thread(logging_output, log)
         };
-        if let Some(result) = self.execute_alternative_main(&config, &extra_options, start_ui) {
+        if let Some(result) = Self::execute_alternative_main(&config, &extra_options, start_ui) {
             return result;
         }
 
-        let (directories, metadata) = self.get_directories_and_metadata(&config)?;
+        let (directories, metadata) = Self::get_directories_and_metadata(&config)?;
 
         Fs.create_dir_all(&directories.state)?;
         Fs.create_dir_all(&directories.cache)?;

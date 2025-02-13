@@ -160,26 +160,22 @@ pub trait TestRunner {
     type ExtraCommandLineOptions: Args + AsRef<config::ExtraCommandLineOptions>;
     type Metadata;
 
-    fn get_base_directories_prefix(&self) -> &'static str;
-    fn get_environment_variable_prefix(&self) -> &'static str;
-    fn get_test_metadata_file_name(&self) -> &str;
-    fn get_test_metadata_default_contents(&self) -> &str;
-    fn get_project_directory(&self, config: &Self::Config) -> Result<Utf8PathBuf>;
-    fn is_list(&self, extra_options: &Self::ExtraCommandLineOptions) -> bool;
+    fn get_base_directories_prefix() -> &'static str;
+    fn get_environment_variable_prefix() -> &'static str;
+    fn get_test_metadata_file_name() -> &'static str;
+    fn get_test_metadata_default_contents() -> &'static str;
+    fn get_project_directory(config: &Self::Config) -> Result<Utf8PathBuf>;
+    fn is_list(extra_options: &Self::ExtraCommandLineOptions) -> bool;
     fn execute_alternative_main(
-        &self,
         _config: &Self::Config,
         _extra_options: &Self::ExtraCommandLineOptions,
         _start_ui: impl FnOnce() -> (UiHandle, UiSender),
     ) -> Option<Result<ExitCode>> {
         None
     }
-    fn get_directories_and_metadata(
-        &self,
-        config: &Self::Config,
-    ) -> Result<(Directories, Self::Metadata)>;
+    fn get_directories_and_metadata(config: &Self::Config)
+        -> Result<(Directories, Self::Metadata)>;
     fn main(
-        &self,
         config: Self::Config,
         extra_options: Self::ExtraCommandLineOptions,
         bg_proc: ClientBgProcess,
@@ -197,7 +193,7 @@ pub trait TestRunner {
 pub fn main<ArgsT, ArgsIntoIterT, TestRunnerT>(
     command: Command,
     args: ArgsIntoIterT,
-    test_runner: TestRunnerT,
+    _test_runner: TestRunnerT,
 ) -> Result<ExitCode>
 where
     ArgsIntoIterT: IntoIterator<Item = ArgsT>,
@@ -207,8 +203,8 @@ where
     let (config, extra_options): (TestRunnerT::Config, TestRunnerT::ExtraCommandLineOptions) =
         maelstrom_util::config::new_config_with_extra_from_args(
             command,
-            test_runner.get_base_directories_prefix(),
-            test_runner.get_environment_variable_prefix(),
+            TestRunnerT::get_base_directories_prefix(),
+            TestRunnerT::get_environment_variable_prefix(),
             args,
         )?;
 
@@ -216,9 +212,9 @@ where
         return alternative_mains::client_bg_proc();
     } else if extra_options.as_ref().init {
         return alternative_mains::init(
-            &test_runner.get_project_directory(&config)?,
-            test_runner.get_test_metadata_file_name(),
-            test_runner.get_test_metadata_default_contents(),
+            &TestRunnerT::get_project_directory(&config)?,
+            TestRunnerT::get_test_metadata_file_name(),
+            TestRunnerT::get_test_metadata_default_contents(),
         );
     }
 
@@ -228,8 +224,8 @@ where
     let stdout_is_tty = io::stdout().is_terminal();
     let ui = ui::factory(
         config_parent.ui,
-        test_runner.is_list(&extra_options),
+        TestRunnerT::is_list(&extra_options),
         stdout_is_tty,
     )?;
-    test_runner.main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
+    TestRunnerT::main(config, extra_options, bg_proc, logger, stdout_is_tty, ui)
 }

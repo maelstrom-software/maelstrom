@@ -531,23 +531,23 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     type ExtraCommandLineOptions = ExtraCommandLineOptions;
     type Metadata = CargoMetadata;
 
-    fn get_base_directories_prefix(&self) -> &'static str {
+    fn get_base_directories_prefix() -> &'static str {
         "maelstrom/cargo-maelstrom"
     }
 
-    fn get_environment_variable_prefix(&self) -> &'static str {
+    fn get_environment_variable_prefix() -> &'static str {
         "CARGO_MAELSTROM"
     }
 
-    fn get_test_metadata_file_name(&self) -> &str {
+    fn get_test_metadata_file_name() -> &'static str {
         crate::TEST_METADATA_FILE_NAME
     }
 
-    fn get_test_metadata_default_contents(&self) -> &str {
+    fn get_test_metadata_default_contents() -> &'static str {
         crate::DEFAULT_TEST_METADATA_CONTENTS
     }
 
-    fn get_project_directory(&self, config: &Config) -> Result<Utf8PathBuf> {
+    fn get_project_directory(config: &Config) -> Result<Utf8PathBuf> {
         Ok(cargo::read_metadata(
             &config.cargo_feature_selection_options,
             &config.cargo_manifest_options,
@@ -555,14 +555,11 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
         .workspace_root)
     }
 
-    fn is_list(&self, extra_options: &ExtraCommandLineOptions) -> bool {
+    fn is_list(extra_options: &ExtraCommandLineOptions) -> bool {
         extra_options.list.any()
     }
 
-    fn get_directories_and_metadata(
-        &self,
-        config: &Config,
-    ) -> Result<(Directories, CargoMetadata)> {
+    fn get_directories_and_metadata(config: &Config) -> Result<(Directories, CargoMetadata)> {
         let cargo_metadata = Self::get_cargo_metadata(config)?;
         let project = Root::new(cargo_metadata.workspace_root.as_std_path()).to_owned();
         let build = Root::new(cargo_metadata.target_directory.as_std_path()).to_owned();
@@ -581,7 +578,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     }
 
     fn execute_alternative_main(
-        &self,
         config: &Config,
         extra_options: &ExtraCommandLineOptions,
         _start_ui: impl FnOnce() -> (UiHandle, UiSender),
@@ -610,7 +606,6 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
     }
 
     fn main(
-        &self,
         config: Config,
         extra_options: ExtraCommandLineOptions,
         bg_proc: ClientBgProcess,
@@ -624,11 +619,11 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             let log = logger.build(logging_output.clone());
             ui.take().unwrap().start_ui_thread(logging_output, log)
         };
-        if let Some(result) = self.execute_alternative_main(&config, &extra_options, start_ui) {
+        if let Some(result) = Self::execute_alternative_main(&config, &extra_options, start_ui) {
             return result;
         }
 
-        let (directories, metadata) = self.get_directories_and_metadata(&config)?;
+        let (directories, metadata) = Self::get_directories_and_metadata(&config)?;
 
         Fs.create_dir_all(&directories.state)?;
         Fs.create_dir_all(&directories.cache)?;

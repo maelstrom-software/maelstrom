@@ -81,8 +81,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     let bg_proc = spawn_bg_proc();
 
     let ui = ui::SimpleUi::new(false, false, term.clone());
-    cargo_maelstrom::TestRunner
-        .main(config, extra_options, bg_proc, logger, false, Box::new(ui))
+    cargo_maelstrom::TestRunner::main(config, extra_options, bg_proc, logger, false, Box::new(ui))
         .unwrap();
 
     term.contents()
