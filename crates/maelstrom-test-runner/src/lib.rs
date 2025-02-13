@@ -171,7 +171,10 @@ pub trait TestRunner {
 /// underlying function.
 ///
 /// Mostly it deals with the `--init` and `--client-bg-proc` flags
-pub fn main<TestRunnerT: TestRunner>(command: Command, args: Vec<String>) -> Result<ExitCode> {
+pub fn main<TestRunnerT: TestRunner>(
+    command: Command,
+    args: impl IntoIterator<Item = String>,
+) -> Result<ExitCode> {
     let (config, extra_options): (TestRunnerT::Config, TestRunnerT::ExtraCommandLineOptions) =
         maelstrom_util::config::new_config_with_extra_from_args(
             command,
