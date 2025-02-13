@@ -275,3 +275,67 @@ where
         extra_options,
     )
 }
+
+pub fn main_for_test_for_cargo<TestRunnerT: TestRunner>(
+    bg_proc: ClientBgProcess,
+    config: TestRunnerT::Config,
+    extra_options: TestRunnerT::ExtraCommandLineOptions,
+    logger_builder: LoggerBuilder,
+    ui: impl Ui,
+) -> Result<ExitCode> {
+    let list_tests: ListTests = match TestRunnerT::get_listing_mode(&extra_options) {
+        ListingMode::None => false.into(),
+        ListingMode::Tests => true.into(),
+        ListingMode::OtherWithoutUi => {
+            return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
+        }
+        ListingMode::OtherWithUi => {
+            unreachable!("cargo-maelstrom doesn't use this");
+        }
+    };
+
+    let (metadata, directories) = TestRunnerT::get_metadata_and_directories(&config)?;
+
+    Fs.create_dir_all(&directories.state)?;
+    Fs.create_dir_all(&directories.cache)?;
+
+    let log_destination = LogDestination::default();
+    let log = logger_builder.build(log_destination.clone());
+
+    let (parent_config, collector_config) = config.into_parts();
+    let client = Client::new(
+        bg_proc,
+        parent_config.broker,
+        &directories.project,
+        &directories.state,
+        parent_config.container_image_depot_root,
+        &directories.cache,
+        parent_config.cache_size,
+        parent_config.inline_limit,
+        parent_config.slots,
+        parent_config.accept_invalid_remote_container_tls_certs,
+        parent_config.artifact_transfer_strategy,
+        log.clone(),
+    )?;
+
+    let (extra_options, _) = extra_options.into_parts();
+    let test_collector =
+        TestRunnerT::build_test_collector(&client, collector_config, &directories, &log, metadata)?;
+
+    run_app_with_ui_multithreaded(
+        log_destination,
+        parent_config.timeout.map(Timeout::new),
+        ui,
+        test_collector,
+        list_tests,
+        parent_config.repeat,
+        parent_config.stop_after,
+        UseColor::from(false),
+        log,
+        &client,
+        TestRunnerT::TEST_METADATA_FILE_NAME,
+        TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+        directories,
+        extra_options,
+    )
+}

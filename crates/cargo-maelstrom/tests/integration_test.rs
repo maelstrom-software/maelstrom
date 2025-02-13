@@ -5,14 +5,10 @@ use cargo_maelstrom::{
     LoggerBuilder,
 };
 use indicatif::InMemoryTerm;
-use maelstrom_base::Timeout;
-use maelstrom_client::{Client, ClientBgProcess};
+use maelstrom_client::ClientBgProcess;
 use maelstrom_test_runner::{
-    config::IntoParts as _,
-    log::LogDestination,
-    run_app_with_ui_multithreaded, ui,
-    util::{IsListing, ListTests, StdoutTty, UseColor},
-    ListingMode, TestRunner as _,
+    ui,
+    util::{IsListing, StdoutTty},
 };
 use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
@@ -86,79 +82,19 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     let term = InMemoryTerm::new(50, 50);
 
     let log = maelstrom_util::log::test_logger();
-    let logger = LoggerBuilder::GivenLogger(log.clone());
+    let logger_builder = LoggerBuilder::GivenLogger(log.clone());
 
     let bg_proc = spawn_bg_proc();
 
     let ui = ui::SimpleUi::new(IsListing::from(false), StdoutTty::from(false), term.clone());
 
-    (|| {
-        let list_tests: ListTests =
-            match cargo_maelstrom::TestRunner::get_listing_mode(&extra_options) {
-                ListingMode::None => false.into(),
-                ListingMode::Tests => true.into(),
-                ListingMode::OtherWithoutUi => {
-                    return cargo_maelstrom::TestRunner::execute_listing_without_ui(
-                        &config,
-                        &extra_options,
-                    );
-                }
-                ListingMode::OtherWithUi => {
-                    unreachable!("cargo-maelstrom doesn't use this");
-                }
-            };
-
-        let (metadata, directories) =
-            cargo_maelstrom::TestRunner::get_metadata_and_directories(&config)?;
-
-        Fs.create_dir_all(&directories.state)?;
-        Fs.create_dir_all(&directories.cache)?;
-
-        let log_destination = LogDestination::default();
-        let log = logger.build(log_destination.clone());
-
-        let (parent_config, collector_config) = config.into_parts();
-        let client = Client::new(
-            bg_proc,
-            parent_config.broker,
-            &directories.project,
-            &directories.state,
-            parent_config.container_image_depot_root,
-            &directories.cache,
-            parent_config.cache_size,
-            parent_config.inline_limit,
-            parent_config.slots,
-            parent_config.accept_invalid_remote_container_tls_certs,
-            parent_config.artifact_transfer_strategy,
-            log.clone(),
-        )?;
-
-        let (extra_options, _) = extra_options.into_parts();
-        let test_collector = cargo_maelstrom::TestRunner::build_test_collector(
-            &client,
-            collector_config,
-            &directories,
-            &log,
-            metadata,
-        )?;
-
-        run_app_with_ui_multithreaded(
-            log_destination,
-            parent_config.timeout.map(Timeout::new),
-            ui,
-            test_collector,
-            list_tests,
-            parent_config.repeat,
-            parent_config.stop_after,
-            UseColor::from(false),
-            log,
-            &client,
-            cargo_maelstrom::TestRunner::TEST_METADATA_FILE_NAME,
-            cargo_maelstrom::TestRunner::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-            directories,
-            extra_options,
-        )
-    })()
+    maelstrom_test_runner::main_for_test_for_cargo::<cargo_maelstrom::TestRunner>(
+        bg_proc,
+        config,
+        extra_options,
+        logger_builder,
+        ui,
+    )
     .unwrap();
 
     term.contents()
