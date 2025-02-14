@@ -257,6 +257,7 @@ fn main_inner<TestRunnerT: TestRunner>(
 ) -> Result<ExitCode> {
     let parent_config = config.as_ref();
 
+    // Deal with other test listings.
     let list_tests = match TestRunnerT::get_listing_mode(&extra_options) {
         ListingMode::None => ListTests::from(false),
         ListingMode::Tests => ListTests::from(true),
@@ -279,7 +280,21 @@ fn main_inner<TestRunnerT: TestRunner>(
         }
     };
 
+    // From this point on, we're going to be building all tests and either running or listing them.
+
     let client_bg_process = client_bg_process_factory(parent_config.log_level)?;
+
+    let (metadata, project_dir) = get_metadata_and_project_directory(&config)?;
+    let directories = TestRunnerT::get_directories(&metadata, project_dir);
+    let (parent_config, test_collector_config) = config.into_parts();
+    let (extra_options, _) = extra_options.into_parts();
+
+    Fs.create_dir_all(&directories.state)?;
+    Fs.create_dir_all(&directories.cache)?;
+
+    let logger_builder = logger_builder_builder(parent_config.log_level);
+    let log_destination = LogDestination::default();
+    let log = logger_builder.build(log_destination.clone());
 
     let ui = ui_factory(
         parent_config.ui,
@@ -287,19 +302,6 @@ fn main_inner<TestRunnerT: TestRunner>(
         stdout_tty,
     )?;
 
-    let (metadata, project_dir) = get_metadata_and_project_directory(&config)?;
-
-    let logger_builder = logger_builder_builder(parent_config.log_level);
-
-    let directories = TestRunnerT::get_directories(&metadata, project_dir);
-
-    Fs.create_dir_all(&directories.state)?;
-    Fs.create_dir_all(&directories.cache)?;
-
-    let log_destination = LogDestination::default();
-    let log = logger_builder.build(log_destination.clone());
-
-    let (parent_config, test_collector_config) = config.into_parts();
     let client = Client::new(
         client_bg_process,
         parent_config.broker,
@@ -315,7 +317,6 @@ fn main_inner<TestRunnerT: TestRunner>(
         log.clone(),
     )?;
 
-    let (extra_options, _) = extra_options.into_parts();
     let test_collector = TestRunnerT::build_test_collector(
         &client,
         test_collector_config,
@@ -324,24 +325,21 @@ fn main_inner<TestRunnerT: TestRunner>(
         metadata,
     )?;
 
-    let timeout_override = parent_config.timeout.map(Timeout::new);
-    let repeat = parent_config.repeat;
-    let stop_after = parent_config.stop_after;
-    let use_color = UseColor::from(stdout_tty.as_bool());
-    let client = &client;
-    let test_metadata_file_name = TestRunnerT::TEST_METADATA_FILE_NAME;
-    let test_metadata_default_contents = TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS;
-
     let fs = Fs::new();
 
     let metadata_template_variables = test_collector.get_template_variables()?;
-    let metadata_path = directories.project.join::<()>(test_metadata_file_name);
+    let metadata_path = directories
+        .project
+        .join::<()>(TestRunnerT::TEST_METADATA_FILE_NAME);
     let metadata_store = if let Some(contents) = fs.read_to_string_if_exists(&metadata_path)? {
         MetadataStore::load(&contents, &metadata_template_variables)
             .with_context(|| format!("parsing metadata file {}", metadata_path.display()))?
     } else {
-        MetadataStore::load(test_metadata_default_contents, &metadata_template_variables)
-            .expect("embedded default test metadata TOML to be valid")
+        MetadataStore::load(
+            TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
+            &metadata_template_variables,
+        )
+        .expect("embedded default test metadata TOML to be valid")
     };
 
     // TODO: There are a few things wrong with this from an efficiency point of view.
@@ -384,9 +382,8 @@ fn main_inner<TestRunnerT: TestRunner>(
         ])
         .collect();
 
-    let (ui_handle, ui) = ui.start_ui_thread(log_destination, log.clone());
-
-    let main_res = run_app_in_loop(
+    let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log.clone());
+    let result = main_with_ui_thread(
         &test_collector,
         log,
         test_db_store,
@@ -394,21 +391,19 @@ fn main_inner<TestRunnerT: TestRunner>(
         TestingOptions {
             test_metadata: metadata_store,
             filter,
-            timeout_override,
-            use_color,
-            repeat,
-            stop_after,
+            timeout_override: parent_config.timeout.map(Timeout::new),
+            use_color: UseColor::from(stdout_tty.as_bool()),
+            repeat: parent_config.repeat,
+            stop_after: parent_config.stop_after,
             list_tests,
         },
         extra_options.watch,
         watch_exclude_paths,
-        ui,
-        client,
+        ui_sender,
+        &client,
     );
     ui_handle.join()?;
-
-    let exit_code = main_res?;
-    Ok(exit_code)
+    result
 }
 
 fn test_filter_compile<TestCollectorT: TestCollector>(
@@ -422,7 +417,7 @@ fn test_filter_compile<TestCollectorT: TestCollector>(
 const MAX_NUM_BACKGROUND_THREADS: isize = 200;
 
 #[allow(clippy::too_many_arguments)]
-fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
+fn main_with_ui_thread<TestCollectorT: TestCollector + Sync>(
     test_collector: &TestCollectorT,
     log: slog::Logger,
     test_db_store: TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
@@ -430,11 +425,11 @@ fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
     options: TestingOptions<TestCollectorT::TestFilter>,
     watch: bool,
     watch_exclude_paths: Vec<PathBuf>,
-    ui: UiSender,
+    ui_sender: UiSender,
     client: &Client,
 ) -> Result<ExitCode> {
     // This is where the pytest runner builds pip packages.
-    test_collector.build_test_layers(options.test_metadata.get_all_images(), &ui)?;
+    test_collector.build_test_layers(options.test_metadata.get_all_images(), &ui_sender)?;
 
     let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
     let done = Event::new();
@@ -462,14 +457,14 @@ fn run_app_in_loop<TestCollectorT: TestCollector + Sync>(
                     &options,
                     scope,
                     &sem,
-                    ui.clone(),
+                    ui_sender.clone(),
                     client,
                 )?;
 
                 if watch {
                     client.restart()?;
 
-                    ui.send(UiMessage::UpdateEnqueueStatus(
+                    ui_sender.send(UiMessage::UpdateEnqueueStatus(
                         "waiting for changes...".into(),
                     ));
                     watcher.wait_for_changes();
