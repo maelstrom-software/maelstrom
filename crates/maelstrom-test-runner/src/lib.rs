@@ -397,7 +397,8 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
 
     let test_db_store = TestDbStore::new(fs, &directories.state);
 
-    // XXX should move up, shouldn't depend on TestCollector.
+    // XXX Ideally, we should be able to compile these once, before looping. However, with the way
+    // the typing is right now, that's hard to do.
     let filter = test_filter_compile(
         &test_collector,
         &extra_options.include,
