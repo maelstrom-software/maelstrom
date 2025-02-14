@@ -87,8 +87,9 @@ struct ClientBgHandle(Pid);
 
 impl ClientBgHandle {
     fn wait(&mut self) -> Result<()> {
-        linux::waitpid(self.0).map_err(|e| anyhow!("waitpid failed: {e}"))?;
-        Ok(())
+        linux::waitpid(self.0)
+            .map_err(|e| anyhow!("waitpid failed: {e}"))
+            .map(drop)
     }
 }
 
@@ -131,9 +132,9 @@ impl ClientBgProcess {
             })
         } else {
             drop(sock1);
-            maelstrom_client_process::main_for_fork(sock2, log_level)
+            let exit_code = maelstrom_client_process::main_for_fork(sock2, log_level)
                 .context("client background process")?;
-            process::exit(0);
+            process::exit(exit_code.into());
         }
     }
 

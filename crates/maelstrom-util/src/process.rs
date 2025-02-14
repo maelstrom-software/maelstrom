@@ -60,6 +60,16 @@ impl From<ExitCode> for process::ExitCode {
     }
 }
 
+impl From<ExitCode> for i32 {
+    fn from(val: ExitCode) -> i32 {
+        match val.0 {
+            ExitCodeInner::Success => 0,
+            ExitCodeInner::Failure => 1,
+            ExitCodeInner::U8(val) => val.get().into(),
+        }
+    }
+}
+
 pub struct ExitCodeAccumulator(Mutex<ExitCode>);
 
 impl Default for ExitCodeAccumulator {

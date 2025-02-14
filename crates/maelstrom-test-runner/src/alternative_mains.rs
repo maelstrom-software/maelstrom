@@ -3,8 +3,7 @@ use maelstrom_client::ProjectDir;
 use maelstrom_util::{fs::Fs, process::ExitCode, root::Root};
 
 pub fn client_bg_proc() -> Result<ExitCode> {
-    maelstrom_client_process::main_for_spawn()?;
-    Ok(ExitCode::from(0))
+    maelstrom_client_process::main_for_spawn()
 }
 
 /// Write out a default config file to `<project-dir>/<TEST_TOML>` if nothing exists there already.
