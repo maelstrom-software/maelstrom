@@ -115,38 +115,44 @@ impl DigestRepository {
     }
 }
 
-#[tokio::test]
-async fn digest_repository_simple_add_get() {
-    let fs = Fs::new();
-    let tmp_dir = tempfile::tempdir().unwrap();
-    let mut repo = DigestRepository::new(tmp_dir.path());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util;
 
-    let foo_path = tmp_dir.path().join("foo.tar");
-    fs.write(&foo_path, "foo").await.unwrap();
-    let (mtime, digest) = crate::calculate_digest(&foo_path).await.unwrap();
-    repo.add(foo_path.clone(), mtime, digest.clone())
-        .await
-        .unwrap();
+    #[tokio::test]
+    async fn digest_repository_simple_add_get() {
+        let fs = Fs::new();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let mut repo = DigestRepository::new(tmp_dir.path());
 
-    assert_eq!(repo.get(&foo_path).await.unwrap(), Some(digest));
-}
+        let foo_path = tmp_dir.path().join("foo.tar");
+        fs.write(&foo_path, "foo").await.unwrap();
+        let (mtime, digest) = util::calculate_digest(&foo_path).await.unwrap();
+        repo.add(foo_path.clone(), mtime, digest.clone())
+            .await
+            .unwrap();
 
-#[tokio::test]
-async fn digest_repository_simple_add_get_after_modify() {
-    let fs = Fs::new();
-    let tmp_dir = tempfile::tempdir().unwrap();
-    let mut repo = DigestRepository::new(tmp_dir.path());
+        assert_eq!(repo.get(&foo_path).await.unwrap(), Some(digest));
+    }
 
-    let foo_path = tmp_dir.path().join("foo.tar");
-    fs.write(&foo_path, "foo").await.unwrap();
-    let (mtime, digest) = crate::calculate_digest(&foo_path).await.unwrap();
-    repo.add(foo_path.clone(), mtime, digest.clone())
-        .await
-        .unwrap();
+    #[tokio::test]
+    async fn digest_repository_simple_add_get_after_modify() {
+        let fs = Fs::new();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let mut repo = DigestRepository::new(tmp_dir.path());
 
-    // apparently depending on the file-system mtime can have up to a 10ms granularity
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    fs.write(&foo_path, "bar").await.unwrap();
+        let foo_path = tmp_dir.path().join("foo.tar");
+        fs.write(&foo_path, "foo").await.unwrap();
+        let (mtime, digest) = util::calculate_digest(&foo_path).await.unwrap();
+        repo.add(foo_path.clone(), mtime, digest.clone())
+            .await
+            .unwrap();
 
-    assert_eq!(repo.get(&foo_path).await.unwrap(), None);
+        // apparently depending on the file-system mtime can have up to a 10ms granularity
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        fs.write(&foo_path, "bar").await.unwrap();
+
+        assert_eq!(repo.get(&foo_path).await.unwrap(), None);
+    }
 }

@@ -8,41 +8,29 @@ mod progress;
 mod router;
 mod rpc;
 mod stream_wrapper;
+mod util;
 
 pub use maelstrom_util::process::clone_into_pid_and_user_namespace;
 
 use anyhow::Result;
 use futures::stream::{self, StreamExt as _};
-use maelstrom_base::Sha256Digest;
 use maelstrom_client_base::proto::client_process_server::ClientProcessServer;
 use maelstrom_linux as linux;
-use maelstrom_util::{async_fs::Fs, config::common::LogLevel, io::Sha256Stream, process::ExitCode};
+use maelstrom_util::{config::common::LogLevel, process::ExitCode};
 use rpc::{ArcHandler, Handler};
+use slog::{info, Logger};
 use std::{
     error,
     os::unix::net::{UnixListener as StdUnixListener, UnixStream as StdUnixStream},
-    path::Path,
     str,
-    time::SystemTime,
 };
 use stream_wrapper::StreamWrapper;
-use tokio::{net::UnixStream as TokioUnixStream, io};
+use tokio::net::UnixStream as TokioUnixStream;
 use tonic::transport::Server;
-use slog::{Logger, info};
 
 // This hack makes some macros in maelstrom_test work correctly
 #[cfg(test)]
 extern crate maelstrom_client_base as maelstrom_client;
-
-async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
-    let fs = Fs::new();
-    let mut f = fs.open_file(path).await?;
-    let mut hasher = Sha256Stream::new(io::sink());
-    io::copy(&mut f, &mut hasher).await?;
-    let mtime = f.metadata().await?.modified()?;
-
-    Ok((mtime, hasher.finalize().1))
-}
 
 type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
@@ -91,11 +79,7 @@ pub fn main_for_spawn() -> Result<ExitCode> {
         let (sock, addr) = StdUnixListener::from(sock).accept()?;
         info!(log, "got connection"; "address" => ?addr);
 
-        let result = main_after_clone(
-            sock,
-            Some(log.clone()),
-            LogLevel::Debug,
-        );
+        let result = main_after_clone(sock, Some(log.clone()), LogLevel::Debug);
         info!(log, "shutting down"; "result" => ?result);
         result
     })

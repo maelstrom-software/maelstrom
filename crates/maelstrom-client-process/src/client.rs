@@ -3,6 +3,7 @@ mod state_machine;
 
 use crate::{
     artifact_pusher, digest_repo::DigestRepository, preparer, progress::ProgressTracker, router,
+    util,
 };
 use anyhow::{anyhow, Context as _, Error, Result};
 use async_trait::async_trait;
@@ -90,7 +91,7 @@ impl Uploader {
         let digest = if let Some(digest) = locked.digest_repo.get(&path).await? {
             digest
         } else {
-            let (mtime, digest) = crate::calculate_digest(&path).await?;
+            let (mtime, digest) = util::calculate_digest(&path).await?;
             locked
                 .digest_repo
                 .add(path.clone(), mtime, digest.clone())
