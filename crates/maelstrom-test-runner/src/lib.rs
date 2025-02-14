@@ -271,11 +271,7 @@ fn main_inner<TestRunnerT: TestRunner>(
             return TestRunnerT::execute_listing_without_ui(&config, &extra_options);
         }
         ListingMode::OtherWithUi => {
-            let ui = ui_factory(
-                parent_config.ui,
-                IsListing::from(true),
-                StdoutTty::from(io::stdout().is_terminal()),
-            )?;
+            let ui = ui_factory(parent_config.ui, IsListing::from(true), stdout_tty)?;
             let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log);
             let result = TestRunnerT::execute_listing_with_ui(&config, &extra_options, ui_sender);
             ui_handle.join()?;
@@ -287,11 +283,8 @@ fn main_inner<TestRunnerT: TestRunner>(
 
     let client_bg_process = client_bg_process_factory(parent_config.log_level)?;
 
-    let ui = ui_factory(
-        parent_config.ui,
-        IsListing::from(list_tests.as_bool()),
-        stdout_tty,
-    )?;
+    let is_listing = IsListing::from(list_tests.as_bool());
+    let ui = ui_factory(parent_config.ui, is_listing, stdout_tty)?;
     let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log.clone());
 
     let result = main_with_ui_thread::<TestRunnerT>(
