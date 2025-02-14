@@ -29,7 +29,7 @@ use std::{
     io::{BufRead as _, BufReader, Read as _},
     net::Shutdown,
     os::linux::net::SocketAddrExt as _,
-    os::unix::net::{SocketAddr, UnixListener, UnixStream as StdUnixStream},
+    os::unix::net::{SocketAddr, UnixStream as StdUnixStream},
     pin::Pin,
     process,
     process::{Command, Stdio},
@@ -437,27 +437,4 @@ impl Client {
         self.send_start()?;
         Ok(())
     }
-}
-
-pub fn bg_proc_main() -> Result<()> {
-    maelstrom_client_process::clone_into_pid_and_user_namespace()?;
-
-    maelstrom_util::log::run_with_logger(maelstrom_util::config::common::LogLevel::Debug, |log| {
-        let (sock, path) = linux::autobound_unix_listener(Default::default(), 1)?;
-        let name = str::from_utf8(&path[1..]).unwrap();
-
-        slog::info!(log, "listening on unix-abstract:{name}");
-        println!("{name}");
-
-        let (sock, addr) = UnixListener::from(sock).accept()?;
-        slog::info!(log, "got connection"; "address" => ?addr);
-
-        let res = maelstrom_client_process::main_after_clone(
-            sock,
-            Some(log.clone()),
-            maelstrom_util::config::common::LogLevel::Debug,
-        );
-        slog::info!(log, "shutting down"; "res" => ?res);
-        res
-    })
 }

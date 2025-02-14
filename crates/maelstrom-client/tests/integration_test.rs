@@ -24,7 +24,7 @@ fn spawn_bg_proc() -> ClientBgProcess {
     // To make us have the same dependencies as the client-process, call into the client-process
     // code in some code-path which won't execute but the compiler won't optimize out.
     if std::env::args().next().unwrap() == "not_going_to_happen" {
-        maelstrom_client::bg_proc_main().unwrap();
+        maelstrom_client_process::main_for_spawn().unwrap();
     }
 
     let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-client"));

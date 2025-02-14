@@ -1,3 +1,3 @@
 pub fn main() -> anyhow::Result<()> {
-    maelstrom_client::bg_proc_main()
+    maelstrom_client_process::main_for_spawn()
 }

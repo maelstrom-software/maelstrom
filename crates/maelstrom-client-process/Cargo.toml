@@ -25,6 +25,7 @@ maelstrom-base.workspace = true
 maelstrom-client-base.workspace = true
 maelstrom-container.workspace = true
 maelstrom-github.workspace = true
+maelstrom-linux.workspace = true
 maelstrom-util.workspace = true
 maelstrom-worker.workspace = true
 pin-project.workspace = true
