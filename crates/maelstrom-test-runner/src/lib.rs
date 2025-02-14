@@ -40,6 +40,7 @@ use std::{
     path::PathBuf,
     str,
     sync::mpsc::Receiver,
+    thread::Scope,
     time::Duration,
 };
 use std_semaphore::Semaphore;
@@ -471,6 +472,7 @@ fn run_app_once<TestCollectorT: TestCollector + Sync>(
 ) -> ControlFlow<Result<ExitCode>> {
     let done = Event::new();
     let files_changed = Event::new();
+    let semaphore = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
 
     std::thread::scope(|scope| {
         let result = (|| -> ControlFlow<Result<_>> {
@@ -489,11 +491,14 @@ fn run_app_once<TestCollectorT: TestCollector + Sync>(
             }
 
             let result = run_app_once_inner(
+                client,
+                &done,
+                scope,
+                &semaphore,
                 test_collector,
                 test_db_store,
                 testing_options,
                 ui_sender.clone(),
-                client,
             );
 
             if extra_options.watch {
@@ -517,44 +522,38 @@ fn run_app_once<TestCollectorT: TestCollector + Sync>(
     })
 }
 
-fn run_app_once_inner<TestCollectorT: TestCollector + Sync>(
-    test_collector: &TestCollectorT,
-    test_db_store: &TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
-    options: &TestingOptions<TestCollectorT::TestFilter>,
-    ui: UiSender,
-    client: &Client,
+#[allow(clippy::too_many_arguments)]
+fn run_app_once_inner<'scope, 'env, TestCollectorT: TestCollector + Sync>(
+    client: &'env Client,
+    done: &'env Event,
+    scope: &'scope Scope<'scope, 'env>,
+    semaphore: &'env Semaphore,
+    test_collector: &'env TestCollectorT,
+    test_db_store: &'env TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
+    testing_options: &'env TestingOptions<TestCollectorT::TestFilter>,
+    ui_sender: UiSender,
 ) -> Result<ExitCode> {
     let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
 
-    let done = Event::new();
-    let sem = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
-    std::thread::scope(|scope| {
-        scope.spawn(|| introspect_loop(&done, client, ui.clone()));
+    let ui_sender_clone = ui_sender.clone();
+    scope.spawn(|| introspect_loop(done, client, ui_sender_clone));
 
-        let res = (|| -> Result<_> {
-            let deps = MainAppDepsAdapter::new(
-                test_collector,
-                scope,
-                main_app_sender.clone(),
-                ui.clone(),
-                &sem,
-                client,
-            );
+    let deps = MainAppDepsAdapter::new(
+        test_collector,
+        scope,
+        main_app_sender.clone(),
+        ui_sender,
+        semaphore,
+        client,
+    );
 
-            main_app_sender.send(MainAppMessage::Start.into()).unwrap();
+    main_app_sender.send(MainAppMessage::Start.into()).unwrap();
+    let test_db = test_db_store.load()?;
+    let app = MainApp::new(&deps, testing_options, test_db);
+    let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
+    test_db_store.save(test_db)?;
 
-            let test_db = test_db_store.load()?;
-            let app = MainApp::new(&deps, options, test_db);
-
-            let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
-            test_db_store.save(test_db)?;
-
-            Ok(exit_code)
-        })();
-
-        done.set();
-        res
-    })
+    Ok(exit_code)
 }
 
 /// Grab introspect data from the client process periodically and send it to the UI. Exit when the
