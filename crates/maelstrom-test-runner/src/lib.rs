@@ -476,19 +476,24 @@ fn run_app_once<TestCollectorT: TestCollector + Sync>(
 
     std::thread::scope(|scope| {
         let result = (|| -> ControlFlow<Result<_>> {
-            let watcher = Watcher::new(
-                scope,
-                log.clone(),
-                &directories.project,
-                watch_exclude_paths,
-                &done,
-                &files_changed,
-            );
-            if extra_options.watch {
-                if let Err(err) = watcher.watch_for_changes() {
-                    return ControlFlow::Break(Err(err));
-                }
-            }
+            let watcher = if extra_options.watch {
+                Some({
+                    let watcher = Watcher::new(
+                        scope,
+                        log.clone(),
+                        &directories.project,
+                        watch_exclude_paths,
+                        &done,
+                        &files_changed,
+                    );
+                    if let Err(err) = watcher.watch_for_changes() {
+                        return ControlFlow::Break(Err(err));
+                    }
+                    watcher
+                })
+            } else {
+                None
+            };
 
             let result = run_app_once_inner(
                 client,
@@ -501,19 +506,20 @@ fn run_app_once<TestCollectorT: TestCollector + Sync>(
                 ui_sender.clone(),
             );
 
-            if extra_options.watch {
-                if let Err(err) = client.restart() {
-                    return ControlFlow::Break(Err(err));
+            match watcher {
+                None => ControlFlow::Break(result),
+                Some(watcher) => {
+                    if let Err(err) = client.restart() {
+                        return ControlFlow::Break(Err(err));
+                    }
+
+                    ui_sender.send(UiMessage::UpdateEnqueueStatus(
+                        "waiting for changes...".into(),
+                    ));
+                    watcher.wait_for_changes();
+
+                    ControlFlow::Continue(())
                 }
-
-                ui_sender.send(UiMessage::UpdateEnqueueStatus(
-                    "waiting for changes...".into(),
-                ));
-                watcher.wait_for_changes();
-
-                ControlFlow::Continue(())
-            } else {
-                ControlFlow::Break(result)
             }
         })();
 
