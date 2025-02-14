@@ -8,6 +8,10 @@ use std::io::{self, IoSlice};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::server::Connected;
 
+/// The `StreamWrapper` wraps an async socket. It passes all functions on directly to the
+/// underlying inner implementation. However it does snoop on the read side of things, and if it
+/// ever sees an EOF or an error on the read side, it sends an event to an [`EventReceiver`]. That
+/// can be used to trigger something. In our case, it will cause the top-level loop to terminate.
 #[pin_project]
 pub struct StreamWrapper<T> {
     #[pin]

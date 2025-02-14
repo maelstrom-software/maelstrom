@@ -51,6 +51,8 @@ async fn main_after_clone(
             receiver,
         )
         .await;
+
+    // Tell the local worker to shut down, and then wait for its task to complete.
     handler.client.read().await.shutdown().await;
 
     res?;
