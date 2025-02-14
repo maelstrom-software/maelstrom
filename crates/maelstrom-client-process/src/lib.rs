@@ -61,7 +61,9 @@ pub async fn main_after_clone(
     Ok(())
 }
 
-pub fn main(sock: StdUnixStream, log: Option<slog::Logger>, rpc_log_level: LogLevel) -> Result<()> {
+/// The main function for the process when invoked using the "fork" method, described at
+/// [`maelstrom_client::ClientBgProcess`].
+pub fn main_for_fork(sock: StdUnixStream, rpc_log_level: LogLevel) -> Result<()> {
     clone_into_pid_and_user_namespace()?;
-    main_after_clone(sock, log, rpc_log_level)
+    main_after_clone(sock, None, rpc_log_level)
 }

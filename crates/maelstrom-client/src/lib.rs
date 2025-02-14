@@ -24,12 +24,12 @@ use maelstrom_util::{
     root::Root,
 };
 use std::{
+    ffi::OsStr,
     future::Future,
     io::{BufRead as _, BufReader, Read as _},
     net::Shutdown,
     os::linux::net::SocketAddrExt as _,
     os::unix::net::{SocketAddr, UnixListener, UnixStream as StdUnixStream},
-    path::Path,
     pin::Pin,
     process,
     process::{Command, Stdio},
@@ -92,6 +92,27 @@ impl ClientBgHandle {
     }
 }
 
+/// A struct of this type is required to create a [`Client`]. It represents a background client
+/// process, running the code in the [`maelstrom-client-process`] crate.
+///
+/// The client library does most of its work by sending RPCs to the client process, which then
+/// connects to the broker, runs local jobs, etc.
+///
+/// There are two ways to get a client process running. The first is to fork without exec-ing. The
+/// second is to fork and then exec (also called spawn).
+///
+/// The advantage of the first approach, a fork without an exec, is that it doesn't require a
+/// separate binary be deployed along with the client library. The program using the library just
+/// packages up the client process code in its binary, and runs that in a separate process.
+///
+/// The main downside of the first approach is that the client process needs to be created while
+/// the process is single-threaded. As a result, the client code needs to create one of the
+/// [`ClientBgProcess`]es early during startup, and then pass it down to the [`Client`] when it's
+/// created.
+///
+/// The advantage of the second approach is that client processes can be created at any time, even
+/// after the process is multi-threaded. However, the downside is that the client code must know
+/// where the client process executable is located on the local file system.
 #[derive(Debug)]
 pub struct ClientBgProcess {
     handle: ClientBgHandle,
@@ -99,6 +120,8 @@ pub struct ClientBgProcess {
 }
 
 impl ClientBgProcess {
+    /// Create a new client process using the fork-without-exec approach. This must be called
+    /// before the process becomes multi-threaded.
     pub fn new_from_fork(log_level: LogLevel) -> Result<Self> {
         let (sock1, sock2) = StdUnixStream::pair()?;
         if let Some(pid) = linux::fork().context("forking client background process")? {
@@ -108,14 +131,26 @@ impl ClientBgProcess {
             })
         } else {
             drop(sock1);
-            maelstrom_client_process::main(sock2, None, log_level)
+            maelstrom_client_process::main_for_fork(sock2, log_level)
                 .context("client background process")?;
             process::exit(0);
         }
     }
 
-    pub fn new_from_bin(bin_path: &Path, args: &[&str]) -> Result<Self> {
-        let mut proc = Command::new(bin_path)
+    /// Create a new client process using the spawn approach. This can be called at any time, even
+    /// if the process is multi-threaded. However, there must be a binary with the client process
+    /// code available on the local file system.
+    ///
+    /// Any stderr from the client process is written to this process's stdout.
+    ///
+    /// This is currently only used for Maelstorm integration tests.
+    pub fn new_from_spawn<ProgramT, ArgsT, ArgT>(program: ProgramT, args: ArgsT) -> Result<Self>
+    where
+        ProgramT: AsRef<OsStr>,
+        ArgsT: IntoIterator<Item = ArgT>,
+        ArgT: AsRef<OsStr>,
+    {
+        let mut proc = Command::new(program)
             .args(args)
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())

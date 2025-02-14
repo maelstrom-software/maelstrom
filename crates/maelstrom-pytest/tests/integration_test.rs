@@ -18,7 +18,7 @@ use tempfile::tempdir;
 
 fn spawn_bg_proc() -> Result<ClientBgProcess> {
     let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-pytest"));
-    ClientBgProcess::new_from_bin(&bin_path, &["--client-bg-proc"])
+    ClientBgProcess::new_from_spawn(&bin_path, ["--client-bg-proc"])
 }
 
 fn sh(script: &str, description: &str) -> Result<()> {
