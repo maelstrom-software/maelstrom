@@ -197,7 +197,7 @@ pub fn main<TestRunnerT: TestRunner>(
         )?;
 
     if extra_options.as_ref().client_bg_proc {
-        return alternative_mains::client_bg_proc();
+        return maelstrom_client_process::main_for_spawn()
     } else if extra_options.as_ref().init {
         let (_, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
         return alternative_mains::init(
