@@ -15,8 +15,8 @@ use core::{
 use derive_more::{BitOr, BitOrAssign, Display, Into};
 use libc::{
     c_char, c_int, c_long, c_short, c_uint, c_ulong, c_void, gid_t, id_t, idtype_t, mode_t, nfds_t,
-    pid_t, pollfd, sa_family_t, siginfo_t, sigset_t, size_t, sockaddr, sockaddr_storage,
-    sockaddr_un, socklen_t, uid_t,
+    pid_t, pollfd, sa_family_t, sighandler_t, siginfo_t, sigset_t, size_t, sockaddr,
+    sockaddr_storage, sockaddr_un, socklen_t, uid_t,
 };
 
 #[cfg(any(test, feature = "std"))]
@@ -598,6 +598,14 @@ pub struct Rlimit {
 #[repr(u32)]
 pub enum RlimitResource {
     NoFile = libc::RLIMIT_NOFILE,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Sighandler(sighandler_t);
+
+impl Sighandler {
+    pub const IGN: Self = Self(libc::SIG_IGN);
+    pub const DFL: Self = Self(libc::SIG_DFL);
 }
 
 #[derive(Clone, Copy, Debug, Default, Into, PartialEq, Eq, PartialOrd, Ord)]
@@ -1572,6 +1580,10 @@ fn setsockopt_u32(sock: &impl AsFd, level: c_int, name: c_int, value: u32) -> Re
         libc::setsockopt(fd.0, level, name, value_ptr as *const c_void, value_len)
     })
     .map(drop)
+}
+
+pub fn signal(signal: Signal, handler: Sighandler) -> Sighandler {
+    Sighandler(unsafe { libc::signal(signal.0, handler.0) })
 }
 
 pub fn sigprocmask(how: SigprocmaskHow, set: Option<&SignalSet>) -> Result<SignalSet, Errno> {
