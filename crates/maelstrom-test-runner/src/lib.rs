@@ -1,7 +1,7 @@
-mod alternative_mains;
 mod app;
 pub mod config;
 mod deps;
+mod init;
 pub mod log;
 pub mod metadata;
 pub mod test_db;
@@ -197,10 +197,10 @@ pub fn main<TestRunnerT: TestRunner>(
         )?;
 
     if extra_options.as_ref().client_bg_proc {
-        return maelstrom_client_process::main_for_spawn()
+        return maelstrom_client_process::main_for_spawn();
     } else if extra_options.as_ref().init {
         let (_, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
-        return alternative_mains::init(
+        return init::main(
             &project_dir,
             TestRunnerT::TEST_METADATA_FILE_NAME,
             TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,

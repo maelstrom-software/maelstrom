@@ -3,7 +3,7 @@ use maelstrom_client::ProjectDir;
 use maelstrom_util::{fs::Fs, process::ExitCode, root::Root};
 
 /// Write out a default config file to `<project-dir>/<TEST_TOML>` if nothing exists there already.
-pub fn init(
+pub fn main(
     project_dir: &Root<ProjectDir>,
     test_metadata_file_name: &str,
     default_test_metadata_file_contents: &str,
