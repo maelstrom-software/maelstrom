@@ -200,11 +200,7 @@ pub fn main<TestRunnerT: TestRunner>(
         return maelstrom_client_process::main_for_spawn();
     } else if extra_options.as_ref().init {
         let (_, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
-        return init::main(
-            &project_dir,
-            TestRunnerT::TEST_METADATA_FILE_NAME,
-            TestRunnerT::DEFAULT_TEST_METADATA_FILE_CONTENTS,
-        );
+        return init::main::<TestRunnerT>(&project_dir);
     }
 
     main_inner::<TestRunnerT>(
