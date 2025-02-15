@@ -93,7 +93,7 @@ impl ExitCodeAccumulator {
     }
 }
 
-fn assert_single_threaded() -> Result<()> {
+pub fn assert_single_threaded() -> Result<()> {
     let fs = Fs::new();
     let num_tasks = fs
         .read_dir("/proc/self/task")?

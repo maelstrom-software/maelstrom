@@ -8,7 +8,7 @@ pub use maelstrom_client_base::{
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
-use anyhow::{anyhow, bail, Context as _, Result};
+use anyhow::{anyhow, Context as _, Result};
 use futures::stream::StreamExt as _;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
@@ -16,21 +16,22 @@ use maelstrom_client_base::{
     spec::{ContainerSpec, JobSpec},
     AddContainerRequest, IntoProtoBuf, StartRequest, TryFromProtoBuf,
 };
-use maelstrom_linux::{self as linux, Pid};
+use maelstrom_linux::{self as linux, Fd, Pid, Signal, UnixStream};
 use maelstrom_util::{
     config::common::{
         ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots,
     },
+    process::assert_single_threaded,
     root::Root,
 };
 use slog::{debug, warn, Logger};
 use std::{
-    cell::Cell,
     ffi::{OsStr, OsString},
     future::Future,
     io::{BufRead as _, BufReader, Read as _},
     net::Shutdown,
     os::{
+        fd::AsRawFd as _,
         linux::net::SocketAddrExt as _,
         unix::net::{SocketAddr, UnixStream as StdUnixStream},
     },
@@ -79,46 +80,83 @@ async fn run_dispatcher(std_sock: StdUnixStream, mut requester: RequestReceiver)
     Ok(())
 }
 
+/// A type that implements this trait is required to create a a [`Client`]. It represents a factory
+/// that can create a client process, which will run the code in [`maelstrom_client_process`].
+///
+/// The client library does most of its work by sending RPCs to the client process, which then
+/// connects to the broker, runs local jobs, etc.
+///
+/// There are two ways to start a client process. The first is to fork without exec-ing
+/// ([`ForkClientProcessFactory`]). The second is to fork and then exec (also called "spawning",
+/// [`SpawnClientProcessFactory`]).
+///
+/// The advantage of a fork without an exec is that it doesn't require a separate binary to be
+/// deployed along with the client library. The program using the library just forks a separate
+/// process, which jumps to the client process code that is packaged up in the client library.
+///
+/// The main disadvantage of a fork without an exec is that the [`ForkClientProcessFactory`] must
+/// be created while the process is single threaded. If that's not possible, the
+/// [`SpawnClientProcessFactory`] can be used instead. The disadvantage of
+/// [`SpawnClientProcessFactory`] is that it requires a client process executable to be located on
+/// the local file system.
+///
+/// The [`SpawnClientProcessFactory`] can also be used to test the stand-alone client process,
+/// which may be used by bindings for other languages.
 pub trait ClientProcessFactory {
     fn new_client_process(&self, log: &Logger) -> Result<(ClientProcessHandle, StdUnixStream)>;
 }
 
+/// Create client processes by forking without exec-ing. When a [`ForkClientProcessFactory`] is
+/// started, a "zygote" process is forked. That zygote process then forks client processes when
+/// requested.
 pub struct ForkClientProcessFactory {
-    handle: Cell<Option<(ClientProcessHandle, StdUnixStream)>>,
+    pid: Pid,
+    socket: UnixStream,
 }
 
 impl ForkClientProcessFactory {
+    /// Create a new [`ForkClientProcessFactory`]. This must be called while the process is still
+    /// single-threaded.
     pub fn new(log_level: LogLevel) -> Result<Self> {
-        let (sock1, sock2) = StdUnixStream::pair()?;
-        if let Some(pid) = linux::fork().context("forking client background process")? {
-            Ok(Self {
-                handle: Cell::new(Some((ClientProcessHandle { pid, log: None }, sock1))),
-            })
+        assert_single_threaded()?;
+        let (sock1, sock2) = UnixStream::pair()?;
+        if let Some(pid) = linux::fork().context("forking client process zygote process")? {
+            Ok(Self { pid, socket: sock1 })
         } else {
             drop(sock1);
-            let exit_code = maelstrom_client_process::main_for_fork(sock2, log_level)
-                .context("client background process")?;
+            let exit_code = maelstrom_client_process::main_for_zygote(sock2, log_level)
+                .context("client process zygote")?;
             process::exit(exit_code.into());
         }
     }
 }
 
-impl ClientProcessFactory for ForkClientProcessFactory {
-    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcessHandle, StdUnixStream)> {
-        let Some((mut handle, socket)) = self.handle.replace(None) else {
-            bail!("can only create one client process with this factory")
-        };
-        handle.log.replace(log.clone());
-        Ok((handle, socket))
+impl Drop for ForkClientProcessFactory {
+    fn drop(&mut self) {
+        let _ = linux::kill(self.pid, Signal::KILL);
+        let _ = linux::waitpid(self.pid);
     }
 }
 
+impl ClientProcessFactory for ForkClientProcessFactory {
+    fn new_client_process(&self, _log: &Logger) -> Result<(ClientProcessHandle, StdUnixStream)> {
+        let (sock1, sock2) = StdUnixStream::pair()?;
+        let buf = [0; 1];
+        self.socket
+            .send_with_fd(&buf, Fd::from_raw(sock2.as_raw_fd()))?;
+        Ok((ClientProcessHandle(None), sock1))
+    }
+}
+
+/// Create client processes by spawning (forking and exec-ing).
 pub struct SpawnClientProcessFactory {
     program: OsString,
     args: Vec<OsString>,
 }
 
 impl SpawnClientProcessFactory {
+    /// Create a [`SpawnClientProcessFactory`] that forks and executes the program specified by
+    /// `program` and `args`.
     pub fn new<ProgramT, ArgsT, ArgT>(program: ProgramT, args: ArgsT) -> Self
     where
         ProgramT: AsRef<OsStr>,
@@ -154,49 +192,17 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         let address = SocketAddr::from_abstract_name(address_bytes)?;
         let sock = StdUnixStream::connect_addr(&address)
             .with_context(|| format!("failed to connect to {address:?}"))?;
-        Ok((
-            ClientProcessHandle {
-                pid: proc.into(),
-                log: Some(log.clone()),
-            },
-            sock,
-        ))
+        Ok((ClientProcessHandle(Some((proc.into(), log.clone()))), sock))
     }
 }
 
-/// A struct of this type is required to create a [`Client`]. It represents a background client
-/// process, running the code in the [`maelstrom-client-process`] crate.
-///
-/// The client library does most of its work by sending RPCs to the client process, which then
-/// connects to the broker, runs local jobs, etc. There are two ways to get a client process
-/// running. The first is to fork without exec-ing. The second is to fork and then exec (also
-/// called spawn).
-///
-/// The advantage of the first approach, a fork without an exec, is that it doesn't require a
-/// separate binary be deployed along with the client library. The program using the library just
-/// packages up the client process code in its binary, and runs that in a separate process.
-///
-/// The main downside of the first approach is that the client process needs to be created while
-/// the process is single-threaded. As a result, the client code needs to create one of the
-/// [`ClientProcess`]es early during startup, and then pass it down to the [`Client`] when it's
-/// created.
-///
-/// The advantage of the second approach is that client processes can be created at any time, even
-/// after the process is multi-threaded. However, the downside is that the client code must know
-/// where the client process executable is located on the local file system.
-#[derive(Debug)]
-pub struct ClientProcessHandle {
-    pid: Pid,
-    log: Option<Logger>,
-}
+pub struct ClientProcessHandle(Option<(Pid, Logger)>);
 
 impl Drop for ClientProcessHandle {
     fn drop(&mut self) {
-        if let Some(log) = self.log.as_ref() {
-            debug!(log, "waiting for child client process"; "pid" => ?self.pid);
-        }
-        if let Err(errno) = linux::waitpid(self.pid) {
-            if let Some(log) = self.log.as_ref() {
+        if let ClientProcessHandle(Some((pid, log))) = self {
+            debug!(log, "waiting for child client process"; "pid" => ?pid);
+            if let Err(errno) = linux::waitpid(*pid) {
                 warn!(log, "error waiting for child client process"; "errno" => %errno);
             }
         }
