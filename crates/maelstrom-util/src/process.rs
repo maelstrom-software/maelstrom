@@ -161,11 +161,11 @@ async fn gen_1_process_main(gen_2_pid: linux::Pid) -> WaitStatus {
 ///
 /// We do two levels of cloning so that the returned process isn't pid 1 in its own pid namespace.
 /// This is important because we don't want that process to inherit orphaned descendants. We want
-/// to worker to be able to effectively use waitpid (or equivalently, wait on pidfds). If the
+/// the worker to be able to effectively use waitpid (or equivalently, wait on pidfds). If the
 /// worker had to worry about reaping zombie descendants, then it would need to call the generic
 /// wait functions, which could return a pid for one of the legitimate children that the process
-/// was trying to waidpid on. This makes calling waitpid a no-go, and complicates the design of
-/// the worker.
+/// was trying to waidpid on. This makes calling waitpid a no-go, and complicates the design of the
+/// worker.
 ///
 /// It's much easier to just have the worker not be pid 1 in its own namespace.
 ///
