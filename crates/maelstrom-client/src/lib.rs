@@ -8,7 +8,7 @@ pub use maelstrom_client_base::{
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
-use anyhow::{anyhow, Context as _, Result, bail};
+use anyhow::{anyhow, bail, Context as _, Result};
 use futures::stream::StreamExt as _;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
@@ -23,6 +23,7 @@ use maelstrom_util::{
     },
     root::Root,
 };
+use slog::{debug, warn, Logger};
 use std::{
     cell::Cell,
     ffi::{OsStr, OsString},
@@ -35,7 +36,7 @@ use std::{
     },
     pin::Pin,
     process::{self, Command, Stdio},
-    result, str,
+    result,
     sync::mpsc::{self as std_mpsc, Receiver},
     thread,
 };
@@ -44,7 +45,6 @@ use tokio::{
     sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
     task,
 };
-use slog::Logger;
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type RequestFn = Box<
@@ -77,12 +77,6 @@ async fn run_dispatcher(std_sock: StdUnixStream, mut requester: RequestReceiver)
     std_sock.shutdown(Shutdown::Both)?;
 
     Ok(())
-}
-
-fn print_error(label: &str, res: Result<()>) {
-    if let Err(e) = res {
-        eprintln!("{label}: error: {e:?}");
-    }
 }
 
 pub trait ClientProcessFactory {
@@ -160,7 +154,13 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         let address = SocketAddr::from_abstract_name(address_bytes)?;
         let sock = StdUnixStream::connect_addr(&address)
             .with_context(|| format!("failed to connect to {address:?}"))?;
-        Ok((ClientProcess { pid: proc.into(), log: Some(log.clone()) }, sock))
+        Ok((
+            ClientProcess {
+                pid: proc.into(),
+                log: Some(log.clone()),
+            },
+            sock,
+        ))
     }
 }
 
@@ -190,35 +190,33 @@ pub struct ClientProcess {
     log: Option<Logger>,
 }
 
-impl ClientProcess {
-    fn wait(&mut self) -> Result<()> {
-        linux::waitpid(self.pid)
-            .map_err(|e| anyhow!("waitpid failed: {e}"))
-            .map(drop)
+impl Drop for ClientProcess {
+    fn drop(&mut self) {
+        if let Some(log) = self.log.as_ref() {
+            debug!(log, "waiting for child client process"; "pid" => ?self.pid);
+        }
+        if let Err(errno) = linux::waitpid(self.pid) {
+            if let Some(log) = self.log.as_ref() {
+                warn!(log, "error waiting for child client process"; "errno" => %errno);
+            }
+        }
     }
 }
 
 impl Drop for Client {
     fn drop(&mut self) {
-        slog::debug!(self.log, "dropping Client");
+        debug!(self.log, "dropping Client");
         drop(self.requester.take());
-        slog::debug!(self.log, "Client::drop: waiting for dispatcher");
-        print_error(
-            "dispatcher",
-            self.dispatcher_handle.take().unwrap().join().unwrap(),
-        );
-        slog::debug!(
-            self.log,
-            "Client::drop: waiting for child process";
-            "client_process" => ?self.client_process
-        );
-        self.client_process.wait().unwrap();
+        debug!(self.log, "Client::drop: waiting for dispatcher");
+        if let Err(err) = self.dispatcher_handle.take().unwrap().join().unwrap() {
+            warn!(self.log, "dispatcher task returned error"; "error" => %err);
+        }
     }
 }
 
 pub struct Client {
     requester: Option<RequestSender>,
-    client_process: ClientProcess,
+    _client_process: ClientProcess,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
     log: Logger,
     start_req: StartRequest,
@@ -298,13 +296,13 @@ impl Client {
         };
         let s = Self {
             requester: Some(send),
-            client_process,
+            _client_process: client_process,
             dispatcher_handle: Some(dispatcher_handle),
             log,
             start_req,
         };
 
-        slog::debug!(s.log, "opening log stream");
+        debug!(s.log, "opening log stream");
         let rpc_log = s.log.clone();
         s.send_sync_unit(|mut client| async move {
             let log_stream = client
@@ -323,11 +321,11 @@ impl Client {
     }
 
     fn send_start(&self) -> Result<()> {
-        slog::debug!(self.log, "client sending start"; "request" => ?self.start_req);
+        debug!(self.log, "client sending start"; "request" => ?self.start_req);
 
         let req = self.start_req.clone().into_proto_buf();
         self.send_sync_unit(|mut client| async move { client.start(req).await })?;
-        slog::debug!(self.log, "client completed start");
+        debug!(self.log, "client completed start");
         Ok(())
     }
 
