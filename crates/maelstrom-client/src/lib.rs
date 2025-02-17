@@ -234,15 +234,15 @@ impl Drop for Client {
         slog::debug!(
             self.log,
             "Client::drop: waiting for child process";
-            "process_handle" => ?self.process_handle
+            "client_process" => ?self.client_process
         );
-        self.process_handle.wait().unwrap();
+        self.client_process.wait().unwrap();
     }
 }
 
 pub struct Client {
     requester: Option<RequestSender>,
-    process_handle: ClientProcess,
+    client_process: ClientProcess,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
     log: slog::Logger,
     start_req: StartRequest,
@@ -323,7 +323,7 @@ impl Client {
         };
         let s = Self {
             requester: Some(send),
-            process_handle: client_process,
+            client_process,
             dispatcher_handle: Some(dispatcher_handle),
             log,
             start_req,
