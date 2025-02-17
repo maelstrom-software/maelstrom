@@ -8,7 +8,7 @@ pub use maelstrom_client_base::{
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{anyhow, Context as _, Result, bail};
 use futures::stream::StreamExt as _;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
@@ -44,6 +44,7 @@ use tokio::{
     sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
     task,
 };
+use slog::Logger;
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type RequestFn = Box<
@@ -85,7 +86,7 @@ fn print_error(label: &str, res: Result<()>) {
 }
 
 pub trait ClientProcessFactory {
-    fn new_client_process(&self) -> Result<(ClientProcess, StdUnixStream)>;
+    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcess, StdUnixStream)>;
 }
 
 pub struct ForkClientProcessFactory {
@@ -97,7 +98,7 @@ impl ForkClientProcessFactory {
         let (sock1, sock2) = StdUnixStream::pair()?;
         if let Some(pid) = linux::fork().context("forking client background process")? {
             Ok(Self {
-                client_process: Cell::new(Some((ClientProcess { pid }, sock1))),
+                client_process: Cell::new(Some((ClientProcess { pid, log: None }, sock1))),
             })
         } else {
             drop(sock1);
@@ -109,10 +110,12 @@ impl ForkClientProcessFactory {
 }
 
 impl ClientProcessFactory for ForkClientProcessFactory {
-    fn new_client_process(&self) -> Result<(ClientProcess, StdUnixStream)> {
-        let client_process = self.client_process.replace(None);
-        client_process
-            .ok_or_else(|| anyhow!("can only create one client process with this factory"))
+    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcess, StdUnixStream)> {
+        let Some((mut client_process, socket)) = self.client_process.replace(None) else {
+            bail!("can only create one client process with this factory")
+        };
+        client_process.log.replace(log.clone());
+        Ok((client_process, socket))
     }
 }
 
@@ -139,7 +142,7 @@ impl SpawnClientProcessFactory {
 }
 
 impl ClientProcessFactory for SpawnClientProcessFactory {
-    fn new_client_process(&self) -> Result<(ClientProcess, StdUnixStream)> {
+    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcess, StdUnixStream)> {
         let mut proc = Command::new(&self.program)
             .args(&self.args)
             .stderr(Stdio::piped())
@@ -157,7 +160,7 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         let address = SocketAddr::from_abstract_name(address_bytes)?;
         let sock = StdUnixStream::connect_addr(&address)
             .with_context(|| format!("failed to connect to {address:?}"))?;
-        Ok((ClientProcess { pid: proc.into() }, sock))
+        Ok((ClientProcess { pid: proc.into(), log: Some(log.clone()) }, sock))
     }
 }
 
@@ -165,10 +168,9 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
 /// process, running the code in the [`maelstrom-client-process`] crate.
 ///
 /// The client library does most of its work by sending RPCs to the client process, which then
-/// connects to the broker, runs local jobs, etc.
-///
-/// There are two ways to get a client process running. The first is to fork without exec-ing. The
-/// second is to fork and then exec (also called spawn).
+/// connects to the broker, runs local jobs, etc. There are two ways to get a client process
+/// running. The first is to fork without exec-ing. The second is to fork and then exec (also
+/// called spawn).
 ///
 /// The advantage of the first approach, a fork without an exec, is that it doesn't require a
 /// separate binary be deployed along with the client library. The program using the library just
@@ -185,6 +187,7 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
 #[derive(Debug)]
 pub struct ClientProcess {
     pid: Pid,
+    log: Option<Logger>,
 }
 
 impl ClientProcess {
@@ -217,7 +220,7 @@ pub struct Client {
     requester: Option<RequestSender>,
     client_process: ClientProcess,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
-    log: slog::Logger,
+    log: Logger,
     start_req: StartRequest,
 }
 
@@ -237,7 +240,7 @@ fn transform_rpc_response<RetT: TryFromProtoBuf>(
 }
 
 async fn handle_log_messages(
-    log: &slog::Logger,
+    log: &Logger,
     mut stream: tonic::Streaming<proto::LogMessage>,
 ) -> Result<()> {
     while let Some(message) = stream.next().await {
@@ -275,9 +278,9 @@ impl Client {
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
         artifact_transfer_strategy: ArtifactTransferStrategy,
-        log: slog::Logger,
+        log: Logger,
     ) -> Result<Self> {
-        let (client_process, sock) = client_process_factory.new_client_process()?;
+        let (client_process, sock) = client_process_factory.new_client_process(&log)?;
         let (send, recv) = tokio_mpsc::unbounded_channel();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
 
