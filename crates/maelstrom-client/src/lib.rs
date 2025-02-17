@@ -142,7 +142,7 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines() {
                 let Ok(line) = line else { break };
-                println!("client bg-process: {line}");
+                println!("client process: {line}");
             }
         });
         let mut address_bytes = [0; 5]; // We know Linux uses exactly 5 bytes for this
