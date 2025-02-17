@@ -186,7 +186,7 @@ pub trait TestRunner {
 /// Helper that does common work for test-runner main functions and then forwards on to the given
 /// underlying function.
 ///
-/// Mostly it deals with the `--init` and `--client-bg-proc` flags
+/// Mostly it deals with the `--init` and `--client-process` flags
 pub fn main<TestRunnerT: TestRunner>(
     command: Command,
     args: impl IntoIterator<Item = String>,
@@ -199,7 +199,7 @@ pub fn main<TestRunnerT: TestRunner>(
             args,
         )?;
 
-    if extra_options.as_ref().client_bg_proc {
+    if extra_options.as_ref().client_process {
         return maelstrom_client_process::main_for_spawn();
     } else if extra_options.as_ref().init {
         let (_, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;

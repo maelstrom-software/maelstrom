@@ -184,7 +184,7 @@ pub struct ExtraCommandLineOptions {
     pub init: bool,
 
     #[arg(long, hide(true), help = "Only used for testing purposes.")]
-    pub client_bg_proc: bool,
+    pub client_process: bool,
 
     #[arg(
         long,

@@ -91,7 +91,7 @@ fn do_maelstrom_pytest_test(
 
     let exit_code = maelstrom_test_runner::main_for_test::<maelstrom_pytest::TestRunner>(
         env!("CARGO_BIN_EXE_maelstrom-pytest"),
-        ["--client-bg-proc"],
+        ["--client-process"],
         Config {
             parent: maelstrom_test_runner::config::Config {
                 broker: None,

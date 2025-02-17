@@ -21,7 +21,7 @@ fn do_maelstrom_go_test_test(
 
     let exit_code = maelstrom_test_runner::main_for_test::<maelstrom_go_test::TestRunner>(
         env!("CARGO_BIN_EXE_maelstrom-go-test"),
-        ["--client-bg-proc"],
+        ["--client-process"],
         Config {
             parent: maelstrom_test_runner::config::Config {
                 broker: None,
