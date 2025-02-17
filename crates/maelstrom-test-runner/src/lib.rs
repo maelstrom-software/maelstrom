@@ -24,7 +24,10 @@ use config::IntoParts;
 use derive_more::{From, Into};
 use log::{LogDestination, LoggerBuilder};
 use maelstrom_base::Timeout;
-use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
+use maelstrom_client::{
+    CacheDir, Client, ClientProcessFactory, ForkClientProcessFactory, ProjectDir,
+    SpawnClientProcessFactory, StateDir,
+};
 use maelstrom_util::{
     config::{common::LogLevel, Config},
     fs::Fs,
@@ -203,8 +206,8 @@ pub fn main<TestRunnerT: TestRunner>(
         return init::main::<TestRunnerT>(&project_dir);
     }
 
-    main_inner::<TestRunnerT>(
-        ClientBgProcess::new_from_fork,
+    main_inner::<TestRunnerT, ForkClientProcessFactory>(
+        ForkClientProcessFactory::new,
         config,
         extra_options,
         TestRunnerT::get_metadata_and_project_directory,
@@ -215,7 +218,8 @@ pub fn main<TestRunnerT: TestRunner>(
 }
 
 pub fn main_for_test<TestRunnerT: TestRunner>(
-    client_bg_process_factory: impl FnOnce(LogLevel) -> Result<ClientBgProcess>,
+    spawn_client_process_factory_program: &'static str,
+    spawn_client_process_factory_args: impl IntoIterator<Item = &'static str>,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     get_metadata_and_project_directory: impl FnOnce(
@@ -227,8 +231,13 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
     logger_builder: LoggerBuilder,
     ui_factory: impl FnOnce(UiKind, IsListing, StdoutTty) -> Result<Box<dyn Ui>>,
 ) -> Result<ExitCode> {
-    main_inner::<TestRunnerT>(
-        client_bg_process_factory,
+    main_inner::<TestRunnerT, SpawnClientProcessFactory>(
+        |_| {
+            Ok(SpawnClientProcessFactory::new(
+                spawn_client_process_factory_program,
+                spawn_client_process_factory_args,
+            ))
+        },
         config,
         extra_options,
         get_metadata_and_project_directory,
@@ -239,8 +248,8 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn main_inner<TestRunnerT: TestRunner>(
-    client_bg_process_factory: impl FnOnce(LogLevel) -> Result<ClientBgProcess>,
+fn main_inner<TestRunnerT: TestRunner, ClientProcessFactoryT: ClientProcessFactory>(
+    client_process_factory_factory: impl FnOnce(LogLevel) -> Result<ClientProcessFactoryT>,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     get_metadata_and_project_directory: impl FnOnce(
@@ -277,14 +286,14 @@ fn main_inner<TestRunnerT: TestRunner>(
 
     // From this point on, we're going to be building all tests and either running or listing them.
 
-    let client_bg_process = client_bg_process_factory(parent_config.log_level)?;
+    let client_process_factory = client_process_factory_factory(parent_config.log_level)?;
 
     let is_listing = IsListing::from(list_tests.as_bool());
     let ui = ui_factory(parent_config.ui, is_listing, stdout_tty)?;
     let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log.clone());
 
     let result = main_with_ui_thread::<TestRunnerT>(
-        client_bg_process,
+        client_process_factory,
         config,
         extra_options,
         get_metadata_and_project_directory,
@@ -309,7 +318,7 @@ const MAX_NUM_BACKGROUND_THREADS: isize = 200;
 
 #[allow(clippy::too_many_arguments)]
 fn main_with_ui_thread<TestRunnerT: TestRunner>(
-    client_bg_process: ClientBgProcess,
+    client_process_factory: impl ClientProcessFactory,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
     get_metadata_and_project_directory: impl FnOnce(
@@ -332,7 +341,7 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
     Fs.create_dir_all(&directories.cache)?;
 
     let client = Client::new(
-        client_bg_process,
+        &client_process_factory,
         parent_config.broker,
         &directories.project,
         &directories.state,

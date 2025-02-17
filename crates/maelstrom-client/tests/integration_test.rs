@@ -6,8 +6,8 @@ use maelstrom_base::{
 use maelstrom_client::{
     environment_spec, glob_layer_spec, job_spec, paths_layer_spec, spec::LayerSpec,
     stubs_layer_spec, symlink_spec, symlinks_layer_spec, tar_layer_spec,
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ContainerImageDepotDir, ProjectDir,
+    SpawnClientProcessFactory, StateDir,
 };
 use maelstrom_util::{
     config::common::ArtifactTransferStrategy, elf::read_shared_libraries, fs::Fs, log::test_logger,
@@ -15,10 +15,9 @@ use maelstrom_util::{
 };
 use regex::Regex;
 use std::panic::Location;
-use std::path::PathBuf;
 use tempfile::tempdir;
 
-fn spawn_bg_proc() -> ClientBgProcess {
+fn client_process_factory_factory() -> SpawnClientProcessFactory {
     // XXX cargo-maelstrom doesn't add shared-library dependencies for additional binaries.
     //
     // To make us have the same dependencies as the client-process, call into the client-process
@@ -27,8 +26,7 @@ fn spawn_bg_proc() -> ClientBgProcess {
         let _ = maelstrom_client_process::main_for_spawn();
     }
 
-    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-client"));
-    ClientBgProcess::new_from_spawn(&bin_path, [] as [&str; 0]).unwrap()
+    SpawnClientProcessFactory::new(env!("CARGO_BIN_EXE_maelstrom-client"), [] as [&str; 0])
 }
 
 struct ClientFixture {
@@ -53,11 +51,11 @@ impl ClientFixture {
         let container_image_depot_dir = temp_dir.path().join("container_image_depot");
         fs.create_dir_all(&container_image_depot_dir).unwrap();
 
-        let bg_proc = spawn_bg_proc();
+        let client_process_factory = client_process_factory_factory();
         let log = test_logger();
         slog::info!(log, "connected unix socket to child");
         let client = Client::new(
-            bg_proc,
+            &client_process_factory,
             None, /* broker_addr */
             Root::<ProjectDir>::new(&project_dir),
             Root::<StateDir>::new(&state_dir),
