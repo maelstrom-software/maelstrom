@@ -316,10 +316,6 @@ impl TestCollector for CargoTestCollector {
         lines
     }
 
-    fn get_paths_to_exclude_from_watch(&self) -> Vec<PathBuf> {
-        vec![self.build_dir.clone().into_path_buf()]
-    }
-
     fn get_template_variables(&self) -> Result<TemplateVariables> {
         let profile = self
             .config
@@ -457,6 +453,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             state,
             project,
         }
+    }
+
+    fn get_paths_to_exclude_from_watch(directories: &Directories) -> Vec<PathBuf> {
+        vec![directories.build.clone().into_path_buf()]
     }
 
     fn build_test_collector(
