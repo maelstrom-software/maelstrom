@@ -41,7 +41,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
 
     maelstrom_test_runner::main_for_test::<cargo_maelstrom::TestRunner>(
         env!("CARGO_BIN_EXE_cargo-maelstrom"),
-        ["--client-bg-proc"],
+        ["--client-process"],
         Config {
             parent: maelstrom_test_runner::config::Config {
                 broker: None,
