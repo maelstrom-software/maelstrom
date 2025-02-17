@@ -1,6 +1,5 @@
 use anyhow::{bail, Result};
 use indicatif::InMemoryTerm;
-use maelstrom_client::ClientBgProcess;
 use maelstrom_container::local_registry;
 use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
 use maelstrom_test_runner::ui::{SimpleUi, UiKind};
@@ -10,16 +9,8 @@ use maelstrom_util::{
     process::ExitCode,
     root::RootBuf,
 };
-use std::{
-    path::PathBuf,
-    process::{Command, Stdio},
-};
+use std::process::{Command, Stdio};
 use tempfile::tempdir;
-
-fn spawn_bg_proc() -> Result<ClientBgProcess> {
-    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-pytest"));
-    ClientBgProcess::new_from_spawn(&bin_path, ["--client-bg-proc"])
-}
 
 fn sh(script: &str, description: &str) -> Result<()> {
     let mut cmd = Command::new("/bin/sh");
@@ -99,7 +90,8 @@ fn do_maelstrom_pytest_test(
     let term = InMemoryTerm::new(terminal_size.0, terminal_size.1);
 
     let exit_code = maelstrom_test_runner::main_for_test::<maelstrom_pytest::TestRunner>(
-        |_| spawn_bg_proc(),
+        env!("CARGO_BIN_EXE_maelstrom-pytest"),
+        ["--client-bg-proc"],
         Config {
             parent: maelstrom_test_runner::config::Config {
                 broker: None,

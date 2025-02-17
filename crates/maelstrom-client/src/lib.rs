@@ -24,15 +24,17 @@ use maelstrom_util::{
     root::Root,
 };
 use std::{
-    ffi::OsStr,
+    cell::Cell,
+    ffi::{OsStr, OsString},
     future::Future,
     io::{BufRead as _, BufReader, Read as _},
     net::Shutdown,
-    os::linux::net::SocketAddrExt as _,
-    os::unix::net::{SocketAddr, UnixStream as StdUnixStream},
+    os::{
+        linux::net::SocketAddrExt as _,
+        unix::net::{SocketAddr, UnixStream as StdUnixStream},
+    },
     pin::Pin,
-    process,
-    process::{Command, Stdio},
+    process::{self, Command, Stdio},
     result, str,
     sync::mpsc::{self as std_mpsc, Receiver},
     thread,
@@ -82,6 +84,79 @@ fn print_error(label: &str, res: Result<()>) {
     }
 }
 
+pub trait ClientProcessFactory {
+    fn new_client_process(&self) -> Result<ClientBgProcess>;
+}
+
+pub struct ForkClientProcessFactory {
+    client_process: Cell<Option<ClientBgProcess>>,
+}
+
+impl ForkClientProcessFactory {
+    pub fn new(log_level: LogLevel) -> Result<Self> {
+        let client_process = ClientBgProcess::new_from_fork(log_level)?;
+        Ok(Self {
+            client_process: Cell::new(Some(client_process)),
+        })
+    }
+}
+
+impl ClientProcessFactory for ForkClientProcessFactory {
+    fn new_client_process(&self) -> Result<ClientBgProcess> {
+        let client_process = self.client_process.replace(None);
+        client_process
+            .ok_or_else(|| anyhow!("can only create one client process with this factory"))
+    }
+}
+
+pub struct SpawnClientProcessFactory {
+    program: OsString,
+    args: Vec<OsString>,
+}
+
+impl SpawnClientProcessFactory {
+    pub fn new<ProgramT, ArgsT, ArgT>(program: ProgramT, args: ArgsT) -> Self
+    where
+        ProgramT: AsRef<OsStr>,
+        ArgsT: IntoIterator<Item = ArgT>,
+        ArgT: AsRef<OsStr>,
+    {
+        Self {
+            program: program.as_ref().to_owned(),
+            args: args
+                .into_iter()
+                .map(|arg| arg.as_ref().to_owned())
+                .collect(),
+        }
+    }
+}
+
+impl ClientProcessFactory for SpawnClientProcessFactory {
+    fn new_client_process(&self) -> Result<ClientBgProcess> {
+        let mut proc = Command::new(&self.program)
+            .args(&self.args)
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let stderr = proc.stderr.take().unwrap();
+        thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                println!("client bg-process: {line}");
+            }
+        });
+        let mut address_bytes = [0; 5]; // We know Linux uses exactly 5 bytes for this
+        proc.stdout.take().unwrap().read_exact(&mut address_bytes)?;
+        let address = SocketAddr::from_abstract_name(address_bytes)?;
+        let sock = StdUnixStream::connect_addr(&address)
+            .with_context(|| format!("failed to connect to {address:?}"))?;
+        Ok(ClientBgProcess {
+            handle: ClientBgHandle(proc.into()),
+            sock: Some(sock),
+        })
+    }
+}
+
 #[derive(Debug)]
 struct ClientBgHandle(Pid);
 
@@ -123,7 +198,7 @@ pub struct ClientBgProcess {
 impl ClientBgProcess {
     /// Create a new client process using the fork-without-exec approach. This must be called
     /// before the process becomes multi-threaded.
-    pub fn new_from_fork(log_level: LogLevel) -> Result<Self> {
+    fn new_from_fork(log_level: LogLevel) -> Result<Self> {
         let (sock1, sock2) = StdUnixStream::pair()?;
         if let Some(pid) = linux::fork().context("forking client background process")? {
             Ok(Self {
@@ -136,42 +211,6 @@ impl ClientBgProcess {
                 .context("client background process")?;
             process::exit(exit_code.into());
         }
-    }
-
-    /// Create a new client process using the spawn approach. This can be called at any time, even
-    /// if the process is multi-threaded. However, there must be a binary with the client process
-    /// code available on the local file system.
-    ///
-    /// Any stderr from the client process is written to this process's stdout.
-    ///
-    /// This is currently only used for Maelstorm integration tests.
-    pub fn new_from_spawn<ProgramT, ArgsT, ArgT>(program: ProgramT, args: ArgsT) -> Result<Self>
-    where
-        ProgramT: AsRef<OsStr>,
-        ArgsT: IntoIterator<Item = ArgT>,
-        ArgT: AsRef<OsStr>,
-    {
-        let mut proc = Command::new(program)
-            .args(args)
-            .stderr(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()?;
-        let stderr = proc.stderr.take().unwrap();
-        thread::spawn(move || {
-            for line in BufReader::new(stderr).lines() {
-                let Ok(line) = line else { break };
-                println!("client bg-process: {line}");
-            }
-        });
-        let mut address_bytes = [0; 5]; // We know Linux uses exactly 5 bytes for this
-        proc.stdout.take().unwrap().read_exact(&mut address_bytes)?;
-        let address = SocketAddr::from_abstract_name(address_bytes)?;
-        let sock = StdUnixStream::connect_addr(&address)
-            .with_context(|| format!("failed to connect to {address:?}"))?;
-        Ok(Self {
-            handle: ClientBgHandle(proc.into()),
-            sock: Some(sock),
-        })
     }
 
     fn take_socket(&mut self) -> StdUnixStream {
@@ -252,7 +291,7 @@ fn wait_for_job_completed_blocking(
 impl Client {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        mut process_handle: ClientBgProcess,
+        client_process_factory: &impl ClientProcessFactory,
         broker_addr: Option<BrokerAddr>,
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
@@ -265,9 +304,9 @@ impl Client {
         artifact_transfer_strategy: ArtifactTransferStrategy,
         log: slog::Logger,
     ) -> Result<Self> {
+        let mut client_process = client_process_factory.new_client_process()?;
+        let sock = client_process.take_socket();
         let (send, recv) = tokio_mpsc::unbounded_channel();
-
-        let sock = process_handle.take_socket();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
 
         let start_req = StartRequest {
@@ -284,7 +323,7 @@ impl Client {
         };
         let s = Self {
             requester: Some(send),
-            process_handle,
+            process_handle: client_process,
             dispatcher_handle: Some(dispatcher_handle),
             log,
             start_req,
