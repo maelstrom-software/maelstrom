@@ -85,11 +85,11 @@ fn print_error(label: &str, res: Result<()>) {
 }
 
 pub trait ClientProcessFactory {
-    fn new_client_process(&self) -> Result<ClientProcess>;
+    fn new_client_process(&self) -> Result<(ClientProcess, StdUnixStream)>;
 }
 
 pub struct ForkClientProcessFactory {
-    client_process: Cell<Option<ClientProcess>>,
+    client_process: Cell<Option<(ClientProcess, StdUnixStream)>>,
 }
 
 impl ForkClientProcessFactory {
@@ -102,7 +102,7 @@ impl ForkClientProcessFactory {
 }
 
 impl ClientProcessFactory for ForkClientProcessFactory {
-    fn new_client_process(&self) -> Result<ClientProcess> {
+    fn new_client_process(&self) -> Result<(ClientProcess, StdUnixStream)> {
         let client_process = self.client_process.replace(None);
         client_process
             .ok_or_else(|| anyhow!("can only create one client process with this factory"))
@@ -132,7 +132,7 @@ impl SpawnClientProcessFactory {
 }
 
 impl ClientProcessFactory for SpawnClientProcessFactory {
-    fn new_client_process(&self) -> Result<ClientProcess> {
+    fn new_client_process(&self) -> Result<(ClientProcess, StdUnixStream)> {
         let mut proc = Command::new(&self.program)
             .args(&self.args)
             .stderr(Stdio::piped())
@@ -150,10 +150,7 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         let address = SocketAddr::from_abstract_name(address_bytes)?;
         let sock = StdUnixStream::connect_addr(&address)
             .with_context(|| format!("failed to connect to {address:?}"))?;
-        Ok(ClientProcess {
-            pid: proc.into(),
-            sock: Some(sock),
-        })
+        Ok((ClientProcess { pid: proc.into() }, sock))
     }
 }
 
@@ -181,29 +178,21 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
 #[derive(Debug)]
 pub struct ClientProcess {
     pid: Pid,
-    sock: Option<StdUnixStream>,
 }
 
 impl ClientProcess {
     /// Create a new client process using the fork-without-exec approach. This must be called
     /// before the process becomes multi-threaded.
-    fn new_from_fork(log_level: LogLevel) -> Result<Self> {
+    fn new_from_fork(log_level: LogLevel) -> Result<(Self, StdUnixStream)> {
         let (sock1, sock2) = StdUnixStream::pair()?;
         if let Some(pid) = linux::fork().context("forking client background process")? {
-            Ok(Self {
-                pid,
-                sock: Some(sock1),
-            })
+            Ok((Self { pid }, sock1))
         } else {
             drop(sock1);
             let exit_code = maelstrom_client_process::main_for_fork(sock2, log_level)
                 .context("client background process")?;
             process::exit(exit_code.into());
         }
-    }
-
-    fn take_socket(&mut self) -> StdUnixStream {
-        self.sock.take().unwrap()
     }
 
     fn wait(&mut self) -> Result<()> {
@@ -295,8 +284,7 @@ impl Client {
         artifact_transfer_strategy: ArtifactTransferStrategy,
         log: slog::Logger,
     ) -> Result<Self> {
-        let mut client_process = client_process_factory.new_client_process()?;
-        let sock = client_process.take_socket();
+        let (client_process, sock) = client_process_factory.new_client_process()?;
         let (send, recv) = tokio_mpsc::unbounded_channel();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
 
