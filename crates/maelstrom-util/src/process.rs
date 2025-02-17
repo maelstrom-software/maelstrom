@@ -251,6 +251,11 @@ pub fn clone_into_pid_and_user_namespace() -> Result<()> {
             // Fork the gen 2 process.
             match linux::fork()? {
                 Some(gen_2_pid) => {
+                    // This is racy. If we receive a signal before this point, it will be ignored.
+                    // However, this race is kind of inherent in the gen 1 process being PID 1 in
+                    // its own namespace. I think the only way to fix this race would be to have
+                    // the gen 0 process establish the signal handlers before cloning the gen 1
+                    // process.
                     let child_status = gen_1_process_main(gen_2_pid);
                     mimic_child_death(child_status);
                 }
