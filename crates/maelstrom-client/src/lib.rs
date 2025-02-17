@@ -80,11 +80,11 @@ async fn run_dispatcher(std_sock: StdUnixStream, mut requester: RequestReceiver)
 }
 
 pub trait ClientProcessFactory {
-    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcess, StdUnixStream)>;
+    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcessHandle, StdUnixStream)>;
 }
 
 pub struct ForkClientProcessFactory {
-    client_process: Cell<Option<(ClientProcess, StdUnixStream)>>,
+    handle: Cell<Option<(ClientProcessHandle, StdUnixStream)>>,
 }
 
 impl ForkClientProcessFactory {
@@ -92,7 +92,7 @@ impl ForkClientProcessFactory {
         let (sock1, sock2) = StdUnixStream::pair()?;
         if let Some(pid) = linux::fork().context("forking client background process")? {
             Ok(Self {
-                client_process: Cell::new(Some((ClientProcess { pid, log: None }, sock1))),
+                handle: Cell::new(Some((ClientProcessHandle { pid, log: None }, sock1))),
             })
         } else {
             drop(sock1);
@@ -104,12 +104,12 @@ impl ForkClientProcessFactory {
 }
 
 impl ClientProcessFactory for ForkClientProcessFactory {
-    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcess, StdUnixStream)> {
-        let Some((mut client_process, socket)) = self.client_process.replace(None) else {
+    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcessHandle, StdUnixStream)> {
+        let Some((mut handle, socket)) = self.handle.replace(None) else {
             bail!("can only create one client process with this factory")
         };
-        client_process.log.replace(log.clone());
-        Ok((client_process, socket))
+        handle.log.replace(log.clone());
+        Ok((handle, socket))
     }
 }
 
@@ -136,7 +136,7 @@ impl SpawnClientProcessFactory {
 }
 
 impl ClientProcessFactory for SpawnClientProcessFactory {
-    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcess, StdUnixStream)> {
+    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcessHandle, StdUnixStream)> {
         let mut proc = Command::new(&self.program)
             .args(&self.args)
             .stderr(Stdio::piped())
@@ -155,7 +155,7 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         let sock = StdUnixStream::connect_addr(&address)
             .with_context(|| format!("failed to connect to {address:?}"))?;
         Ok((
-            ClientProcess {
+            ClientProcessHandle {
                 pid: proc.into(),
                 log: Some(log.clone()),
             },
@@ -185,12 +185,12 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
 /// after the process is multi-threaded. However, the downside is that the client code must know
 /// where the client process executable is located on the local file system.
 #[derive(Debug)]
-pub struct ClientProcess {
+pub struct ClientProcessHandle {
     pid: Pid,
     log: Option<Logger>,
 }
 
-impl Drop for ClientProcess {
+impl Drop for ClientProcessHandle {
     fn drop(&mut self) {
         if let Some(log) = self.log.as_ref() {
             debug!(log, "waiting for child client process"; "pid" => ?self.pid);
@@ -216,7 +216,7 @@ impl Drop for Client {
 
 pub struct Client {
     requester: Option<RequestSender>,
-    _client_process: ClientProcess,
+    _client_process_handle: ClientProcessHandle,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
     log: Logger,
     start_req: StartRequest,
@@ -278,7 +278,7 @@ impl Client {
         artifact_transfer_strategy: ArtifactTransferStrategy,
         log: Logger,
     ) -> Result<Self> {
-        let (client_process, sock) = client_process_factory.new_client_process(&log)?;
+        let (client_process_handle, sock) = client_process_factory.new_client_process(&log)?;
         let (send, recv) = tokio_mpsc::unbounded_channel();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
 
@@ -296,7 +296,7 @@ impl Client {
         };
         let s = Self {
             requester: Some(send),
-            _client_process: client_process,
+            _client_process_handle: client_process_handle,
             dispatcher_handle: Some(dispatcher_handle),
             log,
             start_req,
