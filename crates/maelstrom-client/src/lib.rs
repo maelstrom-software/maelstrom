@@ -85,16 +85,16 @@ fn print_error(label: &str, res: Result<()>) {
 }
 
 pub trait ClientProcessFactory {
-    fn new_client_process(&self) -> Result<ClientBgProcess>;
+    fn new_client_process(&self) -> Result<ClientProcess>;
 }
 
 pub struct ForkClientProcessFactory {
-    client_process: Cell<Option<ClientBgProcess>>,
+    client_process: Cell<Option<ClientProcess>>,
 }
 
 impl ForkClientProcessFactory {
     pub fn new(log_level: LogLevel) -> Result<Self> {
-        let client_process = ClientBgProcess::new_from_fork(log_level)?;
+        let client_process = ClientProcess::new_from_fork(log_level)?;
         Ok(Self {
             client_process: Cell::new(Some(client_process)),
         })
@@ -102,7 +102,7 @@ impl ForkClientProcessFactory {
 }
 
 impl ClientProcessFactory for ForkClientProcessFactory {
-    fn new_client_process(&self) -> Result<ClientBgProcess> {
+    fn new_client_process(&self) -> Result<ClientProcess> {
         let client_process = self.client_process.replace(None);
         client_process
             .ok_or_else(|| anyhow!("can only create one client process with this factory"))
@@ -132,7 +132,7 @@ impl SpawnClientProcessFactory {
 }
 
 impl ClientProcessFactory for SpawnClientProcessFactory {
-    fn new_client_process(&self) -> Result<ClientBgProcess> {
+    fn new_client_process(&self) -> Result<ClientProcess> {
         let mut proc = Command::new(&self.program)
             .args(&self.args)
             .stderr(Stdio::piped())
@@ -150,7 +150,7 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         let address = SocketAddr::from_abstract_name(address_bytes)?;
         let sock = StdUnixStream::connect_addr(&address)
             .with_context(|| format!("failed to connect to {address:?}"))?;
-        Ok(ClientBgProcess {
+        Ok(ClientProcess {
             handle: ClientBgHandle(proc.into()),
             sock: Some(sock),
         })
@@ -183,19 +183,19 @@ impl ClientBgHandle {
 ///
 /// The main downside of the first approach is that the client process needs to be created while
 /// the process is single-threaded. As a result, the client code needs to create one of the
-/// [`ClientBgProcess`]es early during startup, and then pass it down to the [`Client`] when it's
+/// [`ClientProcess`]es early during startup, and then pass it down to the [`Client`] when it's
 /// created.
 ///
 /// The advantage of the second approach is that client processes can be created at any time, even
 /// after the process is multi-threaded. However, the downside is that the client code must know
 /// where the client process executable is located on the local file system.
 #[derive(Debug)]
-pub struct ClientBgProcess {
+pub struct ClientProcess {
     handle: ClientBgHandle,
     sock: Option<StdUnixStream>,
 }
 
-impl ClientBgProcess {
+impl ClientProcess {
     /// Create a new client process using the fork-without-exec approach. This must be called
     /// before the process becomes multi-threaded.
     fn new_from_fork(log_level: LogLevel) -> Result<Self> {
@@ -242,7 +242,7 @@ impl Drop for Client {
 
 pub struct Client {
     requester: Option<RequestSender>,
-    process_handle: ClientBgProcess,
+    process_handle: ClientProcess,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
     log: slog::Logger,
     start_req: StartRequest,

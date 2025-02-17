@@ -60,14 +60,14 @@ async fn main_after_clone(
 }
 
 /// The main function for the process when invoked using the "fork" method, described at
-/// [`maelstrom_client::ClientBgProcess`].
+/// [`maelstrom_client::ClientProcess`].
 pub fn main_for_fork(sock: StdUnixStream, rpc_log_level: LogLevel) -> Result<ExitCode> {
     clone_into_pid_and_user_namespace()?;
     main_after_clone(sock, None, rpc_log_level)
 }
 
 /// The main function for the process when invoked using the "spawn" method, described at
-/// [`maelstrom_client::ClientBgProcess`].
+/// [`maelstrom_client::ClientProcess`].
 pub fn main_for_spawn() -> Result<ExitCode> {
     clone_into_pid_and_user_namespace()?;
 
