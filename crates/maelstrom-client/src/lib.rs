@@ -94,10 +94,17 @@ pub struct ForkClientProcessFactory {
 
 impl ForkClientProcessFactory {
     pub fn new(log_level: LogLevel) -> Result<Self> {
-        let client_process = ClientProcess::new_from_fork(log_level)?;
-        Ok(Self {
-            client_process: Cell::new(Some(client_process)),
-        })
+        let (sock1, sock2) = StdUnixStream::pair()?;
+        if let Some(pid) = linux::fork().context("forking client background process")? {
+            Ok(Self {
+                client_process: Cell::new(Some((ClientProcess { pid }, sock1))),
+            })
+        } else {
+            drop(sock1);
+            let exit_code = maelstrom_client_process::main_for_fork(sock2, log_level)
+                .context("client background process")?;
+            process::exit(exit_code.into());
+        }
     }
 }
 
@@ -181,20 +188,6 @@ pub struct ClientProcess {
 }
 
 impl ClientProcess {
-    /// Create a new client process using the fork-without-exec approach. This must be called
-    /// before the process becomes multi-threaded.
-    fn new_from_fork(log_level: LogLevel) -> Result<(Self, StdUnixStream)> {
-        let (sock1, sock2) = StdUnixStream::pair()?;
-        if let Some(pid) = linux::fork().context("forking client background process")? {
-            Ok((Self { pid }, sock1))
-        } else {
-            drop(sock1);
-            let exit_code = maelstrom_client_process::main_for_fork(sock2, log_level)
-                .context("client background process")?;
-            process::exit(exit_code.into());
-        }
-    }
-
     fn wait(&mut self) -> Result<()> {
         linux::waitpid(self.pid)
             .map_err(|e| anyhow!("waitpid failed: {e}"))
