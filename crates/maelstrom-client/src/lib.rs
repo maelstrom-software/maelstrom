@@ -151,20 +151,9 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         let sock = StdUnixStream::connect_addr(&address)
             .with_context(|| format!("failed to connect to {address:?}"))?;
         Ok(ClientProcess {
-            handle: ClientBgHandle(proc.into()),
+            pid: proc.into(),
             sock: Some(sock),
         })
-    }
-}
-
-#[derive(Debug)]
-struct ClientBgHandle(Pid);
-
-impl ClientBgHandle {
-    fn wait(&mut self) -> Result<()> {
-        linux::waitpid(self.0)
-            .map_err(|e| anyhow!("waitpid failed: {e}"))
-            .map(drop)
     }
 }
 
@@ -191,7 +180,7 @@ impl ClientBgHandle {
 /// where the client process executable is located on the local file system.
 #[derive(Debug)]
 pub struct ClientProcess {
-    handle: ClientBgHandle,
+    pid: Pid,
     sock: Option<StdUnixStream>,
 }
 
@@ -202,7 +191,7 @@ impl ClientProcess {
         let (sock1, sock2) = StdUnixStream::pair()?;
         if let Some(pid) = linux::fork().context("forking client background process")? {
             Ok(Self {
-                handle: ClientBgHandle(pid),
+                pid,
                 sock: Some(sock1),
             })
         } else {
@@ -218,7 +207,9 @@ impl ClientProcess {
     }
 
     fn wait(&mut self) -> Result<()> {
-        self.handle.wait()
+        linux::waitpid(self.pid)
+            .map_err(|e| anyhow!("waitpid failed: {e}"))
+            .map(drop)
     }
 }
 
