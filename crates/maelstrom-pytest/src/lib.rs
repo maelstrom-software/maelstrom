@@ -420,10 +420,6 @@ impl TestCollector for PytestTestCollector<'_> {
         }
         lines
     }
-
-    fn get_paths_to_exclude_from_watch(&self) -> Vec<PathBuf> {
-        vec![self.directories.build.clone().into_path_buf()]
-    }
 }
 
 #[test]
@@ -545,6 +541,10 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
             project,
             state,
         }
+    }
+
+    fn get_paths_to_exclude_from_watch(directories: &Directories) -> Vec<PathBuf> {
+        vec![directories.build.clone().into_path_buf()]
     }
 
     fn build_test_collector<'client>(

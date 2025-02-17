@@ -8,7 +8,7 @@ use std::{
     collections::HashSet,
     fmt,
     hash::Hash,
-    path::{Path, PathBuf},
+    path::Path,
     str::{self, FromStr},
     sync::Arc,
 };
@@ -245,11 +245,6 @@ pub trait TestCollector {
     /// Build any test layers that might want to be used later. This function is allowed to block.
     fn build_test_layers(&self, _images: HashSet<ImageRef>, _ui: &ui::UiSender) -> Result<()> {
         Ok(())
-    }
-
-    /// Return any extra paths that should be excluded in `--watch` mode.
-    fn get_paths_to_exclude_from_watch(&self) -> Vec<PathBuf> {
-        vec![]
     }
 
     /// Return any template variables to make available to test metadata.

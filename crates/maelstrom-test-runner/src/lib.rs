@@ -173,6 +173,11 @@ pub trait TestRunner {
     /// Return the directories computed from the metadata and project directory.
     fn get_directories(metadata: &Self::Metadata, project_dir: RootBuf<ProjectDir>) -> Directories;
 
+    /// Return any extra paths that should be excluded in `--watch` mode.
+    fn get_paths_to_exclude_from_watch(_directories: &Directories) -> Vec<PathBuf> {
+        vec![]
+    }
+
     /// Build the test collector. This will be used for the rest of the execution.
     fn build_test_collector<'client>(
         client: &'client Client,
@@ -334,6 +339,18 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
 ) -> Result<ExitCode> {
     let (metadata, project_dir) = get_metadata_and_project_directory(&config)?;
     let directories = TestRunnerT::get_directories(&metadata, project_dir);
+
+    let watch_exclude_paths = TestRunnerT::get_paths_to_exclude_from_watch(&directories)
+        .into_iter()
+        .chain([
+            directories
+                .project
+                .to_path_buf()
+                .join(maelstrom_container::TAG_FILE_NAME),
+            directories.project.to_path_buf().join(".git"),
+        ])
+        .collect();
+
     let (parent_config, test_collector_config) = config.into_parts();
     let (extra_options, _) = extra_options.into_parts();
 
@@ -409,18 +426,6 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
         &extra_options.include,
         &extra_options.exclude,
     )?;
-
-    let watch_exclude_paths = test_collector
-        .get_paths_to_exclude_from_watch()
-        .into_iter()
-        .chain([
-            directories
-                .project
-                .to_path_buf()
-                .join(maelstrom_container::TAG_FILE_NAME),
-            directories.project.to_path_buf().join(".git"),
-        ])
-        .collect();
 
     let testing_options = TestingOptions {
         test_metadata: metadata_store,
