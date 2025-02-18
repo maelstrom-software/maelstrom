@@ -410,7 +410,7 @@ pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<V
         .collect())
 }
 
-#[derive(Config, Debug, Default)]
+#[derive(Clone, Config, Debug, Default)]
 pub struct FeatureSelectionOptions {
     /// Comma-separated list of features to activate.
     #[config(
@@ -446,7 +446,7 @@ impl FeatureSelectionOptions {
     }
 }
 
-#[derive(Config, Debug, Default)]
+#[derive(Clone, Config, Debug, Default)]
 pub struct CompilationOptions {
     /// Build artifacts with the specified profile.
     #[config(option, value_name = "PROFILE-NAME", default = r#""cargo's default""#)]
@@ -484,7 +484,7 @@ impl CompilationOptions {
     }
 }
 
-#[derive(Config, Debug, Default)]
+#[derive(Clone, Config, Debug, Default)]
 pub struct ManifestOptions {
     /// Path to Cargo.toml.
     #[config(option, value_name = "PATH", default = r#""cargo's default""#)]

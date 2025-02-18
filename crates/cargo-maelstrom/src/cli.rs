@@ -1,6 +1,6 @@
 use clap::{command, Args};
 use maelstrom_test_runner::config::{
-    ExtraCommandLineOptions as TestRunnerExtraCommandLineOptions, IntoParts,
+    AsParts, ExtraCommandLineOptions as TestRunnerExtraCommandLineOptions,
 };
 
 #[derive(Args)]
@@ -46,10 +46,10 @@ impl AsRef<TestRunnerExtraCommandLineOptions> for ExtraCommandLineOptions {
     }
 }
 
-impl IntoParts for ExtraCommandLineOptions {
+impl AsParts for ExtraCommandLineOptions {
     type First = TestRunnerExtraCommandLineOptions;
     type Second = ListOptions;
-    fn into_parts(self) -> (TestRunnerExtraCommandLineOptions, ListOptions) {
-        (self.parent, self.list)
+    fn as_parts(&self) -> (&TestRunnerExtraCommandLineOptions, &ListOptions) {
+        (&self.parent, &self.list)
     }
 }

@@ -1,5 +1,5 @@
 use maelstrom_macro::Config;
-use maelstrom_test_runner::config::{Config as TestRunnerConfig, IntoParts};
+use maelstrom_test_runner::config::{AsParts, Config as TestRunnerConfig};
 
 #[derive(Config, Debug)]
 pub struct Config {
@@ -10,7 +10,7 @@ pub struct Config {
     pub go_test: GoTestConfig,
 }
 
-#[derive(Config, Clone, Debug, Default)]
+#[derive(Clone, Config, Debug, Default)]
 pub struct GoTestConfig {
     /// Controls the value of the `-vet` flag being passed to `go test`. See `go help test` for
     /// details.
@@ -41,10 +41,10 @@ impl AsRef<TestRunnerConfig> for Config {
     }
 }
 
-impl IntoParts for Config {
+impl AsParts for Config {
     type First = TestRunnerConfig;
     type Second = GoTestConfig;
-    fn into_parts(self) -> (TestRunnerConfig, GoTestConfig) {
-        (self.parent, self.go_test)
+    fn as_parts(&self) -> (&TestRunnerConfig, &GoTestConfig) {
+        (&self.parent, &self.go_test)
     }
 }

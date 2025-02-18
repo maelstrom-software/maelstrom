@@ -461,14 +461,14 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn build_test_collector(
         _client: &Client,
-        config: CargoConfig,
+        config: &CargoConfig,
         directories: &Directories,
         log: &slog::Logger,
         metadata: CargoMetadata,
     ) -> Result<CargoTestCollector> {
         Ok(CargoTestCollector {
             build_dir: directories.build.to_owned(),
-            config,
+            config: config.clone(),
             log: log.clone(),
             packages: metadata
                 .workspace_packages()
