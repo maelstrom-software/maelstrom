@@ -24,7 +24,7 @@ use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux};
 use maelstrom_util::{
     cache::{self, fs::std::Fs as StdFs, TempFileFactory},
-    config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, Slots},
+    config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, Slots, BrokerConnection as ConfigBrokerConnection},
     root::RootBuf,
     signal,
 };
@@ -54,12 +54,10 @@ const MAX_PENDING_LAYERS_BUILDS: usize = 10;
 const MAX_ARTIFACT_FETCHES: usize = 1;
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
-    use maelstrom_util::config::common::BrokerConnection::*;
-
     info!(log, "started"; "config" => ?config, "pid" => process::id());
     let err = match config.broker_connection {
-        Tcp => main_inner::<TcpStream>(config, &log).unwrap_err(),
-        GitHub => main_inner::<GitHubQueue>(config, &log).unwrap_err(),
+        ConfigBrokerConnection::Tcp => main_inner::<TcpStream>(config, &log).unwrap_err(),
+        ConfigBrokerConnection::GitHub => main_inner::<GitHubQueue>(config, &log).unwrap_err(),
     };
     error!(log, "exiting"; "error" => %err);
     Err(err)
@@ -267,7 +265,7 @@ fn start_dispatcher_task_common<
             let msg = dispatcher_receiver
                 .recv()
                 .await
-                .expect("missing shut down message");
+                .expect("all senders should never be closed");
             if let Err(err) = dispatcher.receive_message(msg) {
                 break err;
             }
