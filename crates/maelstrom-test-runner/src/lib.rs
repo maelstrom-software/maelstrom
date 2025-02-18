@@ -43,6 +43,7 @@ use std::{
     path::PathBuf,
     str,
     sync::mpsc::Receiver,
+    thread,
     thread::Scope,
     time::Duration,
 };
@@ -347,7 +348,12 @@ fn main_with_ui_thread<TestRunnerT: TestRunner>(
             Ok(ControlFlow::Break(exit_code)) => {
                 break Ok(exit_code);
             }
-            Ok(ControlFlow::Continue(())) => {
+            Ok(ControlFlow::Continue(watcher)) => {
+                ui_sender.send(UiMessage::UpdateEnqueueStatus(
+                    "waiting for changes...".into(),
+                ));
+                watcher.wait();
+                thread::sleep(Duration::from_millis(100));
                 continue;
             }
         }
@@ -367,7 +373,7 @@ fn run_app_once<TestRunnerT: TestRunner>(
     log: &Logger,
     stdout_tty: StdoutTty,
     ui_sender: &UiSender,
-) -> Result<ControlFlow<ExitCode>> {
+) -> Result<ControlFlow<ExitCode, Watcher>> {
     let done = Event::new();
     let semaphore = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
 
@@ -473,39 +479,29 @@ fn run_app_once<TestRunnerT: TestRunner>(
     // This is where the pytest runner builds pip packages.
     test_collector.build_test_layers(testing_options.test_metadata.get_all_images(), ui_sender)?;
 
-    std::thread::scope(|scope| {
-        let result = (|| -> Result<ControlFlow<_>> {
-            let watcher = if extra_options.watch {
-                Some(Watcher::new(&directories.project, watch_exclude_paths)?)
-            } else {
-                None
-            };
+    let watcher = extra_options
+        .watch
+        .then(|| Watcher::new(&directories.project, watch_exclude_paths))
+        .transpose()?;
 
-            let exit_code = run_app_once_inner(
-                &client,
-                &done,
-                scope,
-                &semaphore,
-                &test_collector,
-                &test_db_store,
-                &testing_options,
-                ui_sender,
-            )?;
-
-            Ok(match watcher {
-                None => ControlFlow::Break(exit_code),
-                Some(watcher) => {
-                    ui_sender.send(UiMessage::UpdateEnqueueStatus(
-                        "waiting for changes...".into(),
-                    ));
-                    watcher.wait();
-                    ControlFlow::Continue(())
-                }
-            })
-        })();
-
+    let exit_code = std::thread::scope(|scope| {
+        let result = run_app_once_inner(
+            &client,
+            &done,
+            scope,
+            &semaphore,
+            &test_collector,
+            &test_db_store,
+            &testing_options,
+            ui_sender,
+        );
         done.set();
         result
+    })?;
+
+    Ok(match watcher {
+        None => ControlFlow::Break(exit_code),
+        Some(watcher) => ControlFlow::Continue(watcher),
     })
 }
 
