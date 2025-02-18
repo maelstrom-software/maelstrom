@@ -369,7 +369,6 @@ fn run_app_once<TestRunnerT: TestRunner>(
     ui_sender: &UiSender,
 ) -> Result<ControlFlow<ExitCode>> {
     let done = Event::new();
-    let files_changed = Event::new();
     let semaphore = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
 
     let (metadata, project_dir) = get_metadata_and_project_directory(config)?;
@@ -384,8 +383,7 @@ fn run_app_once<TestRunnerT: TestRunner>(
                 .to_path_buf()
                 .join(maelstrom_container::TAG_FILE_NAME),
             directories.project.to_path_buf().join(".git"),
-        ])
-        .collect();
+        ]);
 
     let (parent_config, test_collector_config) = config.as_parts();
 
@@ -478,18 +476,7 @@ fn run_app_once<TestRunnerT: TestRunner>(
     std::thread::scope(|scope| {
         let result = (|| -> Result<ControlFlow<_>> {
             let watcher = if extra_options.watch {
-                Some({
-                    let watcher = Watcher::new(
-                        scope,
-                        log.clone(),
-                        &directories.project,
-                        &watch_exclude_paths,
-                        &done,
-                        &files_changed,
-                    );
-                    watcher.watch_for_changes()?;
-                    watcher
-                })
+                Some(Watcher::new(&directories.project, watch_exclude_paths)?)
             } else {
                 None
             };
@@ -511,7 +498,7 @@ fn run_app_once<TestRunnerT: TestRunner>(
                     ui_sender.send(UiMessage::UpdateEnqueueStatus(
                         "waiting for changes...".into(),
                     ));
-                    watcher.wait_for_changes();
+                    watcher.wait();
                     ControlFlow::Continue(())
                 }
             })
@@ -557,7 +544,6 @@ fn run_app_once_inner<'scope, 'env, TestCollectorT: TestCollector + Sync>(
 
     Ok(exit_code)
 }
-
 
 /// Grab introspect data from the client process periodically and send it to the UI. Exit when the
 /// done event has been set.
