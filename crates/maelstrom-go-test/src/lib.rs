@@ -705,14 +705,14 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn build_test_collector(
         _client: &Client,
-        config: GoTestConfig,
+        config: &GoTestConfig,
         directories: &Directories,
         _log: &slog::Logger,
         _metadata: (),
     ) -> Result<GoTestCollector> {
         Ok(GoTestCollector::new(
             &directories.cache,
-            config,
+            config.clone(),
             &directories.project,
         ))
     }

@@ -1,5 +1,5 @@
 use maelstrom_macro::Config;
-use maelstrom_test_runner::config::{Config as TestRunnerConfig, IntoParts};
+use maelstrom_test_runner::config::{AsParts, Config as TestRunnerConfig};
 
 #[derive(Config, Debug)]
 pub struct Config {
@@ -47,10 +47,10 @@ impl AsRef<TestRunnerConfig> for Config {
     }
 }
 
-impl IntoParts for Config {
+impl AsParts for Config {
     type First = TestRunnerConfig;
     type Second = PytestConfig;
-    fn into_parts(self) -> (TestRunnerConfig, PytestConfig) {
-        (self.parent, self.pytest)
+    fn as_parts(&self) -> (&TestRunnerConfig, &PytestConfig) {
+        (&self.parent, &self.pytest)
     }
 }

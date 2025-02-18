@@ -549,14 +549,14 @@ impl maelstrom_test_runner::TestRunner for TestRunner {
 
     fn build_test_collector<'client>(
         client: &'client Client,
-        config: PytestConfig,
+        config: &PytestConfig,
         directories: &Directories,
         _log: &slog::Logger,
         _metadata: (),
     ) -> Result<PytestTestCollector<'client>> {
         Ok(PytestTestCollector {
             client,
-            config,
+            config: config.clone(),
             directories: directories.clone(),
             test_layers: Mutex::new(HashMap::new()),
         })

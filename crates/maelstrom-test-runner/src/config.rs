@@ -63,10 +63,10 @@ impl Default for Repeat {
 
 non_zero_usize_wrapper!(StopAfter);
 
-pub trait IntoParts {
+pub trait AsParts {
     type First;
     type Second;
-    fn into_parts(self) -> (Self::First, Self::Second);
+    fn as_parts(&self) -> (&Self::First, &Self::Second);
 }
 
 #[derive(Config, Debug)]
