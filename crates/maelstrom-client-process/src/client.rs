@@ -1,11 +1,10 @@
 pub mod layer_builder;
-mod state_machine;
 
 use crate::{
     artifact_pusher, digest_repo::DigestRepository, preparer, progress::ProgressTracker, router,
     util,
 };
-use anyhow::{anyhow, Context as _, Error, Result};
+use anyhow::{anyhow, bail, Context as _, Error, Result};
 use async_trait::async_trait;
 use layer_builder::LayerBuilder;
 use maelstrom_base::{
@@ -27,19 +26,15 @@ use maelstrom_util::{
 };
 use maelstrom_worker::local_worker;
 use slog::{debug, warn, Logger};
-use state_machine::StateMachine;
 use std::{collections::HashSet, future::Future, path::Path, pin::Pin, sync::Arc};
 use tokio::{
     net::TcpStream,
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, oneshot, Mutex, RwLock},
     task::{self, JoinHandle, JoinSet},
 };
 
-#[derive(Clone)]
-pub struct Client {
-    state_machine: Arc<StateMachine<ClientState>>,
-    clean_up: Arc<CleanUpWork>,
-}
+#[derive(Default)]
+pub struct Client(RwLock<Option<ClientState>>);
 
 struct ClientState {
     router_sender: router::Sender,
@@ -47,30 +42,12 @@ struct ClientState {
     image_download_tracker: ProgressTracker,
     log: Logger,
     preparer_sender: preparer::task::Sender,
+    clean_up: Vec<Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>>>,
 }
 
 struct ClientStateLocked {
     digest_repo: DigestRepository,
     processed_artifact_digests: HashSet<Sha256Digest>,
-}
-
-#[derive(Default)]
-struct CleanUpWork {
-    work: std::sync::Mutex<Vec<Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>>>>,
-}
-
-impl CleanUpWork {
-    async fn execute(&self) {
-        let work = std::mem::take(&mut *self.work.lock().unwrap());
-        for w in work {
-            w.await;
-        }
-    }
-
-    fn add_work(&self, fut: impl Future<Output = ()> + Send + Sync + 'static) {
-        let mut work = self.work.lock().unwrap();
-        work.push(Box::pin(fut));
-    }
 }
 
 #[derive(Clone)]
@@ -121,11 +98,216 @@ const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 const MAX_PENDING_LAYER_BUILDS: usize = 10;
 
 impl Client {
-    pub fn new() -> Self {
-        Self {
-            state_machine: Arc::new(StateMachine::default()),
-            clean_up: Default::default(),
+    #[allow(clippy::too_many_arguments)]
+    async fn try_to_start(
+        log: Logger,
+        broker_addr: Option<BrokerAddr>,
+        project_dir: RootBuf<ProjectDir>,
+        state_dir: RootBuf<StateDir>,
+        cache_dir: RootBuf<CacheDir>,
+        container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
+        cache_size: CacheSize,
+        inline_limit: InlineLimit,
+        slots: Slots,
+        accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+        artifact_transfer_strategy: ArtifactTransferStrategy,
+    ) -> Result<(ClientState, JoinSet<Result<()>>, JoinHandle<Error>)> {
+        let fs = async_fs::Fs::new();
+
+        // Make sure the state dir exists before we try to put a log file in.
+        fs.create_dir_all(&state_dir).await?;
+
+        debug!(log, "client starting";
+            "broker_addr" => ?broker_addr,
+            "project_dir" => ?project_dir,
+            "state_dir" => ?state_dir,
+            "cache_dir" => ?cache_dir,
+            "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
+            "cache_size" => ?cache_size,
+            "inline_limit" => ?inline_limit,
+            "slots" => ?slots,
+        );
+
+        let extra = 1 /* rpc connection */ +
+                /* 1 for the manifest, 1 for file we are reading, 1 for directory we are listing */
+                MAX_PENDING_LAYER_BUILDS * 3 +
+                artifact_pusher::MAX_CLIENT_UPLOADS * 2; // 1 for the socket, 1 for the file.
+        local_worker::check_open_file_limit(&log, slots, extra as u64)?;
+
+        // We recreate all the manifests every time. We delete it here to clean-up unused
+        // manifests and leaked temporary files.
+        if fs.exists((**cache_dir).join(MANIFEST_DIR)).await {
+            fs.remove_dir_all((**cache_dir).join(MANIFEST_DIR)).await?;
         }
+
+        // Ensure all of the appropriate subdirectories have been created in the cache
+        // directory.
+        const LOCAL_WORKER_DIR: &str = "local-worker";
+        for d in [STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR, LOCAL_WORKER_DIR] {
+            fs.create_dir_all((**cache_dir).join(d)).await?;
+        }
+
+        // Create standalone sub-components.
+        let container_image_depot = ContainerImageDepot::new(
+            project_dir.transmute::<container::ProjectDir>(),
+            container_image_depot_cache_dir,
+            accept_invalid_remote_container_tls_certs.into_inner(),
+        )?;
+        let digest_repo = DigestRepository::new(&cache_dir);
+        let artifact_upload_tracker = ProgressTracker::default();
+        let image_download_tracker = ProgressTracker::default();
+
+        // Create the JoinSet we're going to put tasks in. If we bail early from this function,
+        // we'll cancel all tasks we have started thus far.
+        let mut join_set = JoinSet::new();
+
+        // Create all of the channels we're going to need to connect everything up.
+        let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
+        let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
+        let (router_sender, router_receiver) = router::channel();
+        let (local_worker_sender, local_worker_receiver) = local_worker::channel();
+
+        let standalone;
+        if let Some(broker_addr) = broker_addr {
+            // We have a broker_addr, which means we're not in standalone mode.
+            standalone = false;
+
+            // Connect to the broker.
+            let (broker_socket_read_half, mut broker_socket_write_half) =
+                TcpStream::connect(broker_addr.inner())
+                    .await
+                    .with_context(|| format!("failed to connect to {broker_addr}"))?
+                    .set_socket_options()?
+                    .into_split();
+            debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
+
+            // Send it a Hello message.
+            net::write_message_to_async_socket(&mut broker_socket_write_half, Hello::Client, &log)
+                .await?;
+
+            // Spawn a task to read from the socket and write to the router's channel.
+            let log_clone = log.clone();
+            let router_sender_clone = router_sender.clone();
+            join_set.spawn(async move {
+                net::async_socket_reader(
+                    broker_socket_read_half,
+                    router_sender_clone,
+                    router::Message::Broker,
+                    &log_clone,
+                )
+                .await
+                .context("reading from broker")
+            });
+
+            // Spawn a task to read from the broker's channel and write to the socket.
+            let log_clone = log.clone();
+            join_set.spawn(async move {
+                net::async_socket_writer(broker_receiver, broker_socket_write_half, &log_clone)
+                    .await
+                    .context("writing to broker")
+            });
+
+            // Spawn a task for the artifact_pusher.
+            artifact_pusher::start_task(
+                artifact_transfer_strategy,
+                &mut join_set,
+                artifact_pusher_receiver,
+                broker_addr,
+                artifact_upload_tracker.clone(),
+                log.clone(),
+            )?;
+        } else {
+            // We don't have a broker_addr, which means we're in standalone mode.
+            standalone = true;
+
+            // Drop the receivers for the artifact_pusher and the broker. We're not going to be
+            // sending messages to their corresponding senders (at least, we better not be!).
+            drop(artifact_pusher_receiver);
+            drop(broker_receiver);
+        }
+
+        // Spawn a task for the router.
+        router::start_task(
+            &mut join_set,
+            standalone,
+            router_receiver,
+            broker_sender,
+            artifact_pusher_sender,
+            local_worker_sender.clone(),
+        );
+
+        // Start the local worker.
+        struct ArtifactFetcher(router::Sender);
+        impl local_worker::ArtifactFetcher for ArtifactFetcher {
+            fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
+                let _ = self
+                    .0
+                    .send(router::Message::LocalWorkerStartArtifactFetch(digest));
+            }
+        }
+
+        struct BrokerSender(Option<router::Sender>);
+        impl local_worker::BrokerSender for BrokerSender {
+            fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
+                if let Some(sender) = self.0.as_ref() {
+                    let _ = sender.send(router::Message::LocalWorker(msg));
+                }
+            }
+            fn close(&mut self) {
+                self.0 = None;
+            }
+        }
+
+        let local_worker_handle = local_worker::start_task(
+            ArtifactFetcher(router_sender.clone()),
+            BrokerSender(Some(router_sender.clone())),
+            local_worker::Config {
+                cache_root: cache_dir.join(LOCAL_WORKER_DIR),
+                cache_size,
+                inline_limit,
+                slots,
+            },
+            local_worker_receiver,
+            local_worker_sender,
+            &log,
+        )?;
+
+        let layer_builder = LayerBuilder::new(cache_dir, project_dir, MANIFEST_INLINE_LIMIT);
+        let locked = Arc::new(Mutex::new(ClientStateLocked {
+            digest_repo,
+            processed_artifact_digests: HashSet::default(),
+        }));
+        let uploader = Uploader {
+            log: log.clone(),
+            router_sender: router_sender.clone(),
+            locked,
+        };
+
+        let (preparer_sender, preparer_receiver) = preparer::task::channel();
+
+        preparer::task::start(
+            &mut join_set,
+            MAX_PENDING_LAYER_BUILDS.try_into().unwrap(),
+            preparer_sender.clone(),
+            preparer_receiver,
+            container_image_depot,
+            image_download_tracker.clone(),
+            layer_builder,
+            uploader,
+        );
+
+        Ok((
+            ClientState {
+                router_sender,
+                artifact_upload_tracker,
+                image_download_tracker,
+                log,
+                preparer_sender,
+                clean_up: Default::default(),
+            },
+            join_set,
+            local_worker_handle,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -143,223 +325,12 @@ impl Client {
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
         artifact_transfer_strategy: ArtifactTransferStrategy,
     ) -> Result<()> {
-        async fn try_to_start(
-            log: Logger,
-            broker_addr: Option<BrokerAddr>,
-            project_dir: RootBuf<ProjectDir>,
-            state_dir: RootBuf<StateDir>,
-            cache_dir: RootBuf<CacheDir>,
-            container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
-            cache_size: CacheSize,
-            inline_limit: InlineLimit,
-            slots: Slots,
-            accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-            artifact_transfer_strategy: ArtifactTransferStrategy,
-        ) -> Result<(ClientState, JoinSet<Result<()>>, JoinHandle<Error>)> {
-            let fs = async_fs::Fs::new();
-
-            // Make sure the state dir exists before we try to put a log file in.
-            fs.create_dir_all(&state_dir).await?;
-
-            debug!(log, "client starting";
-                "broker_addr" => ?broker_addr,
-                "project_dir" => ?project_dir,
-                "state_dir" => ?state_dir,
-                "cache_dir" => ?cache_dir,
-                "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
-                "cache_size" => ?cache_size,
-                "inline_limit" => ?inline_limit,
-                "slots" => ?slots,
-            );
-
-            let extra = 1 /* rpc connection */ +
-                /* 1 for the manifest, 1 for file we are reading, 1 for directory we are listing */
-                MAX_PENDING_LAYER_BUILDS * 3 +
-                artifact_pusher::MAX_CLIENT_UPLOADS * 2; // 1 for the socket, 1 for the file.
-            local_worker::check_open_file_limit(&log, slots, extra as u64)?;
-
-            // We recreate all the manifests every time. We delete it here to clean-up unused
-            // manifests and leaked temporary files.
-            if fs.exists((**cache_dir).join(MANIFEST_DIR)).await {
-                fs.remove_dir_all((**cache_dir).join(MANIFEST_DIR)).await?;
-            }
-
-            // Ensure all of the appropriate subdirectories have been created in the cache
-            // directory.
-            const LOCAL_WORKER_DIR: &str = "local-worker";
-            for d in [STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR, LOCAL_WORKER_DIR] {
-                fs.create_dir_all((**cache_dir).join(d)).await?;
-            }
-
-            // Create standalone sub-components.
-            let container_image_depot = ContainerImageDepot::new(
-                project_dir.transmute::<container::ProjectDir>(),
-                container_image_depot_cache_dir,
-                accept_invalid_remote_container_tls_certs.into_inner(),
-            )?;
-            let digest_repo = DigestRepository::new(&cache_dir);
-            let artifact_upload_tracker = ProgressTracker::default();
-            let image_download_tracker = ProgressTracker::default();
-
-            // Create the JoinSet we're going to put tasks in. If we bail early from this function,
-            // we'll cancel all tasks we have started thus far.
-            let mut join_set = JoinSet::new();
-
-            // Create all of the channels we're going to need to connect everything up.
-            let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
-            let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-            let (router_sender, router_receiver) = router::channel();
-            let (local_worker_sender, local_worker_receiver) = local_worker::channel();
-
-            let standalone;
-            if let Some(broker_addr) = broker_addr {
-                // We have a broker_addr, which means we're not in standalone mode.
-                standalone = false;
-
-                // Connect to the broker.
-                let (broker_socket_read_half, mut broker_socket_write_half) =
-                    TcpStream::connect(broker_addr.inner())
-                        .await
-                        .with_context(|| format!("failed to connect to {broker_addr}"))?
-                        .set_socket_options()?
-                        .into_split();
-                debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
-
-                // Send it a Hello message.
-                net::write_message_to_async_socket(
-                    &mut broker_socket_write_half,
-                    Hello::Client,
-                    &log,
-                )
-                .await?;
-
-                // Spawn a task to read from the socket and write to the router's channel.
-                let log_clone = log.clone();
-                let router_sender_clone = router_sender.clone();
-                join_set.spawn(async move {
-                    net::async_socket_reader(
-                        broker_socket_read_half,
-                        router_sender_clone,
-                        router::Message::Broker,
-                        &log_clone,
-                    )
-                    .await
-                    .context("reading from broker")
-                });
-
-                // Spawn a task to read from the broker's channel and write to the socket.
-                let log_clone = log.clone();
-                join_set.spawn(async move {
-                    net::async_socket_writer(broker_receiver, broker_socket_write_half, &log_clone)
-                        .await
-                        .context("writing to broker")
-                });
-
-                // Spawn a task for the artifact_pusher.
-                artifact_pusher::start_task(
-                    artifact_transfer_strategy,
-                    &mut join_set,
-                    artifact_pusher_receiver,
-                    broker_addr,
-                    artifact_upload_tracker.clone(),
-                    log.clone(),
-                )?;
-            } else {
-                // We don't have a broker_addr, which means we're in standalone mode.
-                standalone = true;
-
-                // Drop the receivers for the artifact_pusher and the broker. We're not going to be
-                // sending messages to their corresponding senders (at least, we better not be!).
-                drop(artifact_pusher_receiver);
-                drop(broker_receiver);
-            }
-
-            // Spawn a task for the router.
-            router::start_task(
-                &mut join_set,
-                standalone,
-                router_receiver,
-                broker_sender,
-                artifact_pusher_sender,
-                local_worker_sender.clone(),
-            );
-
-            // Start the local worker.
-            struct ArtifactFetcher(router::Sender);
-            impl local_worker::ArtifactFetcher for ArtifactFetcher {
-                fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
-                    let _ = self
-                        .0
-                        .send(router::Message::LocalWorkerStartArtifactFetch(digest));
-                }
-            }
-
-            struct BrokerSender(Option<router::Sender>);
-            impl local_worker::BrokerSender for BrokerSender {
-                fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
-                    if let Some(sender) = self.0.as_ref() {
-                        let _ = sender.send(router::Message::LocalWorker(msg));
-                    }
-                }
-                fn close(&mut self) {
-                    self.0 = None;
-                }
-            }
-
-            let local_worker_handle = local_worker::start_task(
-                ArtifactFetcher(router_sender.clone()),
-                BrokerSender(Some(router_sender.clone())),
-                local_worker::Config {
-                    cache_root: cache_dir.join(LOCAL_WORKER_DIR),
-                    cache_size,
-                    inline_limit,
-                    slots,
-                },
-                local_worker_receiver,
-                local_worker_sender,
-                &log,
-            )?;
-
-            let layer_builder = LayerBuilder::new(cache_dir, project_dir, MANIFEST_INLINE_LIMIT);
-            let locked = Arc::new(Mutex::new(ClientStateLocked {
-                digest_repo,
-                processed_artifact_digests: HashSet::default(),
-            }));
-            let uploader = Uploader {
-                log: log.clone(),
-                router_sender: router_sender.clone(),
-                locked,
-            };
-
-            let (preparer_sender, preparer_receiver) = preparer::task::channel();
-
-            preparer::task::start(
-                &mut join_set,
-                MAX_PENDING_LAYER_BUILDS.try_into().unwrap(),
-                preparer_sender.clone(),
-                preparer_receiver,
-                container_image_depot,
-                image_download_tracker.clone(),
-                layer_builder,
-                uploader,
-            );
-
-            Ok((
-                ClientState {
-                    router_sender,
-                    artifact_upload_tracker,
-                    image_download_tracker,
-                    log,
-                    preparer_sender,
-                },
-                join_set,
-                local_worker_handle,
-            ))
+        let mut guard = self.0.write().await;
+        if guard.is_some() {
+            bail!("client already started");
         }
 
-        let activation_handle = self.state_machine.try_to_begin_activation()?;
-
-        let result = try_to_start(
+        let (mut state, mut join_set, local_worker_handle) = Self::try_to_start(
             log,
             broker_addr,
             project_dir,
@@ -372,75 +343,83 @@ impl Client {
             accept_invalid_remote_container_tls_certs,
             artifact_transfer_strategy,
         )
-        .await;
-        match result {
-            Ok((state, mut join_set, local_worker_handle)) => {
-                let shutdown_sender = state.router_sender.clone();
-                let state_machine_clone = self.state_machine.clone();
-                let fail = move |msg: String| {
-                    state_machine_clone.fail(msg.clone());
-                    let _ = shutdown_sender.send(router::Message::Shutdown(anyhow!(msg)));
-                };
+        .await?;
 
-                let log = state.log.clone();
-                let fail_clone = fail.clone();
-                task::spawn(async move {
-                    let signal = signal::wait_for_signal(log.clone()).await;
-                    fail_clone(format!("received signal {signal}"));
-                });
+        let shutdown_sender = state.router_sender.clone();
+        let fail = move |msg: String| {
+            let _ = shutdown_sender.send(router::Message::Shutdown(anyhow!(msg)));
+        };
 
-                let log = state.log.clone();
-                debug!(log, "client started successfully");
+        let log = state.log.clone();
+        let fail_clone = fail.clone();
+        task::spawn(async move {
+            let signal = signal::wait_for_signal(log.clone()).await;
+            fail_clone(format!("received signal {signal}"));
+        });
 
-                let shutdown_sender = state.router_sender.clone();
-                let log_clone = log.clone();
-                self.clean_up.add_work(async move {
-                    let _ = shutdown_sender
-                        .send(router::Message::Shutdown(anyhow!("connection closed")));
-                    let err = local_worker_handle.await.unwrap();
-                    debug!(log_clone, "local worker shut down"; "error" => %err);
-                });
-                activation_handle.activate(state);
+        let log = state.log.clone();
+        debug!(log, "client started successfully");
 
-                task::spawn(async move {
-                    while let Some(res) = join_set.join_next().await {
-                        match res {
-                            Err(err) => {
-                                // This means that the task was either cancelled or it panicked.
-                                warn!(log, "error joining task"; "error" => %err);
-                                fail(format!("{err:?}"));
-                                return;
-                            }
-                            Ok(Err(err)) => {
-                                // One of the tasks ran into an error. Log it and return.
-                                debug!(log, "task completed with error"; "error" => %err);
-                                fail(format!("{err:?}"));
-                                return;
-                            }
-                            Ok(Ok(())) => {
-                                // We ignore Ok(_) because we expect to hear about the real error later.
-                                continue;
-                            }
-                        }
+        let shutdown_sender = state.router_sender.clone();
+        let log_clone = log.clone();
+        state.clean_up.push(Box::pin(async move {
+            let _ = shutdown_sender.send(router::Message::Shutdown(anyhow!("connection closed")));
+            let err = local_worker_handle.await.unwrap();
+            debug!(log_clone, "local worker shut down"; "error" => %err);
+        }));
+
+        task::spawn(async move {
+            while let Some(res) = join_set.join_next().await {
+                match res {
+                    Err(err) => {
+                        // This means that the task was either cancelled or it panicked.
+                        warn!(log, "error joining task"; "error" => %err);
+                        fail(format!("{err:?}"));
+                        return;
                     }
-                    // Somehow we didn't get a real error. That's not good!
-                    warn!(log, "all tasks exited, but none completed with an error");
-                    fail("client unexpectedly exited prematurely".to_string());
-                });
-                Ok(())
+                    Ok(Err(err)) => {
+                        // One of the tasks ran into an error. Log it and return.
+                        debug!(log, "task completed with error"; "error" => %err);
+                        fail(format!("{err:?}"));
+                        return;
+                    }
+                    Ok(Ok(())) => {
+                        // We ignore Ok(_) because we expect to hear about the real error later.
+                        continue;
+                    }
+                }
             }
-            Err(err) => {
-                activation_handle.fail(format!("{err:?}"));
-                Err(err)
-            }
+            // Somehow we didn't get a real error. That's not good!
+            warn!(log, "all tasks exited, but none completed with an error");
+            fail("client unexpectedly exited prematurely".to_string());
+        });
+
+        *guard = Some(state);
+        Ok(())
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        let mut guard = self.0.write().await;
+        let state = guard.take().ok_or_else(|| anyhow!("client not started"))?;
+
+        // Even though we just took the state, wait to drop the lock until we're done shutting
+        // down. This will block a subsequent start, if there were to be one.
+        for work in state.clean_up {
+            work.await;
         }
+
+        Ok(())
     }
 
     pub async fn run_job(
         &self,
         spec: spec::JobSpec,
     ) -> Result<futures::channel::mpsc::UnboundedReceiver<JobStatus>> {
-        let state = self.state_machine.active()?;
+        let guard = self.0.read().await;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| anyhow!("client not started"))?;
+
         debug!(state.log, "run_job"; "spec" => ?spec);
 
         let (sender, receiver) = oneshot::channel();
@@ -458,7 +437,11 @@ impl Client {
     }
 
     pub async fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {
-        let state = self.state_machine.active()?;
+        let guard = self.0.read().await;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| anyhow!("client not started"))?;
+
         debug!(state.log, "add_container"; "name" => ?name, "container" => ?container);
 
         let (sender, receiver) = oneshot::channel();
@@ -474,16 +457,16 @@ impl Client {
     }
 
     pub async fn introspect(&self) -> Result<IntrospectResponse> {
-        let state = self.state_machine.active()?;
+        let guard = self.0.read().await;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| anyhow!("client not started"))?;
+
         let artifact_uploads = state.artifact_upload_tracker.get_remote_progresses();
         let image_downloads = state.image_download_tracker.get_remote_progresses();
         Ok(IntrospectResponse {
             artifact_uploads,
             image_downloads,
         })
-    }
-
-    pub async fn shutdown(&self) {
-        self.clean_up.execute().await;
     }
 }

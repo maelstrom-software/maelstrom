@@ -52,8 +52,9 @@ async fn main_after_clone(
         )
         .await;
 
-    // Tell the local worker to shut down, and then wait for its task to complete.
-    handler.client.read().await.shutdown().await;
+    // Tell the local worker to shut down, and then wait for its task to complete. Ignore error, as
+    // they only arise if we haven't started or have already stopped.
+    let _ = handler.client.stop().await;
 
     res?;
     Ok(ExitCode::SUCCESS)

@@ -223,7 +223,6 @@ struct DispatcherArgs<BrokerSenderT> {
     slots: Slots,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn start_dispatcher_task_common<
     ArtifactFetcherT: dispatcher::ArtifactFetcher + Send + 'static,
     ArtifactFetcherFactoryT: FnOnce(TempFileFactory<StdFs>) -> ArtifactFetcherT,

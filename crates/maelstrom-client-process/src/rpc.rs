@@ -13,7 +13,6 @@ use std::{
     result,
     sync::{Arc, Mutex},
 };
-use tokio::sync::RwLock;
 use tonic::{Code, Request, Response, Status};
 
 type TonicResult<T> = result::Result<T, Status>;
@@ -37,7 +36,7 @@ impl std::ops::Deref for ArcHandler {
 }
 
 pub struct Handler {
-    pub client: RwLock<Client>,
+    pub client: Client,
     rpc_log_level: LogLevel,
     log: Mutex<Option<slog::Logger>>,
 }
@@ -45,7 +44,7 @@ pub struct Handler {
 impl Handler {
     pub fn new(log: Option<slog::Logger>, rpc_log_level: LogLevel) -> Self {
         Self {
-            client: RwLock::new(Client::new()),
+            client: Default::default(),
             rpc_log_level,
             log: Mutex::new(log),
         }
@@ -90,8 +89,6 @@ impl ClientProcess for ArcHandler {
                 bail!("no logging set up");
             };
             self.client
-                .read()
-                .await
                 .start(
                     log,
                     request.broker_addr,
@@ -120,7 +117,7 @@ impl ClientProcess for ArcHandler {
     ) -> TonicResponse<Self::RunJobStream> {
         async {
             let RunJobRequest { spec } = TryFromProtoBuf::try_from_proto_buf(request.into_inner())?;
-            let stream = self.client.read().await.run_job(spec).await?;
+            let stream = self.client.run_job(spec).await?;
             Ok(Box::pin(stream.map(|e| Ok(IntoProtoBuf::into_proto_buf(e)))) as Self::RunJobStream)
         }
         .await
@@ -135,8 +132,6 @@ impl ClientProcess for ArcHandler {
             let AddContainerRequest { name, container } =
                 TryFromProtoBuf::try_from_proto_buf(request.into_inner())?;
             self.client
-                .read()
-                .await
                 .add_container(name, container)
                 .await
                 .map(IntoProtoBuf::into_proto_buf)
@@ -150,8 +145,6 @@ impl ClientProcess for ArcHandler {
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::IntrospectResponse> {
         self.client
-            .read()
-            .await
             .introspect()
             .await
             .map(|res| res.into_proto_buf())
@@ -159,11 +152,8 @@ impl ClientProcess for ArcHandler {
     }
 
     async fn stop(&self, _request: Request<proto::Void>) -> TonicResponse<proto::Void> {
-        let mut client = self.client.write().await;
-        let old_client = std::mem::replace(&mut *client, Client::new());
-        drop(client);
-
-        old_client.shutdown().await;
-        Ok(proto::Void {}).map_to_tonic()
+        async { self.client.stop().await.map(IntoProtoBuf::into_proto_buf) }
+            .await
+            .map_to_tonic()
     }
 }
