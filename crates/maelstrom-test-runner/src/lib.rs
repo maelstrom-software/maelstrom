@@ -536,8 +536,6 @@ fn run_app_once_inner<'scope, 'env, TestCollectorT: TestCollector + Sync>(
     let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
     test_db_store.save(test_db)?;
 
-    client.restart()?;
-
     Ok(exit_code)
 }
 

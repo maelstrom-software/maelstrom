@@ -158,7 +158,7 @@ impl ClientProcess for ArcHandler {
             .map_to_tonic()
     }
 
-    async fn restart(&self, _request: Request<proto::Void>) -> TonicResponse<proto::Void> {
+    async fn stop(&self, _request: Request<proto::Void>) -> TonicResponse<proto::Void> {
         let mut client = self.client.write().await;
         let old_client = std::mem::replace(&mut *client, Client::new());
         drop(client);

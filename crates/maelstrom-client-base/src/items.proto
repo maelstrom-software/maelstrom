@@ -350,5 +350,5 @@ service ClientProcess {
     rpc AddContainer(AddContainerRequest) returns (Void);
     rpc RunJob(RunJobRequest) returns (stream JobStatus);
     rpc Introspect(Void) returns (IntrospectResponse);
-    rpc Restart(Void) returns (Void);
+    rpc Stop(Void) returns (Void);
 }

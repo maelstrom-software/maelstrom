@@ -211,7 +211,12 @@ impl Drop for ClientProcessHandle {
 
 impl Drop for Client {
     fn drop(&mut self) {
-        debug!(self.log, "dropping Client");
+        debug!(self.log, "dropping Client: waiting for stop request");
+        if let Err(err) =
+            self.send_sync_unit(move |mut client| async move { client.stop(proto::Void {}).await })
+        {
+            debug!(self.log, "dropping Client: error waiting for stop: {err}");
+        }
         drop(self.requester.take());
         debug!(self.log, "Client::drop: waiting for dispatcher");
         if let Err(err) = self.dispatcher_handle.take().unwrap().join().unwrap() {
@@ -448,12 +453,5 @@ impl Client {
 
     pub fn introspect(&self) -> Result<IntrospectResponse> {
         self.send_sync(move |mut client| async move { client.introspect(proto::Void {}).await })
-    }
-
-    /// Kills all running jobs and clears the layer caches.
-    pub fn restart(&self) -> Result<()> {
-        self.send_sync_unit(move |mut client| async move { client.restart(proto::Void {}).await })?;
-        self.send_start()?;
-        Ok(())
     }
 }
