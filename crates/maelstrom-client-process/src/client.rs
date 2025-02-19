@@ -216,6 +216,7 @@ impl Client {
                 artifact_upload_tracker.clone(),
                 log.clone(),
             )?;
+
         } else {
             // We don't have a broker_addr, which means we're in standalone mode.
             standalone = true;
