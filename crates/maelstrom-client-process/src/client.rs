@@ -2,10 +2,7 @@ pub mod layer_builder;
 
 use crate::{artifact_pusher, preparer, progress::ProgressTracker, router};
 use anyhow::{anyhow, bail, Context as _, Error, Result};
-use maelstrom_base::{
-    proto::{Hello, WorkerToBroker},
-    Sha256Digest,
-};
+use maelstrom_base::proto::Hello;
 use maelstrom_client_base::{
     spec::{self, ContainerSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
@@ -192,25 +189,13 @@ impl Client {
         )?;
 
         // Start the local worker.
-        struct ArtifactFetcher(router::Sender);
-        impl local_worker::ArtifactFetcher for ArtifactFetcher {
-            fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
-                let _ = self
-                    .0
-                    .send(router::Message::LocalWorkerStartArtifactFetch(digest));
-            }
-        }
-
-        struct BrokerSender(router::Sender);
-        impl local_worker::BrokerSender for BrokerSender {
-            fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
-                let _ = self.0.send(router::Message::LocalWorker(msg));
-            }
-        }
-
+        let router_sender_clone_1 = router_sender.clone();
+        let router_sender_clone_2 = router_sender.clone();
         let local_worker_handle = local_worker::start_task(
-            ArtifactFetcher(router_sender.clone()),
-            BrokerSender(router_sender.clone()),
+            move |digest| {
+                router_sender_clone_1.send(router::Message::LocalWorkerStartArtifactFetch(digest))
+            },
+            move |msg| router_sender_clone_2.send(router::Message::LocalWorker(msg)),
             local_worker::Config {
                 cache_root: cache_dir.join(LOCAL_WORKER_DIR),
                 cache_size,

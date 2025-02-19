@@ -1,11 +1,12 @@
 pub use crate::{
     check_open_file_limit,
     config::CacheDir,
-    dispatcher::{ArtifactFetcher, BrokerSender, Message},
+    dispatcher::Message,
     types::{DispatcherReceiver as Receiver, DispatcherSender as Sender},
 };
 pub use maelstrom_util::cache::GotArtifact;
 
+use crate::dispatcher::{ArtifactFetcher, BrokerSender};
 use anyhow::{Error, Result};
 use maelstrom_util::{
     config::common::{CacheSize, InlineLimit, Slots},

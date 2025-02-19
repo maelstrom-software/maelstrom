@@ -203,6 +203,12 @@ pub trait ArtifactFetcher {
     fn start_artifact_fetch(&mut self, digest: Sha256Digest);
 }
 
+impl<F: FnMut(Sha256Digest) -> Result<(), E>, E> ArtifactFetcher for F {
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest) {
+        let _ = self(digest);
+    }
+}
+
 /// The broker sender is split out of [`Deps`] for convenience. Sending message to the broker is
 /// different for "real" and local workers, but the rest of [`Deps`] is the same. For the "real"
 /// worker, we just enqueue the message as it is, but for the local worker, we need to wrap it in a
@@ -210,6 +216,12 @@ pub trait ArtifactFetcher {
 pub trait BrokerSender {
     /// Send a message to the broker.
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
+}
+
+impl<F: FnMut(WorkerToBroker) -> Result<(), E>, E> BrokerSender for F {
+    fn send_message_to_broker(&mut self, message: WorkerToBroker) {
+        let _ = self(message);
+    }
 }
 
 /// The [`cache::Cache`] dependency for [`Dispatcher`]. This should be very similar to

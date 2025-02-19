@@ -1,5 +1,4 @@
 use crate::dispatcher;
-use derive_more::Constructor;
 use maelstrom_base::{proto::WorkerToBroker, JobId, Sha256Digest};
 use maelstrom_util::cache::{self, fs::std::Fs as StdFs, GotArtifact};
 use std::path::PathBuf;
@@ -113,15 +112,6 @@ impl dispatcher::Cache for Cache {
 
     fn cache_path(&self, key: &CacheKey) -> PathBuf {
         self.cache_path(key).into_path_buf()
-    }
-}
-
-#[derive(Constructor)]
-pub struct BrokerSender(BrokerSocketOutgoingSender);
-
-impl dispatcher::BrokerSender for BrokerSender {
-    fn send_message_to_broker(&mut self, message: WorkerToBroker) {
-        let _ = self.0.send(message);
     }
 }
 

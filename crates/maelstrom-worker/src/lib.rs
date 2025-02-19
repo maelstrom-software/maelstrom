@@ -39,9 +39,7 @@ use tokio::{
     sync::mpsc,
     task::{self, JoinHandle, JoinSet},
 };
-use types::{
-    BrokerSender, BrokerSocketOutgoingSender, Cache, DispatcherReceiver, DispatcherSender,
-};
+use types::{BrokerSocketOutgoingSender, Cache, DispatcherReceiver, DispatcherSender};
 
 fn env_or_error(key: &str) -> Result<String> {
     std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
@@ -150,7 +148,7 @@ fn start_dispatcher_task(
         .unwrap()
         .try_into()
         .unwrap();
-    let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
+    let broker_sender = move |msg| broker_socket_outgoing_sender.send(msg);
 
     let args = DispatcherArgs {
         broker_sender,
