@@ -1,12 +1,7 @@
 pub mod layer_builder;
 
-use crate::{
-    artifact_pusher, digest_repo::DigestRepository, preparer, progress::ProgressTracker, router,
-    util,
-};
+use crate::{artifact_pusher, preparer, progress::ProgressTracker, router};
 use anyhow::{anyhow, bail, Context as _, Error, Result};
-use async_trait::async_trait;
-use layer_builder::LayerBuilder;
 use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
     Sha256Digest,
@@ -16,7 +11,7 @@ use maelstrom_client_base::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
     StateDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
-use maelstrom_container::{self as container, ContainerImageDepot, ContainerImageDepotDir};
+use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_util::{
     async_fs,
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -25,11 +20,11 @@ use maelstrom_util::{
     signal,
 };
 use maelstrom_worker::local_worker;
-use slog::{debug, warn, Logger};
-use std::{collections::HashSet, future::Future, path::Path, pin::Pin, sync::Arc};
+use slog::{debug, o, warn, Logger};
+use std::{future::Future, pin::Pin};
 use tokio::{
     net::TcpStream,
-    sync::{mpsc, oneshot, Mutex, RwLock},
+    sync::{mpsc, oneshot, RwLock},
     task::{self, JoinHandle, JoinSet},
 };
 
@@ -43,52 +38,6 @@ struct ClientState {
     log: Logger,
     preparer_sender: preparer::task::Sender,
     clean_up: Vec<Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>>>,
-}
-
-struct ClientStateLocked {
-    digest_repo: DigestRepository,
-    processed_artifact_digests: HashSet<Sha256Digest>,
-}
-
-#[derive(Clone)]
-pub struct Uploader {
-    log: slog::Logger,
-    router_sender: router::Sender,
-    locked: Arc<Mutex<ClientStateLocked>>,
-}
-
-impl Uploader {
-    pub async fn upload(&self, path: &Path) -> Result<Sha256Digest> {
-        debug!(self.log, "add_artifact"; "path" => ?path);
-
-        let fs = async_fs::Fs::new();
-        let path = fs.canonicalize(path).await?;
-
-        let mut locked = self.locked.lock().await;
-        let digest = if let Some(digest) = locked.digest_repo.get(&path).await? {
-            digest
-        } else {
-            let (mtime, digest) = util::calculate_digest(&path).await?;
-            locked
-                .digest_repo
-                .add(path.clone(), mtime, digest.clone())
-                .await?;
-            digest
-        };
-        if !locked.processed_artifact_digests.contains(&digest) {
-            locked.processed_artifact_digests.insert(digest.clone());
-            self.router_sender
-                .send(router::Message::AddArtifact(path, digest.clone()))?;
-        }
-        Ok(digest)
-    }
-}
-
-#[async_trait]
-impl maelstrom_util::manifest::DataUpload for &Uploader {
-    async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
-        Uploader::upload(self, path).await
-    }
 }
 
 /// For files under this size, the data is stashed in the manifest rather than uploaded separately
@@ -147,25 +96,20 @@ impl Client {
             fs.create_dir_all((**cache_dir).join(d)).await?;
         }
 
-        // Create standalone sub-components.
-        let container_image_depot = ContainerImageDepot::new(
-            project_dir.transmute::<container::ProjectDir>(),
-            container_image_depot_cache_dir,
-            accept_invalid_remote_container_tls_certs.into_inner(),
-        )?;
-        let digest_repo = DigestRepository::new(&cache_dir);
+        // Create shared standalone sub-components.
         let artifact_upload_tracker = ProgressTracker::default();
         let image_download_tracker = ProgressTracker::default();
 
         // Create the JoinSet we're going to put tasks in. If we bail early from this function,
-        // we'll cancel all tasks we have started thus far.
+        // we'll abort all tasks we have started thus far.
         let mut join_set = JoinSet::new();
 
         // Create all of the channels we're going to need to connect everything up.
         let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
         let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-        let (router_sender, router_receiver) = router::channel();
         let (local_worker_sender, local_worker_receiver) = local_worker::channel();
+        let (preparer_sender, preparer_receiver) = preparer::task::channel();
+        let (router_sender, router_receiver) = router::channel();
 
         let standalone;
         if let Some(broker_addr) = broker_addr {
@@ -186,28 +130,21 @@ impl Client {
                 .await?;
 
             // Spawn a task to read from the socket and write to the router's channel.
-            let log_clone = log.clone();
-            let router_sender_clone = router_sender.clone();
-            join_set.spawn(
-                net::async_socket_reader(
-                    broker_socket_read_half,
-                    router_sender_clone,
-                    router::Message::Broker,
-                    log_clone,
-                    "reading from broker socket",
-                )
-            );
+            join_set.spawn(net::async_socket_reader(
+                broker_socket_read_half,
+                router_sender.clone(),
+                router::Message::Broker,
+                log.new(o!("task" => "broker socket reader")),
+                "reading from broker socket",
+            ));
 
             // Spawn a task to read from the broker's channel and write to the socket.
-            let log_clone = log.clone();
-            join_set.spawn(
-                net::async_socket_writer(
-                    broker_receiver,
-                    broker_socket_write_half,
-                    log_clone,
-                    "writing to broker socket",
-                )
-            );
+            join_set.spawn(net::async_socket_writer(
+                broker_receiver,
+                broker_socket_write_half,
+                log.new(o!("task" => "broker socket writer")),
+                "writing to broker socket",
+            ));
 
             // Spawn a task for the artifact_pusher.
             artifact_pusher::start_task(
@@ -216,7 +153,7 @@ impl Client {
                 artifact_pusher_receiver,
                 broker_addr,
                 artifact_upload_tracker.clone(),
-                log.clone(),
+                log.new(o!("task" => "artifact pusher")),
             )?;
         } else {
             // We don't have a broker_addr, which means we're in standalone mode.
@@ -239,30 +176,20 @@ impl Client {
         );
 
         // Spawn a task for the preparer.
-        let layer_builder =
-            LayerBuilder::new(cache_dir.clone(), project_dir, MANIFEST_INLINE_LIMIT);
-        let locked = Arc::new(Mutex::new(ClientStateLocked {
-            digest_repo,
-            processed_artifact_digests: HashSet::default(),
-        }));
-        let uploader = Uploader {
-            log: log.clone(),
-            router_sender: router_sender.clone(),
-            locked,
-        };
-
-        let (preparer_sender, preparer_receiver) = preparer::task::channel();
-
         preparer::task::start(
-            &mut join_set,
-            MAX_PENDING_LAYER_BUILDS.try_into().unwrap(),
-            preparer_sender.clone(),
-            preparer_receiver,
-            container_image_depot,
+            accept_invalid_remote_container_tls_certs,
+            cache_dir.clone(),
+            container_image_depot_cache_dir,
             image_download_tracker.clone(),
-            layer_builder,
-            uploader,
-        );
+            &mut join_set,
+            log.clone(),
+            MANIFEST_INLINE_LIMIT,
+            MAX_PENDING_LAYER_BUILDS.try_into().unwrap(),
+            project_dir,
+            preparer_receiver,
+            router_sender.clone(),
+            preparer_sender.clone(),
+        )?;
 
         // Start the local worker.
         struct ArtifactFetcher(router::Sender);

@@ -1,20 +1,30 @@
 use super::{Deps, Message, Preparer};
 use crate::{
-    client::{layer_builder::LayerBuilder, Uploader},
+    client::layer_builder::LayerBuilder,
+    digest_repo::DigestRepository,
     progress::{LazyProgress, ProgressTracker},
+    router, util,
 };
 use anyhow::Result;
-use maelstrom_base::JobSpec;
-use maelstrom_client_base::spec::{
-    self, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageConfig, LayerSpec,
+use async_trait::async_trait;
+use maelstrom_base::{JobSpec, Sha256Digest};
+use maelstrom_client_base::{
+    spec::{self, ContainerSpec, ConvertedImage, EnvironmentSpec, ImageConfig, LayerSpec},
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, ProjectDir,
 };
-use maelstrom_container::ContainerImageDepot;
-use maelstrom_util::sync;
-use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc};
+use maelstrom_container::{ContainerImageDepot, ContainerImageDepotDir};
+use maelstrom_util::{async_fs, root::RootBuf, sync};
+use slog::{debug, Logger};
+use std::{
+    collections::{BTreeMap, HashSet},
+    num::NonZeroUsize,
+    path::Path,
+    sync::Arc,
+};
 use tokio::{
     sync::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
-        oneshot,
+        oneshot, Mutex,
     },
     task::{self, JoinSet},
 };
@@ -26,17 +36,85 @@ pub fn channel() -> (Sender, Receiver) {
     mpsc::unbounded_channel()
 }
 
+struct ClientStateLocked {
+    digest_repo: DigestRepository,
+    processed_artifact_digests: HashSet<Sha256Digest>,
+}
+
+#[derive(Clone)]
+pub struct Uploader {
+    log: slog::Logger,
+    router_sender: router::Sender,
+    locked: Arc<Mutex<ClientStateLocked>>,
+}
+
+impl Uploader {
+    pub async fn upload(&self, path: &Path) -> Result<Sha256Digest> {
+        debug!(self.log, "add_artifact"; "path" => ?path);
+
+        let fs = async_fs::Fs::new();
+        let path = fs.canonicalize(path).await?;
+
+        let mut locked = self.locked.lock().await;
+        let digest = if let Some(digest) = locked.digest_repo.get(&path).await? {
+            digest
+        } else {
+            let (mtime, digest) = util::calculate_digest(&path).await?;
+            locked
+                .digest_repo
+                .add(path.clone(), mtime, digest.clone())
+                .await?;
+            digest
+        };
+        if !locked.processed_artifact_digests.contains(&digest) {
+            locked.processed_artifact_digests.insert(digest.clone());
+            self.router_sender
+                .send(router::Message::AddArtifact(path, digest.clone()))?;
+        }
+        Ok(digest)
+    }
+}
+
+#[async_trait]
+impl maelstrom_util::manifest::DataUpload for &Uploader {
+    async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
+        Uploader::upload(self, path).await
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn start(
-    join_set: &mut JoinSet<Result<()>>,
-    max_pending_layer_builds: NonZeroUsize,
-    sender: Sender,
-    receiver: Receiver,
-    container_image_depot: ContainerImageDepot,
+    accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+    cache_dir: RootBuf<CacheDir>,
+    container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
     image_download_tracker: ProgressTracker,
-    layer_builder: LayerBuilder,
-    uploader: Uploader,
-) {
+    join_set: &mut JoinSet<Result<()>>,
+    log: Logger,
+    manifest_inline_limit: u64,
+    max_pending_layer_builds: NonZeroUsize,
+    project_dir: RootBuf<ProjectDir>,
+    receiver: Receiver,
+    router_sender: router::Sender,
+    sender: Sender,
+) -> Result<()> {
+    let container_image_depot = ContainerImageDepot::new(
+        project_dir.transmute::<maelstrom_container::ProjectDir>(),
+        container_image_depot_cache_dir,
+        accept_invalid_remote_container_tls_certs.into_inner(),
+    )?;
+
+    let digest_repo = DigestRepository::new(&cache_dir);
+    let layer_builder = LayerBuilder::new(cache_dir, project_dir, manifest_inline_limit);
+    let locked = Arc::new(Mutex::new(ClientStateLocked {
+        digest_repo,
+        processed_artifact_digests: HashSet::default(),
+    }));
+    let uploader = Uploader {
+        log,
+        router_sender,
+        locked,
+    };
+
     let adapter = Adapter {
         container_image_depot: Arc::new(container_image_depot),
         image_download_tracker,
@@ -48,6 +126,8 @@ pub fn start(
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
         preparer.receive_message(msg)
     }));
+
+    Ok(())
 }
 
 pub struct Adapter {
