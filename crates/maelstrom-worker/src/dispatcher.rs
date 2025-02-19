@@ -210,9 +210,6 @@ pub trait ArtifactFetcher {
 pub trait BrokerSender {
     /// Send a message to the broker.
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
-
-    /// Close the connection. All further messages will be black-holed.
-    fn close(&mut self);
 }
 
 /// The [`cache::Cache`] dependency for [`Dispatcher`]. This should be very similar to
@@ -669,7 +666,6 @@ where
     /// Close our connection to the broker, drop pending work, and cancel all jobs.
     fn receive_shut_down(&mut self, shutdown_error: Error) {
         if !self.shut_down {
-            self.broker_sender.close();
             self.awaiting_layers = Default::default();
             self.available = Default::default();
             self.shut_down = true;
@@ -806,7 +802,6 @@ mod tests {
         got_artifact_success_returns: HashMap<CacheKey, Vec<JobId>>,
         got_artifact_failure_returns: HashMap<CacheKey, Vec<JobId>>,
         cache_path_returns: HashMap<CacheKey, PathBuf>,
-        closed: bool,
     }
 
     struct TestHandle(Option<TestMessage>, Rc<RefCell<TestState>>);
@@ -874,15 +869,7 @@ mod tests {
 
     impl BrokerSender for Rc<RefCell<TestState>> {
         fn send_message_to_broker(&mut self, message: WorkerToBroker) {
-            let mut b = self.borrow_mut();
-            if !b.closed {
-                b.messages.push(SendMessageToBroker(message));
-            }
-        }
-
-        fn close(&mut self) {
-            let mut b = self.borrow_mut();
-            b.closed = true;
+            self.borrow_mut().messages.push(SendMessageToBroker(message));
         }
     }
 
@@ -965,7 +952,6 @@ mod tests {
                 got_artifact_success_returns: HashMap::from(got_artifact_success_returns),
                 got_artifact_failure_returns: HashMap::from(got_artifact_failure_returns),
                 cache_path_returns: HashMap::from(cache_path_returns),
-                closed: false,
             }));
             let dispatcher = Dispatcher::new(
                 test_state.clone(),
@@ -1628,8 +1614,6 @@ mod tests {
 
         fixture.receive_message(ShutDown(anyhow!("test error")));
         fixture.expect_messages_in_any_order(vec![JobHandleDropped(jid!(1))]);
-
-        assert!(fixture.test_state.borrow().closed);
 
         fixture.receive_message_error(JobCompleted(jid!(1), Ok(completed!(3))), "test error");
     }

@@ -1,4 +1,5 @@
 use crate::dispatcher;
+use derive_more::Constructor;
 use maelstrom_base::{proto::WorkerToBroker, JobId, Sha256Digest};
 use maelstrom_util::cache::{self, fs::std::Fs as StdFs, GotArtifact};
 use std::path::PathBuf;
@@ -115,27 +116,12 @@ impl dispatcher::Cache for Cache {
     }
 }
 
-pub struct BrokerSender {
-    sender: Option<BrokerSocketOutgoingSender>,
-}
-
-impl BrokerSender {
-    pub fn new(broker_socket_outgoing_sender: BrokerSocketOutgoingSender) -> Self {
-        Self {
-            sender: Some(broker_socket_outgoing_sender),
-        }
-    }
-}
+#[derive(Constructor)]
+pub struct BrokerSender(BrokerSocketOutgoingSender);
 
 impl dispatcher::BrokerSender for BrokerSender {
     fn send_message_to_broker(&mut self, message: WorkerToBroker) {
-        if let Some(sender) = self.sender.as_ref() {
-            sender.send(message).ok();
-        }
-    }
-
-    fn close(&mut self) {
-        self.sender = None;
+        let _ = self.0.send(message);
     }
 }
 

@@ -246,21 +246,16 @@ impl Client {
             }
         }
 
-        struct BrokerSender(Option<router::Sender>);
+        struct BrokerSender(router::Sender);
         impl local_worker::BrokerSender for BrokerSender {
             fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
-                if let Some(sender) = self.0.as_ref() {
-                    let _ = sender.send(router::Message::LocalWorker(msg));
-                }
-            }
-            fn close(&mut self) {
-                self.0 = None;
+                let _ = self.0.send(router::Message::LocalWorker(msg));
             }
         }
 
         let local_worker_handle = local_worker::start_task(
             ArtifactFetcher(router_sender.clone()),
-            BrokerSender(Some(router_sender.clone())),
+            BrokerSender(router_sender.clone()),
             local_worker::Config {
                 cache_root: cache_dir.join(LOCAL_WORKER_DIR),
                 cache_size,

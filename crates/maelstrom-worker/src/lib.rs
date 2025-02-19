@@ -24,7 +24,10 @@ use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux};
 use maelstrom_util::{
     cache::{self, fs::std::Fs as StdFs, TempFileFactory},
-    config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, Slots, BrokerConnection as ConfigBrokerConnection},
+    config::common::{
+        ArtifactTransferStrategy, BrokerConnection as ConfigBrokerConnection, CacheSize,
+        InlineLimit, Slots,
+    },
     root::RootBuf,
     signal,
 };
