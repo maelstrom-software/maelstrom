@@ -869,7 +869,9 @@ mod tests {
 
     impl BrokerSender for Rc<RefCell<TestState>> {
         fn send_message_to_broker(&mut self, message: WorkerToBroker) {
-            self.borrow_mut().messages.push(SendMessageToBroker(message));
+            self.borrow_mut()
+                .messages
+                .push(SendMessageToBroker(message));
         }
     }
 
