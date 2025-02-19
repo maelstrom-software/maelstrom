@@ -7,7 +7,7 @@ use crate::{
     heap::{Heap, HeapDeps, HeapIndex},
     root::{Root, RootBuf},
 };
-use anyhow::{bail, Error, Result};
+use anyhow::{bail, Context as _, Error, Result};
 use bytesize::ByteSize;
 use derive_more::{Debug, Deref, DerefMut};
 use fs::{FileType, Fs, Metadata};
@@ -320,10 +320,13 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
         let tmp = root.join::<TmpDir>("tmp");
 
         // First, make sure the root directory exists.
-        fs.mkdir_recursively(&root)?;
+        fs.mkdir_recursively(&root)
+            .with_context(|| format!("creating directory {root:?}"))?;
 
         // Next, get an exclusive lock on the lock file.
-        let Some(lock_file) = fs.possibly_create_file_and_try_exclusive_lock(&lock_file_path)?
+        let Some(lock_file) = fs
+            .possibly_create_file_and_try_exclusive_lock(&lock_file_path)
+            .with_context(|| format!("creating and locking lock file {lock_file_path:?}"))?
         else {
             bail!("lock file {lock_file_path:?} is held by a different process");
         };
@@ -332,13 +335,17 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
         // decide if this is a "new style" cache directory that can be re-used across invocations.
         // In the future, if we change the layout of the cache directory, we may need a proper
         // version file, but for now, we can just use `CACHEDIR.TAG`.
-        let preserve_directory_contents = match fs.metadata(&cachedir_tag)? {
+        let preserve_directory_contents = match fs
+            .metadata(&cachedir_tag)
+            .with_context(|| format!("getting metedata for {cachedir_tag:?}"))?
+        {
             Some(Metadata {
                 type_: FileType::File,
                 size: CACHEDIR_TAG_CONTENTS_LEN_U64,
             }) => {
                 let mut contents = [0u8; CACHEDIR_TAG_CONTENTS_LEN];
-                fs.read_file(&cachedir_tag, &mut contents[..])?;
+                fs.read_file(&cachedir_tag, &mut contents[..])
+                    .with_context(|| format!("reading {cachedir_tag:?}"))?;
                 contents == CACHEDIR_TAG_CONTENTS
             }
             _ => false,
@@ -392,17 +399,22 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
         log: Logger,
     ) -> Result<(Self, TempFileFactory<FsT>)> {
         // First, make sure the `removing` directory exists and is empty.
-        ensure_removing_directory(&fs, &root, &removing)?;
+        ensure_removing_directory(&fs, &root, &removing)
+            .context("creating `removing` directory")?;
 
         // Next, remove everything else in the cache directory.
-        remove_all_from_directory_except(&fs, &removing, &root, [LOCK_FILE, REMOVING])?;
+        remove_all_from_directory_except(&fs, &removing, &root, [LOCK_FILE, REMOVING])
+            .context("clearing previous contents of cache directory")?;
 
         // Finally, create all of the files all directories that should be there.
-        fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS)?;
-        fs.mkdir(&tmp)?;
-        fs.mkdir(&sha256)?;
+        fs.create_file(&cachedir_tag, &CACHEDIR_TAG_CONTENTS)
+            .with_context(|| format!("creating {cachedir_tag:?}"))?;
+        fs.mkdir(&tmp).with_context(|| format!("mkdir {tmp:?}"))?;
+        fs.mkdir(&sha256)
+            .with_context(|| format!("mkdir {sha256:?}"))?;
         for kind in KeyT::kinds() {
-            fs.mkdir(&kind_dir(&sha256, kind))?;
+            fs.mkdir(&kind_dir(&sha256, kind))
+                .with_context(|| format!("mkdir {:?}", kind_dir(&sha256, kind)))?;
         }
 
         let cache = Cache {
