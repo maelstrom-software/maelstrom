@@ -149,11 +149,11 @@ impl Client {
             // Spawn a task for the artifact_pusher.
             artifact_pusher::start_task(
                 artifact_transfer_strategy,
-                &mut join_set,
-                artifact_pusher_receiver,
                 broker_addr,
-                artifact_upload_tracker.clone(),
+                &mut join_set,
                 log.new(o!("task" => "artifact pusher")),
+                artifact_pusher_receiver,
+                artifact_upload_tracker.clone(),
             )?;
         } else {
             // We don't have a broker_addr, which means we're in standalone mode.
@@ -167,12 +167,12 @@ impl Client {
 
         // Spawn a task for the router.
         router::start_task(
-            &mut join_set,
-            standalone,
-            router_receiver,
-            broker_sender,
             artifact_pusher_sender,
+            broker_sender,
+            &mut join_set,
             local_worker_sender.clone(),
+            router_receiver,
+            standalone,
         );
 
         // Spawn a task for the preparer.

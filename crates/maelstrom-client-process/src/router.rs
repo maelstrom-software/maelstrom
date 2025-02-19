@@ -245,12 +245,12 @@ pub fn channel() -> (Sender, Receiver) {
 }
 
 pub fn start_task(
-    join_set: &mut JoinSet<Result<()>>,
-    standalone: bool,
-    mut receiver: Receiver,
-    broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: artifact_pusher::Sender,
+    broker_sender: UnboundedSender<ClientToBroker>,
+    join_set: &mut JoinSet<Result<()>>,
     local_worker_sender: local_worker::Sender,
+    mut receiver: Receiver,
+    standalone: bool,
 ) {
     let adapter = Adapter::new(broker_sender, artifact_pusher_sender, local_worker_sender);
     let mut router = Router::new(adapter, standalone);

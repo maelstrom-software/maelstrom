@@ -94,11 +94,11 @@ fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
 
 pub fn start_task(
     artifact_transfer_strategy: ArtifactTransferStrategy,
-    join_set: &mut JoinSet<Result<()>>,
-    receiver: Receiver,
     broker_addr: BrokerAddr,
-    upload_tracker: ProgressTracker,
+    join_set: &mut JoinSet<Result<()>>,
     log: Logger,
+    receiver: Receiver,
+    upload_tracker: ProgressTracker,
 ) -> Result<()> {
     match artifact_transfer_strategy {
         ArtifactTransferStrategy::TcpUpload => {
