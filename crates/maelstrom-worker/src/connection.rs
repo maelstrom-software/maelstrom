@@ -1,6 +1,6 @@
 use crate::dispatcher::Message;
 use crate::types::{BrokerSocketOutgoingReceiver, DispatcherSender};
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use maelstrom_base::proto::Hello;
 use maelstrom_github::{GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_util::{
@@ -63,9 +63,14 @@ pub trait BrokerReadConnection: Send + Sync + 'static {
 
 impl BrokerReadConnection for BufReader<tokio::net::tcp::OwnedReadHalf> {
     async fn read_messages(self, dispatcher_sender: DispatcherSender, log: Logger) -> Result<()> {
-        net::async_socket_reader(self, dispatcher_sender, Message::Broker, &log)
-            .await
-            .context("error communicating with broker")
+        net::async_socket_reader(
+            self,
+            dispatcher_sender,
+            Message::Broker,
+            log,
+            "reading from broker socket",
+        )
+        .await
     }
 }
 
@@ -83,9 +88,13 @@ impl BrokerWriteConnection for tokio::net::tcp::OwnedWriteHalf {
         broker_socket_outgoing_receiver: BrokerSocketOutgoingReceiver,
         log: Logger,
     ) -> Result<()> {
-        net::async_socket_writer(broker_socket_outgoing_receiver, self, &log)
-            .await
-            .context("error communicating with broker")
+        net::async_socket_writer(
+            broker_socket_outgoing_receiver,
+            self,
+            log,
+            "writing to broker socket",
+        )
+        .await
     }
 }
 
@@ -126,9 +135,14 @@ impl BrokerReadConnection for GitHubReadQueue {
         dispatcher_sender: DispatcherSender,
         log: Logger,
     ) -> Result<()> {
-        net::github_queue_reader(&mut self, dispatcher_sender, Message::Broker, &log)
-            .await
-            .context("error communicating with broker")
+        net::github_queue_reader(
+            &mut self,
+            dispatcher_sender,
+            Message::Broker,
+            log,
+            "writing to broker github queue",
+        )
+        .await
     }
 }
 
@@ -138,8 +152,12 @@ impl BrokerWriteConnection for GitHubWriteQueue {
         broker_socket_outgoing_receiver: BrokerSocketOutgoingReceiver,
         log: Logger,
     ) -> Result<()> {
-        net::github_queue_writer(broker_socket_outgoing_receiver, &mut self, &log)
-            .await
-            .context("error communicating with broker")
+        net::github_queue_writer(
+            broker_socket_outgoing_receiver,
+            &mut self,
+            log,
+            "reading from broker github queue",
+        )
+        .await
     }
 }

@@ -156,15 +156,17 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
                                 )
                             }
                         },
-                        &log_clone,
+                        log_clone,
+                        "reading from client socket",
                     )
                     .await;
                 },
-                |scheduler_task_receiver| async move {
+                |scheduler_task_receiver| async {
                     let _ = net::async_socket_writer(
                         scheduler_task_receiver,
                         write_stream,
-                        &log_clone2,
+                        log_clone2,
+                        "writing to client socket",
                     )
                     .await;
                 },
@@ -197,15 +199,17 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
                                 scheduler_task::Message::JobStatusUpdateFromWorker(wid, jid, status)
                             }
                         },
-                        &log_clone,
+                        log_clone,
+                        "reading from worker socket",
                     )
                     .await;
                 },
-                |scheduler_task_receiver| async move {
+                |scheduler_task_receiver| async {
                     let _ = net::async_socket_writer(
                         scheduler_task_receiver,
                         write_stream,
-                        &log_clone2,
+                        log_clone2,
+                        "writing to worker socket",
                     )
                     .await;
                 },
@@ -235,15 +239,17 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
                                 scheduler_task::Message::StatisticsRequestFromMonitor(mid)
                             }
                         },
-                        &log_clone,
+                        log_clone,
+                        "reading from monitor socket",
                     )
                     .await;
                 },
-                |scheduler_task_receiver| async move {
+                |scheduler_task_receiver| async {
                     let _ = net::async_socket_writer(
                         scheduler_task_receiver,
                         write_stream,
-                        &log_clone2,
+                        log_clone2,
+                        "writing to monitor socket",
                     )
                     .await;
                 },
@@ -348,7 +354,8 @@ async fn unassigned_github_connection_main<TempFileT>(
                                 scheduler_task::Message::JobStatusUpdateFromWorker(wid, jid, status)
                             }
                         },
-                        &log_clone,
+                        log_clone,
+                        "reading from worker github queue",
                     )
                     .await;
                 },
@@ -357,7 +364,8 @@ async fn unassigned_github_connection_main<TempFileT>(
                     let _ = net::github_queue_writer(
                         scheduler_task_receiver,
                         &mut write_queue,
-                        &log_clone2,
+                        log_clone2,
+                        "writing to worker github queue",
                     )
                     .await;
                 },

@@ -188,24 +188,26 @@ impl Client {
             // Spawn a task to read from the socket and write to the router's channel.
             let log_clone = log.clone();
             let router_sender_clone = router_sender.clone();
-            join_set.spawn(async move {
+            join_set.spawn(
                 net::async_socket_reader(
                     broker_socket_read_half,
                     router_sender_clone,
                     router::Message::Broker,
-                    &log_clone,
+                    log_clone,
+                    "reading from broker socket",
                 )
-                .await
-                .context("reading from broker")
-            });
+            );
 
             // Spawn a task to read from the broker's channel and write to the socket.
             let log_clone = log.clone();
-            join_set.spawn(async move {
-                net::async_socket_writer(broker_receiver, broker_socket_write_half, &log_clone)
-                    .await
-                    .context("writing to broker")
-            });
+            join_set.spawn(
+                net::async_socket_writer(
+                    broker_receiver,
+                    broker_socket_write_half,
+                    log_clone,
+                    "writing to broker socket",
+                )
+            );
 
             // Spawn a task for the artifact_pusher.
             artifact_pusher::start_task(
@@ -216,7 +218,6 @@ impl Client {
                 artifact_upload_tracker.clone(),
                 log.clone(),
             )?;
-
         } else {
             // We don't have a broker_addr, which means we're in standalone mode.
             standalone = true;

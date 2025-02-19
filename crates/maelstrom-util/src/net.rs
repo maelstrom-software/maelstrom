@@ -1,6 +1,6 @@
 //! Functions that are useful for reading/writing messages from/to sockets.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context as _, Result};
 use maelstrom_base::proto;
 use maelstrom_github::{GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_linux::{self as linux, Fd};
@@ -18,7 +18,7 @@ use tokio::{
     time::Instant,
 };
 
-fn write_message_to_vec(msg: impl Serialize) -> Result<Vec<u8>> {
+fn encode_message_to_vec(msg: impl Serialize) -> Result<Vec<u8>> {
     let msg_len = proto::serialized_size(&msg)? as u32;
     let mut buf = Vec::<u8>::with_capacity(msg_len as usize + 4);
     Write::write_all(&mut buf, &msg_len.to_be_bytes())?;
@@ -35,7 +35,7 @@ pub fn write_message_to_socket(
     log: &Logger,
 ) -> Result<()> {
     debug!(log, "sending message"; "message" => #?msg);
-    (|| Ok(stream.write_all(&write_message_to_vec(msg)?)?))()
+    (|| Ok(stream.write_all(&encode_message_to_vec(msg)?)?))()
         .inspect_err(|err| debug!(log, "error sending message"; "error" => %err))
 }
 
@@ -48,7 +48,7 @@ pub async fn write_message_to_async_socket(
     log: &Logger,
 ) -> Result<()> {
     debug!(log, "sending message"; "message" => #?msg);
-    async { Ok(stream.write_all(&write_message_to_vec(msg)?).await?) }
+    async { Ok(stream.write_all(&encode_message_to_vec(msg)?).await?) }
         .await
         .inspect_err(|err| debug!(log, "error sending message"; "error" => %err))
 }
@@ -98,13 +98,16 @@ where
 pub async fn async_socket_writer<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
     mut socket: (impl AsyncWrite + Unpin),
-    log: &Logger,
+    log: Logger,
+    context: &'static str,
 ) -> Result<()>
 where
     MessageT: Debug + Serialize,
 {
     while let Some(msg) = channel.recv().await {
-        write_message_to_async_socket(&mut socket, msg, log).await?;
+        write_message_to_async_socket(&mut socket, msg, &log)
+            .await
+            .context(context)?;
     }
     Ok(())
 }
@@ -116,13 +119,16 @@ pub async fn async_socket_reader<MessageT, TransformedT>(
     mut socket: (impl AsyncRead + Unpin),
     channel: UnboundedSender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
-    log: &Logger,
+    log: Logger,
+    context: &'static str,
 ) -> Result<()>
 where
     MessageT: Debug + DeserializeOwned,
 {
     loop {
-        let msg = read_message_from_async_socket(&mut socket, log).await?;
+        let msg = read_message_from_async_socket(&mut socket, &log)
+            .await
+            .context(context)?;
         if channel.send(transform(msg)).is_err() {
             return Ok(());
         }
@@ -174,17 +180,21 @@ pub async fn github_queue_reader<MessageT, TransformedT>(
     queue: &mut GitHubReadQueue,
     channel: UnboundedSender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
-    log: &Logger,
+    log: Logger,
+    context: &'static str,
 ) -> Result<()>
 where
     MessageT: Debug + DeserializeOwned,
 {
-    while let Some(msg) = read_message_from_github_queue(queue, log).await? {
+    while let Some(msg) = read_message_from_github_queue(queue, &log)
+        .await
+        .context(context)?
+    {
         if channel.send(transform(msg)).is_err() {
             return Ok(());
         }
     }
-    Err(anyhow!("queue closed"))
+    Err(anyhow!("queue closed")).context(context)
 }
 
 pub async fn write_message_to_github_queue<MessageT>(
@@ -222,7 +232,8 @@ where
 pub async fn github_queue_writer<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
     queue: &mut GitHubWriteQueue,
-    log: &Logger,
+    log: Logger,
+    context: &'static str,
 ) -> Result<()>
 where
     MessageT: Debug + Serialize,
@@ -233,7 +244,10 @@ where
         match tokio::time::timeout_at(next, channel.recv()).await {
             Err(_) => {
                 if !to_send.is_empty() {
-                    write_many_messages_to_github_queue(queue, &to_send, log).await?;
+                    write_many_messages_to_github_queue(queue, &to_send, &log)
+                        .await
+                        .context("writing messages to github queue")
+                        .context(context)?;
                     to_send.clear();
                 }
                 next = Instant::now() + Duration::from_millis(10);
@@ -244,7 +258,11 @@ where
             Ok(None) => break,
         }
     }
-    queue.shut_down().await?;
+    queue
+        .shut_down()
+        .await
+        .context("shutting down github queue")
+        .context(context)?;
 
     Ok(())
 }
