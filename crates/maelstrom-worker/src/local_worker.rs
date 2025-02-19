@@ -34,17 +34,16 @@ pub fn start_task(
     sender: Sender,
     slots: Slots,
 ) -> Result<JoinHandle<Error>> {
-    let args = crate::DispatcherArgs {
+    crate::start_dispatcher_task_common(
+        move |_| artifact_fetcher,
         broker_sender,
         cache_size,
         cache_root,
-        dispatcher_receiver: receiver,
-        dispatcher_sender: sender,
+        receiver,
+        sender,
         inline_limit,
         log,
-        log_initial_cache_message_at_info: false,
+        false, /* log_initial_cache_message_at_info */
         slots,
-    };
-
-    crate::start_dispatcher_task_common(move |_| artifact_fetcher, args)
+    )
 }
