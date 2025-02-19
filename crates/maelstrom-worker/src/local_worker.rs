@@ -18,35 +18,32 @@ use tokio::{
     task::JoinHandle,
 };
 
-pub struct Config {
-    pub cache_root: RootBuf<CacheDir>,
-    pub cache_size: CacheSize,
-    pub inline_limit: InlineLimit,
-    pub slots: Slots,
-}
-
 pub fn channel() -> (Sender, Receiver) {
     mpsc::unbounded_channel()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn start_task(
     artifact_fetcher: impl ArtifactFetcher + Send + Sync + 'static,
     broker_sender: impl BrokerSender + Send + Sync + 'static,
-    config: Config,
-    dispatcher_receiver: Receiver,
-    dispatcher_sender: Sender,
-    log: &Logger,
+    cache_root: RootBuf<CacheDir>,
+    cache_size: CacheSize,
+    inline_limit: InlineLimit,
+    log: Logger,
+    receiver: Receiver,
+    sender: Sender,
+    slots: Slots,
 ) -> Result<JoinHandle<Error>> {
     let args = crate::DispatcherArgs {
         broker_sender,
-        cache_size: config.cache_size,
-        cache_root: config.cache_root,
-        dispatcher_receiver,
-        dispatcher_sender,
-        inline_limit: config.inline_limit,
-        log: log.clone(),
+        cache_size,
+        cache_root,
+        dispatcher_receiver: receiver,
+        dispatcher_sender: sender,
+        inline_limit,
+        log,
         log_initial_cache_message_at_info: false,
-        slots: config.slots,
+        slots,
     };
 
     crate::start_dispatcher_task_common(move |_| artifact_fetcher, args)

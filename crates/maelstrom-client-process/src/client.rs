@@ -196,15 +196,13 @@ impl Client {
                 router_sender_clone_1.send(router::Message::LocalWorkerStartArtifactFetch(digest))
             },
             move |msg| router_sender_clone_2.send(router::Message::LocalWorker(msg)),
-            local_worker::Config {
-                cache_root: cache_dir.join(LOCAL_WORKER_DIR),
-                cache_size,
-                inline_limit,
-                slots,
-            },
+            cache_dir.join(LOCAL_WORKER_DIR),
+            cache_size,
+            inline_limit,
+            log.new(o!("task" => "local worker")),
             local_worker_receiver,
             local_worker_sender,
-            &log,
+            slots,
         )?;
 
         Ok((
