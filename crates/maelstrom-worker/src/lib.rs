@@ -28,7 +28,7 @@ use maelstrom_util::{
     root::RootBuf,
     signal,
 };
-use slog::{debug, error, info, Logger};
+use slog::{debug, error, info, o, Logger};
 use std::{future::Future, process, sync::Arc};
 use tokio::{
     net::TcpStream,
@@ -78,16 +78,16 @@ async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger)
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =
         mpsc::unbounded_channel();
 
-    let log_clone = log.clone();
+    let reader_log = log.new(o!("task" => "reader"));
     let dispatcher_sender_clone = dispatcher_sender.clone();
     task::spawn(shutdown_on_error(
-        read_stream.read_messages(dispatcher_sender_clone, log_clone),
+        read_stream.read_messages(dispatcher_sender_clone, reader_log),
         dispatcher_sender.clone(),
     ));
 
-    let log_clone = log.clone();
+    let writer_log = log.new(o!("task" => "writer"));
     task::spawn(shutdown_on_error(
-        write_stream.write_messages(broker_socket_outgoing_receiver, log_clone),
+        write_stream.write_messages(broker_socket_outgoing_receiver, writer_log),
         dispatcher_sender.clone(),
     ));
 
@@ -96,12 +96,13 @@ async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger)
         dispatcher_sender.clone(),
     ));
 
+    let log = log.new(o!("task" => "dispatcher"));
     Err(start_dispatcher_task(
         config,
         dispatcher_receiver,
         dispatcher_sender,
         broker_socket_outgoing_sender,
-        log,
+        &log,
     )?
     .await?)
 }
