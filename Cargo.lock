@@ -3975,6 +3975,7 @@ dependencies = [
  "maplit",
  "netlink-packet-core",
  "netlink-packet-route",
+ "num",
  "pathdiff",
  "rand 0.8.5",
  "serde",

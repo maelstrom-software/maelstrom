@@ -31,6 +31,7 @@ use maelstrom_util::{
     root::RootBuf,
     signal,
 };
+use num::integer;
 use slog::{debug, error, info, o, Logger};
 use std::{process, sync::Arc};
 use tokio::{
@@ -128,11 +129,7 @@ fn open_file_max(slots: Slots) -> u64 {
 }
 
 fn round_to_multiple(n: u64, k: u64) -> u64 {
-    if n % k == 0 {
-        n
-    } else {
-        n + (k - (n % k))
-    }
+    integer::div_ceil(n, k) * k
 }
 
 async fn wait_for_signal(log: Logger) -> Result<()> {

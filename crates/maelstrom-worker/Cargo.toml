@@ -30,6 +30,7 @@ maelstrom-util.workspace = true
 maelstrom-worker-child.workspace = true
 netlink-packet-core.workspace = true
 netlink-packet-route.workspace = true
+num.workspace = true
 rand.workspace = true
 serde.workspace = true
 sha2.workspace = true
