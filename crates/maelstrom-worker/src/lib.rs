@@ -32,11 +32,11 @@ use maelstrom_util::{
     signal,
 };
 use slog::{debug, error, info, o, Logger};
-use std::{future::Future, process, sync::Arc};
+use std::{process, sync::Arc};
 use tokio::{
     net::TcpStream,
     sync::mpsc,
-    task::{self, JoinHandle},
+    task::{self, JoinHandle, JoinSet},
 };
 use types::{
     BrokerSender, BrokerSocketOutgoingSender, Cache, DispatcherReceiver, DispatcherSender,
@@ -79,34 +79,27 @@ async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger)
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =
         mpsc::unbounded_channel();
 
+    let mut join_set = JoinSet::new();
+
     let reader_log = log.new(o!("task" => "reader"));
-    let dispatcher_sender_clone = dispatcher_sender.clone();
-    task::spawn(shutdown_on_error(
-        read_stream.read_messages(dispatcher_sender_clone, reader_log),
-        dispatcher_sender.clone(),
-    ));
+    join_set.spawn(read_stream.read_messages(dispatcher_sender.clone(), reader_log));
 
     let writer_log = log.new(o!("task" => "writer"));
-    task::spawn(shutdown_on_error(
-        write_stream.write_messages(broker_socket_outgoing_receiver, writer_log),
-        dispatcher_sender.clone(),
-    ));
+    join_set.spawn(write_stream.write_messages(broker_socket_outgoing_receiver, writer_log));
 
-    task::spawn(shutdown_on_error(
-        wait_for_signal(log.clone()),
-        dispatcher_sender.clone(),
-    ));
+    join_set.spawn(wait_for_signal(log.clone()));
 
     let log = log.new(o!("task" => "dispatcher"));
-    Err(start_dispatcher_task(
+    let dispatcher_handle = start_dispatcher_task(
         config,
         dispatcher_receiver,
-        dispatcher_sender,
+        dispatcher_sender.clone(),
         broker_socket_outgoing_sender,
         &log,
     )
-    .context("starting dispatcher task")?
-    .await?)
+    .context("starting dispatcher task")?;
+
+    wait_for_worker_tasks(dispatcher_handle, dispatcher_sender, join_set).await
 }
 
 /// Check if the open file limit is high enough to fit our estimate of how many files we need.
@@ -139,15 +132,6 @@ fn round_to_multiple(n: u64, k: u64) -> u64 {
         n
     } else {
         n + (k - (n % k))
-    }
-}
-
-async fn shutdown_on_error(
-    fut: impl Future<Output = Result<()>>,
-    dispatcher_sender: DispatcherSender,
-) {
-    if let Err(error) = fut.await {
-        let _ = dispatcher_sender.send(Message::ShutDown(error));
     }
 }
 
@@ -275,4 +259,41 @@ fn start_dispatcher_task_common<
         }
     };
     Ok(task::spawn(dispatcher_main))
+}
+
+async fn wait_for_worker_tasks(
+    mut dispatcher: JoinHandle<Error>,
+    dispatcher_sender: DispatcherSender,
+    mut other_tasks: JoinSet<Result<()>>,
+) -> Result<()> {
+    // The tasks in the JoinSet are all of the supporting tasks. If these complete with Ok(()),
+    // that means they ran out of work to do. This should only happen at shutdown time, like when
+    // the channel a task is reading or writing from is closed. When we see these Ok(()) results,
+    // we just ignore them, since we expect the root cause to surface somewhere else.
+    //
+    // When a task in the JoinSet completes with Err(_), then we need to tell the dispatcher to
+    // cleanly shut down. We do that by sending it a ShutDown message with the error returned from
+    // the task. It's okay to send multiple ShutDown messages: the dispatcher will ignore all but
+    // the first.
+    //
+    // The dispatcher will only complete when we send it a ShutDown message. When that happens, we
+    // just forward the error.
+    loop {
+        tokio::select! {
+            Some(result) = other_tasks.join_next() => {
+                match result.context("joining worker task") {
+                    Err(join_error) => {
+                        let _ = dispatcher_sender.send(Message::ShutDown(join_error));
+                    }
+                    Ok(Err(error)) => {
+                        let _ = dispatcher_sender.send(Message::ShutDown(error));
+                    }
+                    Ok(Ok(())) => {}
+                }
+            }
+            result = &mut dispatcher => {
+                return Err(result.context("joining dispatcher task")?);
+            }
+        }
+    }
 }
