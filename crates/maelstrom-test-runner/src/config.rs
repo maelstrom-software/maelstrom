@@ -63,10 +63,10 @@ impl Default for Repeat {
 
 non_zero_usize_wrapper!(StopAfter);
 
-pub trait AsParts {
+pub trait IntoParts {
     type First;
     type Second;
-    fn as_parts(&self) -> (&Self::First, &Self::Second);
+    fn into_parts(self) -> (Self::First, Self::Second);
 }
 
 #[derive(Config, Debug)]
@@ -184,7 +184,7 @@ pub struct ExtraCommandLineOptions {
     pub init: bool,
 
     #[arg(long, hide(true), help = "Only used for testing purposes.")]
-    pub client_process: bool,
+    pub client_bg_proc: bool,
 
     #[arg(
         long,

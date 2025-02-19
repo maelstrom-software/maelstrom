@@ -1,4 +1,6 @@
+use anyhow::Result;
 use indicatif::InMemoryTerm;
+use maelstrom_client::ClientBgProcess;
 use maelstrom_go_test::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
 use maelstrom_test_runner::ui::{self, SimpleUi};
 use maelstrom_util::{
@@ -8,8 +10,13 @@ use maelstrom_util::{
     root::RootBuf,
 };
 use regex::Regex;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::tempdir;
+
+fn spawn_bg_proc() -> Result<ClientBgProcess> {
+    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-go-test"));
+    ClientBgProcess::new_from_spawn(&bin_path, ["--client-bg-proc"])
+}
 
 fn do_maelstrom_go_test_test(
     temp_dir: &tempfile::TempDir,
@@ -20,8 +27,7 @@ fn do_maelstrom_go_test_test(
     let term = InMemoryTerm::new(50, 50);
 
     let exit_code = maelstrom_test_runner::main_for_test::<maelstrom_go_test::TestRunner>(
-        env!("CARGO_BIN_EXE_maelstrom-go-test"),
-        ["--client-process"],
+        |_| spawn_bg_proc(),
         Config {
             parent: maelstrom_test_runner::config::Config {
                 broker: None,

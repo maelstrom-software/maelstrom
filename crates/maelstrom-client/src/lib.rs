@@ -16,28 +16,24 @@ use maelstrom_client_base::{
     spec::{ContainerSpec, JobSpec},
     AddContainerRequest, IntoProtoBuf, StartRequest, TryFromProtoBuf,
 };
-use maelstrom_linux::{self as linux, Fd, Pid, Signal, UnixStream};
+use maelstrom_linux::{self as linux, Pid};
 use maelstrom_util::{
     config::common::{
         ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots,
     },
-    process::assert_single_threaded,
     root::Root,
 };
-use slog::{debug, warn, Logger};
 use std::{
-    ffi::{OsStr, OsString},
+    ffi::OsStr,
     future::Future,
     io::{BufRead as _, BufReader, Read as _},
     net::Shutdown,
-    os::{
-        fd::AsRawFd as _,
-        linux::net::SocketAddrExt as _,
-        unix::net::{SocketAddr, UnixStream as StdUnixStream},
-    },
+    os::linux::net::SocketAddrExt as _,
+    os::unix::net::{SocketAddr, UnixStream as StdUnixStream},
     pin::Pin,
-    process::{self, Command, Stdio},
-    result,
+    process,
+    process::{Command, Stdio},
+    result, str,
     sync::mpsc::{self as std_mpsc, Receiver},
     thread,
 };
@@ -80,103 +76,83 @@ async fn run_dispatcher(std_sock: StdUnixStream, mut requester: RequestReceiver)
     Ok(())
 }
 
-/// A type that implements this trait is required to create a a [`Client`]. It represents a factory
-/// that can create a client process, which will run the code in [`maelstrom_client_process`].
+fn print_error(label: &str, res: Result<()>) {
+    if let Err(e) = res {
+        eprintln!("{label}: error: {e:?}");
+    }
+}
+
+#[derive(Debug)]
+struct ClientBgHandle(Pid);
+
+impl ClientBgHandle {
+    fn wait(&mut self) -> Result<()> {
+        linux::waitpid(self.0)
+            .map_err(|e| anyhow!("waitpid failed: {e}"))
+            .map(drop)
+    }
+}
+
+/// A struct of this type is required to create a [`Client`]. It represents a background client
+/// process, running the code in the [`maelstrom-client-process`] crate.
 ///
 /// The client library does most of its work by sending RPCs to the client process, which then
 /// connects to the broker, runs local jobs, etc.
 ///
-/// There are two ways to start a client process. The first is to fork without exec-ing
-/// ([`ForkClientProcessFactory`]). The second is to fork and then exec (also called "spawning",
-/// [`SpawnClientProcessFactory`]).
+/// There are two ways to get a client process running. The first is to fork without exec-ing. The
+/// second is to fork and then exec (also called spawn).
 ///
-/// The advantage of a fork without an exec is that it doesn't require a separate binary to be
-/// deployed along with the client library. The program using the library just forks a separate
-/// process, which jumps to the client process code that is packaged up in the client library.
+/// The advantage of the first approach, a fork without an exec, is that it doesn't require a
+/// separate binary be deployed along with the client library. The program using the library just
+/// packages up the client process code in its binary, and runs that in a separate process.
 ///
-/// The main disadvantage of a fork without an exec is that the [`ForkClientProcessFactory`] must
-/// be created while the process is single threaded. If that's not possible, the
-/// [`SpawnClientProcessFactory`] can be used instead. The disadvantage of
-/// [`SpawnClientProcessFactory`] is that it requires a client process executable to be located on
-/// the local file system.
+/// The main downside of the first approach is that the client process needs to be created while
+/// the process is single-threaded. As a result, the client code needs to create one of the
+/// [`ClientBgProcess`]es early during startup, and then pass it down to the [`Client`] when it's
+/// created.
 ///
-/// The [`SpawnClientProcessFactory`] can also be used to test the stand-alone client process,
-/// which may be used by bindings for other languages.
-pub trait ClientProcessFactory {
-    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcessHandle, StdUnixStream)>;
+/// The advantage of the second approach is that client processes can be created at any time, even
+/// after the process is multi-threaded. However, the downside is that the client code must know
+/// where the client process executable is located on the local file system.
+#[derive(Debug)]
+pub struct ClientBgProcess {
+    handle: ClientBgHandle,
+    sock: Option<StdUnixStream>,
 }
 
-/// Create client processes by forking without exec-ing. When a [`ForkClientProcessFactory`] is
-/// started, a "zygote" process is forked. That zygote process then forks client processes when
-/// requested.
-pub struct ForkClientProcessFactory {
-    pid: Pid,
-    socket: UnixStream,
-}
-
-impl ForkClientProcessFactory {
-    /// Create a new [`ForkClientProcessFactory`]. This must be called while the process is still
-    /// single-threaded.
-    pub fn new(log_level: LogLevel) -> Result<Self> {
-        assert_single_threaded()?;
-        let (sock1, sock2) = UnixStream::pair()?;
-        if let Some(pid) = linux::fork().context("forking client process zygote process")? {
-            Ok(Self { pid, socket: sock1 })
+impl ClientBgProcess {
+    /// Create a new client process using the fork-without-exec approach. This must be called
+    /// before the process becomes multi-threaded.
+    pub fn new_from_fork(log_level: LogLevel) -> Result<Self> {
+        let (sock1, sock2) = StdUnixStream::pair()?;
+        if let Some(pid) = linux::fork().context("forking client background process")? {
+            Ok(Self {
+                handle: ClientBgHandle(pid),
+                sock: Some(sock1),
+            })
         } else {
             drop(sock1);
-            let exit_code = maelstrom_client_process::main_for_zygote(sock2, log_level)
-                .context("client process zygote")?;
+            let exit_code = maelstrom_client_process::main_for_fork(sock2, log_level)
+                .context("client background process")?;
             process::exit(exit_code.into());
         }
     }
-}
 
-impl Drop for ForkClientProcessFactory {
-    fn drop(&mut self) {
-        let _ = linux::kill(self.pid, Signal::KILL);
-        let _ = linux::waitpid(self.pid);
-    }
-}
-
-impl ClientProcessFactory for ForkClientProcessFactory {
-    fn new_client_process(&self, _log: &Logger) -> Result<(ClientProcessHandle, StdUnixStream)> {
-        let (sock1, sock2) = StdUnixStream::pair()?;
-        let buf = [0; 1];
-        self.socket
-            .send_with_fd(&buf, Fd::from_raw(sock2.as_raw_fd()))?;
-        Ok((ClientProcessHandle(None), sock1))
-    }
-}
-
-/// Create client processes by spawning (forking and exec-ing).
-pub struct SpawnClientProcessFactory {
-    program: OsString,
-    args: Vec<OsString>,
-}
-
-impl SpawnClientProcessFactory {
-    /// Create a [`SpawnClientProcessFactory`] that forks and executes the program specified by
-    /// `program` and `args`.
-    pub fn new<ProgramT, ArgsT, ArgT>(program: ProgramT, args: ArgsT) -> Self
+    /// Create a new client process using the spawn approach. This can be called at any time, even
+    /// if the process is multi-threaded. However, there must be a binary with the client process
+    /// code available on the local file system.
+    ///
+    /// Any stderr from the client process is written to this process's stdout.
+    ///
+    /// This is currently only used for Maelstorm integration tests.
+    pub fn new_from_spawn<ProgramT, ArgsT, ArgT>(program: ProgramT, args: ArgsT) -> Result<Self>
     where
         ProgramT: AsRef<OsStr>,
         ArgsT: IntoIterator<Item = ArgT>,
         ArgT: AsRef<OsStr>,
     {
-        Self {
-            program: program.as_ref().to_owned(),
-            args: args
-                .into_iter()
-                .map(|arg| arg.as_ref().to_owned())
-                .collect(),
-        }
-    }
-}
-
-impl ClientProcessFactory for SpawnClientProcessFactory {
-    fn new_client_process(&self, log: &Logger) -> Result<(ClientProcessHandle, StdUnixStream)> {
-        let mut proc = Command::new(&self.program)
-            .args(&self.args)
+        let mut proc = Command::new(program)
+            .args(args)
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?;
@@ -184,7 +160,7 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines() {
                 let Ok(line) = line else { break };
-                println!("client process: {line}");
+                println!("client bg-process: {line}");
             }
         });
         let mut address_bytes = [0; 5]; // We know Linux uses exactly 5 bytes for this
@@ -192,39 +168,44 @@ impl ClientProcessFactory for SpawnClientProcessFactory {
         let address = SocketAddr::from_abstract_name(address_bytes)?;
         let sock = StdUnixStream::connect_addr(&address)
             .with_context(|| format!("failed to connect to {address:?}"))?;
-        Ok((ClientProcessHandle(Some((proc.into(), log.clone()))), sock))
+        Ok(Self {
+            handle: ClientBgHandle(proc.into()),
+            sock: Some(sock),
+        })
     }
-}
 
-pub struct ClientProcessHandle(Option<(Pid, Logger)>);
+    fn take_socket(&mut self) -> StdUnixStream {
+        self.sock.take().unwrap()
+    }
 
-impl Drop for ClientProcessHandle {
-    fn drop(&mut self) {
-        if let ClientProcessHandle(Some((pid, log))) = self {
-            debug!(log, "waiting for child client process"; "pid" => ?pid);
-            if let Err(errno) = linux::waitpid(*pid) {
-                warn!(log, "error waiting for child client process"; "errno" => %errno);
-            }
-        }
+    fn wait(&mut self) -> Result<()> {
+        self.handle.wait()
     }
 }
 
 impl Drop for Client {
     fn drop(&mut self) {
-        debug!(self.log, "dropping Client");
+        slog::debug!(self.log, "dropping Client");
         drop(self.requester.take());
-        debug!(self.log, "Client::drop: waiting for dispatcher");
-        if let Err(err) = self.dispatcher_handle.take().unwrap().join().unwrap() {
-            warn!(self.log, "dispatcher task returned error"; "error" => %err);
-        }
+        slog::debug!(self.log, "Client::drop: waiting for dispatcher");
+        print_error(
+            "dispatcher",
+            self.dispatcher_handle.take().unwrap().join().unwrap(),
+        );
+        slog::debug!(
+            self.log,
+            "Client::drop: waiting for child process";
+            "process_handle" => ?self.process_handle
+        );
+        self.process_handle.wait().unwrap();
     }
 }
 
 pub struct Client {
     requester: Option<RequestSender>,
-    _client_process_handle: ClientProcessHandle,
+    process_handle: ClientBgProcess,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
-    log: Logger,
+    log: slog::Logger,
     start_req: StartRequest,
 }
 
@@ -244,7 +225,7 @@ fn transform_rpc_response<RetT: TryFromProtoBuf>(
 }
 
 async fn handle_log_messages(
-    log: &Logger,
+    log: &slog::Logger,
     mut stream: tonic::Streaming<proto::LogMessage>,
 ) -> Result<()> {
     while let Some(message) = stream.next().await {
@@ -271,7 +252,7 @@ fn wait_for_job_completed_blocking(
 impl Client {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        client_process_factory: &impl ClientProcessFactory,
+        mut process_handle: ClientBgProcess,
         broker_addr: Option<BrokerAddr>,
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
@@ -282,10 +263,11 @@ impl Client {
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
         artifact_transfer_strategy: ArtifactTransferStrategy,
-        log: Logger,
+        log: slog::Logger,
     ) -> Result<Self> {
-        let (client_process_handle, sock) = client_process_factory.new_client_process(&log)?;
         let (send, recv) = tokio_mpsc::unbounded_channel();
+
+        let sock = process_handle.take_socket();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
 
         let start_req = StartRequest {
@@ -302,13 +284,13 @@ impl Client {
         };
         let s = Self {
             requester: Some(send),
-            _client_process_handle: client_process_handle,
+            process_handle,
             dispatcher_handle: Some(dispatcher_handle),
             log,
             start_req,
         };
 
-        debug!(s.log, "opening log stream");
+        slog::debug!(s.log, "opening log stream");
         let rpc_log = s.log.clone();
         s.send_sync_unit(|mut client| async move {
             let log_stream = client
@@ -327,11 +309,11 @@ impl Client {
     }
 
     fn send_start(&self) -> Result<()> {
-        debug!(self.log, "client sending start"; "request" => ?self.start_req);
+        slog::debug!(self.log, "client sending start"; "request" => ?self.start_req);
 
         let req = self.start_req.clone().into_proto_buf();
         self.send_sync_unit(|mut client| async move { client.start(req).await })?;
-        debug!(self.log, "client completed start");
+        slog::debug!(self.log, "client completed start");
         Ok(())
     }
 

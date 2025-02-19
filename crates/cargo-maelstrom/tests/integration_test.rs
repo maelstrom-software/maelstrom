@@ -1,3 +1,4 @@
+use anyhow::Result;
 use cargo_maelstrom::{
     cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
     cli::{ExtraCommandLineOptions, ListOptions},
@@ -5,6 +6,7 @@ use cargo_maelstrom::{
     LoggerBuilder,
 };
 use indicatif::InMemoryTerm;
+use maelstrom_client::ClientBgProcess;
 use maelstrom_test_runner::{
     ui::{SimpleUi, UiKind},
     TestRunner as _,
@@ -20,6 +22,11 @@ use std::{
     process::{Command, Stdio},
 };
 use tempfile::tempdir;
+
+fn spawn_bg_proc() -> Result<ClientBgProcess> {
+    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_cargo-maelstrom"));
+    ClientBgProcess::new_from_spawn(&bin_path, ["--client-bg-proc"])
+}
 
 fn cmd(args: &[&str], current_dir: &Path) {
     let mut cmd = Command::new(args[0]);
@@ -40,8 +47,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     let term = InMemoryTerm::new(50, 50);
 
     maelstrom_test_runner::main_for_test::<cargo_maelstrom::TestRunner>(
-        env!("CARGO_BIN_EXE_cargo-maelstrom"),
-        ["--client-process"],
+        |_| spawn_bg_proc(),
         Config {
             parent: maelstrom_test_runner::config::Config {
                 broker: None,

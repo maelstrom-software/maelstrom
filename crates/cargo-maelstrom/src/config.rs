@@ -1,6 +1,6 @@
 use crate::cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
 use maelstrom_macro::Config;
-use maelstrom_test_runner::config::{AsParts, Config as TestRunnerConfig};
+use maelstrom_test_runner::config::{Config as TestRunnerConfig, IntoParts};
 
 #[derive(Config, Debug)]
 pub struct Config {
@@ -11,7 +11,7 @@ pub struct Config {
     pub cargo: CargoConfig,
 }
 
-#[derive(Clone, Config, Debug)]
+#[derive(Config, Debug)]
 pub struct CargoConfig {
     #[config(flatten, next_help_heading = "Feature Selection Config Options")]
     pub feature_selection_options: FeatureSelectionOptions,
@@ -38,10 +38,10 @@ impl AsRef<TestRunnerConfig> for Config {
     }
 }
 
-impl AsParts for Config {
+impl IntoParts for Config {
     type First = TestRunnerConfig;
     type Second = CargoConfig;
-    fn as_parts(&self) -> (&TestRunnerConfig, &CargoConfig) {
-        (&self.parent, &self.cargo)
+    fn into_parts(self) -> (TestRunnerConfig, CargoConfig) {
+        (self.parent, self.cargo)
     }
 }

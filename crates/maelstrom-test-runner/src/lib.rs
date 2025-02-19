@@ -14,19 +14,17 @@ pub mod fake_test_framework;
 pub use deps::*;
 
 use anyhow::{Context as _, Result};
+use app::TestingOptions;
 use app::{
     main_app::MainApp, watch::Watcher, ControlMessage, Deps, MainAppDepsAdapter, MainAppMessage,
-    MainAppMessageM, TestDbM, TestingOptions,
+    MainAppMessageM, TestDbM,
 };
 use clap::{Args, Command};
-use config::AsParts;
+use config::IntoParts;
 use derive_more::{From, Into};
 use log::{LogDestination, LoggerBuilder};
 use maelstrom_base::Timeout;
-use maelstrom_client::{
-    CacheDir, Client, ClientProcessFactory, ForkClientProcessFactory, ProjectDir,
-    SpawnClientProcessFactory, StateDir,
-};
+use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
 use maelstrom_util::{
     config::{common::LogLevel, Config},
     fs::Fs,
@@ -35,7 +33,6 @@ use maelstrom_util::{
     sync::Event,
 };
 use metadata::Store as MetadataStore;
-use slog::Logger;
 use std::{
     fmt::Debug,
     io::{self, IsTerminal as _},
@@ -43,7 +40,6 @@ use std::{
     path::PathBuf,
     str,
     sync::mpsc::Receiver,
-    thread,
     thread::Scope,
     time::Duration,
 };
@@ -98,15 +94,18 @@ pub trait TestRunner {
     /// Configuration values for the test runner. This consists of configuration values shared
     /// between all test runners ([`config::Config`]), and those specific to this test runner
     /// ([`Self::TestCollectorConfig`]).
-    type Config: AsParts<First = config::Config, Second = Self::TestCollectorConfig>
-        + Config
-        + Debug;
+    type Config: Config
+        + Debug
+        + AsRef<config::Config>
+        + IntoParts<First = config::Config, Second = Self::TestCollectorConfig>;
 
     /// Extra command-line options for the test runner. This consists of extra command-line options
     /// shared between all test runners ([`config::ExtraCommandLineOptions`]), and those specific
     /// to this test runner. The extra command-line options specific to this test runner are used
     /// to control the listing mode.
-    type ExtraCommandLineOptions: Args + AsParts<First = config::ExtraCommandLineOptions>;
+    type ExtraCommandLineOptions: Args
+        + AsRef<config::ExtraCommandLineOptions>
+        + IntoParts<First = config::ExtraCommandLineOptions>;
 
     /// Project metadata specific to the test runner. This is called out as a separate type so that
     /// it can be acquired once, and then used later. In particular, for Cargo, this is the result
@@ -171,17 +170,12 @@ pub trait TestRunner {
     /// Return the directories computed from the metadata and project directory.
     fn get_directories(metadata: &Self::Metadata, project_dir: RootBuf<ProjectDir>) -> Directories;
 
-    /// Return any extra paths that should be excluded in `--watch` mode.
-    fn get_paths_to_exclude_from_watch(_directories: &Directories) -> Vec<PathBuf> {
-        vec![]
-    }
-
     /// Build the test collector. This will be used for the rest of the execution.
     fn build_test_collector<'client>(
         client: &'client Client,
-        config: &Self::TestCollectorConfig,
+        config: Self::TestCollectorConfig,
         directories: &Directories,
-        log: &Logger,
+        log: &slog::Logger,
         metadata: Self::Metadata,
     ) -> Result<Self::TestCollector<'client>>;
 }
@@ -189,7 +183,7 @@ pub trait TestRunner {
 /// Helper that does common work for test-runner main functions and then forwards on to the given
 /// underlying function.
 ///
-/// Mostly it deals with the `--init` and `--client-process` flags
+/// Mostly it deals with the `--init` and `--client-bg-proc` flags
 pub fn main<TestRunnerT: TestRunner>(
     command: Command,
     args: impl IntoIterator<Item = String>,
@@ -202,16 +196,15 @@ pub fn main<TestRunnerT: TestRunner>(
             args,
         )?;
 
-    let (parent_extra_options, _) = extra_options.as_parts();
-    if parent_extra_options.client_process {
+    if extra_options.as_ref().client_bg_proc {
         return maelstrom_client_process::main_for_spawn();
-    } else if parent_extra_options.init {
+    } else if extra_options.as_ref().init {
         let (_, project_dir) = TestRunnerT::get_metadata_and_project_directory(&config)?;
         return init::main::<TestRunnerT>(&project_dir);
     }
 
-    main_inner::<TestRunnerT, ForkClientProcessFactory>(
-        ForkClientProcessFactory::new,
+    main_inner::<TestRunnerT>(
+        ClientBgProcess::new_from_fork,
         config,
         extra_options,
         TestRunnerT::get_metadata_and_project_directory,
@@ -222,24 +215,20 @@ pub fn main<TestRunnerT: TestRunner>(
 }
 
 pub fn main_for_test<TestRunnerT: TestRunner>(
-    spawn_client_process_factory_program: &'static str,
-    spawn_client_process_factory_args: impl IntoIterator<Item = &'static str>,
+    client_bg_process_factory: impl FnOnce(LogLevel) -> Result<ClientBgProcess>,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
-    get_metadata_and_project_directory: impl Fn(
+    get_metadata_and_project_directory: impl FnOnce(
         &TestRunnerT::Config,
-    )
-        -> Result<(TestRunnerT::Metadata, RootBuf<ProjectDir>)>,
+    ) -> Result<(
+        TestRunnerT::Metadata,
+        RootBuf<ProjectDir>,
+    )>,
     logger_builder: LoggerBuilder,
     ui_factory: impl FnOnce(UiKind, IsListing, StdoutTty) -> Result<Box<dyn Ui>>,
 ) -> Result<ExitCode> {
-    main_inner::<TestRunnerT, SpawnClientProcessFactory>(
-        |_| {
-            Ok(SpawnClientProcessFactory::new(
-                spawn_client_process_factory_program,
-                spawn_client_process_factory_args,
-            ))
-        },
+    main_inner::<TestRunnerT>(
+        client_bg_process_factory,
         config,
         extra_options,
         get_metadata_and_project_directory,
@@ -250,22 +239,21 @@ pub fn main_for_test<TestRunnerT: TestRunner>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn main_inner<TestRunnerT: TestRunner, ClientProcessFactoryT: ClientProcessFactory>(
-    client_process_factory_factory: impl FnOnce(LogLevel) -> Result<ClientProcessFactoryT>,
+fn main_inner<TestRunnerT: TestRunner>(
+    client_bg_process_factory: impl FnOnce(LogLevel) -> Result<ClientBgProcess>,
     config: TestRunnerT::Config,
     extra_options: TestRunnerT::ExtraCommandLineOptions,
-    get_metadata_and_project_directory: impl Fn(
+    get_metadata_and_project_directory: impl FnOnce(
         &TestRunnerT::Config,
-    )
-        -> Result<(TestRunnerT::Metadata, RootBuf<ProjectDir>)>,
+    ) -> Result<(
+        TestRunnerT::Metadata,
+        RootBuf<ProjectDir>,
+    )>,
     logger_builder_builder: impl FnOnce(LogLevel) -> LoggerBuilder,
     stdout_tty: StdoutTty,
     ui_factory: impl FnOnce(UiKind, IsListing, StdoutTty) -> Result<Box<dyn Ui>>,
 ) -> Result<ExitCode> {
-    let (parent_config, _) = config.as_parts();
-    let (parent_extra_options, _) = extra_options.as_parts();
-
-    let client_process_factory = client_process_factory_factory(parent_config.log_level)?;
+    let parent_config = config.as_ref();
 
     let logger_builder = logger_builder_builder(parent_config.log_level);
     let log_destination = LogDestination::default();
@@ -289,14 +277,16 @@ fn main_inner<TestRunnerT: TestRunner, ClientProcessFactoryT: ClientProcessFacto
 
     // From this point on, we're going to be building all tests and either running or listing them.
 
+    let client_bg_process = client_bg_process_factory(parent_config.log_level)?;
+
     let is_listing = IsListing::from(list_tests.as_bool());
     let ui = ui_factory(parent_config.ui, is_listing, stdout_tty)?;
     let (ui_handle, ui_sender) = ui.start_ui_thread(log_destination, log.clone());
 
     let result = main_with_ui_thread::<TestRunnerT>(
-        client_process_factory,
-        &config,
-        parent_extra_options,
+        client_bg_process,
+        config,
+        extra_options,
         get_metadata_and_project_directory,
         list_tests,
         log,
@@ -319,89 +309,34 @@ const MAX_NUM_BACKGROUND_THREADS: isize = 200;
 
 #[allow(clippy::too_many_arguments)]
 fn main_with_ui_thread<TestRunnerT: TestRunner>(
-    client_process_factory: impl ClientProcessFactory,
-    config: &TestRunnerT::Config,
-    extra_options: &config::ExtraCommandLineOptions,
-    get_metadata_and_project_directory: impl Fn(
+    client_bg_process: ClientBgProcess,
+    config: TestRunnerT::Config,
+    extra_options: TestRunnerT::ExtraCommandLineOptions,
+    get_metadata_and_project_directory: impl FnOnce(
         &TestRunnerT::Config,
-    )
-        -> Result<(TestRunnerT::Metadata, RootBuf<ProjectDir>)>,
+    ) -> Result<(
+        TestRunnerT::Metadata,
+        RootBuf<ProjectDir>,
+    )>,
     list_tests: ListTests,
-    log: Logger,
+    log: slog::Logger,
     stdout_tty: StdoutTty,
     ui_sender: UiSender,
 ) -> Result<ExitCode> {
-    loop {
-        match run_app_once::<TestRunnerT>(
-            &client_process_factory,
-            config,
-            extra_options,
-            &get_metadata_and_project_directory,
-            list_tests,
-            &log,
-            stdout_tty,
-            &ui_sender,
-        ) {
-            Err(err) => {
-                break Err(err);
-            }
-            Ok(ControlFlow::Break(exit_code)) => {
-                break Ok(exit_code);
-            }
-            Ok(ControlFlow::Continue(watcher)) => {
-                ui_sender.send(UiMessage::UpdateEnqueueStatus(
-                    "waiting for changes...".into(),
-                ));
-                watcher.wait();
-                thread::sleep(Duration::from_millis(100));
-                continue;
-            }
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_app_once<TestRunnerT: TestRunner>(
-    client_process_factory: &impl ClientProcessFactory,
-    config: &TestRunnerT::Config,
-    extra_options: &config::ExtraCommandLineOptions,
-    get_metadata_and_project_directory: &impl Fn(
-        &TestRunnerT::Config,
-    )
-        -> Result<(TestRunnerT::Metadata, RootBuf<ProjectDir>)>,
-    list_tests: ListTests,
-    log: &Logger,
-    stdout_tty: StdoutTty,
-    ui_sender: &UiSender,
-) -> Result<ControlFlow<ExitCode, Watcher>> {
-    let done = Event::new();
-    let semaphore = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
-
-    let (metadata, project_dir) = get_metadata_and_project_directory(config)?;
-
+    let (metadata, project_dir) = get_metadata_and_project_directory(&config)?;
     let directories = TestRunnerT::get_directories(&metadata, project_dir);
-
-    let watch_exclude_paths = TestRunnerT::get_paths_to_exclude_from_watch(&directories)
-        .into_iter()
-        .chain([
-            directories
-                .project
-                .to_path_buf()
-                .join(maelstrom_container::TAG_FILE_NAME),
-            directories.project.to_path_buf().join(".git"),
-        ]);
-
-    let (parent_config, test_collector_config) = config.as_parts();
+    let (parent_config, test_collector_config) = config.into_parts();
+    let (extra_options, _) = extra_options.into_parts();
 
     Fs.create_dir_all(&directories.state)?;
     Fs.create_dir_all(&directories.cache)?;
 
     let client = Client::new(
-        client_process_factory,
+        client_bg_process,
         parent_config.broker,
         &directories.project,
         &directories.state,
-        &parent_config.container_image_depot_root,
+        parent_config.container_image_depot_root,
         &directories.cache,
         parent_config.cache_size,
         parent_config.inline_limit,
@@ -415,7 +350,7 @@ fn run_app_once<TestRunnerT: TestRunner>(
         &client,
         test_collector_config,
         &directories,
-        log,
+        &log,
         metadata,
     )?;
 
@@ -466,6 +401,18 @@ fn run_app_once<TestRunnerT: TestRunner>(
         &extra_options.exclude,
     )?;
 
+    let watch_exclude_paths = test_collector
+        .get_paths_to_exclude_from_watch()
+        .into_iter()
+        .chain([
+            directories
+                .project
+                .to_path_buf()
+                .join(maelstrom_container::TAG_FILE_NAME),
+            directories.project.to_path_buf().join(".git"),
+        ])
+        .collect();
+
     let testing_options = TestingOptions {
         test_metadata: metadata_store,
         filter,
@@ -477,31 +424,97 @@ fn run_app_once<TestRunnerT: TestRunner>(
     };
 
     // This is where the pytest runner builds pip packages.
-    test_collector.build_test_layers(testing_options.test_metadata.get_all_images(), ui_sender)?;
+    test_collector.build_test_layers(testing_options.test_metadata.get_all_images(), &ui_sender)?;
 
-    let watcher = extra_options
-        .watch
-        .then(|| Watcher::new(&directories.project, watch_exclude_paths))
-        .transpose()?;
-
-    let exit_code = std::thread::scope(|scope| {
-        let result = run_app_once_inner(
+    loop {
+        match run_app_once(
             &client,
-            &done,
-            scope,
-            &semaphore,
+            &directories,
+            &extra_options,
+            log.clone(),
             &test_collector,
             &test_db_store,
             &testing_options,
-            ui_sender,
-        );
+            ui_sender.clone(),
+            &watch_exclude_paths,
+        ) {
+            ControlFlow::Break(result) => {
+                break result;
+            }
+            ControlFlow::Continue(()) => {
+                continue;
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_app_once<TestCollectorT: TestCollector + Sync>(
+    client: &Client,
+    directories: &Directories,
+    extra_options: &config::ExtraCommandLineOptions,
+    log: slog::Logger,
+    test_collector: &TestCollectorT,
+    test_db_store: &TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
+    testing_options: &TestingOptions<TestCollectorT::TestFilter>,
+    ui_sender: UiSender,
+    watch_exclude_paths: &Vec<PathBuf>,
+) -> ControlFlow<Result<ExitCode>> {
+    let done = Event::new();
+    let files_changed = Event::new();
+    let semaphore = Semaphore::new(MAX_NUM_BACKGROUND_THREADS);
+
+    std::thread::scope(|scope| {
+        let result = (|| -> ControlFlow<Result<_>> {
+            let watcher = if extra_options.watch {
+                Some({
+                    let watcher = Watcher::new(
+                        scope,
+                        log.clone(),
+                        &directories.project,
+                        watch_exclude_paths,
+                        &done,
+                        &files_changed,
+                    );
+                    if let Err(err) = watcher.watch_for_changes() {
+                        return ControlFlow::Break(Err(err));
+                    }
+                    watcher
+                })
+            } else {
+                None
+            };
+
+            let result = run_app_once_inner(
+                client,
+                &done,
+                scope,
+                &semaphore,
+                test_collector,
+                test_db_store,
+                testing_options,
+                ui_sender.clone(),
+            );
+
+            match watcher {
+                None => ControlFlow::Break(result),
+                Some(watcher) => {
+                    if let Err(err) = client.restart() {
+                        return ControlFlow::Break(Err(err));
+                    }
+
+                    ui_sender.send(UiMessage::UpdateEnqueueStatus(
+                        "waiting for changes...".into(),
+                    ));
+                    watcher.wait_for_changes();
+
+                    ControlFlow::Continue(())
+                }
+            }
+        })();
+
         done.set();
         result
-    })?;
-
-    Ok(match watcher {
-        None => ControlFlow::Break(exit_code),
-        Some(watcher) => ControlFlow::Continue(watcher),
     })
 }
 
@@ -512,9 +525,9 @@ fn run_app_once_inner<'scope, 'env, TestCollectorT: TestCollector + Sync>(
     scope: &'scope Scope<'scope, 'env>,
     semaphore: &'env Semaphore,
     test_collector: &'env TestCollectorT,
-    test_db_store: &TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
-    testing_options: &TestingOptions<TestCollectorT::TestFilter>,
-    ui_sender: &'env UiSender,
+    test_db_store: &'env TestDbStore<TestCollectorT::ArtifactKey, TestCollectorT::CaseMetadata>,
+    testing_options: &'env TestingOptions<TestCollectorT::TestFilter>,
+    ui_sender: UiSender,
 ) -> Result<ExitCode> {
     let (main_app_sender, main_app_receiver) = std::sync::mpsc::channel();
 
@@ -525,7 +538,7 @@ fn run_app_once_inner<'scope, 'env, TestCollectorT: TestCollector + Sync>(
         test_collector,
         scope,
         main_app_sender.clone(),
-        ui_sender.clone(),
+        ui_sender,
         semaphore,
         client,
     );
@@ -535,8 +548,6 @@ fn run_app_once_inner<'scope, 'env, TestCollectorT: TestCollector + Sync>(
     let app = MainApp::new(&deps, testing_options, test_db);
     let (exit_code, test_db) = main_app_channel_reader(app, &main_app_receiver)?;
     test_db_store.save(test_db)?;
-
-    client.restart()?;
 
     Ok(exit_code)
 }

@@ -12,7 +12,7 @@ mod layer_fs;
 mod manifest_digest_cache;
 mod types;
 
-use anyhow::{anyhow, bail, Context as _, Error, Result};
+use anyhow::{anyhow, bail, Error, Result};
 use artifact_fetcher::{GitHubArtifactFetcher, TcpArtifactFetcher};
 use config::Config;
 use connection::{BrokerConnection, BrokerReadConnection as _, BrokerWriteConnection as _};
@@ -28,7 +28,7 @@ use maelstrom_util::{
     root::RootBuf,
     signal,
 };
-use slog::{debug, error, info, o, Logger};
+use slog::{debug, error, info, Logger};
 use std::{future::Future, process, sync::Arc};
 use tokio::{
     net::TcpStream,
@@ -78,16 +78,16 @@ async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger)
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =
         mpsc::unbounded_channel();
 
-    let reader_log = log.new(o!("task" => "reader"));
+    let log_clone = log.clone();
     let dispatcher_sender_clone = dispatcher_sender.clone();
     task::spawn(shutdown_on_error(
-        read_stream.read_messages(dispatcher_sender_clone, reader_log),
+        read_stream.read_messages(dispatcher_sender_clone, log_clone),
         dispatcher_sender.clone(),
     ));
 
-    let writer_log = log.new(o!("task" => "writer"));
+    let log_clone = log.clone();
     task::spawn(shutdown_on_error(
-        write_stream.write_messages(broker_socket_outgoing_receiver, writer_log),
+        write_stream.write_messages(broker_socket_outgoing_receiver, log_clone),
         dispatcher_sender.clone(),
     ));
 
@@ -96,15 +96,13 @@ async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger)
         dispatcher_sender.clone(),
     ));
 
-    let log = log.new(o!("task" => "dispatcher"));
     Err(start_dispatcher_task(
         config,
         dispatcher_receiver,
         dispatcher_sender,
         broker_socket_outgoing_sender,
-        &log,
-    )
-    .context("starting dispatcher task")?
+        log,
+    )?
     .await?)
 }
 
@@ -196,7 +194,7 @@ fn start_dispatcher_task(
             start_dispatcher_task_common(artifact_fetcher_factory, args)
         }
         ArtifactTransferStrategy::GitHub => {
-            let github_client = github_client_factory().context("creating GitHub client")?;
+            let github_client = github_client_factory()?;
             let artifact_fetcher_factory = move |temp_file_factory| {
                 GitHubArtifactFetcher::new(
                     max_simultaneous_fetches,
@@ -238,8 +236,7 @@ fn start_dispatcher_task_common<
         args.cache_size,
         args.log.clone(),
         args.log_initial_cache_message_at_info,
-    )
-    .context("creating cache")?;
+    )?;
 
     let artifact_fetcher = artifact_fetcher_factory(temp_file_factory.clone());
 
@@ -251,8 +248,7 @@ fn start_dispatcher_task_common<
         args.cache_root.join::<TmpfsDir>("upper"),
         cache.root().join::<BlobDir>("sha256/blob"),
         temp_file_factory,
-    )
-    .context("creating dispatcher adapter")?;
+    )?;
 
     let mut dispatcher = Dispatcher::new(
         dispatcher_adapter,

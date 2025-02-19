@@ -5,8 +5,8 @@ use maelstrom_base::{
     JobOutputResult, JobTerminationStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
-    spec::JobSpec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ContainerImageDepotDir,
-    ForkClientProcessFactory, JobStatus, ProjectDir, StateDir,
+    spec::JobSpec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, JobStatus, ProjectDir, StateDir,
 };
 use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow};
 use maelstrom_macro::Config;
@@ -748,7 +748,7 @@ fn main_with_logger(
     blocked_signals: SignalSet,
     config: Config,
     mut extra_options: ExtraCommandLineOptions,
-    client_process_factory: ForkClientProcessFactory,
+    bg_proc: ClientBgProcess,
     log: Logger,
 ) -> Result<ExitCode> {
     let fs = Fs::new();
@@ -760,7 +760,7 @@ fn main_with_logger(
     fs.create_dir_all(&config.state_root)?;
     fs.create_dir_all(&config.container_image_depot_root)?;
     let client = Client::new(
-        &client_process_factory,
+        bg_proc,
         config.broker,
         Root::<ProjectDir>::new(".".as_ref()),
         config.state_root,
@@ -846,7 +846,7 @@ fn main() -> Result<ExitCode> {
         }
     }
 
-    let client_process_factory = ForkClientProcessFactory::new(config.log_level)?;
+    let bg_proc = ClientBgProcess::new_from_fork(config.log_level)?;
 
     // We need to block the signals before we become multi-threaded, but after we've forked a
     // background process.
@@ -860,12 +860,6 @@ fn main() -> Result<ExitCode> {
     }
 
     log::run_with_logger(config.log_level, |log| {
-        main_with_logger(
-            blocked_signals,
-            config,
-            extra_options,
-            client_process_factory,
-            log,
-        )
+        main_with_logger(blocked_signals, config, extra_options, bg_proc, log)
     })
 }

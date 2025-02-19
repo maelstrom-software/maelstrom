@@ -6,8 +6,8 @@ use maelstrom_base::{
 use maelstrom_client::{
     environment_spec, glob_layer_spec, job_spec, paths_layer_spec, spec::LayerSpec,
     stubs_layer_spec, symlink_spec, symlinks_layer_spec, tar_layer_spec,
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ContainerImageDepotDir, ProjectDir,
-    SpawnClientProcessFactory, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_util::{
     config::common::ArtifactTransferStrategy, elf::read_shared_libraries, fs::Fs, log::test_logger,
@@ -15,9 +15,10 @@ use maelstrom_util::{
 };
 use regex::Regex;
 use std::panic::Location;
+use std::path::PathBuf;
 use tempfile::tempdir;
 
-fn client_process_factory_factory() -> SpawnClientProcessFactory {
+fn spawn_bg_proc() -> ClientBgProcess {
     // XXX cargo-maelstrom doesn't add shared-library dependencies for additional binaries.
     //
     // To make us have the same dependencies as the client-process, call into the client-process
@@ -26,7 +27,8 @@ fn client_process_factory_factory() -> SpawnClientProcessFactory {
         let _ = maelstrom_client_process::main_for_spawn();
     }
 
-    SpawnClientProcessFactory::new(env!("CARGO_BIN_EXE_maelstrom-client"), [] as [&str; 0])
+    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-client"));
+    ClientBgProcess::new_from_spawn(&bin_path, [] as [&str; 0]).unwrap()
 }
 
 struct ClientFixture {
@@ -51,11 +53,11 @@ impl ClientFixture {
         let container_image_depot_dir = temp_dir.path().join("container_image_depot");
         fs.create_dir_all(&container_image_depot_dir).unwrap();
 
-        let client_process_factory = client_process_factory_factory();
+        let bg_proc = spawn_bg_proc();
         let log = test_logger();
         slog::info!(log, "connected unix socket to child");
         let client = Client::new(
-            &client_process_factory,
+            bg_proc,
             None, /* broker_addr */
             Root::<ProjectDir>::new(&project_dir),
             Root::<StateDir>::new(&state_dir),
