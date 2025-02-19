@@ -349,10 +349,9 @@ impl Client {
         };
 
         let log = state.log.clone();
-        let fail_clone = fail.clone();
-        task::spawn(async move {
+        join_set.spawn(async move {
             let signal = signal::wait_for_signal(log.clone()).await;
-            fail_clone(format!("received signal {signal}"));
+            Err(anyhow!("received signal {signal}"))
         });
 
         let log = state.log.clone();
