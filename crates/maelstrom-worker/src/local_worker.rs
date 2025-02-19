@@ -3,11 +3,12 @@ pub use crate::{
     config::CacheDir,
     dispatcher::Message,
     types::{DispatcherReceiver as Receiver, DispatcherSender as Sender},
+    Tasks,
 };
 pub use maelstrom_util::cache::GotArtifact;
 
 use crate::dispatcher::{ArtifactFetcher, BrokerSender};
-use anyhow::{Error, Result};
+use anyhow::Result;
 use maelstrom_util::{
     config::common::{CacheSize, InlineLimit, Slots},
     root::RootBuf,
@@ -15,7 +16,7 @@ use maelstrom_util::{
 use slog::Logger;
 use tokio::{
     sync::mpsc::{self},
-    task::JoinHandle,
+    task::JoinSet,
 };
 
 pub fn channel() -> (Sender, Receiver) {
@@ -33,7 +34,8 @@ pub fn start_task(
     receiver: Receiver,
     sender: Sender,
     slots: Slots,
-) -> Result<JoinHandle<Error>> {
+    tasks: JoinSet<Result<()>>,
+) -> Result<Tasks> {
     crate::start_dispatcher_task_common(
         move |_| artifact_fetcher,
         broker_sender,
@@ -45,5 +47,6 @@ pub fn start_task(
         log,
         false, /* log_initial_cache_message_at_info */
         slots,
+        tasks,
     )
 }

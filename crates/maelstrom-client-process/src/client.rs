@@ -17,12 +17,11 @@ use maelstrom_util::{
     signal,
 };
 use maelstrom_worker::local_worker;
-use slog::{debug, o, warn, Logger};
-use std::{future::Future, pin::Pin};
+use slog::{debug, o, Logger};
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot, RwLock},
-    task::{self, JoinHandle, JoinSet},
+    task::JoinSet,
 };
 
 #[derive(Default)]
@@ -34,7 +33,7 @@ struct ClientState {
     image_download_tracker: ProgressTracker,
     log: Logger,
     preparer_sender: preparer::task::Sender,
-    clean_up: Vec<Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>>>,
+    tasks: local_worker::Tasks,
 }
 
 /// For files under this size, the data is stashed in the manifest rather than uploaded separately
@@ -57,7 +56,7 @@ impl Client {
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
         artifact_transfer_strategy: ArtifactTransferStrategy,
-    ) -> Result<(ClientState, JoinSet<Result<()>>, JoinHandle<Error>)> {
+    ) -> Result<ClientState> {
         let fs = async_fs::Fs::new();
 
         // Make sure the state dir exists before we try to put a log file in.
@@ -188,10 +187,17 @@ impl Client {
             preparer_sender.clone(),
         )?;
 
+        // Start the signal handler.
+        let log_clone = log.clone();
+        join_set.spawn(async move {
+            let signal = signal::wait_for_signal(log_clone).await;
+            Err(anyhow!("received signal {signal}"))
+        });
+
         // Start the local worker.
         let router_sender_clone_1 = router_sender.clone();
         let router_sender_clone_2 = router_sender.clone();
-        let local_worker_handle = local_worker::start_task(
+        let tasks = local_worker::start_task(
             move |digest| {
                 router_sender_clone_1.send(router::Message::LocalWorkerStartArtifactFetch(digest))
             },
@@ -203,20 +209,17 @@ impl Client {
             local_worker_receiver,
             local_worker_sender,
             slots,
+            join_set,
         )?;
 
-        Ok((
-            ClientState {
-                router_sender,
-                artifact_upload_tracker,
-                image_download_tracker,
-                log,
-                preparer_sender,
-                clean_up: Default::default(),
-            },
-            join_set,
-            local_worker_handle,
-        ))
+        Ok(ClientState {
+            router_sender,
+            artifact_upload_tracker,
+            image_download_tracker,
+            log,
+            preparer_sender,
+            tasks,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -239,70 +242,25 @@ impl Client {
             bail!("client already started");
         }
 
-        let (mut state, mut join_set, local_worker_handle) = Self::try_to_start(
-            log,
-            broker_addr,
-            project_dir,
-            state_dir,
-            cache_dir,
-            container_image_depot_cache_dir,
-            cache_size,
-            inline_limit,
-            slots,
-            accept_invalid_remote_container_tls_certs,
-            artifact_transfer_strategy,
-        )
-        .await?;
+        *guard = Some(
+            Self::try_to_start(
+                log.clone(),
+                broker_addr,
+                project_dir,
+                state_dir,
+                cache_dir,
+                container_image_depot_cache_dir,
+                cache_size,
+                inline_limit,
+                slots,
+                accept_invalid_remote_container_tls_certs,
+                artifact_transfer_strategy,
+            )
+            .await?,
+        );
 
-        let shutdown_sender = state.router_sender.clone();
-        let fail = move |msg: String| {
-            let _ = shutdown_sender.send(router::Message::Shutdown(anyhow!(msg)));
-        };
-
-        let log = state.log.clone();
-        join_set.spawn(async move {
-            let signal = signal::wait_for_signal(log.clone()).await;
-            Err(anyhow!("received signal {signal}"))
-        });
-
-        let log = state.log.clone();
         debug!(log, "client started successfully");
 
-        let shutdown_sender = state.router_sender.clone();
-        let log_clone = log.clone();
-        state.clean_up.push(Box::pin(async move {
-            let _ = shutdown_sender.send(router::Message::Shutdown(anyhow!("connection closed")));
-            let err = local_worker_handle.await.unwrap();
-            debug!(log_clone, "local worker shut down"; "error" => %err);
-        }));
-
-        task::spawn(async move {
-            while let Some(res) = join_set.join_next().await {
-                match res {
-                    Err(err) => {
-                        // This means that the task was either cancelled or it panicked.
-                        warn!(log, "error joining task"; "error" => %err);
-                        fail(format!("{err:?}"));
-                        return;
-                    }
-                    Ok(Err(err)) => {
-                        // One of the tasks ran into an error. Log it and return.
-                        debug!(log, "task completed with error"; "error" => %err);
-                        fail(format!("{err:?}"));
-                        return;
-                    }
-                    Ok(Ok(())) => {
-                        // We ignore Ok(_) because we expect to hear about the real error later.
-                        continue;
-                    }
-                }
-            }
-            // Somehow we didn't get a real error. That's not good!
-            warn!(log, "all tasks exited, but none completed with an error");
-            fail("client unexpectedly exited prematurely".to_string());
-        });
-
-        *guard = Some(state);
         Ok(())
     }
 
@@ -312,9 +270,10 @@ impl Client {
 
         // Even though we just took the state, wait to drop the lock until we're done shutting
         // down. This will block a subsequent start, if there were to be one.
-        for work in state.clean_up {
-            work.await;
-        }
+        let _ = state
+            .tasks
+            .shut_down(anyhow!("client process stopped by client"))
+            .await;
 
         Ok(())
     }

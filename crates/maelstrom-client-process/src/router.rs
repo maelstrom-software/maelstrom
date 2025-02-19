@@ -1,5 +1,5 @@
 use crate::artifact_pusher;
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{anyhow, bail, Result};
 use maelstrom_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
@@ -28,14 +28,12 @@ pub trait Deps {
         digest: Sha256Digest,
         result: Result<PathBuf>,
     );
-    fn shutdown_local_worker(&self, error: Error);
 }
 
 pub enum Message<DepsT: Deps> {
     // These are requests from the client.
     AddArtifact(PathBuf, Sha256Digest),
     RunJob(JobSpec, DepsT::JobHandle),
-    Shutdown(Error),
 
     // Only in remote-broker mode.
     Broker(BrokerToClient),
@@ -159,7 +157,6 @@ impl<DepsT: Deps> Router<DepsT> {
                 self.deps
                     .send_artifact_fetch_completed_to_local_worker(digest, result);
             }
-            Message::Shutdown(error) => self.deps.shutdown_local_worker(error),
         };
         Ok(())
     }
@@ -229,12 +226,6 @@ impl Deps for Adapter {
                 result.map(local_worker::GotArtifact::symlink),
             ));
     }
-
-    fn shutdown_local_worker(&self, error: Error) {
-        let _ = self
-            .local_worker_sender
-            .send(local_worker::Message::ShutDown(error));
-    }
 }
 
 pub type Sender = UnboundedSender<Message<Adapter>>;
@@ -278,7 +269,6 @@ mod tests {
         StartArtifactTransferToBroker(Sha256Digest, PathBuf),
         EnqueueJobToLocalWorker(JobId, JobSpec),
         ArtifactFetchCompletedToLocalWorker(Sha256Digest, result::Result<PathBuf, String>),
-        ShutdownLocalWorker(String),
     }
 
     struct TestState {
@@ -323,12 +313,6 @@ mod tests {
                     digest,
                     result.map_err(|e| format!("{e}")),
                 ));
-        }
-
-        fn shutdown_local_worker(&self, error: Error) {
-            self.borrow_mut()
-                .messages
-                .push(TestMessage::ShutdownLocalWorker(error.to_string()));
         }
     }
 
@@ -624,34 +608,6 @@ mod tests {
         };
         Broker(BrokerToClient::JobResponse(cjid!(0), Ok(outcome!(0)))) => {
             JobUpdate(cjid!(0), JobStatus::Completed { client_job_id: cjid!(0), result: Ok(outcome!(0)) }),
-        };
-    }
-
-    script_test! {
-        shutdown_standalone,
-        Fixture::new(true, None),
-        RunJob(spec!(0), cjid!(0)) => {
-            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0)),
-        };
-        RunJob(spec!(1), cjid!(1)) => {
-            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1)),
-        };
-        Shutdown(anyhow!("test error")) => {
-            ShutdownLocalWorker("test error".into())
-        };
-    }
-
-    script_test! {
-        shutdown_clustered,
-        Fixture::new(false, None),
-        RunJob(spec!(0), cjid!(0)) => {
-            JobRequestToBroker(cjid!(0), spec!(0)),
-        };
-        RunJob(spec!(1), cjid!(1)) => {
-            JobRequestToBroker(cjid!(1), spec!(1)),
-        };
-        Shutdown(anyhow!("test error")) => {
-            ShutdownLocalWorker("test error".into())
         };
     }
 }

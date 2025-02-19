@@ -89,16 +89,17 @@ async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger)
     join_set.spawn(wait_for_signal(log.clone()));
 
     let log = log.new(o!("task" => "dispatcher"));
-    let dispatcher_handle = start_dispatcher_task(
+    let tasks = start_dispatcher_task(
         config,
         dispatcher_receiver,
         dispatcher_sender.clone(),
         broker_socket_outgoing_sender,
         &log,
+        join_set,
     )
     .context("starting dispatcher task")?;
 
-    wait_for_worker_tasks(dispatcher_handle, dispatcher_sender, join_set).await
+    tasks.run_to_completion().await
 }
 
 /// Check if the open file limit is high enough to fit our estimate of how many files we need.
@@ -141,7 +142,8 @@ fn start_dispatcher_task(
     dispatcher_sender: DispatcherSender,
     broker_socket_outgoing_sender: BrokerSocketOutgoingSender,
     log: &Logger,
-) -> Result<JoinHandle<Error>> {
+    tasks: JoinSet<Result<()>>,
+) -> Result<Tasks> {
     let log_clone = log.clone();
     let dispatcher_sender_clone = dispatcher_sender.clone();
     let max_simultaneous_fetches = u32::try_from(MAX_ARTIFACT_FETCHES)
@@ -172,6 +174,7 @@ fn start_dispatcher_task(
                 log.clone(),
                 true, /* log_initial_cache_message_at_info */
                 config.slots,
+                tasks,
             )
         }
         ArtifactTransferStrategy::GitHub => {
@@ -196,6 +199,7 @@ fn start_dispatcher_task(
                 log.clone(),
                 true, /* log_initial_cache_message_at_info */
                 config.slots,
+                tasks,
             )
         }
     }
@@ -217,7 +221,8 @@ fn start_dispatcher_task_common<
     log: Logger,
     log_initial_cache_message_at_info: bool,
     slots: Slots,
-) -> Result<JoinHandle<Error>> {
+    tasks: JoinSet<Result<()>>,
+) -> Result<Tasks> {
     let (cache, temp_file_factory) = Cache::new(
         StdFs,
         cache_root.join::<cache::CacheDir>("artifacts"),
@@ -230,7 +235,7 @@ fn start_dispatcher_task_common<
     let artifact_fetcher = artifact_fetcher_factory(temp_file_factory.clone());
 
     let dispatcher_adapter = DispatcherAdapter::new(
-        dispatcher_sender,
+        dispatcher_sender.clone(),
         inline_limit,
         log.clone(),
         cache_root.join::<MountDir>("mount"),
@@ -248,7 +253,7 @@ fn start_dispatcher_task_common<
         slots,
     );
 
-    let dispatcher_main = async move {
+    let dispatcher_task = task::spawn(async move {
         loop {
             let msg = dispatcher_receiver
                 .recv()
@@ -258,43 +263,63 @@ fn start_dispatcher_task_common<
                 break err;
             }
         }
-    };
-    Ok(task::spawn(dispatcher_main))
+    });
+
+    Ok(Tasks::new(dispatcher_task, dispatcher_sender, tasks))
 }
 
-async fn wait_for_worker_tasks(
-    mut dispatcher: JoinHandle<Error>,
+// The tasks in the JoinSet are all of the supporting tasks. If these complete with Ok(()), that
+// means they ran out of work to do. This should only happen at shutdown time, like when the
+// channel a task is reading from or writing to is closed. When we see these return Ok(()) results,
+// we just ignore them, since we expect the root cause to surface somewhere else.
+//
+// When a task in the JoinSet completes with Err(_), then we need to tell the dispatcher to
+// cleanly shut down. We do that by sending it a ShutDown message with the error returned
+// from the task. It's okay to send multiple ShutDown messages: the dispatcher will ignore
+// all but the first.
+pub struct Tasks {
+    dispatcher: JoinHandle<Error>,
     dispatcher_sender: DispatcherSender,
-    mut other_tasks: JoinSet<Result<()>>,
-) -> Result<()> {
-    // The tasks in the JoinSet are all of the supporting tasks. If these complete with Ok(()),
-    // that means they ran out of work to do. This should only happen at shutdown time, like when
-    // the channel a task is reading or writing from is closed. When we see these Ok(()) results,
-    // we just ignore them, since we expect the root cause to surface somewhere else.
-    //
-    // When a task in the JoinSet completes with Err(_), then we need to tell the dispatcher to
-    // cleanly shut down. We do that by sending it a ShutDown message with the error returned from
-    // the task. It's okay to send multiple ShutDown messages: the dispatcher will ignore all but
-    // the first.
-    //
-    // The dispatcher will only complete when we send it a ShutDown message. When that happens, we
-    // just forward the error.
-    loop {
-        tokio::select! {
-            Some(result) = other_tasks.join_next() => {
+    other_tasks_monitor: JoinHandle<()>,
+}
+
+impl Tasks {
+    fn new(
+        dispatcher: JoinHandle<Error>,
+        dispatcher_sender: DispatcherSender,
+        mut other_tasks: JoinSet<Result<()>>,
+    ) -> Self {
+        let dispatcher_sender_clone = dispatcher_sender.clone();
+        let other_tasks_monitor = task::spawn(async move {
+            while let Some(result) = other_tasks.join_next().await {
                 match result.context("joining worker task") {
                     Err(join_error) => {
-                        let _ = dispatcher_sender.send(Message::ShutDown(join_error));
+                        let _ = dispatcher_sender_clone.send(Message::ShutDown(join_error));
+                        break;
                     }
                     Ok(Err(error)) => {
-                        let _ = dispatcher_sender.send(Message::ShutDown(error));
+                        let _ = dispatcher_sender_clone.send(Message::ShutDown(error));
+                        break;
                     }
                     Ok(Ok(())) => {}
                 }
             }
-            result = &mut dispatcher => {
-                return Err(result.context("joining dispatcher task")?);
-            }
+        });
+        Self {
+            dispatcher,
+            dispatcher_sender,
+            other_tasks_monitor,
         }
+    }
+
+    pub async fn run_to_completion(self) -> Result<()> {
+        let result = Err(self.dispatcher.await?);
+        self.other_tasks_monitor.abort();
+        result
+    }
+
+    pub async fn shut_down(self, error: Error) -> Result<()> {
+        let _ = self.dispatcher_sender.send(Message::ShutDown(error));
+        self.run_to_completion().await
     }
 }
