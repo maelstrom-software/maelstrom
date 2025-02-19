@@ -12,7 +12,7 @@ mod layer_fs;
 mod manifest_digest_cache;
 mod types;
 
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{anyhow, bail, Context as _, Error, Result};
 use artifact_fetcher::{GitHubArtifactFetcher, TcpArtifactFetcher};
 use config::Config;
 use connection::{BrokerConnection, BrokerReadConnection as _, BrokerWriteConnection as _};
@@ -103,7 +103,8 @@ async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger)
         dispatcher_sender,
         broker_socket_outgoing_sender,
         &log,
-    )?
+    )
+    .context("starting dispatcher task")?
     .await?)
 }
 
@@ -195,7 +196,7 @@ fn start_dispatcher_task(
             start_dispatcher_task_common(artifact_fetcher_factory, args)
         }
         ArtifactTransferStrategy::GitHub => {
-            let github_client = github_client_factory()?;
+            let github_client = github_client_factory().context("creating GitHub client")?;
             let artifact_fetcher_factory = move |temp_file_factory| {
                 GitHubArtifactFetcher::new(
                     max_simultaneous_fetches,
@@ -237,7 +238,8 @@ fn start_dispatcher_task_common<
         args.cache_size,
         args.log.clone(),
         args.log_initial_cache_message_at_info,
-    )?;
+    )
+    .context("creating cache")?;
 
     let artifact_fetcher = artifact_fetcher_factory(temp_file_factory.clone());
 
@@ -249,7 +251,8 @@ fn start_dispatcher_task_common<
         args.cache_root.join::<TmpfsDir>("upper"),
         cache.root().join::<BlobDir>("sha256/blob"),
         temp_file_factory,
-    )?;
+    )
+    .context("creating dispatcher adapter")?;
 
     let mut dispatcher = Dispatcher::new(
         dispatcher_adapter,
