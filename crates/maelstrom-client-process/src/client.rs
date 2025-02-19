@@ -237,6 +237,32 @@ impl Client {
             local_worker_sender.clone(),
         );
 
+        // Spawn a task for the preparer.
+        let layer_builder =
+            LayerBuilder::new(cache_dir.clone(), project_dir, MANIFEST_INLINE_LIMIT);
+        let locked = Arc::new(Mutex::new(ClientStateLocked {
+            digest_repo,
+            processed_artifact_digests: HashSet::default(),
+        }));
+        let uploader = Uploader {
+            log: log.clone(),
+            router_sender: router_sender.clone(),
+            locked,
+        };
+
+        let (preparer_sender, preparer_receiver) = preparer::task::channel();
+
+        preparer::task::start(
+            &mut join_set,
+            MAX_PENDING_LAYER_BUILDS.try_into().unwrap(),
+            preparer_sender.clone(),
+            preparer_receiver,
+            container_image_depot,
+            image_download_tracker.clone(),
+            layer_builder,
+            uploader,
+        );
+
         // Start the local worker.
         struct ArtifactFetcher(router::Sender);
         impl local_worker::ArtifactFetcher for ArtifactFetcher {
@@ -267,30 +293,6 @@ impl Client {
             local_worker_sender,
             &log,
         )?;
-
-        let layer_builder = LayerBuilder::new(cache_dir, project_dir, MANIFEST_INLINE_LIMIT);
-        let locked = Arc::new(Mutex::new(ClientStateLocked {
-            digest_repo,
-            processed_artifact_digests: HashSet::default(),
-        }));
-        let uploader = Uploader {
-            log: log.clone(),
-            router_sender: router_sender.clone(),
-            locked,
-        };
-
-        let (preparer_sender, preparer_receiver) = preparer::task::channel();
-
-        preparer::task::start(
-            &mut join_set,
-            MAX_PENDING_LAYER_BUILDS.try_into().unwrap(),
-            preparer_sender.clone(),
-            preparer_receiver,
-            container_image_depot,
-            image_download_tracker.clone(),
-            layer_builder,
-            uploader,
-        );
 
         Ok((
             ClientState {
