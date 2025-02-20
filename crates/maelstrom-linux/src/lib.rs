@@ -608,7 +608,7 @@ impl Sighandler {
     pub const DFL: Self = Self(libc::SIG_DFL);
 }
 
-#[derive(Clone, Copy, Debug, Default, Into, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(c_int);
 
 impl Signal {
@@ -632,6 +632,10 @@ impl Signal {
     pub const USR2: Self = Self(libc::SIGUSR2);
     pub const VTALRM: Self = Self(libc::SIGVTALRM);
     pub const WINCH: Self = Self(libc::SIGWINCH);
+
+    pub fn from_u8(signo: u8) -> Self {
+        Self(signo.into())
+    }
 
     pub fn as_u8(&self) -> u8 {
         self.0.try_into().unwrap()
@@ -659,12 +663,6 @@ impl fmt::Display for Signal {
             let abbrev = unsafe { CStr::from_ptr(abbrev) }.to_str().unwrap();
             write!(f, "SIG{abbrev}")
         }
-    }
-}
-
-impl From<u8> for Signal {
-    fn from(signo: u8) -> Self {
-        Self(signo.into())
     }
 }
 

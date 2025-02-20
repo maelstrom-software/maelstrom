@@ -312,7 +312,7 @@ fn mimic_child_death(res: JobOutcomeResult) -> Result<ExitCode> {
             match status {
                 JobTerminationStatus::Exited(code) => code.into(),
                 JobTerminationStatus::Signaled(signo) => {
-                    let _ = linux::raise(signo.into());
+                    let _ = linux::raise(Signal::from_u8(signo));
                     let _ = linux::raise(Signal::KILL);
                     unreachable!()
                 }
