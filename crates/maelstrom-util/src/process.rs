@@ -1,15 +1,15 @@
-use crate::{fs::Fs, signal};
+use crate::fs::Fs;
 use anyhow::{Context as _, Result};
-use futures::StreamExt as _;
 use maelstrom_linux::{
-    self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal, WaitStatus,
+    self as linux, CloneArgs, CloneFlags, Pid, PollEvents, PollFd, Signal, SignalSet,
+    SigprocmaskHow, WaitStatus,
 };
 use std::{
     num::NonZeroU8,
-    pin::pin,
     process::{self, Termination},
     slice,
     sync::Mutex,
+    thread,
     time::Duration,
 };
 
@@ -105,88 +105,47 @@ pub fn assert_single_threaded() -> Result<()> {
     Ok(())
 }
 
-fn mimic_child_death(status: WaitStatus) -> ! {
-    match status {
-        WaitStatus::Exited(code) => {
-            process::exit(code.as_u8().into());
-        }
-        WaitStatus::Signaled(signal) => {
-            linux::raise(signal).unwrap_or_else(|e| panic!("error raising signal {signal}: {e}"));
-            // The signal may be blocked, or the process may be pid 1 in the pid namespace. In
-            // those cases, the raise may effectively be a no-op. In that case, just abort.
-            linux::abort()
-        }
-    }
-}
+/// Signals that will cause a graceful shutdown.
+const TERMINATION_SIGNALS: [Signal; 3] = [Signal::HUP, Signal::INT, Signal::TERM];
 
-#[tokio::main(flavor = "current_thread")]
-async fn gen_1_process_main(gen_2_pid: linux::Pid) -> WaitStatus {
-    let log = slog::Logger::root(slog::Discard, slog::o!());
-
-    let mut wait_stream = pin!(futures::stream::unfold((), |()| async move {
-        Some((tokio::task::spawn_blocking(linux::wait).await.unwrap(), ()))
-    }));
-
-    loop {
-        tokio::select! {
-            signal = signal::wait_for_signal(log.clone()) => {
-                if let Err(e) = linux::kill(gen_2_pid, signal) {
-                    // If we failed to find the process, it already exited, so just ignore.
-                    if e != linux::Errno::ESRCH {
-                        panic!("error sending {signal} to child: {e}")
-                    }
-                }
-            },
-            res = wait_stream.next() => {
-                // Now that we've created the gen 2 process, we need to start reaping
-                // zombies. If we ever notice that the gen 2 process terminated, then it's
-                // time to terminate ourselves.
-                match res.unwrap() {
-                    Err(err) => panic!("error waiting: {err}"),
-                    Ok(result) if result.pid == gen_2_pid => break result.status,
-                    Ok(_) => {}
-                }
-            }
-        }
-    }
-}
-
-/// Create a grandchild process in its own pid and user namespaces.
+/// Create a grandchild process in its own PID and user namespaces.
 ///
-/// We want to run the worker in its own pid namespace so that when it terminates, all descendant
+/// We want to run the worker in its own PID namespace so that when it terminates, all descendant
 /// processes also terminate. We don't want the worker to ever leak jobs, no matter how it
 /// terminates.
 ///
-/// We have to create a user namespace so that we can create the pid namespace.
+/// We have to create a user namespace so that we can create the PID namespace.
 ///
-/// We do two levels of cloning so that the returned process isn't pid 1 in its own pid namespace.
+/// We do two levels of cloning so that the returned process isn't PID 1 in its own PID namespace.
 /// This is important because we don't want that process to inherit orphaned descendants. We want
 /// the worker to be able to effectively use waitpid (or equivalently, wait on pidfds). If the
 /// worker had to worry about reaping zombie descendants, then it would need to call the generic
-/// wait functions, which could return a pid for one of the legitimate children that the process
+/// wait functions, which could return a PID for one of the legitimate children that the process
 /// was trying to waidpid on. This makes calling waitpid a no-go, and complicates the design of the
 /// worker.
 ///
-/// It's much easier to just have the worker not be pid 1 in its own namespace.
+/// It's much easier to just have the worker not be PID 1 in its own namespace.
 ///
 /// We take special care to ensure that all three processes will terminate if any single process
 /// terminates. This is accomplished in the following ways:
 ///   - If the gen 0 process (the calling process) terminates, the gen 1 process will receive a
-///     parent-death signal, which will immediately terminate it.
+///     parent-death signal, which will immediately terminate it. This handles unexpected crashes.
+///     Additionally, the gen 0 process propagates [`TERMINATION_SIGNALS`] to the gen 1 process for
+///     clean shutdown.
+///   - After cloning the gen 1 process, the gen 0 process calls waitpid on the gen 1 process.
+///     When this returns, it knows the gen 1 process has terminated. Then gen 0 process then
+///     terminates itself, trying to mimic the termination mode of the gen 1 process.
 ///   - If the gen 1 process terminates, all processes in the new pid namespace --- including the
 ///     gen 2 process --- will immediately terminate, since the gen 1 process had pid 1 in their
-///     pid namespace.
+///     pid namespace. This handles unexpected crashes. Additionally, the en 1 process propagates
+///     [`TERMINATION_SIGNALS`] to the gen 2 process for clean shutdown.
 ///   - After creating the gen 2 process, the gen 1 process loops calling wait(2) forever. It does
 ///     this to reap zombies, but it also allows it to detect when the gen 2 process terminates.
-///     When this happens, the gen 1 process will terminate itself, trying to mimic the termination
-///     mode of the gen 2 process.
-///   - After cloning the gen 1 process, the gen 0 process just calls waitpid on the gen 1 process.
-///     When this returns, it knows the gen 1 process has terminated. It then terminates itself,
-///     trying to mimic the termination mode of the gen 1 process.
+///     When this happens, the gen 1 process will terminate itself.
 ///
 /// This function will return exactly once. It may be the gen 0, gen 1, or gen 2 process. It'll be
-/// in the gen 2 process if and only if it returns `Ok(())`. It'll be in the gen 0 or gen 1 process
-/// if and only if it return `Err(_)`.
+/// in the gen 2 process only if it returns `Ok(())`. If it returns `Err(_)`, it can be any
+/// process.
 ///
 /// WARNING: This function must only be called while the program is single-threaded. We check this
 /// and will panic if called when there is more than one thread.
@@ -196,31 +155,38 @@ pub fn clone_into_pid_and_user_namespace() -> Result<()> {
     let gen_0_uid = linux::getuid();
     let gen_0_gid = linux::getgid();
 
+    // Mask termination signals. We do this early here in the gen 0 process so the mask will be
+    // inherited by the gen 1 process, which closes a race condition where the gen 1 process would
+    // temporarily ignore termination signals.
+    let mut masked_signals = SignalSet::empty();
+    for signal in TERMINATION_SIGNALS {
+        masked_signals.insert(signal);
+    }
+    let old_sigprocmask =
+        linux::sigprocmask(SigprocmaskHow::BLOCK, Some(&masked_signals)).context("sigprocmask")?;
+
     // Create a pidfd for the gen 0 process. We'll use this in the gen 1 process to see if the gen
     // 0 process has terminated early.
-    let gen_0_pidfd = linux::pidfd_open(linux::getpid())?;
+    let gen_0_pidfd = linux::pidfd_open(linux::getpid()).context("pidfd_open")?;
 
-    // Clone a new process into new user, pid, and mount namespaces.
+    // Clone a new process into new user, PID, and mount namespaces.
     let mut clone_args = CloneArgs::default()
         .flags(CloneFlags::NEWUSER | CloneFlags::NEWPID)
         .exit_signal(Signal::CHLD);
-    match linux::clone3(&mut clone_args).context("cloning the second-generation process")? {
+    match linux::clone3(&mut clone_args).context("cloning the gen 1 process")? {
         Some(gen_1_pid) => {
             // Gen 0 process.
 
             // The gen_0_pidfd is only used in the gen 1 process.
             drop(gen_0_pidfd);
 
-            // Wait for the gen 1 process's termination and mimic how it terminated.
-            mimic_child_death(linux::waitpid(gen_1_pid).unwrap_or_else(|e| {
-                panic!("error waiting on second-generation process {gen_1_pid}: {e}")
-            }));
+            gen_0_main(gen_1_pid, masked_signals);
         }
         None => {
             // Gen 1 process.
 
             // Set parent death signal.
-            linux::prctl_set_pdeathsig(Signal::TERM)?;
+            linux::prctl_set_pdeathsig(Signal::TERM).context("prctl(PR_SET_PDEATHSIG)")?;
 
             // Check if the gen 0 process has already terminated. We do this to deal with a race
             // condition. It's possible for the gen 0 process to terminate before we call prctl
@@ -229,41 +195,93 @@ pub fn clone_into_pid_and_user_namespace() -> Result<()> {
             // init daemon.
             //
             // Unfortunately, we can't attempt to see if the gen 0 process is still alive using its
-            // pid, as it's not in our pid namespace. We get around this by inheriting a pidfd from
+            // PID, as it's not in our PID namespace. We get around this by inheriting a pidfd from
             // the gen 0 process. The pidfd will become readable once the process has terminated.
-            // So, we can just do a non-blocking poll on the fd to see fi the gen 0 process has
+            // So, we can just do a non-blocking poll on the fd to see if the gen 0 process has
             // already terminated. If it hasn't, we can rely on the parent death signal mechanism.
             let mut pollfd = PollFd::new(gen_0_pidfd.as_fd(), PollEvents::IN);
-            if linux::poll(slice::from_mut(&mut pollfd), Duration::ZERO)? == 1 {
+            if linux::poll(slice::from_mut(&mut pollfd), Duration::ZERO).context("poll")? == 1 {
                 process::abort();
             }
 
             // We are done with the parent_pidfd now.
             drop(gen_0_pidfd);
 
-            // Map uid and guid. If we don't do this here, then children processes will not be able
-            // to map their own uids and gids.
+            // Map UID and GID. If we don't do this here, then children processes will not be able
+            // to map their own UIDs and GIDs.
             let fs = Fs::new();
             fs.write("/proc/self/setgroups", "deny\n")?;
             fs.write("/proc/self/uid_map", format!("0 {gen_0_uid} 1\n"))?;
             fs.write("/proc/self/gid_map", format!("0 {gen_0_gid} 1\n"))?;
 
             // Fork the gen 2 process.
-            match linux::fork()? {
+            match linux::fork().context("forking the gen 2 process")? {
                 Some(gen_2_pid) => {
-                    // This is racy. If we receive a signal before this point, it will be ignored.
-                    // However, this race is kind of inherent in the gen 1 process being PID 1 in
-                    // its own namespace. I think the only way to fix this race would be to have
-                    // the gen 0 process establish the signal handlers before cloning the gen 1
-                    // process.
-                    let child_status = gen_1_process_main(gen_2_pid);
-                    mimic_child_death(child_status);
+                    // Gen 1 process.
+                    gen_1_main(gen_2_pid, masked_signals);
                 }
                 None => {
                     // Gen 2 process.
+
+                    // Restore the signal mask. The program will do its own signal handling.
+                    linux::sigprocmask(SigprocmaskHow::SETMASK, Some(&old_sigprocmask))
+                        .context("sigprocmask")?;
                     Ok(())
                 }
             }
+        }
+    }
+}
+
+fn gen_0_main(gen_1_pid: Pid, masked_signals: SignalSet) -> ! {
+    // Start a detached thread to wait for masked signals and to forward them.
+    thread::spawn(move || loop {
+        let signal =
+            linux::sigwait(&masked_signals).unwrap_or_else(|e| panic!("sigwait failed: {e}"));
+        let _ = linux::kill(gen_1_pid, signal);
+    });
+
+    // Wait for the gen 1 process to terminate.
+    let gen_1_status = linux::waitpid(gen_1_pid)
+        .unwrap_or_else(|e| panic!("waitpid for generation 1 process {gen_1_pid} failed: {e}"));
+
+    // Terminate in a way that attempts to mimic how the gen 1 process terminated.
+    match gen_1_status {
+        WaitStatus::Exited(code) => {
+            process::exit(code.as_u8().into());
+        }
+        WaitStatus::Signaled(signal) => {
+            linux::raise(signal).unwrap_or_else(|e| panic!("error raising signal {signal}: {e}"));
+            unreachable!();
+        }
+    }
+}
+
+fn gen_1_main(gen_2_pid: Pid, masked_signals: SignalSet) -> ! {
+    // Start a detached thread to wait for masked signals and to forward them.
+    thread::spawn(move || loop {
+        let signal =
+            linux::sigwait(&masked_signals).unwrap_or_else(|e| panic!("sigwait failed: {e}"));
+        let _ = linux::kill(gen_2_pid, signal);
+    });
+
+    // Wait for the gen 2 process to terminate, reaping any zombies while doing so.
+    let gen_2_status = loop {
+        let wait_result = linux::wait().unwrap_or_else(|e| panic!("wait returned an error: {e}"));
+        if wait_result.pid == gen_2_pid {
+            break wait_result.status;
+        }
+    };
+
+    // Terminate in a way that attempts to mimic how the gen 2 process terminated.
+    match gen_2_status {
+        WaitStatus::Exited(code) => {
+            process::exit(code.as_u8().into());
+        }
+        WaitStatus::Signaled(_) => {
+            // There isn't really anything good to do here, since we're the init process and Linux
+            // really doesn't want us to die from a signal.
+            process::exit(ExitCode::FAILURE.into());
         }
     }
 }

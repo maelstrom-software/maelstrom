@@ -633,6 +633,10 @@ impl Signal {
     pub const VTALRM: Self = Self(libc::SIGVTALRM);
     pub const WINCH: Self = Self(libc::SIGWINCH);
 
+    pub fn from_c_int(signo: c_int) -> Self {
+        Self(signo)
+    }
+
     pub fn from_u8(signo: u8) -> Self {
         Self(signo.into())
     }
