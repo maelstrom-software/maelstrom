@@ -197,7 +197,7 @@ impl Client {
             cache_dir.join(LOCAL_WORKER_DIR),
             cache_size,
             inline_limit,
-            log.new(o!("task" => "local worker")),
+            &log,
             local_worker_receiver,
             local_worker_sender,
             slots,

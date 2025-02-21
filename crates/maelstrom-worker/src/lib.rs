@@ -86,13 +86,12 @@ async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger)
     let writer_log = log.new(o!("task" => "writer"));
     join_set.spawn(write_stream.write_messages(broker_socket_outgoing_receiver, writer_log));
 
-    let log = log.new(o!("task" => "dispatcher"));
     let tasks = start_dispatcher_task(
         config,
         dispatcher_receiver,
         dispatcher_sender.clone(),
         broker_socket_outgoing_sender,
-        &log,
+        log,
         join_set,
     )
     .context("starting dispatcher task")?;
@@ -142,7 +141,6 @@ fn start_dispatcher_task(
     log: &Logger,
     tasks: JoinSet<Result<()>>,
 ) -> Result<Tasks> {
-    let log_clone = log.clone();
     let dispatcher_sender_clone = dispatcher_sender.clone();
     let max_simultaneous_fetches = u32::try_from(MAX_ARTIFACT_FETCHES)
         .unwrap()
@@ -157,7 +155,7 @@ fn start_dispatcher_task(
                     max_simultaneous_fetches,
                     dispatcher_sender_clone,
                     config.broker,
-                    log_clone,
+                    log.clone(),
                     temp_file_factory,
                 )
             };
@@ -169,7 +167,7 @@ fn start_dispatcher_task(
                 dispatcher_receiver,
                 dispatcher_sender,
                 config.inline_limit,
-                log.clone(),
+                log,
                 true, /* log_initial_cache_message_at_info */
                 config.slots,
                 tasks,
@@ -182,7 +180,7 @@ fn start_dispatcher_task(
                     max_simultaneous_fetches,
                     github_client,
                     dispatcher_sender_clone,
-                    log_clone,
+                    log.clone(),
                     temp_file_factory,
                 )
             };
@@ -194,7 +192,7 @@ fn start_dispatcher_task(
                 dispatcher_receiver,
                 dispatcher_sender,
                 config.inline_limit,
-                log.clone(),
+                log,
                 true, /* log_initial_cache_message_at_info */
                 config.slots,
                 tasks,
@@ -216,11 +214,16 @@ fn start_dispatcher_task_common<
     mut dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
     inline_limit: InlineLimit,
-    log: Logger,
+    log: &Logger,
     log_initial_cache_message_at_info: bool,
     slots: Slots,
     mut tasks: JoinSet<Result<()>>,
 ) -> Result<Tasks> {
+    // Start the signal handler.
+    tasks.spawn(wait_for_signal(log.clone()));
+
+    let log = log.new(o!("task" => "dispatcher"));
+
     let (cache, temp_file_factory) = Cache::new(
         StdFs,
         cache_root.join::<cache::CacheDir>("artifacts"),
@@ -235,7 +238,7 @@ fn start_dispatcher_task_common<
     let dispatcher_adapter = DispatcherAdapter::new(
         dispatcher_sender.clone(),
         inline_limit,
-        log.clone(),
+        log,
         cache_root.join::<MountDir>("mount"),
         cache_root.join::<TmpfsDir>("upper"),
         cache.root().join::<BlobDir>("sha256/blob"),
@@ -250,9 +253,6 @@ fn start_dispatcher_task_common<
         cache,
         slots,
     );
-
-    // Start the signal handler.
-    tasks.spawn(wait_for_signal(log.clone()));
 
     let dispatcher_task = task::spawn(async move {
         loop {

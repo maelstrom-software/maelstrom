@@ -30,7 +30,7 @@ pub fn start_task(
     cache_root: RootBuf<CacheDir>,
     cache_size: CacheSize,
     inline_limit: InlineLimit,
-    log: Logger,
+    log: &Logger,
     receiver: Receiver,
     sender: Sender,
     slots: Slots,
