@@ -33,7 +33,7 @@ use maelstrom_util::{
 };
 use num::integer;
 use slog::{debug, error, info, o, Logger};
-use std::{process, sync::Arc};
+use std::sync::Arc;
 use tokio::{
     net::TcpStream,
     sync::mpsc,
@@ -56,7 +56,7 @@ const MAX_PENDING_LAYERS_BUILDS: usize = 10;
 const MAX_ARTIFACT_FETCHES: usize = 1;
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
-    info!(log, "started"; "config" => ?config, "pid" => process::id());
+    info!(log, "started"; "config" => ?config);
     let err = match config.broker_connection {
         ConfigBrokerConnection::Tcp => main_inner::<TcpStream>(config, &log).unwrap_err(),
         ConfigBrokerConnection::GitHub => main_inner::<GitHubQueue>(config, &log).unwrap_err(),
