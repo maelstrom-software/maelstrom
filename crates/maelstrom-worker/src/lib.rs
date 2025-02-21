@@ -21,21 +21,22 @@ use dispatcher_adapter::DispatcherAdapter;
 use executor::{MountDir, TmpfsDir};
 use maelstrom_github::{GitHubClient, GitHubQueue};
 use maelstrom_layer_fs::BlobDir;
-use maelstrom_linux::{self as linux};
+use maelstrom_linux::{self as linux, Signal};
 use maelstrom_util::{
     cache::{self, fs::std::Fs as StdFs, TempFileFactory},
     config::common::{
         ArtifactTransferStrategy, BrokerConnection as ConfigBrokerConnection, CacheSize,
         InlineLimit, Slots,
     },
+    process::TERMINATION_SIGNALS,
     root::RootBuf,
-    signal,
 };
 use num::integer;
-use slog::{debug, info, o, Logger};
-use std::sync::Arc;
+use slog::{debug, error, info, o, Logger};
+use std::{future::Future, sync::Arc};
 use tokio::{
     net::TcpStream,
+    signal::unix::{self as signal, SignalKind},
     sync::mpsc,
     task::{self, JoinHandle, JoinSet},
 };
@@ -128,9 +129,32 @@ fn round_to_multiple(n: u64, k: u64) -> u64 {
     integer::div_ceil(n, k) * k
 }
 
-async fn wait_for_signal(log: Logger) -> Result<()> {
-    let signal = signal::wait_for_signal(log).await;
-    Err(anyhow!("signal {signal}"))
+/// Return a future that will wait for a signal to arrive, then return an error.
+fn signal_handler_terminate(
+    signal: Signal,
+    log: &Logger,
+) -> Result<impl Future<Output = Result<()>>> {
+    let mut handler = signal::signal(SignalKind::from_raw(signal.as_c_int()))
+        .with_context(|| "registering signal handler for {signal}")?;
+    let log = log.clone();
+    Ok(async move {
+        handler.recv().await;
+        error!(log, "received {signal}");
+        Err(anyhow!("signal {signal}"))
+    })
+}
+
+/// Return a future that will just log and ignore the given signal.
+fn signal_handler_ignore(signal: Signal, log: &Logger) -> Result<impl Future<Output = Result<()>>> {
+    let mut handler = signal::signal(SignalKind::from_raw(signal.as_c_int()))
+        .with_context(|| "registering signal handler for {signal}")?;
+    let log = log.clone();
+    Ok(async move {
+        loop {
+            handler.recv().await;
+            debug!(log, "received {signal}; ignoring");
+        }
+    })
 }
 
 fn start_dispatcher_task(
@@ -219,8 +243,27 @@ fn start_dispatcher_task_common<
     slots: Slots,
     mut tasks: JoinSet<Result<()>>,
 ) -> Result<Tasks> {
-    // Start the signal handler.
-    tasks.spawn(wait_for_signal(log.clone()));
+    // Register signal handlers. There are a few things to note.
+    //
+    // First, we want to do this before we start executing any jobs. Therefore, it's important to
+    // register the handler on this task, even if we start another task to monitor the signal.
+    //
+    // Second, we ignore SIGPIPE, but do so in a tricky way. It's possible that we may get a TCP
+    // reset which would generate a SIGPIPE. We don't want that killing the process. So, we need to
+    // ignore SIGPIPE so that an EPIPE will be returned from the socket write, and we will then
+    // gracefully clean up. However, we have to be careful how we register the signal handler. If
+    // we set the disposition to SIG_IGN, this would be inherited by all of our children processes,
+    // and we'd then have remember to explicitly reset to SIG_DFL. But if we set up an actual
+    // handler, the signal disposition will be set back to the default when we call clone with
+    // CLONE_CLEAR_SIGHAND.
+    //
+    // Third, we don't ignore SIGTSTP, SIGTIN, or SIGTOU, as their default disposition stops the
+    // process instead of killing it. If the user wants to do this, then they should be able to do
+    // it. Jobs will continue in the background just fine, but we won't schedule any new ones.
+    for signal in TERMINATION_SIGNALS {
+        tasks.spawn(signal_handler_terminate(signal, log)?);
+    }
+    tasks.spawn(signal_handler_ignore(Signal::PIPE, log)?);
 
     let log = log.new(o!("task" => "dispatcher"));
 

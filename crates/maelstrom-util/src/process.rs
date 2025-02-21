@@ -106,7 +106,7 @@ pub fn assert_single_threaded() -> Result<()> {
 }
 
 /// Signals that will cause a graceful shutdown.
-const TERMINATION_SIGNALS: [Signal; 3] = [Signal::HUP, Signal::INT, Signal::TERM];
+pub const TERMINATION_SIGNALS: [Signal; 3] = [Signal::HUP, Signal::INT, Signal::TERM];
 
 /// Create a grandchild process in its own PID and user namespaces.
 ///
