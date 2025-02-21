@@ -61,7 +61,7 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
         ConfigBrokerConnection::Tcp => main_inner::<TcpStream>(config, &log).unwrap_err(),
         ConfigBrokerConnection::GitHub => main_inner::<GitHubQueue>(config, &log).unwrap_err(),
     };
-    info!(log, "exiting"; "error" => %err);
+    info!(log, "exiting");
     Err(err)
 }
 
