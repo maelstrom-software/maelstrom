@@ -12,6 +12,7 @@ use anyhow::Result;
 use maelstrom_util::{
     config::common::{CacheSize, InlineLimit, Slots},
     root::RootBuf,
+    sync::EventSender,
 };
 use slog::Logger;
 use tokio::{
@@ -29,6 +30,7 @@ pub fn start_task(
     broker_sender: impl BrokerSender + Send + Sync + 'static,
     cache_root: RootBuf<CacheDir>,
     cache_size: CacheSize,
+    done: EventSender,
     inline_limit: InlineLimit,
     log: &Logger,
     receiver: Receiver,
@@ -43,6 +45,7 @@ pub fn start_task(
         cache_root,
         receiver,
         sender,
+        Some(done),
         inline_limit,
         log,
         false, /* log_initial_cache_message_at_info */

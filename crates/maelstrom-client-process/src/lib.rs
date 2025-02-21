@@ -12,11 +12,11 @@ mod util;
 
 pub use maelstrom_util::process::clone_into_pid_and_user_namespace;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow, Error};
 use futures::stream::{self, StreamExt as _};
 use maelstrom_client_base::proto::client_process_server::ClientProcessServer;
 use maelstrom_linux::{self as linux, Sighandler, Signal, UnixStream};
-use maelstrom_util::{config::common::LogLevel, process::ExitCode};
+use maelstrom_util::{config::common::LogLevel, process::ExitCode, sync};
 use rpc::{ArcHandler, Handler};
 use slog::{info, Logger};
 use std::{
@@ -40,24 +40,38 @@ async fn main_after_clone(
     log: Option<Logger>,
     rpc_log_level: LogLevel,
 ) -> Result<ExitCode> {
-    let handler = ArcHandler::new(Handler::new(log, rpc_log_level));
+    let (done_sender, done_receiver) = sync::event();
+    let handler = ArcHandler::new(Handler::new(done_sender, log, rpc_log_level));
 
     sock.set_nonblocking(true)?;
-    let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
-    let res = Server::builder()
+    let (sock, eof_receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
+    let handler_clone = handler.clone();
+    let server = Server::builder()
         .add_service(ClientProcessServer::new(handler.clone()))
-        .serve_with_incoming_shutdown(
+        .serve_with_incoming(
             stream::once(async move { TokioError::<_>::Ok(sock) }).chain(stream::pending()),
-            receiver,
-        )
-        .await;
+        );
+
+    let result = 
+    tokio::select! {
+        _ = done_receiver => {
+            info!(handler_clone.get_logger(), "got done from dispatcher");
+            Err(anyhow!("local worker shut down"))
+        },
+        _ = eof_receiver => {
+            info!(handler_clone.get_logger(), "got EOF from socket");
+            Ok(ExitCode::SUCCESS)
+        },
+        result = server => {
+            result.map(|()| ExitCode::SUCCESS).map_err(Error::from)
+        }
+    };
 
     // Tell the local worker to shut down, and then wait for its task to complete. Ignore error, as
     // they only arise if we haven't started or have already stopped.
     let _ = handler.client.stop().await;
 
-    res?;
-    Ok(ExitCode::SUCCESS)
+    result
 }
 
 /// The main function for the process when invoked using

@@ -14,17 +14,69 @@ use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
     net::{self, AsRawFdExt as _},
     root::RootBuf,
+    sync::EventSender,
 };
 use maelstrom_worker::local_worker;
 use slog::{debug, o, Logger};
+use std::mem;
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot, RwLock},
     task::JoinSet,
 };
 
-#[derive(Default)]
-pub struct Client(RwLock<Option<ClientState>>);
+pub struct Client(RwLock<ClientStateWrapper>);
+
+enum ClientStateWrapper {
+    NotRunning(Option<EventSender>),
+    Running(ClientState),
+}
+
+impl ClientStateWrapper {
+    fn get_running(&self) -> Result<&ClientState> {
+        match self {
+            Self::NotRunning(Some(_)) => Err(anyhow!("client not yet started")),
+            Self::NotRunning(None) => Err(anyhow!("client started and stopped")),
+            Self::Running(state) => Ok(state),
+        }
+    }
+
+    fn take_to_start(&mut self) -> Result<EventSender> {
+        match self {
+            Self::NotRunning(Some(_)) => {}
+            Self::NotRunning(None) => {
+                bail!("client already started and stopped");
+            }
+            Self::Running(_) => {
+                bail!("client already started");
+            }
+        }
+
+        let Self::NotRunning(Some(done)) = mem::replace(self, Self::NotRunning(None)) else {
+            unreachable!();
+        };
+
+        Ok(done)
+    }
+
+    fn take_to_stop(&mut self) -> Result<ClientState> {
+        match self {
+            Self::NotRunning(Some(_)) => {
+                bail!("client not yet started");
+            }
+            Self::NotRunning(None) => {
+                bail!("client already stopped");
+            }
+            Self::Running(_) => {}
+        }
+
+        let Self::Running(state) = mem::replace(self, Self::NotRunning(None)) else {
+            unreachable!();
+        };
+
+        Ok(state)
+    }
+}
 
 struct ClientState {
     router_sender: router::Sender,
@@ -42,6 +94,10 @@ const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 const MAX_PENDING_LAYER_BUILDS: usize = 10;
 
 impl Client {
+    pub fn new(done: EventSender) -> Self {
+        Self(RwLock::new(ClientStateWrapper::NotRunning(Some(done))))
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn try_to_start(
         log: Logger,
@@ -55,6 +111,7 @@ impl Client {
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
         artifact_transfer_strategy: ArtifactTransferStrategy,
+        done: EventSender,
     ) -> Result<ClientState> {
         let fs = async_fs::Fs::new();
 
@@ -196,6 +253,7 @@ impl Client {
             move |msg| router_sender_clone_2.send(router::Message::LocalWorker(msg)),
             cache_dir.join(LOCAL_WORKER_DIR),
             cache_size,
+            done,
             inline_limit,
             &log,
             local_worker_receiver,
@@ -230,11 +288,9 @@ impl Client {
         artifact_transfer_strategy: ArtifactTransferStrategy,
     ) -> Result<()> {
         let mut guard = self.0.write().await;
-        if guard.is_some() {
-            bail!("client already started");
-        }
+        let done = guard.take_to_start()?;
 
-        *guard = Some(
+        *guard = ClientStateWrapper::Running(
             Self::try_to_start(
                 log.clone(),
                 broker_addr,
@@ -247,6 +303,7 @@ impl Client {
                 slots,
                 accept_invalid_remote_container_tls_certs,
                 artifact_transfer_strategy,
+                done,
             )
             .await?,
         );
@@ -258,7 +315,7 @@ impl Client {
 
     pub async fn stop(&self) -> Result<()> {
         let mut guard = self.0.write().await;
-        let state = guard.take().ok_or_else(|| anyhow!("client not started"))?;
+        let state = guard.take_to_stop()?;
 
         // Even though we just took the state, wait to drop the lock until we're done shutting
         // down. This will block a subsequent start, if there were to be one.
@@ -275,9 +332,7 @@ impl Client {
         spec: spec::JobSpec,
     ) -> Result<futures::channel::mpsc::UnboundedReceiver<JobStatus>> {
         let guard = self.0.read().await;
-        let state = guard
-            .as_ref()
-            .ok_or_else(|| anyhow!("client not started"))?;
+        let state = guard.get_running()?;
 
         debug!(state.log, "run_job"; "spec" => ?spec);
 
@@ -297,9 +352,7 @@ impl Client {
 
     pub async fn add_container(&self, name: String, container: ContainerSpec) -> Result<()> {
         let guard = self.0.read().await;
-        let state = guard
-            .as_ref()
-            .ok_or_else(|| anyhow!("client not started"))?;
+        let state = guard.get_running()?;
 
         debug!(state.log, "add_container"; "name" => ?name, "container" => ?container);
 
@@ -317,9 +370,7 @@ impl Client {
 
     pub async fn introspect(&self) -> Result<IntrospectResponse> {
         let guard = self.0.read().await;
-        let state = guard
-            .as_ref()
-            .ok_or_else(|| anyhow!("client not started"))?;
+        let state = guard.get_running()?;
 
         let artifact_uploads = state.artifact_upload_tracker.get_remote_progresses();
         let image_downloads = state.image_download_tracker.get_remote_progresses();

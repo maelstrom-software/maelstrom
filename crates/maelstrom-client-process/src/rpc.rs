@@ -6,7 +6,7 @@ use maelstrom_client_base::{
     proto::{self, client_process_server::ClientProcess},
     AddContainerRequest, IntoProtoBuf, RunJobRequest, StartRequest, TryFromProtoBuf,
 };
-use maelstrom_util::config::common::LogLevel;
+use maelstrom_util::{config::common::LogLevel, sync::EventSender};
 use slog::Drain as _;
 use std::pin::Pin;
 use std::{
@@ -42,12 +42,16 @@ pub struct Handler {
 }
 
 impl Handler {
-    pub fn new(log: Option<slog::Logger>, rpc_log_level: LogLevel) -> Self {
+    pub fn new(done: EventSender, log: Option<slog::Logger>, rpc_log_level: LogLevel) -> Self {
         Self {
-            client: Default::default(),
+            client: Client::new(done),
             rpc_log_level,
             log: Mutex::new(log),
         }
+    }
+
+    pub fn get_logger(&self) -> slog::Logger {
+        self.log.lock().unwrap().as_ref().unwrap().clone()
     }
 }
 

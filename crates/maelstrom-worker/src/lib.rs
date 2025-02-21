@@ -30,6 +30,7 @@ use maelstrom_util::{
     },
     process::TERMINATION_SIGNALS,
     root::RootBuf,
+    sync::EventSender,
 };
 use num::integer;
 use slog::{debug, error, info, o, Logger};
@@ -190,6 +191,7 @@ fn start_dispatcher_task(
                 config.cache_root,
                 dispatcher_receiver,
                 dispatcher_sender,
+                None,
                 config.inline_limit,
                 log,
                 true, /* log_initial_cache_message_at_info */
@@ -215,6 +217,7 @@ fn start_dispatcher_task(
                 config.cache_root,
                 dispatcher_receiver,
                 dispatcher_sender,
+                None,
                 config.inline_limit,
                 log,
                 true, /* log_initial_cache_message_at_info */
@@ -237,6 +240,7 @@ fn start_dispatcher_task_common<
     cache_root: RootBuf<config::CacheDir>,
     mut dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
+    done: Option<EventSender>,
     inline_limit: InlineLimit,
     log: &Logger,
     log_initial_cache_message_at_info: bool,
@@ -304,6 +308,7 @@ fn start_dispatcher_task_common<
                 .await
                 .expect("all senders should never be closed");
             if let Err(err) = dispatcher.receive_message(msg) {
+                drop(done);
                 break err;
             }
         }
