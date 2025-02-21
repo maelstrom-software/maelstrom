@@ -14,7 +14,6 @@ use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
     net::{self, AsRawFdExt as _},
     root::RootBuf,
-    signal,
 };
 use maelstrom_worker::local_worker;
 use slog::{debug, o, Logger};
@@ -186,13 +185,6 @@ impl Client {
             router_sender.clone(),
             preparer_sender.clone(),
         )?;
-
-        // Start the signal handler.
-        let log_clone = log.clone();
-        join_set.spawn(async move {
-            let signal = signal::wait_for_signal(log_clone).await;
-            Err(anyhow!("received signal {signal}"))
-        });
 
         // Start the local worker.
         let router_sender_clone_1 = router_sender.clone();

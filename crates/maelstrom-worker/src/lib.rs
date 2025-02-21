@@ -86,8 +86,6 @@ async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger)
     let writer_log = log.new(o!("task" => "writer"));
     join_set.spawn(write_stream.write_messages(broker_socket_outgoing_receiver, writer_log));
 
-    join_set.spawn(wait_for_signal(log.clone()));
-
     let log = log.new(o!("task" => "dispatcher"));
     let tasks = start_dispatcher_task(
         config,
@@ -221,7 +219,7 @@ fn start_dispatcher_task_common<
     log: Logger,
     log_initial_cache_message_at_info: bool,
     slots: Slots,
-    tasks: JoinSet<Result<()>>,
+    mut tasks: JoinSet<Result<()>>,
 ) -> Result<Tasks> {
     let (cache, temp_file_factory) = Cache::new(
         StdFs,
@@ -252,6 +250,9 @@ fn start_dispatcher_task_common<
         cache,
         slots,
     );
+
+    // Start the signal handler.
+    tasks.spawn(wait_for_signal(log.clone()));
 
     let dispatcher_task = task::spawn(async move {
         loop {
