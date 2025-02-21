@@ -12,7 +12,7 @@ mod util;
 
 pub use maelstrom_util::process::clone_into_pid_and_user_namespace;
 
-use anyhow::{Result, anyhow, Error};
+use anyhow::{Error, Result};
 use futures::stream::{self, StreamExt as _};
 use maelstrom_client_base::proto::client_process_server::ClientProcessServer;
 use maelstrom_linux::{self as linux, Sighandler, Signal, UnixStream};
@@ -45,21 +45,17 @@ async fn main_after_clone(
 
     sock.set_nonblocking(true)?;
     let (sock, eof_receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
-    let handler_clone = handler.clone();
     let server = Server::builder()
         .add_service(ClientProcessServer::new(handler.clone()))
         .serve_with_incoming(
             stream::once(async move { TokioError::<_>::Ok(sock) }).chain(stream::pending()),
         );
 
-    let result = 
-    tokio::select! {
+    let result = tokio::select! {
         _ = done_receiver => {
-            info!(handler_clone.get_logger(), "got done from dispatcher");
-            Err(anyhow!("local worker shut down"))
+            Ok(ExitCode::SUCCESS)
         },
         _ = eof_receiver => {
-            info!(handler_clone.get_logger(), "got EOF from socket");
             Ok(ExitCode::SUCCESS)
         },
         result = server => {

@@ -49,10 +49,6 @@ impl Handler {
             log: Mutex::new(log),
         }
     }
-
-    pub fn get_logger(&self) -> slog::Logger {
-        self.log.lock().unwrap().as_ref().unwrap().clone()
-    }
 }
 
 trait ResultExt<T> {
