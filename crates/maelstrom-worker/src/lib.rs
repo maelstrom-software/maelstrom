@@ -32,7 +32,7 @@ use maelstrom_util::{
     signal,
 };
 use num::integer;
-use slog::{debug, error, info, o, Logger};
+use slog::{debug, info, o, Logger};
 use std::sync::Arc;
 use tokio::{
     net::TcpStream,
@@ -61,7 +61,7 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
         ConfigBrokerConnection::Tcp => main_inner::<TcpStream>(config, &log).unwrap_err(),
         ConfigBrokerConnection::GitHub => main_inner::<GitHubQueue>(config, &log).unwrap_err(),
     };
-    error!(log, "exiting"; "error" => %err);
+    info!(log, "exiting"; "error" => %err);
     Err(err)
 }
 
