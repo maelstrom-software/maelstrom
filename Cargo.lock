@@ -1078,7 +1078,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "strum",
+ "strum 0.27.1",
  "tempfile",
  "xdg",
 ]
@@ -3633,7 +3633,7 @@ dependencies = [
  "serde",
  "serde_repr",
  "serde_test",
- "strum",
+ "strum 0.27.1",
  "toml",
 ]
 
@@ -3665,7 +3665,7 @@ dependencies = [
  "rstest",
  "serde",
  "slog",
- "strum",
+ "strum 0.27.1",
  "tar",
  "tempfile",
  "tokio",
@@ -3881,7 +3881,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "strum",
+ "strum 0.27.1",
  "tempfile",
  "xdg",
 ]
@@ -3968,7 +3968,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "strum",
+ "strum 0.27.1",
  "tempfile",
  "xdg",
 ]
@@ -4056,7 +4056,7 @@ dependencies = [
  "slog-json",
  "slog-term",
  "std-semaphore",
- "strum",
+ "strum 0.27.1",
  "tempfile",
  "toml",
  "tui-term",
@@ -4108,7 +4108,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
- "strum",
+ "strum 0.27.1",
  "tempfile",
  "tokio",
  "toml",
@@ -4176,7 +4176,7 @@ dependencies = [
  "sha2",
  "slog",
  "std-semaphore",
- "strum",
+ "strum 0.27.1",
  "tempfile",
  "tokio",
  "url 2.5.4",
@@ -4796,8 +4796,8 @@ dependencies = [
  "getset",
  "serde",
  "serde_json",
- "strum",
- "strum_macros",
+ "strum 0.26.3",
+ "strum_macros 0.26.4",
  "thiserror",
 ]
 
@@ -5467,7 +5467,7 @@ dependencies = [
  "itertools 0.13.0",
  "lru 0.12.5",
  "paste",
- "strum",
+ "strum 0.26.3",
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width 0.2.0",
@@ -6365,7 +6365,16 @@ version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.26.4",
+]
+
+[[package]]
+name = "strum"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f64def088c51c9510a8579e3c5d67c65349dcf755e5479ad3d010aa6454e2c32"
+dependencies = [
+ "strum_macros 0.27.1",
 ]
 
 [[package]]
@@ -6373,6 +6382,19 @@ name = "strum_macros"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.98",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c77a8c5abcaf0f9ce05d62342b7d298c346515365c36b673df4ebe3ced01fde8"
 dependencies = [
  "heck",
  "proc-macro2",

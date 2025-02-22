@@ -151,7 +151,7 @@ slog-json = "2.6"
 slog-term = "2.9.1"
 std-semaphore = "0.1"
 smallvec = "1.14.0"
-strum = { version = "0.26.3", features = ["derive"] }
+strum = { version = "0.27", features = ["derive"] }
 syn = { version = "2", features = ["full"] }
 tar = "0.4"
 tempfile = "3.17.1"
