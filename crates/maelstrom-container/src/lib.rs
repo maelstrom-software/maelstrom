@@ -680,8 +680,12 @@ impl ImageDownloader {
         let manifest = find_manifest_for_platform(index.manifests())?;
         let manifest_digest = manifest.digest().clone();
 
-        let image = self.get_image_manifest(ref_, &manifest_digest).await?;
-        let config = self.get_image_config(ref_, image.config().digest()).await?;
+        let image = self
+            .get_image_manifest(ref_, manifest_digest.as_ref())
+            .await?;
+        let config = self
+            .get_image_config(ref_, image.config().digest().as_ref())
+            .await?;
         Ok((image, config))
     }
 
@@ -696,12 +700,16 @@ impl ImageDownloader {
         let manifest = find_manifest_for_platform(index.manifests())?;
         let manifest_digest = manifest.digest().clone();
 
-        let image = self.get_image_manifest(ref_, &manifest_digest).await?;
+        let image = self
+            .get_image_manifest(ref_, manifest_digest.as_ref())
+            .await?;
 
-        let config = self.get_image_config(ref_, image.config().digest()).await?;
+        let config = self
+            .get_image_config(ref_, image.config().digest().as_ref())
+            .await?;
 
-        let total_size: i64 = image.layers().iter().map(|l| l.size()).sum();
-        prog.set_length(total_size as u64);
+        let total_size = image.layers().iter().map(|l| l.size()).sum();
+        prog.set_length(total_size);
 
         let self_ = Arc::new(self);
         let mut task_handles = vec![];
@@ -709,7 +717,7 @@ impl ImageDownloader {
         for (i, layer) in image.layers().iter().enumerate() {
             let path = layer_dir.as_ref().join(format!("layer_{i}.tar"));
             let handle = self_.clone().download_layer_on_task(
-                layer.digest().clone(),
+                layer.digest().to_string(),
                 ref_.clone(),
                 path.clone(),
                 prog.clone(),
@@ -725,7 +733,7 @@ impl ImageDownloader {
         Ok(ContainerImage {
             version: ContainerImageVersion::default(),
             name: ref_.name().into(),
-            digest: manifest_digest,
+            digest: manifest_digest.to_string(),
             config,
             layers,
         })
