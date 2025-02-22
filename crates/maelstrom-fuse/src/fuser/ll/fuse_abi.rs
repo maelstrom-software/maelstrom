@@ -15,7 +15,7 @@
 
 use crate::fuser::consts::{FATTR_ATIME_NOW, FATTR_MTIME_NOW};
 use std::convert::TryFrom;
-use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 pub const FUSE_KERNEL_VERSION: u32 = 7;
 
@@ -24,7 +24,7 @@ pub const FUSE_KERNEL_MINOR_VERSION: u32 = 31;
 pub const FUSE_ROOT_ID: u64 = 1;
 
 #[repr(C)]
-#[derive(Debug, AsBytes, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Immutable, IntoBytes, FromBytes)]
 pub struct fuse_attr {
     pub ino: u64,
     pub size: u64,
@@ -51,7 +51,7 @@ pub struct fuse_attr {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_kstatfs {
     pub blocks: u64,  // Total blocks (in units of frsize)
     pub bfree: u64,   // Free blocks
@@ -66,7 +66,7 @@ pub struct fuse_kstatfs {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
 pub struct fuse_file_lock {
     pub start: u64,
     pub end: u64,
@@ -278,7 +278,7 @@ impl TryFrom<u32> for fuse_opcode {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_entry_out {
     pub nodeid: u64,
     pub generation: u64,
@@ -290,27 +290,27 @@ pub struct fuse_entry_out {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_forget_in {
     pub nlookup: u64,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable)]
 pub struct fuse_forget_one {
     pub nodeid: u64,
     pub nlookup: u64,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_batch_forget_in {
     pub count: u32,
     pub dummy: u32,
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, FromBytes, Immutable, IntoBytes)]
 pub struct fuse_attr_out {
     pub attr_valid: u64,
     pub attr_valid_nsec: u32,
@@ -319,7 +319,7 @@ pub struct fuse_attr_out {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_mknod_in {
     pub mode: u32,
     pub rdev: u32,
@@ -328,7 +328,7 @@ pub struct fuse_mknod_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_mkdir_in {
     pub mode: u32,
     pub padding: u32,
@@ -336,13 +336,13 @@ pub struct fuse_mkdir_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_rename_in {
     pub newdir: u64,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_rename2_in {
     pub newdir: u64,
     pub flags: u32,
@@ -350,13 +350,13 @@ pub struct fuse_rename2_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_link_in {
     pub oldnodeid: u64,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_setattr_in {
     pub valid: u32,
     pub padding: u32,
@@ -393,7 +393,7 @@ impl fuse_setattr_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_open_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's open method and this matches the open() syscall
@@ -402,7 +402,7 @@ pub struct fuse_open_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_create_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's create method and this matches the open() syscall
@@ -413,11 +413,11 @@ pub struct fuse_create_in {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_create_out(pub fuse_entry_out, pub fuse_open_out);
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_open_out {
     pub fh: u64,
     pub open_flags: u32,
@@ -425,7 +425,7 @@ pub struct fuse_open_out {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_release_in {
     pub fh: u64,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
@@ -436,7 +436,7 @@ pub struct fuse_release_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_flush_in {
     pub fh: u64,
     pub unused: u32,
@@ -445,7 +445,7 @@ pub struct fuse_flush_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_read_in {
     pub fh: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is then cast
@@ -461,7 +461,7 @@ pub struct fuse_read_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_write_in {
     pub fh: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is then cast
@@ -477,20 +477,20 @@ pub struct fuse_write_in {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_write_out {
     pub size: u32,
     pub padding: u32,
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_statfs_out {
     pub st: fuse_kstatfs,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_fsync_in {
     pub fh: u64,
     pub fsync_flags: u32,
@@ -498,7 +498,7 @@ pub struct fuse_fsync_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_setxattr_in {
     pub size: u32,
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
@@ -507,21 +507,21 @@ pub struct fuse_setxattr_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_getxattr_in {
     pub size: u32,
     pub padding: u32,
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_getxattr_out {
     pub size: u32,
     pub padding: u32,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_lk_in {
     pub fh: u64,
     pub owner: u64,
@@ -531,13 +531,13 @@ pub struct fuse_lk_in {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_lk_out {
     pub lk: fuse_file_lock,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_access_in {
     // NOTE: this field is defined as u32 in fuse_kernel.h in libfuse. However, it is then cast
     // to an i32 when invoking the filesystem's access method
@@ -546,7 +546,7 @@ pub struct fuse_access_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_init_in {
     pub major: u32,
     pub minor: u32,
@@ -555,7 +555,7 @@ pub struct fuse_init_in {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_init_out {
     pub major: u32,
     pub minor: u32,
@@ -571,13 +571,13 @@ pub struct fuse_init_out {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_interrupt_in {
     pub unique: u64,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_bmap_in {
     pub block: u64,
     pub blocksize: u32,
@@ -585,13 +585,13 @@ pub struct fuse_bmap_in {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_bmap_out {
     pub block: u64,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_ioctl_in {
     pub fh: u64,
     pub flags: u32,
@@ -602,7 +602,7 @@ pub struct fuse_ioctl_in {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_ioctl_out {
     pub result: i32,
     pub flags: u32,
@@ -611,7 +611,7 @@ pub struct fuse_ioctl_out {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_poll_in {
     pub fh: u64,
     pub kh: u64,
@@ -620,14 +620,14 @@ pub struct fuse_poll_in {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_poll_out {
     pub revents: u32,
     pub padding: u32,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_fallocate_in {
     pub fh: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
@@ -640,7 +640,7 @@ pub struct fuse_fallocate_in {
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_in_header {
     pub len: u32,
     pub opcode: u32,
@@ -653,7 +653,7 @@ pub struct fuse_in_header {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_out_header {
     pub len: u32,
     pub error: i32,
@@ -661,7 +661,7 @@ pub struct fuse_out_header {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_dirent {
     pub ino: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed
@@ -672,14 +672,14 @@ pub struct fuse_dirent {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_direntplus {
     pub entry_out: fuse_entry_out,
     pub dirent: fuse_dirent,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_lseek_in {
     pub fh: u64,
     pub offset: i64,
@@ -689,13 +689,13 @@ pub struct fuse_lseek_in {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, Immutable, IntoBytes)]
 pub struct fuse_lseek_out {
     pub offset: i64,
 }
 
 #[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
+#[derive(Debug, FromBytes, Immutable, KnownLayout)]
 pub struct fuse_copy_file_range_in {
     pub fh_in: u64,
     // NOTE: this field is defined as u64 in fuse_kernel.h in libfuse. However, it is treated as signed

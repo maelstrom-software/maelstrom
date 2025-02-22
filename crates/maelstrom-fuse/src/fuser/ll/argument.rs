@@ -30,9 +30,11 @@ impl<'a> ArgumentIterator<'a> {
     }
 
     /// Fetch a typed argument. Returns `None` if there's not enough data left.
-    pub fn fetch<T: zerocopy::FromBytes>(&mut self) -> Option<&'a T> {
-        match zerocopy::Ref::<_, T>::new_from_prefix(self.data) {
-            None => {
+    pub fn fetch<T: zerocopy::FromBytes + zerocopy::Immutable + zerocopy::KnownLayout>(
+        &mut self,
+    ) -> Option<&'a T> {
+        match zerocopy::Ref::<_, T>::from_prefix(self.data) {
+            Err(_) => {
                 if self.data.as_ptr() as usize % core::mem::align_of::<T>() != 0 {
                     // Panic on alignment errors as this is under the control
                     // of the programmer, we can still return None for size
@@ -43,17 +45,20 @@ impl<'a> ArgumentIterator<'a> {
                     None
                 }
             }
-            Some((x, rest)) => {
+            Ok((x, rest)) => {
                 self.data = rest;
-                Some(x.into_ref())
+                Some(zerocopy::Ref::into_ref(x))
             }
         }
     }
 
     /// Fetch a slice of typed of arguments. Returns `None` if there's not enough data left.
-    pub fn fetch_slice<T: zerocopy::FromBytes>(&mut self, count: usize) -> Option<&'a [T]> {
-        match zerocopy::Ref::<_, [T]>::new_slice_from_prefix(self.data, count) {
-            None => {
+    pub fn fetch_slice<T: zerocopy::FromBytes + zerocopy::Immutable>(
+        &mut self,
+        count: usize,
+    ) -> Option<&'a [T]> {
+        match zerocopy::Ref::<_, [T]>::from_prefix_with_elems(self.data, count) {
+            Err(_) => {
                 if self.data.as_ptr() as usize % core::mem::align_of::<T>() != 0 {
                     // Panic on alignment errors as this is under the control
                     // of the programmer, we can still return None for size
@@ -64,9 +69,9 @@ impl<'a> ArgumentIterator<'a> {
                     None
                 }
             }
-            Some((x, rest)) => {
+            Ok((x, rest)) => {
                 self.data = rest;
-                Some(x.into_slice())
+                Some(zerocopy::Ref::into_ref(x))
             }
         }
     }
@@ -87,13 +92,13 @@ pub mod tests {
 
     use super::super::test::AlignedData;
     use super::*;
-    use zerocopy::{FromBytes, FromZeroes};
+    use zerocopy::{FromBytes, Immutable, KnownLayout};
 
     const TEST_DATA: AlignedData<[u8; 10]> =
         AlignedData([0x66, 0x6f, 0x6f, 0x00, 0x62, 0x61, 0x72, 0x00, 0x62, 0x61]);
 
     #[repr(C)]
-    #[derive(FromBytes, FromZeroes)]
+    #[derive(FromBytes, Immutable, KnownLayout)]
     struct TestArgument {
         p1: u8,
         p2: u8,

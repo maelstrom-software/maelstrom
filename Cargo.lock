@@ -3816,7 +3816,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "tokio",
- "zerocopy 0.7.35",
+ "zerocopy 0.8.20",
 ]
 
 [[package]]
@@ -8267,7 +8267,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "versions",
- "zerocopy 0.7.35",
+ "zerocopy 0.8.20",
 ]
 
 [[package]]

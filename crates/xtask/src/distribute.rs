@@ -9,9 +9,9 @@ use std::io::{Read as _, Seek as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{fmt, mem};
-use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-#[derive(Clone, Debug, Default, PartialEq, FromZeroes, FromBytes, AsBytes)]
+#[derive(Clone, Debug, Default, PartialEq, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 struct Verneed {
     version: u16,
@@ -21,7 +21,7 @@ struct Verneed {
     next: u32,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, FromZeroes, FromBytes, AsBytes)]
+#[derive(Clone, Debug, Default, PartialEq, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 struct Vernaux {
     hash: u32,
@@ -43,7 +43,7 @@ struct VerneedEntry {
     aux: Vec<Vernaux>,
 }
 
-#[derive(Clone, Debug, FromZeroes, FromBytes, AsBytes)]
+#[derive(Clone, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 struct Symbol {
     name: u32,
@@ -65,13 +65,14 @@ fn decode_version_entries(mut data: &[u8]) -> Result<Vec<VerneedEntry>> {
 
     loop {
         let entry_data = &data[..mem::size_of::<Verneed>()];
-        let verneed = Verneed::ref_from(entry_data).ok_or_else(|| anyhow!("malformed verneed"))?;
+        let verneed =
+            Verneed::ref_from_bytes(entry_data).map_err(|_| anyhow!("malformed verneed"))?;
         let mut aux_data = &data[verneed.aux as usize..];
         let mut aux = vec![];
         loop {
             let entry_data = &aux_data[..mem::size_of::<Vernaux>()];
             let vernaux =
-                Vernaux::ref_from(entry_data).ok_or_else(|| anyhow!("malformed vernaux"))?;
+                Vernaux::ref_from_bytes(entry_data).map_err(|_| anyhow!("malformed vernaux"))?;
             aux.push(vernaux.clone());
             if vernaux.next == 0 {
                 break;
@@ -313,7 +314,7 @@ fn remove_symbol_versions(
     let mut symbol_index = 0;
     while !data.is_empty() {
         let symbol_data = &data[..mem::size_of::<Symbol>()];
-        let symbol = Symbol::ref_from(symbol_data).unwrap();
+        let symbol = Symbol::ref_from_bytes(symbol_data).unwrap();
         let version_index = u16::from_le_bytes([
             symbol_version_data[symbol_index * 2],
             symbol_version_data[symbol_index * 2 + 1],

@@ -12,7 +12,7 @@ use std::{
 use tokio::io::unix::AsyncFd;
 use tokio::io::Interest;
 use tokio::sync::{mpsc, oneshot};
-use zerocopy::AsBytes as _;
+use zerocopy::IntoBytes as _;
 
 /// A raw communication channel to the FUSE kernel driver
 #[derive(Debug)]

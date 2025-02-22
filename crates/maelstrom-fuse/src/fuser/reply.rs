@@ -664,9 +664,9 @@ mod tests {
     use std::io::IoSlice;
     use std::time::{Duration, UNIX_EPOCH};
     use tokio::sync::mpsc::{channel, Sender};
-    use zerocopy::AsBytes;
+    use zerocopy::{Immutable, IntoBytes};
 
-    #[derive(Debug, AsBytes)]
+    #[derive(Debug, IntoBytes, Immutable)]
     #[repr(C)]
     struct Data {
         a: u8,
