@@ -166,7 +166,7 @@ tower = { version = "0.5", features = ["util"] }
 tuple = "0.5.2"
 tui-term = "0.2.0"
 url = "2"
-unicode-truncate = "1"
+unicode-truncate = "2"
 unicode-width = "0.2.0"
 versions = "6.3.2"
 uuid = "1.14.0"
