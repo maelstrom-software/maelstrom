@@ -74,7 +74,6 @@ enumset = { version = "1.1.5", features = ["serde"] }
 fs2 = "0.4"
 futures = "0.3"
 futures-lite = "2.6"
-gethostname = "0.4.3"
 get-size = { version = "0.1.4", features = ["derive"] }
 google-sheets4 = "3.1.0"
 globset = "0.4"
