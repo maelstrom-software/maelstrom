@@ -37,7 +37,7 @@ ascii = "1.1.0"
 assert_matches = "1.5.0"
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 async-trait = "0.1"
-async-walkdir = "1"
+async-walkdir = "2"
 atomicbox = "0.4"
 azure_core = { version = "0.21", features = ["tokio-fs"] }
 azure_storage_blobs = "0.21"

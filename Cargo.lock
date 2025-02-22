@@ -544,12 +544,13 @@ dependencies = [
 
 [[package]]
 name = "async-walkdir"
-version = "1.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73f6338023cbfc0555eccb8e83d3d4dcf1183b51ca9140a03b1dbb8a559193db"
+checksum = "37672978ae0febce7516ae0a85b53e6185159a9a28787391eb63fc44ec36037d"
 dependencies = [
  "async-fs 2.1.2",
  "futures-lite 2.6.0",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
