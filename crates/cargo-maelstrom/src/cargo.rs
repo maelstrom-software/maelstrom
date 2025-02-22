@@ -2,6 +2,7 @@ use anyhow::{bail, Context as _, Result};
 use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
     Metadata as CargoMetadata, Package as CargoPackage, PackageId as CargoPackageId,
+    TargetKind as CargoTargetKind,
 };
 use maelstrom_base::WindowSize;
 use maelstrom_linux as linux;
@@ -121,7 +122,12 @@ impl<StreamT: io::Read> GenericTestArtifactStream<StreamT> {
     }
 
     fn receive_built_artifact(&mut self, artifact: CargoArtifact) -> Result<()> {
-        if artifact.target.kind.iter().any(|kind| kind == "proc-macro") {
+        if artifact
+            .target
+            .kind
+            .iter()
+            .any(|kind| *kind == CargoTargetKind::ProcMacro)
+        {
             return Ok(());
         }
         let Some(pkg) = self.packages.get_mut(&artifact.package_id) else {
