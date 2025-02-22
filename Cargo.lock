@@ -3606,6 +3606,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "227748d55f2f0ab4735d87fd623798cb6b664512fe979705f829c9f81c934465"
+dependencies = [
+ "hashbrown 0.15.2",
+]
+
+[[package]]
 name = "maelstrom-base"
 version = "0.13.0-dev"
 dependencies = [
@@ -3887,7 +3896,7 @@ dependencies = [
  "clap",
  "derive_more",
  "futures",
- "lru",
+ "lru 0.13.0",
  "maelstrom-base",
  "maelstrom-fuse",
  "maelstrom-linux",
@@ -4082,7 +4091,7 @@ dependencies = [
  "indoc",
  "itertools 0.13.0",
  "lddtree",
- "lru",
+ "lru 0.13.0",
  "maelstrom-base",
  "maelstrom-github",
  "maelstrom-linux",
@@ -4147,7 +4156,7 @@ dependencies = [
  "futures",
  "indoc",
  "itertools 0.13.0",
- "lru",
+ "lru 0.13.0",
  "maelstrom-base",
  "maelstrom-fuse",
  "maelstrom-github",
@@ -5459,7 +5468,7 @@ dependencies = [
  "indoc",
  "instability",
  "itertools 0.13.0",
- "lru",
+ "lru 0.12.5",
  "paste",
  "strum",
  "unicode-segmentation",
