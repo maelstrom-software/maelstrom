@@ -115,7 +115,7 @@ native-tls = "0.2"
 netlink-packet-core = "0.7"
 netlink-packet-route = "0.17"
 nonempty = { version = "0.10", features = ["serialize"] }
-notify = "7"
+notify = "8"
 num = "0.4.3"
 num-derive = "0.4.2"
 num-traits = "0.2"
