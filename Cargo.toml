@@ -133,7 +133,7 @@ prost = "0.12"
 protoc-bin-vendored = "3.1.0"
 quote = "1"
 ratatui = { version = "0.29", features = ["scrolling-regions", "unstable-rendered-line-info"] }
-rand = "0.8.5"
+rand = "0.9"
 ref-cast = "1.0"
 regex = "1.11.1"
 regex-macro = "0.2"
