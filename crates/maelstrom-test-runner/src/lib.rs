@@ -20,7 +20,6 @@ use app::{
 };
 use clap::{Args, Command};
 use config::AsParts;
-use derive_more::{From, Into};
 use log::{LogDestination, LoggerBuilder};
 use maelstrom_base::Timeout;
 use maelstrom_client::{

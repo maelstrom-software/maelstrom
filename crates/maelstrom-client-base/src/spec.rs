@@ -8,7 +8,6 @@ pub mod substitute;
 
 use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{Error, Result};
-use derive_more::From;
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
     CaptureFileSystemChanges, GroupId, JobMount, JobMountForTomlAndJson, JobNetwork, JobTty,

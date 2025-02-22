@@ -12,7 +12,7 @@ use core::{
     ptr,
     time::Duration,
 };
-use derive_more::{BitOr, BitOrAssign, Display, Into};
+use derive_more::{BitOr, BitOrAssign, Display};
 use libc::{
     c_char, c_int, c_long, c_short, c_uint, c_ulong, c_void, gid_t, id_t, idtype_t, mode_t, nfds_t,
     pid_t, pollfd, sa_family_t, sighandler_t, siginfo_t, sigset_t, size_t, sockaddr,

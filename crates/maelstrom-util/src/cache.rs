@@ -9,7 +9,7 @@ use crate::{
 };
 use anyhow::{bail, Error, Result};
 use bytesize::ByteSize;
-use derive_more::{Debug, Deref, DerefMut};
+use derive_more::{with_trait::Debug, Deref, DerefMut};
 use fs::{FileType, Fs, Metadata};
 use maelstrom_base::{JobId, Sha256Digest};
 use slog::{debug, info, warn, Logger};

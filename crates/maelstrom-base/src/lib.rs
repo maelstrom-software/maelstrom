@@ -11,7 +11,7 @@ pub use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 pub use enumset::{enum_set, EnumSet};
 pub use nonempty::{nonempty, NonEmpty};
 
-use derive_more::{Constructor, Debug, Display, From, Into};
+use derive_more::{with_trait::Debug, Constructor, Display, From, Into};
 use enumset::EnumSetType;
 use get_size::GetSize;
 use hex::{self, FromHexError};
