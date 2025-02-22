@@ -30,7 +30,7 @@ async fn download_artifact(
     let artifact = client
         .get(&artifact_name)
         .await?
-        .ok_or_else(|| anyhow!("artifact {digest} not found"))?;
+        .ok_or_else(|| anyhow!("artifact {digest} not found in broker cache"))?;
     let stream = client
         .download(artifact.backend_ids, &artifact_name)
         .await?;

@@ -24,7 +24,7 @@ fi
 set +e
 
 TEMPFILE=$(mktemp --tmpdir run-tests-on-maelstrom-broker-stderr.XXXXXX)
-cargo run --release --bin maelstrom-broker -- $BROKER_ARGS 2> >(tee "$TEMPFILE" >&2) &
+cargo run --release --bin maelstrom-broker -- --log-level=debug $BROKER_ARGS 2> >(tee "$TEMPFILE" >&2) &
 BROKER_PID=$!
 PORT=$( \
 	tail -f "$TEMPFILE" \
