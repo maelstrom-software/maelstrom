@@ -191,7 +191,7 @@ precedes a valid template variable expression and no template substitution is de
 
 The following are valid template variables for `cargo-maelstrom`
 
-- `<build-path>` The path to the directory where cargo stores build output for the current profile.
+- `<build-dir>` The path to the directory where cargo stores build output for the current profile.
 
 As an example, suppose you have an integration test for a binary named `foo` and want access to
 that binary when running the test. Cargo will provide the `CARGO_BIN_EXE_foo` environment variable
@@ -202,7 +202,7 @@ though, we have to include `foo` in a layer at the right place.
 [[directives]]
 filter = "test.equals(foo_integration_test)"
 layers = [
-    { paths = ["<build-path>/foo"], canonicalize = true }
+    { paths = ["<build-dir>/foo"], canonicalize = true }
 ]
 ```
 
