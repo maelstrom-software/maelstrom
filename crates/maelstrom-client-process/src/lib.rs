@@ -47,10 +47,18 @@ async fn main_after_clone(
     let (sock, eof_receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
     let server = Server::builder()
         .add_service(ClientProcessServer::new(handler.clone()))
-        .serve_with_incoming(
+        .serve_with_incoming_shutdown(
             stream::once(async move { TokioError::<_>::Ok(sock) }).chain(stream::pending()),
+            async {
+                tokio::select! {
+                    _ = done_receiver => {},
+                    _ = eof_receiver => {},
+                }
+            },
         );
 
+    let result = server.await;
+    /*
     let result = tokio::select! {
         _ = done_receiver => {
             Ok(ExitCode::SUCCESS)
@@ -62,12 +70,14 @@ async fn main_after_clone(
             result.map(|()| ExitCode::SUCCESS).map_err(Error::from)
         }
     };
+    */
 
     // Tell the local worker to shut down, and then wait for its task to complete. Ignore error, as
     // they only arise if we haven't started or have already stopped.
     let _ = handler.client.stop().await;
 
-    result
+    result?;
+    Ok(ExitCode::SUCCESS)
 }
 
 /// The main function for the process when invoked using
