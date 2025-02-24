@@ -8,12 +8,23 @@
 //! Second, it handles WebSockets. These are treated just like monitor connections.
 use crate::{connection, scheduler_task, IdVendor};
 use anyhow::{Error, Result};
+use bytes::Bytes;
 use futures::{
     sink::SinkExt,
     stream::{SplitSink, SplitStream, StreamExt},
 };
-use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Request, Response};
+use http_body_util::{
+    //    combinators::BoxBody,
+    //    BodyExt as _,
+    //    Empty,
+    Full,
+    //    StreamBody
+};
+use hyper::{
+    body::Incoming, server::conn::http1, service::Service, upgrade::Upgraded, Request, Response,
+};
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
+use hyper_util::rt::tokio::TokioIo;
 use maelstrom_base::{
     proto::{self, BrokerToMonitor, MonitorToBroker},
     MonitorId,
@@ -26,7 +37,7 @@ use std::{
     path::Path,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    //    task::{Context, Poll},
 };
 use tar::Archive;
 use tokio::{net::TcpListener, sync::mpsc::UnboundedReceiver};
@@ -52,7 +63,7 @@ impl TarHandler {
         Self { map }
     }
 
-    fn get_file(&self, path: &str, log: Logger) -> Response<Body> {
+    fn get_file(&self, path: &str, log: Logger) -> Response<Full<Bytes>> {
         fn mime_for_path(path: &str) -> &'static str {
             if let Some(ext) = Path::new(path).extension() {
                 match &ext.to_str().unwrap().to_lowercase()[..] {
@@ -78,14 +89,14 @@ impl TarHandler {
                 Response::builder()
                     .status(200)
                     .header("Content-Type", mime_for_path(&path))
-                    .body(Body::from(b))
+                    .body(Full::from(b))
                     .unwrap()
             })
             .unwrap_or_else(|| {
                 debug!(log, "received http get request"; "path" => %path, "resp" => 404);
                 Response::builder()
                     .status(404)
-                    .body(Body::from(&b""[..]))
+                    .body(Full::from(&b""[..]))
                     .unwrap()
             })
     }
@@ -95,7 +106,7 @@ impl TarHandler {
 /// return immediately.
 async fn websocket_writer(
     mut scheduler_task_receiver: UnboundedReceiver<BrokerToMonitor>,
-    mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
+    mut socket: SplitSink<WebSocketStream<TokioIo<Upgraded>>, Message>,
 ) {
     while let Some(msg) = scheduler_task_receiver.recv().await {
         if socket
@@ -111,7 +122,7 @@ async fn websocket_writer(
 /// Looping reading from `socket` and writing to `scheduler_task_sender`. If an error is encountered,
 /// return immediately.
 async fn websocket_reader<TempFileT>(
-    mut socket: SplitStream<WebSocketStream<Upgraded>>,
+    mut socket: SplitStream<WebSocketStream<TokioIo<Upgraded>>>,
     scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     mid: MonitorId,
 ) {
@@ -170,19 +181,15 @@ struct Handler<TempFileT> {
     log: Logger,
 }
 
-impl<TempFileT> Service<Request<Body>> for Handler<TempFileT>
+impl<TempFileT> Service<Request<Incoming>> for Handler<TempFileT>
 where
     TempFileT: Send + Sync + 'static,
 {
-    type Response = Response<Body>;
+    type Response = Response<Full<Bytes>>;
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response>> + Send>>;
 
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, mut request: Request<Body>) -> Self::Future {
+    fn call(&self, mut request: Request<Incoming>) -> Self::Future {
         let resp = (|| {
             if hyper_tungstenite::is_upgrade_request(&request) {
                 let (response, websocket) = hyper_tungstenite::upgrade(&mut request, None)?;
@@ -212,9 +219,7 @@ pub async fn listener_main<TempFileT>(
 ) where
     TempFileT: Send + Sync + 'static,
 {
-    let mut http = Http::new();
-    http.http1_only(true);
-    http.http1_keep_alive(true);
+    let http = http1::Builder::new();
 
     let tar_handler = Arc::new(TarHandler::from_embedded());
 
@@ -225,7 +230,7 @@ pub async fn listener_main<TempFileT>(
                 debug!(log, "received http connection");
                 let connection = http
                     .serve_connection(
-                        stream,
+                        TokioIo::new(stream),
                         Handler {
                             tar_handler: tar_handler.clone(),
                             scheduler_task_sender: scheduler_task_sender.clone(),

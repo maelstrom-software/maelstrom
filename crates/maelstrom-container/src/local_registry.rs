@@ -1,15 +1,22 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Error, Result};
+use bytes::Bytes;
 use futures::{Stream, StreamExt as _};
-use hyper::{server::conn::Http, service::Service, Body, Request, Response};
+use http_body::Frame;
+use http_body_util::{combinators::BoxBody, BodyExt as _, Empty, Full, StreamBody};
+use hyper::{body::Incoming, server::conn::http1, service::Service, Request, Response};
+use hyper_util::rt::tokio::TokioIo;
 use maelstrom_util::async_fs::Fs;
-use std::future::Future;
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
-use std::pin::{pin, Pin};
-use std::sync::Arc;
-use std::task::Poll;
-use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, SeekFrom};
-use tokio::net::TcpListener;
+use std::{
+    future::Future,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    pin::{pin, Pin},
+    sync::Arc,
+};
+use tokio::{
+    io::{AsyncReadExt as _, AsyncSeekExt as _, SeekFrom},
+    net::TcpListener,
+};
 
 fn canned_cert() -> &'static [u8] {
     include_bytes!("local_registry_cert.pem")
@@ -17,6 +24,18 @@ fn canned_cert() -> &'static [u8] {
 
 fn canned_key() -> &'static [u8] {
     include_bytes!("local_registry_key.pem")
+}
+
+fn empty() -> BoxBody<Bytes, Error> {
+    Empty::<Bytes>::new()
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, Error> {
+    Full::new(chunk.into())
+        .map_err(|never| match never {})
+        .boxed()
 }
 
 async fn get_from_tar_stream(
@@ -149,13 +168,13 @@ impl LocalRegistry {
                         return;
                     }
                 };
-                let mut http = Http::new();
-                http.http1_only(true);
-                http.http1_keep_alive(true);
                 let handle = LocalRegistryHandle {
                     handle: self_clone.clone(),
                 };
-                if let Err(err) = http.serve_connection(stream, handle).await {
+                if let Err(err) = http1::Builder::new()
+                    .serve_connection(TokioIo::new(stream), handle)
+                    .await
+                {
                     slog::error!(self_clone.log, "failure serving HTTP"; "error" => %err);
                 }
             });
@@ -167,15 +186,12 @@ impl LocalRegistry {
         image_name: &str,
         accept: Vec<oci_spec::image::MediaType>,
         manfiest_name: &str,
-    ) -> Result<Response<Body>> {
+    ) -> Result<Response<BoxBody<Bytes, Error>>> {
         let fs = Fs::new();
         let tar_path = self.source_dir.join(format!("{image_name}.tar"));
         if !fs.exists(&tar_path).await {
             slog::error!(self.log, "not found"; "path" => ?tar_path);
-            return Ok(Response::builder()
-                .status(404)
-                .body(Body::from(b"".as_ref()))
-                .unwrap());
+            return Ok(Response::builder().status(404).body(empty()).unwrap());
         }
 
         if accept
@@ -194,7 +210,7 @@ impl LocalRegistry {
             Ok(Response::builder()
                 .status(200)
                 .header("Content-Type", content_type)
-                .body(Body::from(res))
+                .body(full(res))
                 .unwrap())
         } else if accept
             .iter()
@@ -212,40 +228,37 @@ impl LocalRegistry {
                 Ok(Response::builder()
                     .status(200)
                     .header("Content-Type", content_type)
-                    .body(Body::from(res))
+                    .body(full(res))
                     .unwrap())
             } else {
-                Ok(Response::builder()
-                    .status(404)
-                    .body(Body::from(b"".as_ref()))
-                    .unwrap())
+                Ok(Response::builder().status(404).body(empty()).unwrap())
             }
         } else {
-            Ok(Response::builder()
-                .status(404)
-                .body(Body::from(b"".as_ref()))
-                .unwrap())
+            Ok(Response::builder().status(404).body(empty()).unwrap())
         }
     }
 
-    async fn get_blob(&self, image_name: &str, digest: &str) -> Result<Response<Body>> {
+    async fn get_blob(
+        &self,
+        image_name: &str,
+        digest: &str,
+    ) -> Result<Response<BoxBody<Bytes, Error>>> {
         let fs = Fs::new();
         let tar_path = self.source_dir.join(format!("{image_name}.tar"));
         if !fs.exists(&tar_path).await {
             slog::error!(self.log, "not found"; "path" => ?tar_path);
-            return Ok(Response::builder()
-                .status(404)
-                .body(Body::from(b"".as_ref()))
-                .unwrap());
+            return Ok(Response::builder().status(404).body(empty()).unwrap());
         }
         let (algo, digest) = digest
             .split_once(':')
             .ok_or_else(|| anyhow!("bad digest"))?;
 
-        let stream = get_from_tar_stream(&tar_path, format!("blobs/{algo}/{digest}")).await?;
+        let stream = get_from_tar_stream(&tar_path, format!("blobs/{algo}/{digest}"))
+            .await?
+            .map(|res| res.map(Bytes::from).map(Frame::data));
         Ok(Response::builder()
             .status(200)
-            .body(Body::wrap_stream(stream))
+            .body(BoxBody::new(StreamBody::new(stream)))
             .unwrap())
     }
 }
@@ -254,19 +267,12 @@ struct LocalRegistryHandle {
     handle: Arc<LocalRegistry>,
 }
 
-impl Service<Request<Body>> for LocalRegistryHandle {
-    type Response = Response<Body>;
-    type Error = anyhow::Error;
+impl Service<Request<Incoming>> for LocalRegistryHandle {
+    type Response = Response<BoxBody<Bytes, Error>>;
+    type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response>> + Send>>;
 
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::prelude::v1::Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
+    fn call(&self, req: Request<Incoming>) -> Self::Future {
         let self_clone = self.handle.clone();
         Box::pin(async move {
             let path = req.uri().path();
@@ -286,10 +292,7 @@ impl Service<Request<Body>> for LocalRegistryHandle {
                     self_clone.get_manifest(image_name, accept, tag).await?
                 }
                 &[image_name, "blobs", hash] => self_clone.get_blob(image_name, hash).await?,
-                &[] => Response::builder()
-                    .status(200)
-                    .body(Body::from(b"".as_ref()))
-                    .unwrap(),
+                &[] => Response::builder().status(200).body(empty()).unwrap(),
                 a => {
                     bail!("unexpected request {a:?}")
                 }

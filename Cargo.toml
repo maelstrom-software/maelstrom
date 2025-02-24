@@ -81,8 +81,11 @@ gloo-net = "0.6"
 gloo-utils = "0.2"
 heck = "0.5.0"
 hex = "0.4.3"
-hyper = { version = "0.14", features = ["http1", "server", "tcp", "stream"] }
-hyper-tungstenite = "0.11"
+http-body = "1"
+http-body-util = "0.1.2"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-tungstenite = "0.17"
+hyper-util= "0.1"
 indexmap = "2"
 indicatif = { version = "0.17", features = ["in_memory", "tokio"] }
 indoc = "2.0.5"
