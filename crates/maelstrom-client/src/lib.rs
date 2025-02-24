@@ -10,6 +10,7 @@ pub use maelstrom_container::ContainerImageDepotDir;
 
 use anyhow::{anyhow, Context as _, Result};
 use futures::stream::StreamExt as _;
+use hyper_util::rt::TokioIo;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
@@ -64,6 +65,7 @@ type TonicResponse<T> = TonicResult<tonic::Response<T>>;
 async fn run_dispatcher(std_sock: StdUnixStream, mut requester: RequestReceiver) -> Result<()> {
     std_sock.set_nonblocking(true)?;
     let sock = TokioUnixStream::from_std(std_sock.try_clone()?)?;
+    let sock = TokioIo::new(sock);
     let mut closure = Some(move || async move { result::Result::<_, tower::BoxError>::Ok(sock) });
     let channel = tonic::transport::Endpoint::try_from("http://[::]")?
         .connect_with_connector(tower::service_fn(move |_| {

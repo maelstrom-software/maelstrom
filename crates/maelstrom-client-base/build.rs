@@ -31,6 +31,6 @@ fn main() {
     tonic_build::configure()
         .btree_map(["EnvironmentSpec.vars"])
         .type_attribute(".", "#[derive(maelstrom_macro::ProtoBufExt)]")
-        .compile(&["src/items.proto"], &["src/"])
+        .compile_protos(&["src/items.proto"], &["src/"])
         .unwrap();
 }
