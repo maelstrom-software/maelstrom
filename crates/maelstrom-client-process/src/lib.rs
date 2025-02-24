@@ -58,19 +58,6 @@ async fn main_after_clone(
         );
 
     let result = server.await;
-    /*
-    let result = tokio::select! {
-        _ = done_receiver => {
-            Ok(ExitCode::SUCCESS)
-        },
-        _ = eof_receiver => {
-            Ok(ExitCode::SUCCESS)
-        },
-        result = server => {
-            result.map(|()| ExitCode::SUCCESS).map_err(Error::from)
-        }
-    };
-    */
 
     // Tell the local worker to shut down, and then wait for its task to complete. Ignore error, as
     // they only arise if we haven't started or have already stopped.
