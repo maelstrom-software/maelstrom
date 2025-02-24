@@ -3683,6 +3683,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "futures",
+ "http 1.2.0",
  "hyper-util",
  "indicatif",
  "maelstrom-base",

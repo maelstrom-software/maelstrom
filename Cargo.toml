@@ -81,6 +81,7 @@ gloo-net = "0.6"
 gloo-utils = "0.2"
 heck = "0.5.0"
 hex = "0.4.3"
+http = "1"
 http-body = "1"
 http-body-util = "0.1.2"
 hyper = { version = "1", features = ["http1", "server"] }

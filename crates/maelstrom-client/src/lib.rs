@@ -8,8 +8,9 @@ pub use maelstrom_client_base::{
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{anyhow, Context as _, Error, Result};
 use futures::stream::StreamExt as _;
+use http::Uri;
 use hyper_util::rt::TokioIo;
 use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
@@ -39,7 +40,11 @@ use std::{
     pin::Pin,
     process::{self, Command, Stdio},
     result,
-    sync::mpsc::{self as std_mpsc, Receiver},
+    sync::{
+        mpsc::{self as std_mpsc, Receiver},
+        Arc, Mutex,
+    },
+    task::{Context, Poll},
     thread,
 };
 use tokio::{
@@ -61,16 +66,50 @@ type RequestSender = UnboundedSender<RequestFn>;
 type TonicResult<T> = result::Result<T, tonic::Status>;
 type TonicResponse<T> = TonicResult<tonic::Response<T>>;
 
+struct ConnectService<T>(Arc<Mutex<Option<T>>>);
+
+impl<T> ConnectService<T> {
+    fn new(inner: T) -> Self {
+        Self(Arc::new(Mutex::new(Some(inner))))
+    }
+}
+
+impl<T> tower::Service<Uri> for ConnectService<T> {
+    type Response = T;
+    type Error = Error;
+    type Future = Self;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Ok(()).into()
+    }
+
+    fn call(&mut self, _uri: Uri) -> Self::Future {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> Future for ConnectService<T> {
+    type Output = Result<T, Error>;
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Ready(
+            self.0
+                .lock()
+                .unwrap()
+                .take()
+                .ok_or_else(|| anyhow!("client disconnected")),
+        )
+    }
+}
+
 #[tokio::main]
 async fn run_dispatcher(std_sock: StdUnixStream, mut requester: RequestReceiver) -> Result<()> {
     std_sock.set_nonblocking(true)?;
     let sock = TokioUnixStream::from_std(std_sock.try_clone()?)?;
     let sock = TokioIo::new(sock);
-    let mut closure = Some(move || async move { result::Result::<_, tower::BoxError>::Ok(sock) });
+    let service = ConnectService::new(sock);
     let channel = tonic::transport::Endpoint::try_from("http://[::]")?
-        .connect_with_connector(tower::service_fn(move |_| {
-            (closure.take().expect("unexpected reconnect"))()
-        }))
+        .connect_with_connector(service)
         .await?;
 
     while let Some(f) = requester.recv().await {

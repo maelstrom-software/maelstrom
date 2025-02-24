@@ -14,6 +14,7 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 futures.workspace = true
+http.workspace = true
 hyper-util.workspace = true
 indicatif.workspace = true
 maelstrom-base.workspace = true
