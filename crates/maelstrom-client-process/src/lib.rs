@@ -12,7 +12,7 @@ mod util;
 
 pub use maelstrom_util::process::clone_into_pid_and_user_namespace;
 
-use anyhow::{Error, Result};
+use anyhow::Result;
 use futures::stream::{self, StreamExt as _};
 use maelstrom_client_base::proto::client_process_server::ClientProcessServer;
 use maelstrom_linux::{self as linux, Sighandler, Signal, UnixStream};
