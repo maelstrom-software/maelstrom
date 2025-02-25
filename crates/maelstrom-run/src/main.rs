@@ -6,7 +6,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::JobSpec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ContainerImageDepotDir,
-    ForkClientProcessFactory, JobStatus, ProjectDir, StateDir,
+    ForkClientProcessFactory, JobStatus, ProjectDir,
 };
 use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow};
 use maelstrom_macro::Config;
@@ -56,18 +56,6 @@ pub struct Config {
     /// Minimum log level to output.
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
-
-    /// Directory for state that persists between runs, including the client's log file.
-    #[config(
-        value_name = "PATH",
-        default = r#"|bd: &BaseDirectories| {
-            bd.get_state_home()
-                .into_os_string()
-                .into_string()
-                .unwrap()
-        }"#
-    )]
-    pub state_root: RootBuf<StateDir>,
 
     /// Directory to use for the cache. The local worker's cache will be contained within it.
     #[config(
@@ -757,13 +745,11 @@ fn main_with_logger(
         None => Box::new(io::stdin().lock()),
     };
     fs.create_dir_all(&config.cache_root)?;
-    fs.create_dir_all(&config.state_root)?;
     fs.create_dir_all(&config.container_image_depot_root)?;
     let client = Client::new(
         &client_process_factory,
         config.broker,
         Root::<ProjectDir>::new(".".as_ref()),
-        config.state_root,
         config.container_image_depot_root,
         config.cache_root,
         config.cache_size,

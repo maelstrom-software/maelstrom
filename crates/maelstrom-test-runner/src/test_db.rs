@@ -6,10 +6,9 @@
 //!
 //! The database is stored in a TOML file in the state directory.
 
-use crate::{TestArtifactKey, TestCaseMetadata, TestFilter};
+use crate::{StateDir, TestArtifactKey, TestCaseMetadata, TestFilter};
 use anyhow::{anyhow, bail, Result};
 use maelstrom_base::{nonempty, NonEmpty};
-use maelstrom_client::StateDir;
 use maelstrom_util::{
     fs::Fs,
     root::{Root, RootBuf},

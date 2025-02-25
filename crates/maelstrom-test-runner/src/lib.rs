@@ -24,7 +24,7 @@ use log::{LogDestination, LoggerBuilder};
 use maelstrom_base::Timeout;
 use maelstrom_client::{
     CacheDir, Client, ClientProcessFactory, ForkClientProcessFactory, ProjectDir,
-    SpawnClientProcessFactory, StateDir,
+    SpawnClientProcessFactory,
 };
 use maelstrom_util::{
     config::{common::LogLevel, Config},
@@ -73,6 +73,18 @@ pub enum ListingMode {
     /// quickly acquired from `cargo metadata`.
     OtherWithoutUi,
 }
+
+/// According to the XDG base directories spec:
+///
+///   The state directory contains state data that should persist between (application) restarts,
+///   but that is not important or portable enough to the user that it should be stored in
+///   $XDG_DATA_HOME. It may contain:
+///     - actions history (logs, history, recently used files, ...)
+///     - current state of the application that can be reused on a restart (view, layout, open
+///       files, undo history, ...)
+///
+/// For the client process, that currently just means the log files.
+pub struct StateDir;
 
 /// This is the directory that contains build artifacts. The [`CacheDir`] and [`StateDir`]
 /// directories will be descendents of this directory. On the other hand, this directory will
@@ -399,7 +411,6 @@ fn run_app_once<TestRunnerT: TestRunner>(
         client_process_factory,
         parent_config.broker,
         &directories.project,
-        &directories.state,
         &parent_config.container_image_depot_root,
         &directories.cache,
         parent_config.cache_size,

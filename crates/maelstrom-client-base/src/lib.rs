@@ -29,18 +29,6 @@ use serde::Deserialize;
 /// `maelstrom-container-tags.lock` file.
 pub struct ProjectDir;
 
-/// According to the XDG base directories spec:
-///
-///   The state directory contains state data that should persist between (application) restarts,
-///   but that is not important or portable enough to the user that it should be stored in
-///   $XDG_DATA_HOME. It may contain:
-///     - actions history (logs, history, recently used files, ...)
-///     - current state of the application that can be reused on a restart (view, layout, open
-///       files, undo history, ...)
-///
-/// For the client process, that currently just means the log files.
-pub struct StateDir;
-
 /// The cache directory is where we put a variety of different caches. The local worker's cache
 /// directory lives inside of this client cache directory. Another cache in this directory is the
 /// manifest cache.
@@ -210,7 +198,6 @@ pub enum JobStatus {
 pub struct StartRequest {
     pub broker_addr: Option<BrokerAddr>,
     pub project_dir: RootBuf<ProjectDir>,
-    pub state_dir: RootBuf<StateDir>,
     pub container_image_depot_dir: RootBuf<ContainerImageDepotDir>,
     pub cache_dir: RootBuf<CacheDir>,
     pub cache_size: CacheSize,

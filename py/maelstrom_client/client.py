@@ -49,7 +49,6 @@ class Client:
         self.stub.Start(
             StartRequest(
                 project_dir=".".encode(),
-                state_dir=os.path.join(xdg_state_home(), "maelstrom/py").encode(),
                 cache_dir=os.path.join(xdg_cache_home(), "maelstrom/py").encode(),
                 cache_size=1024 * 1024 * 1024,
                 inline_limit=1024 * 1024,

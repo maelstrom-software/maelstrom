@@ -7,7 +7,7 @@ use maelstrom_client::{
     environment_spec, glob_layer_spec, job_spec, paths_layer_spec, spec::LayerSpec,
     stubs_layer_spec, symlink_spec, symlinks_layer_spec, tar_layer_spec,
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ContainerImageDepotDir, ProjectDir,
-    SpawnClientProcessFactory, StateDir,
+    SpawnClientProcessFactory,
 };
 use maelstrom_util::{
     config::common::ArtifactTransferStrategy, elf::read_shared_libraries, fs::Fs, log::test_logger,
@@ -58,7 +58,6 @@ impl ClientFixture {
             &client_process_factory,
             None, /* broker_addr */
             Root::<ProjectDir>::new(&project_dir),
-            Root::<StateDir>::new(&state_dir),
             Root::<ContainerImageDepotDir>::new(&container_image_depot_dir),
             Root::<CacheDir>::new(&cache_dir),
             "1mb".parse().unwrap(), /* cache_size */

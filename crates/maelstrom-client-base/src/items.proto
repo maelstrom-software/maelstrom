@@ -10,7 +10,6 @@ enum ArtifactTransferStrategy {
 message StartRequest {
     optional string broker_addr = 1;
     bytes project_dir = 2;
-    bytes state_dir = 3;
     bytes cache_dir = 4;
     uint64 cache_size = 5;
     uint64 inline_limit = 6;

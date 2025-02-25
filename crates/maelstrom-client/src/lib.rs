@@ -4,7 +4,7 @@ pub use maelstrom_client_base::{
     shared_library_dependencies_layer_spec, spec, stubs_layer_spec, symlink_spec,
     symlinks_layer_spec, tar_layer_spec, AcceptInvalidRemoteContainerTlsCerts, CacheDir,
     IntrospectResponse, JobRunningStatus, JobStatus, ProjectDir, RemoteProgress, RpcLogMessage,
-    StateDir, MANIFEST_DIR,
+    MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
@@ -320,7 +320,6 @@ impl Client {
         client_process_factory: &impl ClientProcessFactory,
         broker_addr: Option<BrokerAddr>,
         project_dir: impl AsRef<Root<ProjectDir>>,
-        state_dir: impl AsRef<Root<StateDir>>,
         container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
         cache_dir: impl AsRef<Root<CacheDir>>,
         cache_size: CacheSize,
@@ -337,7 +336,6 @@ impl Client {
         let start_req = StartRequest {
             broker_addr,
             project_dir: project_dir.as_ref().to_owned(),
-            state_dir: state_dir.as_ref().to_owned(),
             cache_dir: cache_dir.as_ref().to_owned(),
             container_image_depot_dir: container_image_depot_dir.as_ref().to_owned(),
             cache_size,

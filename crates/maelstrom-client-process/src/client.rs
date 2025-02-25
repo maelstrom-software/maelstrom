@@ -6,7 +6,7 @@ use maelstrom_base::proto::Hello;
 use maelstrom_client_base::{
     spec::{self, ContainerSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
-    StateDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_util::{
@@ -103,7 +103,6 @@ impl Client {
         log: Logger,
         broker_addr: Option<BrokerAddr>,
         project_dir: RootBuf<ProjectDir>,
-        state_dir: RootBuf<StateDir>,
         cache_dir: RootBuf<CacheDir>,
         container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
         cache_size: CacheSize,
@@ -115,13 +114,9 @@ impl Client {
     ) -> Result<ClientState> {
         let fs = async_fs::Fs::new();
 
-        // Make sure the state dir exists before we try to put a log file in.
-        fs.create_dir_all(&state_dir).await?;
-
         debug!(log, "client starting";
             "broker_addr" => ?broker_addr,
             "project_dir" => ?project_dir,
-            "state_dir" => ?state_dir,
             "cache_dir" => ?cache_dir,
             "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
             "cache_size" => ?cache_size,
@@ -278,7 +273,6 @@ impl Client {
         log: Logger,
         broker_addr: Option<BrokerAddr>,
         project_dir: RootBuf<ProjectDir>,
-        state_dir: RootBuf<StateDir>,
         cache_dir: RootBuf<CacheDir>,
         container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
         cache_size: CacheSize,
@@ -295,7 +289,6 @@ impl Client {
                 log.clone(),
                 broker_addr,
                 project_dir,
-                state_dir,
                 cache_dir,
                 container_image_depot_cache_dir,
                 cache_size,

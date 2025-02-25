@@ -93,7 +93,6 @@ impl ClientProcess for ArcHandler {
                     log,
                     request.broker_addr,
                     request.project_dir,
-                    request.state_dir,
                     request.cache_dir,
                     request.container_image_depot_dir,
                     request.cache_size,
