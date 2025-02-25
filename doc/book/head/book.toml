@@ -4,3 +4,6 @@ language = "en"
 multilingual = false
 src = "src"
 title = "Maelstrom Documentation"
+
+[output.html]
+smart-punctuation = true

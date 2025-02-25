@@ -4,8 +4,8 @@ All Maelstrom [programs](programs.md) are configured through "configuration
 values". Configuration values can be set through command-line options,
 environment variables, or configuration files.
 
-Each configuration value has a type, which is either string, number, or
-boolean.
+Each configuration value has a type, which is either: string, number, boolean,
+or list of strings.
 
 Imagine a hypothetical configuration value named `config-value` in a
 hypothetical program called `maelstrom-prog`. This configuration value could be
@@ -16,25 +16,47 @@ specified via:
 
 ## Command-Line Options
 
-Configuration values set on the command line override settings from environment
-variables or configuration files.
+Configuration values set on the command line have the highest priority: they
+override settings from environment variables or configuration files.
 
-Type    | Example
---------|----------------------
-string  | `--frob-name=string`
-string  | `--frob-name string`
-number  | `--frob-size=42`
-number  | `--frob-size 42`
-boolean | `--enable-frobs`
-list    | `--frob-name=a --frob-name=b` or `-- a b c`
+Type             | Example
+-----------------|----------------------
+string           | `--frob-name=string`
+string           | `--frob-name string`
+number           | `--frob-size=42`
+number           | `--frob-size 42`
+boolean          | `--enable-frobs`
+list as flags    | `--extra-args=some --extra-args=list --extra-args=elements`
+list as var-args | `-- some list elements`
 
 There is currently no way to set a boolean configuration value to `false` from
-the command-line.
+the command line.
+
+### Lists
+
+There are two types of list configuration values: those specified using flags
+like `--foo`, and those specified as "var-args", after a `--`. The most
+commonly used list configuration value will be specified using var-args, and the
+rest will use flags.
+
+For example, imagine `maelstrom-prog` has two list configuration values:
+`args-to-foo` and `args-to-bar` that are used to pass extra arguments to the
+commands `foo` and `bar`. Imagine `args-to-foo` is the most common, so it's
+specified using var-args, while `args-to-bar` uses flags. We could invoke
+`maelstrom-prog` like this:
+
+```
+maelstrom-prog --args-to-bar=bar-arg-1 --args-to-bar bar-arg-2 -- foo-arg-1 foo-arg-2
+```
+
+There is currently no way to explicitly set an empty list value on the command
+line.
 
 ## Environment Variables
 
-Configuration values set via environment variables override settings from
-configuration files, but are overridden by command-line options.
+Configuration values set via environment variables have intermediate priority:
+they override settings from configuration files, but are overridden by
+command-line options.
 
 The environment variable name is created by converting the configuration value
 to ["screaming snake case"](https://en.wikipedia.org/wiki/Snake_case), and
@@ -47,14 +69,24 @@ string  | `MAELSTROM_PROG_FROB_NAME=string`
 number  | `MAELSTROM_PROG_FROB_SIZE=42`
 boolean | `MAELSTROM_PROG_ENABLE_FROBS=true`
 boolean | `MAELSTROM_PROG_ENABLE_FROBS=false`
-list    | `MAELSTROM_PROG_FROBS="a b c"`
+list    | `MAELSTROM_PROG_FROBS="some list elements"`
 
-Note that you don't put quotation marks around string values. You also can set
-boolean values to either `true` or `false`.
+Note that quotation marks aren't expected for string values. The string value
+will be the entirety of the environment variable.
 
-List values are white-space delimited. Any extra white-space between entries is ignored.
+Boolean values can be set to either `true` or `false` using environment variables.
+
+List values are whitespace delimited. Any extra whitespace between entries is
+ignored. There is currently no way to include a list element that has internal
+whitespace.
+
+Any empty list value can be specified with an empty string, or one containing
+only whitespace.
 
 ## Configuration Files
+
+Configuration values set in configuration files have the lowest priority: they
+are overridden by both command-line options and environment variables.
 
 Configuration files are in [TOML](https://toml.io/en/) format. In configuration
 files, configuration values map to keys of the same name. Values types map to
@@ -65,7 +97,7 @@ frob-name = "string"
 frob-size = 42
 enable-frobs = true
 enable-qux = false
-frobs = ["a", "b"]
+frobs = ["some", "list", "elements"]
 ```
 
 Maelstrom programs support the existence of multiple configuration files. In
@@ -122,3 +154,20 @@ Command Line                                   | Configuration File(s)
 `maelstrom-prog --config-file - ...`           | none
 `maelstrom-prog ...`                           | [search results](#configuration-file-search)
 
+## Optional Values and Defaults
+
+Almost all configuration values have some sort of default value. These default
+values come in two types.
+
+The first type is a value that can be specified by the user. For example, an integer
+configuration value's default value might be `4`. All boolean and list configuration values
+have default values of this form: booleans default to `false` and lists default
+to empty lists.
+
+The second type of default value is one that can't be specifically specified by
+the user. Once a value of this type is set at one layer, it can't be "unset" at
+a higher layer. An example of this is `cargo-maelstrom`'s `target-dir`
+configuration value. The default value is "whatever `cargo`'s default is".
+
+Regardless of type, all of the configuration values, along with their defaults,
+can be inspected by running the program with the `--help` command-line option.

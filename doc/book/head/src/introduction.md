@@ -19,7 +19,7 @@ way. You might use Maelstrom to run your tests because:
 * It's fast. In most cases, Maelstrom is faster than `cargo test` or `go test`,
   even without using clustering. Maelstrom’s test-per-process model is inherently
   slower than Pytest’s shared-process model, but Maelstrom provides test
-  isolation at a low performance cost
+  isolation at a low performance cost.
 
 While our focus thus far has been on running tests, Maelstrom's underlying job
 execution system is general-purpose. We provide a command line utility to run

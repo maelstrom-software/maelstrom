@@ -5,9 +5,9 @@ categories: clients and daemons.
 
 ## Clients
 
-Clients include the test runners &mdash;
+Clients include the test runners ---
 [`cargo-maelstrom`](cargo-maelstrom.md), [`maelstrom-go-test`](go-test.md), and
-[`maelstrom-pytest`](pytest.md) &mdash; plus the CLI tool
+[`maelstrom-pytest`](pytest.md) --- plus the CLI tool
 [`maelstrom-run`](run.md).
 
 ### Test Runners
@@ -19,9 +19,9 @@ run the test binaries, and how to execute individual tests using the test
 binaries. They then use this information to build tests, execute them on the
 Maelstrom system, and then collect and present the results.
 
-We currently have three test runners, but we're working to add more quickly.
-Please let us know if there is a specific test framework you are interested in,
-and we'll work to prioritize it.
+We currently have three test runners, but we plan to add more. Please let us
+know if there is a specific test framework you are interested in, and we'll
+work to prioritize it.
 
 ### `maelstrom-run`
 
