@@ -17,7 +17,7 @@ do so.
 # Running Tests
 
 As described [here](dirs.html#project-directory), `maelstrom-go-test` finds the
-project directory and then proceding up the directory tree until a `go.mod`
+project directory and then proceeding up the directory tree until a `go.mod`
 file is found. This means that `maelstrom-go-test` will run all the tests for
 the main module, even if it is invoked in a subdirectory of the module. If you
 want to restrict the tests to run, use the [`--include` and `--exclude`
