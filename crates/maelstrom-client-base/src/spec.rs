@@ -378,10 +378,10 @@ pub struct ContainerSpec {
     pub parent: Option<ContainerParent>,
     pub layers: Vec<LayerSpec>,
     pub environment: Vec<EnvironmentSpec>,
-    pub working_directory: Option<Utf8PathBuf>,
-    pub enable_writable_file_system: Option<bool>,
     pub mounts: Vec<JobMount>,
     pub network: Option<JobNetwork>,
+    pub enable_writable_file_system: Option<bool>,
+    pub working_directory: Option<Utf8PathBuf>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
 }
@@ -767,8 +767,8 @@ pub struct JobSpec {
     pub arguments: Vec<String>,
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
-    pub allocate_tty: Option<JobTty>,
     pub priority: i8,
+    pub allocate_tty: Option<JobTty>,
     pub capture_file_system_changes: Option<CaptureFileSystemChanges>,
 }
 
