@@ -22,7 +22,7 @@ Simple selectors consist solely of one of the these identifiers:
 Simple Selector      | What it Matches
 ---------------------|------------------------------
 `true`, `any`, `all` | any test
-`false`, `none`      | no test
+`false`, `none`      | no tests
 
 Simple selectors can optionally be followed by `()`. That is, `all()` and
 `all` are equivalent patterns.
@@ -70,7 +70,7 @@ Let's put this all together with some examples:
 Pattern                                               | What it Matches
 ------------------------------------------------------|----------------
 `node_id.equals(test_mod.py::TestClass::test_method)` | Any test named `"test_mod.py::TestClass::test_method"`.
-`file.contains/maelstrom/`                            | Any test in file whose name contains the substring `"maelstrom"`.
+`file.contains/maelstrom/`                            | Any test in a file whose name contains the substring `"maelstrom"`.
 `package.matches{(foo)*bar}`                          | Any test whose package name matches the regular expression `(foo)*bar`.
 
 ## Markers Selector

@@ -59,9 +59,7 @@ This is a setting [common to all](../common-config.md) Maelstrom programs.
 See [here](../common-config.md#log-level) for details.
 
 <span style="white-space: nowrap;">`maelstrom-pytest`</span> always prints log
-messages to stdout. It also passes
-the log level to `maelstrom-client`, which will log its output in a [file named
-`client-process.log` in the state directory](target-dir.md#client-log-file).
+messages to stdout.
 
 ## `quiet`
 

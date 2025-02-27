@@ -22,16 +22,16 @@ Simple selectors consist solely of one of the these identifiers:
 Simple Selector      | What it Matches
 ---------------------|------------------------------
 `true`, `any`, `all` | any test
-`false`, `none`      | no test
+`false`, `none`      | no tests
 
 Simple selectors can optionally be followed by `()`. That is, `all()` and
 `all` are equivalent patterns.
 
 ## Compound Selectors
 
-"Compound selector patterns" are patterns like `package.equals(foo)`. They
+"Compound selector patterns" are patterns like `name.equals(foo)`. They
 combine "compound selectors" with "matchers" and "arguments". In our example,
-`package` is the compound selector, `equals` is the matcher, and `foo` is the
+`name` is the compound selector, `equals` is the matcher, and `foo` is the
 argument.
 
 These are the possible compound selectors:
@@ -117,10 +117,10 @@ We can abbreviate `name` to `n` since no other selector starts with "n", but we
 can't abbreviate `equals` to `e` because there is another selector, `ends_with`,
 that also starts with an "e".
 
-The `package_import_path` matcher name has a special case. Any prefix of `package` will resolve
+The `package_import_path` matcher name is a special case. Any prefix of `package` will resolve
 to `package_import_path` instead of `package_path` or `package_name`.
 
-For example, all of the following resolve to `package_import_path`
+For example, all of the following are equivalent to `package_import_path.equals(foo)`
 ```maelstrom-test-pattern
 package_import_path.equals(foo)
 package_i.equals(foo)

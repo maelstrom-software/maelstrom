@@ -1,15 +1,16 @@
 # Initializing `maelstrom-go-test.toml`
 
-It's likely that at some point you'll need to adjust the job specs for some
-tests. At that point, you're going to need an actual `maelstrom-go-test.toml`.
-Instead of starting from scratch, you can have `maelstrom-go-test` create one
-for you:
+If there is no `maelstrom-go-test.toml` in the workspace root, then
+`maelstrom-go-test` will use a [default configuration](default.md).
+
+When it comes time to build a more complex configuration, you can have
+`maelstrom-go-test` write out the default configuration:
 
 ```bash
 maelstrom-to-test --init
 ```
 
-This will create a `maelstrom-go-test.toml` file, unless one already exists,
-then exit. The resulting `maelstrom-go-test.toml` will match the default
-configuration. It will also include some commented-out examples that may be
-useful.
+This will create a `maelstrom-go-test.toml` file in the workspace root, unless
+one already exists, then exit. The resulting `maelstrom-go-test.toml` will
+contain the default configuration. It will also include some commented-out
+examples that may be useful.

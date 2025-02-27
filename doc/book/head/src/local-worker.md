@@ -19,11 +19,11 @@ worker is utilized even when the client is connected to a cluster.
 Clients have the following configuration values to configure their local
 workers:
 
-Value                                                    | Type    | Description                                                   | Default
----------------------------------------------------------|---------|---------------------------------------------------------------|----------
-<span style="white-space: nowrap;">`cache-size`</span>   | string  | [target cache disk space usage](#cache-size)                  | `"1 GB"`
+Value                                                    | Type    | Description                                                           | Default
+---------------------------------------------------------|---------|-----------------------------------------------------------------------|----------
+<span style="white-space: nowrap;">`cache-size`</span>   | string  | [target cache disk space usage](#cache-size)                          | `"1 GB"`
 <span style="white-space: nowrap;">`inline-limit`</span> | string  | [maximum amount of captured standard output and error](#inline-limit) | `"1 MB"`
-`slots`                                                  | number  | [job slots available](#slots)                                 | 1 per CPU
+`slots`                                                  | number  | [job slots available](#slots)                                         | 1 per CPU
 
 ## `cache-size`
 

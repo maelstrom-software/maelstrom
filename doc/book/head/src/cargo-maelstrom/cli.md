@@ -65,7 +65,7 @@ or running any tests.
 
 This option can be combined with [`--include` and `--exclude`](#include-and-exclude).
 
-### Working with Workspaces
+## Working with Workspaces
 
 When you specify a filter with a package, `cargo-maelstrom` will only build the
 matching packages. This can be a useful tip to remember when trying to run a
@@ -88,7 +88,7 @@ cargo maelstrom --include "package.equals(baz) && name.equals(foobar)"
 Since we specified that we only care about the `baz` package, `cargo-maelstrom`
 will only bother to build that package.
 
-### Abbreviations
+## Abbreviations
 
 As discussed [here](filter.md#abbreviations), unambiguous prefixes can be used
 in patterns. This can come in handy when doing one-offs on the command line.

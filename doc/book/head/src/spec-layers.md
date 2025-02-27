@@ -57,7 +57,9 @@ pub struct PrefixOptions {
 }
 ```
 
-The [`Paths`](#paths) and [`Glob`](#glob) layer types support some options that
+The [`Paths`](#paths), [`Glob`](#glob), and
+[`SharedLibraryDependencies`](#sharedlibrarydependencies) layer types support
+some options that
 can be used to control how the resulting layer is created. They apply to all
 paths included in the layer. These options can be combined, and in such a
 scenario you can think of them taking effect in the given order:
@@ -72,28 +74,28 @@ Here are some examples.
 ### `follow_symlinks`
 
 If `test/d/symlink` is a symlink which points to the file `test/d/target`, and
-is specified with `follow_symlinks`, then Maelstrom will put a regular file in
+is specified with `follow_symlinks`, then the client will put a regular file in
 the container at `/test/d/symlink` with the contents of `test/d/target`.
 
 ### `canonicalize`
 
 If the client is executing in the directory `/home/bob/project`, and the
-`layers/c/*.bin` glob is specified with `canonicalize`, then Maelstrom will put
+`layers/c/*.bin` glob is specified with `canonicalize`, then the client will put
 files in the container at `/home/bob/project/layers/c/*.bin`.
 
 Additionally, if `/home/bob/project/layers/py` is a symlink pointing to
 `/var/py`, and the `layers/py/*.py` glob is specified with `canonicalize`, then
-Maelstrom will put files in the container at `/var/py/*.py`.
+the client will put files in the container at `/var/py/*.py`.
 
 ### `strip_prefix`
 
-If `layers/a/a.bin` is specified with `strip_prefix = "layers/"`, then Maelstrom
+If `layers/a/a.bin` is specified with `strip_prefix = "layers/"`, then the client
 will put the file in the container at `/a/a.bin`.
 
 ### `prepend_prefix`
 
 If `layers/a/a.bin` is specified with `prepend_prefix = "test/"`, then
-Maelstrom will put the file in the container at `/test/layers/a/a.bin`.
+the client will put the file in the container at `/test/layers/a/a.bin`.
 
 ## `Glob`
 ```rust
@@ -159,7 +161,7 @@ If a string contains the `{` character, the
 perform brace expansion, transforming the single string into multiple strings.
 
 If a string ends in `/`, an empty directory will be added to the layer.
-Otherwise, and empty file will be added to the layer. Any parent directories
+Otherwise, an empty file will be added to the layer. Any parent directories
 will also be created as necessary.
 
 For example, the set of stubs `["/dev/{null,zero}", "/{proc,tmp}/", "/usr/bin/"]` would
@@ -177,6 +179,7 @@ result in a layer with the following files and directories:
 pub enum LayerSpec {
     // ...
     Symlinks { symlinks: Vec<SymlinkSpec> },
+    // ...
 }
 
 pub struct SymlinkSpec {
@@ -186,8 +189,8 @@ pub struct SymlinkSpec {
 ```
 
 The `Symlinks` layer is used to create symlinks. The specified `link`s will be
-created, pointing to the specified `target`s. Any parent directories will also
-be created, as necessary.
+created, pointing to the specified `target`s. Any parent directories the
+`link`s will also be created, as necessary.
 
 ## `SharedLibraryDependencies`
 ```rust
@@ -202,9 +205,10 @@ pub enum LayerSpec {
 
 The `SharedLibraryDependencies` layer is used to include the shared libraries required to run some
 binaries. The given paths to local binaries are inspected and the closure of shared libraries they
-rely on are included in the layer. This set of libraries includes `libc` and the dynamic linker. It
-will fail to create the layer if any of the binaries have missing libraries. The layer does not
-include the binaries themselves, to include them use a separate layer.
+rely on are included in the layer. This set of libraries will almost always
+include `libc` and the dynamic linker. It will fail to create the layer if any
+of the binaries have missing libraries. The layer does not include the binaries
+themselves, to include them use a separate layer.
 
-The `prefix_options` are applied to the paths to the shared libraries, as [described
+The `prefix_options` are applied to the shared libraries' paths, as [described
 above](#prefixoptions).

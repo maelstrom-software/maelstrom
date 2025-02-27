@@ -5,9 +5,10 @@ documents them.
 
 ## Project Directory
 
-The project directory is used to resolve [local](spec-layers.md#glob)
-[relative](spec-layers.md#paths) paths. It's also where the client will put the
-[container tags lock file](container-images.md#lock-file).
+The project directory is used to resolve local paths, as are used in
+[various](spec-layers.md#glob) [layers](spec-layers.md#paths). It's also where
+the client will put the [container tags lock
+file](container-images.md#lock-file).
 
 For `maelstrom-pytest` and `maelstrom-run`, the project directory is just the
 current working directory.
@@ -28,33 +29,6 @@ download from image registries. It's usually desirable to share this directory
 across all clients and all projects. It's specified by the
 `container-image-depot-root` configuration value. See
 [here](../container-images.md#container-image-depot-root) for details.
-
-## State Directory
-
-The state directory concept comes from the [XDG Base Directory
-Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html).
-It's where the client will put things that should persist between restarts, but
-aren't important enough to be stored elsewhere, and which can removed safely.
-
-Maelstrom clients use this directory for two purposes. First,
-every client spawns a program called `maelstrom-client` which it speaks to
-using gRPC messages. The log output for this program goes to the
-`client-process.log` file in the state directory.
-
-Second, test runners keep track of test counts and test timings between runs.
-This lets them estimate how long a test will take, and how many tests still
-need to be built or run. Without this information, test runners will just give
-inaccurate estimates until they've rebuilt the state.
-
-This state is project- and client-specific, so it is stored within the project
-in a client-specific directory:
-
-Client              | State Directory
---------------------|----------------
-`maelstrom-run`     | [`state-root` configuration value](run/config.md#state-root) or the XDG specification
-`cargo-maelstrom`   | `maelstrom/state` in the target subdirectory of the project directory
-`maelstrom-go-test` | `.maelstrom-go-test/state` in the project directory
-`maelstrom-pytest`  | `.maelstrom-pytest/state` in the current directory
 
 ## Cache Directory
 
