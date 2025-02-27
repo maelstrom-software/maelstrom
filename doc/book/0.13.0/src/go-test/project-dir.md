@@ -40,13 +40,6 @@ nowrap;">`maelstrom-go-test`</span> caches this information. This cache is store
 in <span style="white-space:
 nowrap;">`.maelstrom-go-test/cache/cached-digests.toml`</span> in the project directory.
 
-## Client Log File
-
-The local client process &mdash; the one that <span style="white-space:
-nowrap;">`maelstrom-go-test`</span> talks to, and that contains the local worker
-&mdash; has a log file that is stored at <span style="white-space:
-nowrap;">`.maelstrom-go-test/state/client-process.log`</span> in the project directory.
-
 ## Test Listing
 
 When <span style="white-space: nowrap;">`maelstrom-go-test`</span> finishes, it

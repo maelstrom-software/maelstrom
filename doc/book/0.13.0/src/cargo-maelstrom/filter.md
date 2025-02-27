@@ -3,7 +3,7 @@
 There are times when a user needs to concisely specify a set of tests to
 `cargo-maelstrom`. One of those is on the command line: `cargo-maelstrom`
 can be told to only run a certain set of tests, or to exclude some tests.
-Another is the [`filter`](spec/fields.md#filter) field of `cargo-maelstrom.toml`
+Another is the [`filter`](spec/directives.md#filter) field of `cargo-maelstrom.toml`
 directives. This is used to choose which tests a directive applies too.
 
 In order to allow users to easily specify a set of tests to `cargo-maelstrom`,
@@ -22,7 +22,7 @@ Simple selectors consist solely of one of the these identifiers:
 Simple Selector      | What it Matches
 ---------------------|------------------------------
 `true`, `any`, `all` | any test
-`false`, `none`      | no test
+`false`, `none`      | no tests
 `library`            | any test in a library crate
 `binary`             | any test in a binary crate
 `benchmark`          | any test in a benchmark crate

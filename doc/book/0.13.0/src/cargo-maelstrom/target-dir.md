@@ -39,18 +39,11 @@ nowrap;">`cargo-maelstrom`</span> caches this information. This cache is stored
 in <span style="white-space:
 nowrap;">`maelstrom/cache/cached-digests.toml`</span> in the target directory.
 
-## Client Log File
-
-The local client process &mdash; the one that <span style="white-space:
-nowrap;">`cargo-maelstrom`</span> talks to, and that contains the local worker
-&mdash; has a log file that is stored at <span style="white-space:
-nowrap;">`maelstrom/state/client-process.log`</span> in the target directory.
-
 ## Test Listing
 
 When <span style="white-space: nowrap;">`cargo-maelstrom`</span> finishes, it
 updates a list of all of the tests in the workspace, and how long they took to
 run. This is used to predict the number of tests that will be run in subsequent
-invocations, as well as how long they will take. This is stored in the <span
-style="white-space: nowrap;">`maelstrom/state/test-listing.toml`</span> file in
+invocations, as well as how long they will take. This is stored in the ---
+`maelstrom/state/test-listing.toml` --- file in
 the target directory.

@@ -11,7 +11,6 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`container-image-depot-root`</span> | string  | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
 `accept-invalid-remote-container-tls-certs`                            | boolean | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
 <span style="white-space: nowrap;">`broker`</span>                     | string  | [address of broker](#broker)                                                                | standalone mode
-<span style="white-space: nowrap;">`state-root`</span>                 | string  | [directory for client process's log file](#state-root)                                      | `$XDG_STATE_HOME/maelstrom/run`
 <span style="white-space: nowrap;">`cache-root`</span>                 | string  | [directory for local worker's cache and cached layers](#cache-root)                         | `$XDG_CACHE_HOME/maelstrom/run`
 <span style="white-space: nowrap;">`escape-char`</span>                | string  | [TTY escape character for `--tty` mode](#escape-char)                                       | `"^]"`
 
@@ -20,9 +19,7 @@ Value                                                                  | Type   
 This is a setting [common to all](../common-config.md) Maelstrom programs.
 See [here](../common-config.md#log-level) for details.
 
-`maelstrom-run` always prints log messages to standard error. It also passes
-the log level to `maelstrom-client`, which will log its output in a file named
-`client-process.log` in the [state directory](#state-root).
+`maelstrom-run` always prints log messages to standard error.
 
 ## `cache-size`
 
@@ -47,10 +44,6 @@ This is a [container-image setting](../container-images.md), common to all clien
 ## `broker`
 
 This is a setting common to all clients. See [here](../specifying-broker.md) for details.
-
-## `state-root`
-
-This is a [directory setting](../dirs.md) common to all clients. See [here](../dirs.md#state-dir) for more details.
 
 ## `cache-root`
 

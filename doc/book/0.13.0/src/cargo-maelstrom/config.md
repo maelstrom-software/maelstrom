@@ -66,9 +66,7 @@ This is a setting [common to all](../common-config.md) Maelstrom programs.
 See [here](../common-config.md#log-level) for details.
 
 <span style="white-space: nowrap;">`cargo-maelstrom`</span> always prints log
-messages to stdout. It also passes
-the log level to `maelstrom-client`, which will log its output in a [file named
-`client-process.log` in the state directory](target-dir.md#client-log-file).
+messages to stdout.
 
 ## `quiet`
 
@@ -101,7 +99,7 @@ used as an alias for `--repeat`.
 
 The optional `timeout` configuration value provides the
 [timeout](../spec.md#timeout) value to use for all tests. This will override
-any value set in [`cargo-maelstrom.toml`](spec/fields.md#timeout).
+any value set in [`cargo-maelstrom.toml`](spec/directives.md#timeout).
 
 ## Cargo Settings {#cargo}
 

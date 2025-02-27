@@ -2,12 +2,13 @@
 
 Maelstrom runs each job in its own container. By default, these containers are
 minimal and are built entirely from files copied from the local machine. This
-works well for compiled languages (like Rust), where job don't depend on
-executing other programs. However, for interpreted languages (like Python), or
-in situations where the job needs to execute other programs, Maelstrom provides a way to
-create containers based off of a standard, OCI container images. These
-container images can be retrieved from a container registry like [Docker
-Hub](https://hub.docker.com/), or provided from the local machine.
+works well for compiled languages (like Rust), where jobs don't depend on an
+interpreter or executing other programs. However, for interpreted languages
+(like Python), or in situations where the job needs to execute other programs,
+Maelstrom provides a way to create containers based off of a standard, OCI
+container images. These container images can be retrieved from a container
+registry like [Docker Hub](https://hub.docker.com/), or provided from the local
+machine.
 
 ## Container Image URIs
 
@@ -68,8 +69,8 @@ is how the Containers project specifies this scheme.
 
 When a container image is specified, the client will first download or copy the
 image into its cache directory. It will then use the internal bits of the [OCI
-image](https://github.com/opencontainers/image-spec) &mdash; most importantly
-the file-system layers &mdash; to create the container for the job.
+image](https://github.com/opencontainers/image-spec) --- most importantly the
+file-system layers --- to create the container for the job.
 
 The cache directory can be set with the `container-image-depot-root`
 [configuration value](config.md). If this value isn't set, but `XDG_CACHE_HOME`
@@ -98,15 +99,16 @@ and store the new results.
 ## Authentication
 
 When a client connects to a container registry, it may need to authenticate.
-Maelstrom currently only supports registries for no authentication or with
-anonymous authentication. Password authentication will be added in the future.
+Maelstrom currently only supports registries that don't require authentication
+or ones that allow anonymous authentication. Password authentication will be
+added in the future.
 
 ## Image Registry TLS Certificates {#accept-invalid-remote-container-tls-certs}
 
 Maelstrom always uses HTTPS to connect to container registries. By default, it
-will reject self-signed or otherwise invalid certificates. However, clients can be told to accept these
-certificates with the `accept-invalid-remote-container-tls-certs`
-[configuration value](config.md).
+will reject self-signed or otherwise invalid certificates. However, clients can
+be told to accept these certificates with the
+`accept-invalid-remote-container-tls-certs` [configuration value](config.md).
 
 ## Configuration Values
 

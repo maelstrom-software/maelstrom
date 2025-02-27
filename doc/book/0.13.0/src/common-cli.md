@@ -8,7 +8,8 @@ values](common-config.md).
 
 The `--help` (or `-h`) command-line option will print out the program's
 command-line options, configuration values (including their associated
-environment variables), and configuration-file search path, then exit.
+environment variables and default values), and configuration-file search path,
+then exit.
 
 ## `--version`
 
