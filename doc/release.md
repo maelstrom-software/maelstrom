@@ -5,10 +5,14 @@
 Set two environment variables so we can cut and paste below:
 ```bash
 VERSION=1.2.0
-NEXT_VERSION=1.3.0
+NEXT_VERSION=1.2.1
 ```
 
 Obviously, you should choose the correct version strings.
+
+Generally, it's best to set `NEXT_VERSION` to be the smallest increment over
+`VERSION` as possible. We can choose to skip the patch level and go right to
+the next minor or major version when it comes time to cut the next version.
 
 ## Update `CHANGELOG.md`
 
