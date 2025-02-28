@@ -185,6 +185,7 @@ pub struct ExtraCommandLineOptions {
 
     #[arg(
         long,
+        short = 'w',
         help = "Loop running tests then waiting for changes.",
         help_heading = "Test Runner Options"
     )]
