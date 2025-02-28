@@ -1,7 +1,7 @@
 # Test Execution Order
 
-Maelstrom doesn't execute tests in a random order. Instead, it tries to execute
-them in an order that will be helpful to the user.
+Maelstrom tries to execute tests in an order that will be helpful to the user.
+This chapter describes how Maelstrom arrives at the execution order.
 
 ## Understanding Priorities
 
@@ -24,7 +24,7 @@ available.
 A test's priority consists of the two parts. The first part, and more important
 part, is whether the test is new or failed the last time it was run. The logic
 here is that user probably is most interested in finding out the outcomes of
-these tests. New tests and test that failed the last time they were run have
+these tests. New tests and tests that failed the last time they were run have
 the same priority.
 
 A test is considered new if Maelstrom has no record of it executing. If the
@@ -33,9 +33,24 @@ consider every test to be new. If a test, its artifacts, or its package is
 renamed, it is also considered new.
 
 A test is considered to have failed the last time it was run if there was even
-one failure. This is relevant when the `--repeat` configuration value is set.
-If the previous run For example, if `--repeat=1000` is passed, and the passes
-999 times and fails just once, it is still considered to have failed.
+one failure. This is relevant when the [`--repeat` configuration
+value](config.md#repeat) is set. If the previous run For example, if
+`--repeat=1000` is passed, and the passes 999 times and fails just once, it is
+still considered to have failed.
+
+### Synergy with `--stop-after`
+
+As mentioned [previously](stop-after.md), this aspect of Maelstrom's test
+execution order combines very well with the [`--stop-after` configuration
+value](config.md#stop-after). New tests and tests that previously failed are
+the ones most likely to fail on the next run. If you provide a
+[`--stop-after=1`] to Maelstrom, then if those tests fail again, you'll get
+very fast feedback.
+
+This works even if the total number of tests being run numbers in the thousands
+and takes a while to execute. After a failure is discovered, if you use
+`--stop-after=1`, you can continue to work through that failure without
+reducing the total number of tests being run.
 
 ## Estimated Duration and LPT Scheduling
 
