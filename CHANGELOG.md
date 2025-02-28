@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- Made `--watch` flag visible in help for `cargo-maelstrom`,
-  `maelstrom-go-test`, and `maelstrom-pytest.
-- Gave `--watch` a `-w` short option for `cargo-maelstrom`,
-  `maelstrom-go-test`, and `maelstrom-pytest`.
+### All Test Runners (`cargo-maelstrom`, `maelstrom-go-test`, and `maelstrom-pytest`)
+- Made `--watch` flag visible in help.
+- Gave `--watch` a `-w` short option.
+- Gave `--repeat` a `-t` short option.
+- Gave `--stop-after` a `-s` short option.
 
 ## [0.13.0] - 2025-02-24
 

@@ -135,11 +135,21 @@ pub struct Config {
     pub ui: UiKind,
 
     /// The number of times to run each selected test. Must be non-zero.
-    #[config(alias = "loop", value_name = "COUNT", default = "Repeat::default()")]
+    #[config(
+        short = 'r',
+        alias = "loop",
+        value_name = "COUNT",
+        default = "Repeat::default()"
+    )]
     pub repeat: Repeat,
 
     /// Stop running tests after the given number of failures are encountered.
-    #[config(option, value_name = "NUM-FAILURES", default = r#""never stop""#)]
+    #[config(
+        option,
+        short = 's',
+        value_name = "NUM-FAILURES",
+        default = r#""never stop""#
+    )]
     pub stop_after: Option<StopAfter>,
 
     /// Override timeout value for all tests specified (O indicates no timeout).
