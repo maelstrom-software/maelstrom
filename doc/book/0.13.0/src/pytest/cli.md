@@ -13,6 +13,7 @@ Option                                                      | Short Alias | Argu
 <span style="white-space: nowrap;">`--include`</span>       | `-i`        | [pattern](filter.md) | [include tests that match pattern](#--include-and---exclude)
 <span style="white-space: nowrap;">`--exclude`</span>       | `-x`        | [pattern](filter.md) | [exclude tests that match pattern](#--include-and---exclude)                                                  
 <span style="white-space: nowrap;">`--init`</span>          |             |                      | [initialize test metadata file](#--init)
+<span style="white-space: nowrap;">`--watch`</span>         |             |                      | [loop running tests then waiting for changes](#--watch)
 <span style="white-space: nowrap;">`--list`</span>          |             |                      | [only list matching tests instead of running them](#--list)
 
 ## `--include` and `--exclude` {#include-and-exclude}
@@ -35,8 +36,14 @@ If no `--include` option is provided, `maelstrom-pytest` acts as if an
 ## `--init`
 
 The `--init` command-line option is used to create a starter
-`maelstrom-pytest.toml` file. See [here](spec/initializing.html) for more
+`maelstrom-pytest.toml` file. See [here](spec/initializing.md) for more
 information.
+
+## `--watch`
+
+The `--watch` command-line option causes `maelstrom-pytest` to run tests
+repeatedly in a loop, waiting for changes to the project directory in between
+runs. See [here](watch.md) for more information.
 
 ## `--list`
 

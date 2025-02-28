@@ -13,6 +13,7 @@ Option                                                      | Short Alias | Argu
 <span style="white-space: nowrap;">`--include`</span>       | `-i`        | [pattern](filter.md) | [include tests that match pattern](#--include-and---exclude)
 <span style="white-space: nowrap;">`--exclude`</span>       | `-x`        | [pattern](filter.md) | [exclude tests that match pattern](#--include-and---exclude)                                                  
 <span style="white-space: nowrap;">`--init`</span>          |             |                      | [initialize test metadata file](#--init)
+<span style="white-space: nowrap;">`--watch`</span>         |             |                      | [loop running tests then waiting for changes](#--watch)
 <span style="white-space: nowrap;">`--list`</span>          |             |                      | [alias for `--list-tests`](#--list-tests-or---list)
 <span style="white-space: nowrap;">`--list-tests`</span>    |             |                      | [only list matching tests instead of running them](#--list-tests-or---list)
 <span style="white-space: nowrap;">`--list-packages`</span> |             |                      | [only list matching test packages instead of running tests](#--list-packages)
@@ -37,8 +38,14 @@ If no `--include` option is provided, `maelstrom-go-test` acts as if an
 ## `--init`
 
 The `--init` command-line option is used to create a starter
-`maelstrom-go-test.toml` file. See [here](spec/initializing.html) for more
+`maelstrom-go-test.toml` file. See [here](spec/initializing.md) for more
 information.
+
+## `--watch`
+
+The `--watch` command-line option causes `maelstrom-go-test` to run tests
+repeatedly in a loop, waiting for changes to the project directory in between
+runs. See [here](watch.md) for more information.
 
 ## `--list-tests` or `--list`
 
