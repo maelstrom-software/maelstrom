@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Made `--watch` flag visible in help for `cargo-maelstrom`,
+  `maelstrom-go-test`, and `maelstrom-pytest.
+
 ## [0.13.0] - 2025-02-24
 
 ### Changed

@@ -179,17 +179,17 @@ pub struct ExtraCommandLineOptions {
     #[arg(
         long,
         help = "Write out a starter test metadata file if one does not exist, then exit.",
-        help_heading = "Test Metadata Options"
+        help_heading = "Test Runner Options"
     )]
     pub init: bool,
 
-    #[arg(long, hide(true), help = "Only used for testing purposes.")]
-    pub client_process: bool,
-
     #[arg(
         long,
-        hide(true),
-        help = "Keep running tests in a loop waiting for changes in-between"
+        help = "Loop running tests then waiting for changes.",
+        help_heading = "Test Runner Options"
     )]
     pub watch: bool,
+
+    #[arg(long, hide(true), help = "Only used for testing purposes.")]
+    pub client_process: bool,
 }
