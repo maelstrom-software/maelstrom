@@ -53,7 +53,7 @@ We just create artifacts in the store named by their SHA-256 checksums.
 The best way to learning how to use this feature is by looking at [this
 workflow](https://github.com/maelstrom-software/maelstrom-examples/blob/main/.github/workflows/ci-base.yml)
 in the the [Maelstrom examples
-repository](https://github.com/maelstrom/software/maelstrom-examples).
+repository](https://github.com/maelstrom-software/maelstrom-examples).
 
 You will see that one GitHub job is used to run the broker and all of the test
 runners, while worker are run in parallel in other jobs.
