@@ -4,9 +4,10 @@ date = 2025-03-04
 weight = 998
 +++
 
-We're excited to announce Maelstrom 0.13.0. In this release, the big changes
-are further improvements of our test runners' UI, and the introduction of
-GitHub support (still experimental).
+We're excited to announce
+[Maelstrom](https://github.com/maelstrom-software/maelstrom) 0.13.0. In this
+release, the big changes are additional improvements of our test runners' UI,
+and the introduction of GitHub support (still experimental).
 
 <!-- more -->
 
