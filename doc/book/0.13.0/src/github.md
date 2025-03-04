@@ -9,8 +9,8 @@ actions](https://github.com/features/actions), where Maelstrom test runners
 (`cargo-maelstrom`, `maelstrom-go-test`, `maelstrom-pytest),
 `maelstrom-broker`, and the workers (`maelstrom-worker`) are all running inside
 of a GitHub action. This mode allows you to run your CI tests with parallel
-workers. What it doesn't do is allow you to use your GitHub workers to run
-tests ad hoc from your development machine.
+workers. What it doesn't do (yet) is allow you to use your GitHub workers to
+run tests ad hoc from your development machine.
 
 ## How It Works
 
@@ -50,82 +50,12 @@ We just create artifacts in the store named by their SHA-256 checksums.
 
 ## Invocation
 
-To use the GitHub support, you need to have the `ACTIONS_RUNTIME_TOKEN` and
-`ACTIONS_RESULTS_URL` environment variables exposed from GitHub. We use the
-[`crazy-max/ghaction-github-runtime@v3`](https://github.com/crazy-max/ghaction-github-runtime)
-GitHub action to achieve this.
+The best way to learning how to use this feature is by looking at [this
+workflow](https://github.com/maelstrom-software/maelstrom-examples/blob/main/.github/workflows/ci-base.yml)
+in the the [Maelstrom examples
+repository](https://github.com/maelstrom/software/maelstrom-examples).
 
-### `maelstrom-broker`
+You will see that one GitHub job is used to run the broker and all of the test
+runners, while worker are run in parallel in other jobs.
 
-`maelstrom-broker` needs to be run with the environment variables above
-exposed, and with the `--artifact-transfer-strategy github` hidden command-line
-option.
-
-Currently, `maelstrom-broker` and the test runner need to be run inside the
-same GitHub job and use sockets to communicate. Only broker-worker
-communication can currently go over GitHub artifacts.
-
-In our CI, we run `maelstrom-broker` in the background like this:
-
-```bash
-TEMPFILE=$(mktemp)
-maelstrom-broker --artifact-transfer-strategy github 2> >(tee "$TEMPFILE" >&2) &
-BROKER_PID=$!
-BROKER_PORT=$( \
-	tail -f "$TEMPFILE" \
-	| awk '/\<addr: / { print $0; exit}' \
-	| sed -Ee 's/^.*\baddr: [^,]*:([0-9]+),.*$/\1/' \
-)
-```
-
-This gives us `BROKER_PORT` to pass to the test runner and `BROKER_PID` to kill
-the broker at the end of the GitHub job.
-
-### Test Runner
-
-The test runner needs to be run with the environment variables above exposed,
-and with the `--artifact-transfer-strategy github` hidden command-line option.
-As discussed [above](#maelstrom-broker), it also needs to be used in the same
-GitHub job as the broker. Continuing the example from above, we run it like
-this:
-
-```bash
-cargo-maelstrom --broker=localhost:$BROKER_PORT --artifact-transfer-strategy github
-maelstrom-go-test --broker=localhost:$BROKER_PORT --artifact-transfer-strategy github
-maelstrom-pytest --broker=localhost:$BROKER_PORT --artifact-transfer-strategy github
-```
-
-### `maelstrom-worker`
-
-The whole point of doing all of this is to run each `maelstrom-worker` in its
-own GitHub job. We currently use something like this in our github workflow:
-
-```yaml
-  run_worker:
-    strategy:
-      matrix:
-        worker_number: [1, 2, 3, 4]
-    name: Run Worker
-```
-
-`maelstrom-worker` needs to be run with the environment variables above
-exposed, and with the `--artifact-transfer-strategy github` and
-`--broker-connection github` options. This is the whole invocation:
-
-```bash
-maelstrom-worker --broker=0.0.0.0:0 --artifact-transfer-strategy github --broker-connection github || true
-```
-
-The `--broker` config value must currently be specified, even though it's
-ignored in this case. We also ignore the exit value from the worker, as it's
-not an error when the broker eventually disconnects.
-
-## Examples
-
-Maelstrom's own uses may be helpful examples:
-  - [This](https://github.com/maelstrom-software/maelstrom/blob/main/.github/workflows/ci.yml)
-    is our `ci.yml`.
-  - [This](https://github.com/maelstrom-software/maelstrom/blob/main/scripts/run-tests-on-maelstrom-inner.sh)
-    is the script we use to execute the broker and run our tests.
-  - [This](https://github.com/maelstrom-software/maelstrom/blob/main/scripts/run-worker-inner.sh)
-    is the script we use to execute the worker.
+We will package this up into a re-usable GitHub action in the near future.
