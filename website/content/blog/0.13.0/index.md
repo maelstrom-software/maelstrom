@@ -13,9 +13,11 @@ and introduced GitHub support (still experimental).
 
 ## Test Runner UI Rewrite
 
-We rewrote our test runner UI for v0.13.0. We upstreamed
-a change to Ratatui that will reduce flickering and made
-several minor usability improvements.
+We rewrote our test runner UI for v0.13.0. We added support for terminal
+scrolling escape sequences, which greatly reduces flickering and upstreamed
+these changes to Ratatui. There are also several other minor usability
+improvements.
+
 
 ## `--watch` Mode
 
