@@ -6,16 +6,16 @@ weight = 998
 
 We're excited to announce
 [Maelstrom](https://github.com/maelstrom-software/maelstrom) 0.13.0. In this
-release, the big changes are additional improvements of our test runners' UI,
-and the introduction of GitHub support (still experimental).
+release we improved our test runners' UI
+and introduced GitHub support (still experimental).
 
 <!-- more -->
 
 ## Test Runner UI Rewrite
 
-We rewrote our test runner UI for v0.13.0. One big change is that we upstreamed
-a change to Ratatui that will hopefully greatly reduce flickering. We also made
-a number of smaller usability improvements.
+We rewrote our test runner UI for v0.13.0. We upstreamed
+a change to Ratatui that will reduce flickering and made
+several minor usability improvements.
 
 ## `--watch` Mode
 
@@ -25,7 +25,7 @@ project directory.
 
 ## Experimental GitHub Integration
 
-This release sees the addition of initial, experimental support for running
+This release introduces our first, experimental support for running
 tests on Maelstrom in parallel in GitHub actions. The various parts of the
 cluster communicate using the GitHub artifacts store. You can see an example
 GitHub workflow
