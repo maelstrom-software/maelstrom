@@ -18,7 +18,6 @@ scrolling escape sequences, which greatly reduces flickering and upstreamed
 these changes to Ratatui. There are also several other minor usability
 improvements.
 
-
 ## `--watch` Mode
 
 All test runners now have a `--watch` command-line option. When running with
