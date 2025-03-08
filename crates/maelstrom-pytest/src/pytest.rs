@@ -151,7 +151,14 @@ pub fn pytest_collect_tests(
     let mut tests = HashMap::new();
     for line in output.split('\n').filter(|l| !l.is_empty()) {
         let case: PytestCase = serde_json::from_str(line)?;
-        let path = Path::new(&case.file).strip_prefix(project_dir).unwrap();
+        let path = Path::new(&case.file)
+            .strip_prefix(project_dir)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "error stripping prefix {project_dir:?} from {file}: {err}",
+                    file = case.file
+                )
+            });
         let path_str = path.to_str().unwrap().to_owned();
         let test = tests.entry(path_str.clone()).or_insert(PytestTestArtifact {
             path: path.to_path_buf(),
