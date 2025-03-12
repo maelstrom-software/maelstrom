@@ -520,7 +520,7 @@ where
             self.broker_sender
                 .send_message_to_broker(WorkerToBroker::JobResponse(
                     jid,
-                    Err(JobError::System(format!("{msg} {digest}: {err:?}"))),
+                    Err(JobError::System(format!("{msg} {digest}: {err}"))),
                 ));
             for key in entry.tracker.into_cache_keys() {
                 self.cache.decrement_ref_count(&key);
