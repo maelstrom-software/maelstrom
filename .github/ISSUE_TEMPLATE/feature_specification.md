@@ -2,7 +2,7 @@
 name: Feature specification
 about: Track a specific feature's implementation
 title: ''
-labels: enhancement
+type: Feature
 assignees: ''
 
 ---

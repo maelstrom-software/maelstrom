@@ -2,7 +2,7 @@
 name: Feature request
 about: Suggest an idea for Maelstrom
 title: ''
-labels: enhancement 
+type: Feature
 assignees: ''
 
 ---
