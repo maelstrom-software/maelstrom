@@ -321,9 +321,26 @@ fn find_manifest_for_platform(manifests: &[Descriptor]) -> Result<&Descriptor> {
     }
     let current_platform = Platform::default();
     if let Some(manifest) = manifests.iter().find(|des| {
-        des.platform()
-            .as_ref()
-            .is_some_and(|p| p == &current_platform)
+        let platform = des.platform().as_ref();
+        let Some(platform) = platform else {
+            return false;
+        };
+        if platform == &current_platform {
+            true
+        } else if platform.architecture() == current_platform.architecture()
+            && *platform.architecture() == Arch::ARM64
+            && platform
+                .variant()
+                .as_ref()
+                .is_some_and(|variant| variant == "v8")
+        {
+            // ARM64 with the "v8" variant is the same as ARM64 without a variant.
+            let mut normalized = platform.clone();
+            normalized.set_variant(None);
+            normalized == current_platform
+        } else {
+            false
+        }
     }) {
         return Ok(manifest);
     }
