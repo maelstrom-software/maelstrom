@@ -690,6 +690,38 @@ impl ImageDownloader {
     }
 
     #[anyhow_trace]
+    pub async fn inspect_all(
+        mut self,
+        ref_: &DockerReference,
+    ) -> Result<Vec<(Descriptor, ImageManifest, ImageConfiguration)>> {
+        let index = self.get_image_index(ref_).await?;
+        let mut result = vec![];
+        for manifest in index.manifests() {
+            if manifest.platform().is_none() {
+                continue;
+            }
+            if let Some(annotations) = manifest.annotations() {
+                if let Some(value) = annotations.get("vnd.docker.reference.type") {
+                    if value == "attestation-manifest" {
+                        continue;
+                    }
+                }
+            }
+
+            let manifest_digest = manifest.digest().clone();
+
+            let image = self
+                .get_image_manifest(ref_, manifest_digest.as_ref())
+                .await?;
+            let config = self
+                .get_image_config(ref_, image.config().digest().as_ref())
+                .await?;
+            result.push((manifest.clone(), image, config));
+        }
+        Ok(result)
+    }
+
+    #[anyhow_trace]
     pub async fn download_image(
         mut self,
         ref_: &DockerReference,

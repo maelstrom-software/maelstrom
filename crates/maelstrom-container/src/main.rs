@@ -19,6 +19,11 @@ enum CliCommands {
         #[arg(short, long)]
         accept_invalid_certs: bool,
     },
+    InspectAll {
+        image_name: String,
+        #[arg(short, long)]
+        accept_invalid_certs: bool,
+    },
     Registry {
         source_path: PathBuf,
     },
@@ -81,6 +86,20 @@ async fn run(opt: CliOptions, log: slog::Logger) -> Result<()> {
                 .unwrap();
             let downloader = ImageDownloader::new(client);
             let resp = downloader.inspect(&ref_).await?;
+            println!("{resp:#?}");
+        }
+        CliCommands::InspectAll {
+            image_name,
+            accept_invalid_certs,
+        } => {
+            let ref_ = resolve_name(&image_name, accept_invalid_certs).await?;
+
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(accept_invalid_certs)
+                .build()
+                .unwrap();
+            let downloader = ImageDownloader::new(client);
+            let resp = downloader.inspect_all(&ref_).await?;
             println!("{resp:#?}");
         }
         CliCommands::Registry { source_path } => {
