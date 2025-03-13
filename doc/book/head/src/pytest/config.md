@@ -2,24 +2,24 @@
 
 `maelstrom-pytest` supports the following [configuration values](../config.md):
 
-Value                                                                  | Type    | Short Command-Line Alias | Description                                                                                 | Default
------------------------------------------------------------------------|---------|--------------------------|---------------------------------------------------------------------------------------------|----------------
-<span style="white-space: nowrap;">`cache-size`</span>                 | string  |                          | [target cache disk space usage](#cache-size)                                                | `"1 GB"`
-<span style="white-space: nowrap;">`inline-limit`</span>               | string  |                          | [maximum amount of captured standard output error](#inline-limit)                           | `"1 MB"`
-<span style="white-space: nowrap;">`slots`</span>                      | number  |                          | [job slots available](#slots)                                                               | 1 per CPU
-<span style="white-space: nowrap;">`container-image-depot-root`</span> | string  |                          | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
-`accept-invalid-remote-container-tls-certs`                            | boolean |                          | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
-<span style="white-space: nowrap;">`broker`</span>                     | string  | `-b`                     | [address of broker](#broker)                                                                | standalone mode
-<span style="white-space: nowrap;">`log-level`</span>                  | string  | `-l`                     | [minimum log level](#log-level)                                                             | `"info"`
-<span style="white-space: nowrap;">`quiet`</span>                      | boolean |                          | [don't output per-test information](#quiet)                                                 | `false`
-<span style="white-space: nowrap;">`ui`</span>                         | string  |                          | [UI style to use](#ui)                                                                      | `"auto"`
-<span style="white-space: nowrap;">`repeat`</span>                     | number  | `-r`                     | [how many times to run each test](#repeat)                                                  | `1`
-<span style="white-space: nowrap;">`timeout`</span>                    | string  | `-t`                     | [override timeout value tests](#timeout)                                                    | don't override
-<span style="white-space: nowrap;">`collect-from-module`</span>        | string  |                          | [collect tests from the specified module](#collect-from-module)                             | don't override
-<span style="white-space: nowrap;">`extra-pytest-args`</span>          | list    |                          | [pass arbitrary arguments to pytest](#extra-pytest-args)                                    | no args
-<span style="white-space: nowrap;">`extra-pytest-collect-args`</span>  | list    |                          | [pass arbitrary arguments to pytest when collecting](#extra-pytest-collect-args)            | no args
-<span style="white-space: nowrap;">`extra-pytest-test-args`</span>     | list    |                          | [pass arbitrary arguments to pytest when running a test](#extra-pytest-test-args)           | no args
-<span style="white-space: nowrap;">`stop-after`</span>                 | number  | `-s`                     | [stop after given number of failures](#stop-after)                                          | never stop
+Value                                                                  | Short Option | Type    | Description                                                                                 | Default
+-----------------------------------------------------------------------|--------------|---------|---------------------------------------------------------------------------------------------|----------------
+<span style="white-space: nowrap;">`cache-size`</span>                 |              | string  | [target cache disk space usage](#cache-size)                                                | `"1 GB"`
+<span style="white-space: nowrap;">`inline-limit`</span>               |              | string  | [maximum amount of captured standard output error](#inline-limit)                           | `"1 MB"`
+<span style="white-space: nowrap;">`slots`</span>                      |              | number  | [job slots available](#slots)                                                               | 1 per CPU
+<span style="white-space: nowrap;">`container-image-depot-root`</span> |              | string  | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
+`accept-invalid-remote-container-tls-certs`                            |              | boolean | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
+<span style="white-space: nowrap;">`broker`</span>                     | `-b`         | string  | [address of broker](#broker)                                                                | standalone mode
+<span style="white-space: nowrap;">`log-level`</span>                  | `-l`         | string  | [minimum log level](#log-level)                                                             | `"info"`
+<span style="white-space: nowrap;">`quiet`</span>                      |              | boolean | [don't output per-test information](#quiet)                                                 | `false`
+<span style="white-space: nowrap;">`ui`</span>                         |              | string  | [UI style to use](#ui)                                                                      | `"auto"`
+<span style="white-space: nowrap;">`repeat`</span>                     | `-r`         | number  | [how many times to run each test](#repeat)                                                  | `1`
+<span style="white-space: nowrap;">`timeout`</span>                    | `-t`         | string  | [override timeout value tests](#timeout)                                                    | don't override
+<span style="white-space: nowrap;">`collect-from-module`</span>        |              | string  | [collect tests from the specified module](#collect-from-module)                             | don't override
+<span style="white-space: nowrap;">`extra-pytest-args`</span>          |              | list    | [pass arbitrary arguments to pytest](#extra-pytest-args)                                    | no args
+<span style="white-space: nowrap;">`extra-pytest-collect-args`</span>  |              | list    | [pass arbitrary arguments to pytest when collecting](#extra-pytest-collect-args)            | no args
+<span style="white-space: nowrap;">`extra-pytest-test-args`</span>     |              | list    | [pass arbitrary arguments to pytest when running a test](#extra-pytest-test-args)           | no args
+<span style="white-space: nowrap;">`stop-after`</span>                 | `-s`         | number  | [stop after given number of failures](#stop-after)                                          | never stop
 
 ## `cache-size`
 
