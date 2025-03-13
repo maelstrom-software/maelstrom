@@ -209,7 +209,7 @@ pub fn main<TestRunnerT: TestRunner>(
         maelstrom_util::config::new_config_with_extra_from_args(
             command,
             TestRunnerT::BASE_DIRECTORIES_PREFIX,
-            TestRunnerT::ENVIRONMENT_VARIABLE_PREFIX,
+            [TestRunnerT::ENVIRONMENT_VARIABLE_PREFIX, "MAELSTROM"],
             args,
         )?;
 

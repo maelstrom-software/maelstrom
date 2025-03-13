@@ -819,8 +819,11 @@ fn main_with_logger(
 }
 
 fn main() -> Result<ExitCode> {
-    let (config, extra_options): (_, ExtraCommandLineOptions) =
-        Config::new_with_extra_from_args("maelstrom/run", "MAELSTROM_RUN", env::args())?;
+    let (config, extra_options): (_, ExtraCommandLineOptions) = Config::new_with_extra_from_args(
+        "maelstrom/run",
+        ["MAELSTROM_RUN", "MAELSTROM"],
+        env::args(),
+    )?;
     if extra_options.one_or_tty.tty {
         if !io::stdin().is_terminal() {
             eprintln!("error: standard input is not a terminal");

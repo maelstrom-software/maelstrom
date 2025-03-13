@@ -40,7 +40,7 @@ impl ConfigBag {
                     .map(|table| (path.into(), table))
             })
             .collect::<std::result::Result<_, _>>()?;
-        let env_prefixes = env_prefixes.into_iter().map(Into::into).collect();
+        let env_prefixes = Vec::from_iter(env_prefixes.into_iter().map(Into::into));
         Ok(Self {
             args,
             env_prefixes,
@@ -294,20 +294,37 @@ pub trait Config: Sized {
 
 pub struct CommandBuilder {
     command: Command,
-    env_var_prefix: &'static str,
+    env_var_prefixes: Vec<String>,
 }
 
 impl CommandBuilder {
     pub fn new(
         command: Command,
         base_directories: &BaseDirectories,
-        env_var_prefix: &'static str,
+        env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         let config_files = iter::once(base_directories.get_config_home())
             .chain(base_directories.get_config_dirs())
             .map(|pb| pb.join("config.toml").to_string_lossy().to_string())
             .collect::<Vec<_>>()
             .join(", ");
+        let env_var_prefixes = Vec::from_iter(env_var_prefixes.into_iter().map(Into::into));
+        let env_vars = Vec::from_iter(
+            env_var_prefixes
+                .iter()
+                .map(|prefix| format!("{prefix}_CONFIG_VALUE")),
+        );
+        let env_vars_help_phrase = match &env_vars[..] {
+            [] => {
+                panic!("at least one env_var_prefix must be provided");
+            }
+            [one] => format!("the {one} environment variable"),
+            [one, two] => format!("the {one} or {two} environment variables"),
+            [first @ .., last] => {
+                let first = first.join(", ");
+                format!("the {first}, or {last} environment variables")
+            }
+        };
         let command = command
             .disable_help_flag(true)
             .disable_version_flag(true)
@@ -318,8 +335,8 @@ impl CommandBuilder {
                 highest precendence, followed by environment variables.\n\
                 \n\
                 The hypothetical configuration value \"config-value\" would be set via the \
-                --config-value command-line option, the {env_var_prefix}_CONFIG_VALUE \
-                environment variable, and the \"config-value\" key in a configuration file.\n\
+                --config-value command-line option, {env_vars_help_phrase}, \
+                and the \"config-value\" key in a configuration file.\n\
                 \n\
                 See the help information for --config-file for more information."))
             .next_help_heading("Print-and-Exit Options")
@@ -371,7 +388,7 @@ impl CommandBuilder {
 
         Self {
             command,
-            env_var_prefix,
+            env_var_prefixes,
         }
     }
 
@@ -389,12 +406,17 @@ impl CommandBuilder {
         action: ArgAction,
     ) -> Self {
         let name = field.to_kebab_case();
-        let env_var = format!("{}_{}", self.env_var_prefix, field.to_shouty_snake_case());
+        let env_vars = itertools::join(
+            self.env_var_prefixes
+                .iter()
+                .map(|prefix| format!("{prefix}_{}", field.to_shouty_snake_case())),
+            ", ",
+        );
         let default = default.unwrap_or("no default, must be specified".to_string());
         let help = if let Some(alias) = &alias {
-            format!("{help} [default: {default}] [alias: {alias}] [env: {env_var}]")
+            format!("{help} [default: {default}] [alias: {alias}] [env: {env_vars}]")
         } else {
-            format!("{help} [default: {default}] [env: {env_var}]")
+            format!("{help} [default: {default}] [env: {env_vars}]")
         };
         let mut arg = Arg::new(name.clone())
             .value_name(value_name)
@@ -519,7 +541,7 @@ impl CommandBuilder {
 pub fn new_config_with_extra_from_args<T, U, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
-    env_var_prefix: &'static str,
+    env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
     args: AI,
 ) -> Result<(T, U)>
 where
@@ -528,13 +550,14 @@ where
     AI: IntoIterator<Item = AT>,
     AT: Into<OsString> + Clone,
 {
+    let env_var_prefixes = Vec::from_iter(env_var_prefixes.into_iter().map(Into::into));
     let base_directories = BaseDirectories::with_prefix(base_directories_prefix)
         .context("searching for config files")?;
-    let builder = CommandBuilder::new(command, &base_directories, env_var_prefix);
+    let builder = CommandBuilder::new(command, &base_directories, &env_var_prefixes);
     let builder = T::add_command_line_options(builder, &base_directories);
     let command = U::augment_args(builder.build());
     let mut args = command.get_matches_from(args);
-    let env_var_prefixes = [format!("{env_var_prefix}_"), "MAELSTROM_".to_string()];
+    let env_var_prefixes = Vec::from_iter(env_var_prefixes.iter().map(|prefix| format!("{prefix}_")));
     let env = env::vars().filter(|(key, _)| {
         env_var_prefixes
             .iter()
@@ -600,12 +623,12 @@ impl Args for NoExtraCommandLineOptions {
 pub fn new_config<T: Config + Debug>(
     command: Command,
     base_directories_prefix: &'static str,
-    env_var_prefix: &'static str,
+    env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
 ) -> Result<T> {
     let (config, _): (_, NoExtraCommandLineOptions) = new_config_with_extra_from_args(
         command,
         base_directories_prefix,
-        env_var_prefix,
+        env_var_prefixes,
         env::args_os(),
     )?;
     Ok(config)

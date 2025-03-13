@@ -392,16 +392,16 @@ impl ConfigInput {
             impl #self_ident {
                 #vis fn new(
                     base_directories_prefix: &'static str,
-                    env_var_prefix: &'static str,
+                    env_var_prefixes: impl ::std::iter::IntoIterator<Item = impl ::std::convert::Into<::std::string::String>>,
                 ) -> ::anyhow::Result<Self> {
                     ::maelstrom_util::config::new_config(
-                        ::clap::command!(), base_directories_prefix, env_var_prefix,
+                        ::clap::command!(), base_directories_prefix, env_var_prefixes,
                     )
                 }
 
                 #vis fn new_with_extra_from_args<U, AI, AT>(
                     base_directories_prefix: &'static str,
-                    env_var_prefix: &'static str,
+                    env_var_prefixes: impl ::std::iter::IntoIterator<Item = impl ::std::convert::Into<::std::string::String>>,
                     args: AI,
                 ) -> ::anyhow::Result<(Self, U)>
                 where
@@ -410,7 +410,7 @@ impl ConfigInput {
                     AT: ::std::convert::Into<::std::ffi::OsString> + ::std::clone::Clone,
                 {
                     ::maelstrom_util::config::new_config_with_extra_from_args(
-                        ::clap::command!(), base_directories_prefix, env_var_prefix, args,
+                        ::clap::command!(), base_directories_prefix, env_var_prefixes, args,
                     )
                 }
             }
