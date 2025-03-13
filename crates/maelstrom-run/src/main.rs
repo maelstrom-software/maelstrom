@@ -70,7 +70,7 @@ pub struct Config {
     pub cache_root: RootBuf<CacheDir>,
 
     /// The escape character to use in TTY mode. Can be specified as a single character (e.g. "~"),
-    /// using caret notation (e.g. "^C"), or as a hexidecimal escape (e.g. "\x1a").
+    /// using caret notation (e.g. "^C"), or as a hexadecimal escape (e.g. "\x1a").
     #[config(value_name = "CHARACTER", default = "EscapeChar::default()")]
     pub escape_char: EscapeChar,
 

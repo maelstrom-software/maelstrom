@@ -332,7 +332,7 @@ impl CommandBuilder {
             .after_help(format!(
                 "Configuration values can be specified in three ways: fields in a configuration \
                 file, environment variables, or command-line options. Command-line options have the \
-                highest precendence, followed by environment variables.\n\
+                highest precedence, followed by environment variables.\n\
                 \n\
                 The hypothetical configuration value \"config-value\" would be set via the \
                 --config-value command-line option, {env_vars_help_phrase}, \
