@@ -147,6 +147,10 @@ pub const TERMINATION_SIGNALS: [Signal; 3] = [Signal::HUP, Signal::INT, Signal::
 /// in the gen 2 process only if it returns `Ok(())`. If it returns `Err(_)`, it can be any
 /// process.
 ///
+/// Internally, this function adjusts the process's signal mask, but it restores it when it
+/// returns. It doesn't do anything with signal handlers, so those get passed on to descendant
+/// processes. You probably shouldn't register signal handlers until after calling this function.
+///
 /// WARNING: This function must only be called while the program is single-threaded. We check this
 /// and will panic if called when there is more than one thread.
 pub fn clone_into_pid_and_user_namespace() -> Result<()> {
@@ -155,6 +159,17 @@ pub fn clone_into_pid_and_user_namespace() -> Result<()> {
     let gen_0_uid = linux::getuid();
     let gen_0_gid = linux::getgid();
 
+    // This helper struct makes sure we unmask the signal set even on error.
+    struct SignalMaskRestorer(Option<SignalSet>);
+    impl Drop for SignalMaskRestorer {
+        fn drop(&mut self) {
+            if let Some(old_mask) = self.0.take() {
+                // Just ignore an error here, since we're only doing this in the error case anyway.
+                let _ = linux::sigprocmask(SigprocmaskHow::SETMASK, Some(&old_mask));
+            }
+        }
+    }
+
     // Mask termination signals. We do this early here in the gen 0 process so the mask will be
     // inherited by the gen 1 process, which closes a race condition where the gen 1 process would
     // temporarily ignore termination signals.
@@ -162,8 +177,9 @@ pub fn clone_into_pid_and_user_namespace() -> Result<()> {
     for signal in TERMINATION_SIGNALS {
         masked_signals.insert(signal);
     }
-    let old_sigprocmask =
-        linux::sigprocmask(SigprocmaskHow::BLOCK, Some(&masked_signals)).context("sigprocmask")?;
+    let mut signal_mask_restorer = SignalMaskRestorer(Some(
+        linux::sigprocmask(SigprocmaskHow::BLOCK, Some(&masked_signals)).context("sigprocmask")?,
+    ));
 
     // Create a pidfd for the gen 0 process. We'll use this in the gen 1 process to see if the gen
     // 0 process has terminated early.
@@ -223,7 +239,10 @@ pub fn clone_into_pid_and_user_namespace() -> Result<()> {
                 None => {
                     // Gen 2 process.
 
-                    // Restore the signal mask. The program will do its own signal handling.
+                    // Restore the signal mask. The program will do its own signal handling. We
+                    // don't just let the Drop on signal_mask_restorer do this because we want to
+                    // do something if there is an error.
+                    let old_sigprocmask = signal_mask_restorer.0.take().unwrap();
                     linux::sigprocmask(SigprocmaskHow::SETMASK, Some(&old_sigprocmask))
                         .context("sigprocmask")?;
                     Ok(())
