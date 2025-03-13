@@ -27,6 +27,6 @@ Ideally, it should be at least a few multiples of the working set size.
 
 ## Command-Line Options
 
-`maelstrom-broker` supports the [standard command-line
-options](standard-cli.md), as well as a number of [configuration
+`maelstrom-broker` supports the [common command-line
+options](common-cli.md), as well as a number of [configuration
 values](broker/config.md), which are covered in the next chapter.
