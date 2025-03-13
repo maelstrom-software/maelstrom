@@ -13,7 +13,7 @@ Option                                                      | Short Alias | Argu
 <span style="white-space: nowrap;">`--include`</span>       | `-i`        | [pattern](filter.md) | [include tests that match pattern](#--include-and---exclude)
 <span style="white-space: nowrap;">`--exclude`</span>       | `-x`        | [pattern](filter.md) | [exclude tests that match pattern](#--include-and---exclude)                                                  
 <span style="white-space: nowrap;">`--init`</span>          |             |                      | [initialize test metadata file](#--init)
-<span style="white-space: nowrap;">`--watch`</span>         |             |                      | [loop running tests then waiting for changes](#--watch)
+<span style="white-space: nowrap;">`--watch`</span>         | `-w`        |                      | [loop running tests then waiting for changes](#--watch)
 <span style="white-space: nowrap;">`--list`</span>          |             |                      | [alias for `--list-tests`](#--list-tests-or---list)
 <span style="white-space: nowrap;">`--list-tests`</span>    |             |                      | [only list matching tests instead of running them](#--list-tests-or---list)
 <span style="white-space: nowrap;">`--list-binaries`</span> |             |                      | [only list matching test binaries instead of running tests](#--list-binaries)

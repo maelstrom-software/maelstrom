@@ -2,24 +2,24 @@
 
 `maelstrom-go-test` supports the following [configuration values](../config.md):
 
-Value                                                                  | Type    | Description                                                                                 | Default
------------------------------------------------------------------------|---------|---------------------------------------------------------------------------------------------|----------------
-<span style="white-space: nowrap;">`cache-size`</span>                 | string  | [target cache disk space usage](#cache-size)                                                | `"1 GB"`
-<span style="white-space: nowrap;">`inline-limit`</span>               | string  | [maximum amount of captured standard output error](#inline-limit)                           | `"1 MB"`
-<span style="white-space: nowrap;">`slots`</span>                      | number  | [job slots available](#slots)                                                               | 1 per CPU
-<span style="white-space: nowrap;">`container-image-depot-root`</span> | string  | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
-`accept-invalid-remote-container-tls-certs`                            | boolean | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
-<span style="white-space: nowrap;">`broker`</span>                     | string  | [address of broker](#broker)                                                                | standalone mode
-<span style="white-space: nowrap;">`log-level`</span>                  | string  | [minimum log level](#log-level)                                                             | `"info"`
-<span style="white-space: nowrap;">`quiet`</span>                      | boolean | [don't output per-test information](#quiet)                                                 | `false`
-<span style="white-space: nowrap;">`ui`</span>                         | string  | [UI style to use](#ui)                                                                      | `"auto"`
-<span style="white-space: nowrap;">`repeat`</span>                     | number  | [how many times to run each test](#repeat)                                                  | `1`
-<span style="white-space: nowrap;">`timeout`</span>                    | string  | [override timeout value tests](#timeout)                                                    | don't override
-<span style="white-space: nowrap;">`vet`</span>                        | string  | [control `go test` `-vet` flag_value](#vet)                                                 | `go test`'s default
-<span style="white-space: nowrap;">`short`</span>                      | boolean | [tells long running tests to shorten their times](#short)                                   | `false`
-<span style="white-space: nowrap;">`fullpath`</span>                   | boolean | [shows the full file name in error messages](#fullpath)                                     | `false`
-<span style="white-space: nowrap;">`extra-test-binary-args`</span>     | list    | [pass arbitrary arguments to test binary](#extra-test-binary-args)                          | no args
-<span style="white-space: nowrap;">`stop-after`</span>                 | number  | [stop after given number of failures](#stop-after)                                          | never stop
+Value                                                                  | Type    | Short Command-Line Alias | Description                                                                                 | Default
+-----------------------------------------------------------------------|---------|--------------------------|---------------------------------------------------------------------------------------------|----------------
+<span style="white-space: nowrap;">`cache-size`</span>                 | string  |                          | [target cache disk space usage](#cache-size)                                                | `"1 GB"`
+<span style="white-space: nowrap;">`inline-limit`</span>               | string  |                          | [maximum amount of captured standard output error](#inline-limit)                           | `"1 MB"`
+<span style="white-space: nowrap;">`slots`</span>                      | number  |                          | [job slots available](#slots)                                                               | 1 per CPU
+<span style="white-space: nowrap;">`container-image-depot-root`</span> | string  |                          | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
+`accept-invalid-remote-container-tls-certs`                            | boolean |                          | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
+<span style="white-space: nowrap;">`broker`</span>                     | string  | `-b`                     | [address of broker](#broker)                                                                | standalone mode
+<span style="white-space: nowrap;">`log-level`</span>                  | string  | `-l`                     | [minimum log level](#log-level)                                                             | `"info"`
+<span style="white-space: nowrap;">`quiet`</span>                      | boolean |                          | [don't output per-test information](#quiet)                                                 | `false`
+<span style="white-space: nowrap;">`ui`</span>                         | string  |                          | [UI style to use](#ui)                                                                      | `"auto"`
+<span style="white-space: nowrap;">`repeat`</span>                     | number  | `-r`                     | [how many times to run each test](#repeat)                                                  | `1`
+<span style="white-space: nowrap;">`timeout`</span>                    | string  | `-t`                     | [override timeout value tests](#timeout)                                                    | don't override
+<span style="white-space: nowrap;">`vet`</span>                        | string  |                          | [control `go test` `-vet` flag_value](#vet)                                                 | `go test`'s default
+<span style="white-space: nowrap;">`short`</span>                      | boolean |                          | [tells long running tests to shorten their times](#short)                                   | `false`
+<span style="white-space: nowrap;">`fullpath`</span>                   | boolean |                          | [shows the full file name in error messages](#fullpath)                                     | `false`
+<span style="white-space: nowrap;">`extra-test-binary-args`</span>     | list    |                          | [pass arbitrary arguments to test binary](#extra-test-binary-args)                          | no args
+<span style="white-space: nowrap;">`stop-after`</span>                 | number  | `-s`                     | [stop after given number of failures](#stop-after)                                          | never stop
 
 ## `cache-size`
 

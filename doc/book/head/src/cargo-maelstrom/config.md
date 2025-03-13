@@ -2,31 +2,31 @@
 
 `cargo-maelstrom` supports the following [configuration values](../config.md):
 
-Value                                                                  | Type    | Description                                                                                 | Default
------------------------------------------------------------------------|---------|---------------------------------------------------------------------------------------------|----------------
-<span style="white-space: nowrap;">`cache-size`</span>                 | string  | [target cache disk space usage](#cache-size)                                                | `"1 GB"`
-<span style="white-space: nowrap;">`inline-limit`</span>               | string  | [maximum amount of captured standard output error](#inline-limit)                           | `"1 MB"`
-<span style="white-space: nowrap;">`slots`</span>                      | number  | [job slots available](#slots)                                                               | 1 per CPU
-<span style="white-space: nowrap;">`container-image-depot-root`</span> | string  | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
-`accept-invalid-remote-container-tls-certs`                            | boolean | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
-<span style="white-space: nowrap;">`broker`</span>                     | string  | [address of broker](#broker)                                                                | standalone mode
-<span style="white-space: nowrap;">`log-level`</span>                  | string  | [minimum log level](#log-level)                                                             | `"info"`
-<span style="white-space: nowrap;">`quiet`</span>                      | boolean | [don't output per-test information](#quiet)                                                 | `false`
-<span style="white-space: nowrap;">`ui`</span>                         | string  | [UI style to use](#ui)                                                                      | `"auto"`
-<span style="white-space: nowrap;">`repeat`</span>                     | number  | [how many times to run each test](#repeat)                                                  | `1`
-<span style="white-space: nowrap;">`timeout`</span>                    | string  | [override timeout value tests](#timeout)                                                    | don't override
-<span style="white-space: nowrap;">`features`</span>                   | string  | [comma-separated list of features to activate](#cargo)                                      | Cargo's default
-<span style="white-space: nowrap;">`all-features`</span>               | boolean | [activate all available features](#cargo)                                                   | Cargo's default
-<span style="white-space: nowrap;">`no-default-features`</span>        | boolean | [do not activate the `default` feature](#cargo)                                             | Cargo's default
-<span style="white-space: nowrap;">`profile`</span>                    | string  | [build artifacts with the specified profile](#cargo)                                        | Cargo's default
-<span style="white-space: nowrap;">`target`</span>                     | string  | [build for the target triple](#cargo)                                                       | Cargo's default
-<span style="white-space: nowrap;">`target-dir`</span>                 | string  | [directory for all generated artifacts](#cargo)                                             | Cargo's default
-<span style="white-space: nowrap;">`manifest-path`</span>              | string  | [path to `Cargo.toml`](#cargo)                                                              | Cargo's default
-<span style="white-space: nowrap;">`frozen`</span>                     | boolean | [require `Cargo.lock` and cache are up to date](#cargo)                                     | Cargo's default
-<span style="white-space: nowrap;">`locked`</span>                     | boolean | [require `Cargo.lock` is up to date](#cargo)                                                | Cargo's default
-<span style="white-space: nowrap;">`offline`</span>                    | boolean | [run without Cargo accessing the network](#cargo)                                           | Cargo's default
-<span style="white-space: nowrap;">`extra-test-binary-args`</span>     | list    | [pass arbitrary arguments to test binary](#extra-test-binary-args)                          | no args
-<span style="white-space: nowrap;">`stop-after`</span>                 | number  | [stop after given number of failures](#stop-after)                                          | never stop
+Value                                                                  | Type    | Short Command-Line Alias | Description                                                                                 | Default
+-----------------------------------------------------------------------|---------|--------------------------|---------------------------------------------------------------------------------------------|----------------
+<span style="white-space: nowrap;">`cache-size`</span>                 | string  |                          | [target cache disk space usage](#cache-size)                                                | `"1 GB"`
+<span style="white-space: nowrap;">`inline-limit`</span>               | string  |                          | [maximum amount of captured standard output error](#inline-limit)                           | `"1 MB"`
+<span style="white-space: nowrap;">`slots`</span>                      | number  |                          | [job slots available](#slots)                                                               | 1 per CPU
+<span style="white-space: nowrap;">`container-image-depot-root`</span> | string  |                          | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
+`accept-invalid-remote-container-tls-certs`                            | boolean |                          | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
+<span style="white-space: nowrap;">`broker`</span>                     | string  | `-b`                     | [address of broker](#broker)                                                                | standalone mode
+<span style="white-space: nowrap;">`log-level`</span>                  | string  | `-l`                     | [minimum log level](#log-level)                                                             | `"info"`
+<span style="white-space: nowrap;">`quiet`</span>                      | boolean |                          | [don't output per-test information](#quiet)                                                 | `false`
+<span style="white-space: nowrap;">`ui`</span>                         | string  |                          | [UI style to use](#ui)                                                                      | `"auto"`
+<span style="white-space: nowrap;">`repeat`</span>                     | number  | `-r`                     | [how many times to run each test](#repeat)                                                  | `1`
+<span style="white-space: nowrap;">`timeout`</span>                    | string  | `-t`                     | [override timeout value tests](#timeout)                                                    | don't override
+<span style="white-space: nowrap;">`features`</span>                   | string  | `-F`                     | [comma-separated list of features to activate](#cargo)                                      | Cargo's default
+<span style="white-space: nowrap;">`all-features`</span>               | boolean |                          | [activate all available features](#cargo)                                                   | Cargo's default
+<span style="white-space: nowrap;">`no-default-features`</span>        | boolean |                          | [do not activate the `default` feature](#cargo)                                             | Cargo's default
+<span style="white-space: nowrap;">`profile`</span>                    | string  |                          | [build artifacts with the specified profile](#cargo)                                        | Cargo's default
+<span style="white-space: nowrap;">`target`</span>                     | string  |                          | [build for the target triple](#cargo)                                                       | Cargo's default
+<span style="white-space: nowrap;">`target-dir`</span>                 | string  |                          | [directory for all generated artifacts](#cargo)                                             | Cargo's default
+<span style="white-space: nowrap;">`manifest-path`</span>              | string  |                          | [path to `Cargo.toml`](#cargo)                                                              | Cargo's default
+<span style="white-space: nowrap;">`frozen`</span>                     | boolean |                          | [require `Cargo.lock` and cache are up to date](#cargo)                                     | Cargo's default
+<span style="white-space: nowrap;">`locked`</span>                     | boolean |                          | [require `Cargo.lock` is up to date](#cargo)                                                | Cargo's default
+<span style="white-space: nowrap;">`offline`</span>                    | boolean |                          | [run without Cargo accessing the network](#cargo)                                           | Cargo's default
+<span style="white-space: nowrap;">`extra-test-binary-args`</span>     | list    |                          | [pass arbitrary arguments to test binary](#extra-test-binary-args)                          | no args
+<span style="white-space: nowrap;">`stop-after`</span>                 | number  | `-s`                     | [stop after given number of failures](#stop-after)                                          | never stop
 
 ## `cache-size`
 
