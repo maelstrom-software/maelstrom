@@ -2,14 +2,14 @@
 
 `maelstrom-worker` supports the following [configuration values](../config.md):
 
-Value                                                    | Type    | Description                                                   | Default
----------------------------------------------------------|---------|---------------------------------------------------------------|-----------------
-`broker`                                                 | string  | [address of broker](#broker)                                  | must be provided
-<span style="white-space: nowrap;">`log-level`</span>    | string  | [minimum log level](#log-level)                               | `"info"`
-<span style="white-space: nowrap;">`cache-root`</span>   | string  | [cache directory](#cache-root)                                | `$XDG_CACHE_HOME/maelstrom/worker/`
-<span style="white-space: nowrap;">`cache-size`</span>   | string  | [target cache disk space usage](#cache-size)                  | `"1 GB"`
-<span style="white-space: nowrap;">`inline-limit`</span> | string  | [maximum amount of captured standard output and error](#inline-limit) | `"1 MB"`
-`slots`                                                  | number  | [job slots available](#slots)                                 | 1 per CPU
+Value                                                    | Short Option | Type    | Description                                                   | Default
+---------------------------------------------------------|--------------|---------|---------------------------------------------------------------|-----------------
+`broker`                                                 | `-b`         | string  | [address of broker](#broker)                                  | must be provided
+<span style="white-space: nowrap;">`log-level`</span>    | `-L`         | string  | [minimum log level](#log-level)                               | `"info"`
+<span style="white-space: nowrap;">`cache-root`</span>   |              | string  | [cache directory](#cache-root)                                | `$XDG_CACHE_HOME/maelstrom/worker/`
+<span style="white-space: nowrap;">`cache-size`</span>   |              | string  | [target cache disk space usage](#cache-size)                  | `"1 GB"`
+<span style="white-space: nowrap;">`inline-limit`</span> |              | string  | [maximum amount of captured standard output and error](#inline-limit) | `"1 MB"`
+`slots`                                                  |              | number  | [job slots available](#slots)                                 | 1 per CPU
 
 ## `broker`
 

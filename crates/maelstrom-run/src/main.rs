@@ -54,7 +54,7 @@ pub struct Config {
     pub broker: Option<BrokerAddr>,
 
     /// Minimum log level to output.
-    #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
+    #[config(short = 'L', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
 
     /// Directory to use for the cache. The local worker's cache will be contained within it.

@@ -10,7 +10,7 @@ Value                                                                  | Short O
 <span style="white-space: nowrap;">`container-image-depot-root`</span> |              | string  | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
 `accept-invalid-remote-container-tls-certs`                            |              | boolean | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
 <span style="white-space: nowrap;">`broker`</span>                     | `-b`         | string  | [address of broker](#broker)                                                                | standalone mode
-<span style="white-space: nowrap;">`log-level`</span>                  | `-l`         | string  | [minimum log level](#log-level)                                                             | `"info"`
+<span style="white-space: nowrap;">`log-level`</span>                  | `-L`         | string  | [minimum log level](#log-level)                                                             | `"info"`
 <span style="white-space: nowrap;">`quiet`</span>                      |              | boolean | [don't output per-test information](#quiet)                                                 | `false`
 <span style="white-space: nowrap;">`ui`</span>                         |              | string  | [UI style to use](#ui)                                                                      | `"auto"`
 <span style="white-space: nowrap;">`repeat`</span>                     | `-r`         | number  | [how many times to run each test](#repeat)                                                  | `1`

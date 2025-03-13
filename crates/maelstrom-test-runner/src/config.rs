@@ -127,7 +127,7 @@ pub struct Config {
     pub artifact_transfer_strategy: ArtifactTransferStrategy,
 
     /// Minimum log level to output.
-    #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
+    #[config(short = 'L', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
 
     /// The UI style to use. Options are "auto", "simple", "quiet", and "fancy".

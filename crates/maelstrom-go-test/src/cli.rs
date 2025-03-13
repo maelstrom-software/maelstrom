@@ -20,6 +20,7 @@ pub struct ListOptions {
     #[arg(
         long = "list-tests",
         visible_alias = "list",
+        short = 'l',
         help = "Instead of running tests, print the tests that would have been run. \
             May require building test binaries."
     )]

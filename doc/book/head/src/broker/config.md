@@ -2,13 +2,13 @@
 
 `maelstrom-broker` supports the following [configuration values](../config.md):
 
-Value                                                    | Type    | Description                                  | Default
----------------------------------------------------------|---------|----------------------------------------------|-----------------
-<span style="white-space: nowrap;">`log-level`</span>    | string  | [minimum log level](#log-level)              | `"info"`
-<span style="white-space: nowrap;">`cache-root`</span>   | string  | [cache directory](#cache-root)               | `$XDG_CACHE_HOME/maelstrom/worker/`
-<span style="white-space: nowrap;">`cache-size`</span>   | string  | [target cache disk space usage](#cache-size) | `"1 GB"`
-`port`                                                   | number  | [port for clients and workers](#port)        | `0`
-<span style="white-space: nowrap;">`http-port`</span>    | string  | [port for web UI](#http-port)                | `0`
+Value                                                  | Short Option | Type    | Description                                  | Default
+-------------------------------------------------------|--------------|---------|----------------------------------------------|-----------------
+<span style="white-space: nowrap;">`log-level`</span>  | `-L`         | string  | [minimum log level](#log-level)              | `"info"`
+<span style="white-space: nowrap;">`cache-root`</span> |              | string  | [cache directory](#cache-root)               | `$XDG_CACHE_HOME/maelstrom/worker/`
+<span style="white-space: nowrap;">`cache-size`</span> |              | string  | [target cache disk space usage](#cache-size) | `"1 GB"`
+`port`                                                 | `-p`         | number  | [port for clients and workers](#port)        | `0`
+<span style="white-space: nowrap;">`http-port`</span>  |              | string  | [port for web UI](#http-port)                | `0`
 
 ## `log-level`
 

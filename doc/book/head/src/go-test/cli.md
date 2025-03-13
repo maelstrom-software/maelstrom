@@ -15,7 +15,7 @@ Option                                                      | Short Alias | Argu
 <span style="white-space: nowrap;">`--init`</span>          |             |                      | [initialize test metadata file](#--init)
 <span style="white-space: nowrap;">`--watch`</span>         | `-w`        |                      | [loop running tests then waiting for changes](#--watch)
 <span style="white-space: nowrap;">`--list`</span>          |             |                      | [alias for `--list-tests`](#--list-tests-or---list)
-<span style="white-space: nowrap;">`--list-tests`</span>    |             |                      | [only list matching tests instead of running them](#--list-tests-or---list)
+<span style="white-space: nowrap;">`--list-tests`</span>    | `-l`        |                      | [only list matching tests instead of running them](#--list-tests-or---list)
 <span style="white-space: nowrap;">`--list-packages`</span> |             |                      | [only list matching test packages instead of running tests](#--list-packages)
 
 ## `--include` and `--exclude` {#include-and-exclude}

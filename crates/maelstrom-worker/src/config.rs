@@ -42,7 +42,7 @@ pub struct Config {
     pub inline_limit: InlineLimit,
 
     /// Minimum log level to output.
-    #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
+    #[config(short = 'L', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
 
     /// Controls how we upload artifacts when communicating with the broker.

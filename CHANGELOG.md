@@ -14,9 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   \[[482](https://github.com/maelstrom-software/maelstrom/issues/482)\]
 - Gave `--stop-after` a `-s` short option.
   \[[482](https://github.com/maelstrom-software/maelstrom/issues/482)\]
+- Gave `--list` (`--list-tests`) a `-l` short option.
+  \[[513](https://github.com/maelstrom-software/maelstrom/issues/513)\]
+
+### All Clients (Test Runners, `maelstrom-run`, and Client Library)
 - Fix an issue where we wouldn't find a matching image in some OCI images on
   ARM64 (like `docker://alpine`).
   \[[506](https://github.com/maelstrom-software/maelstrom/issues/506)\]
+
+### All Programs
+- Changed the short option for `--log-level` to `-L` instead of `-l`.
+  \[[513](https://github.com/maelstrom-software/maelstrom/issues/513)\]
 
 ## [0.13.0] - 2025-02-24
 

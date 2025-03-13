@@ -11,6 +11,7 @@ pub struct ExtraCommandLineOptions {
 
     #[arg(
         long = "list",
+        short = 'l',
         help = "Instead of running tests, print the tests that would have been run.",
         help_heading = "List Options"
     )]
