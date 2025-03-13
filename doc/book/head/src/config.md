@@ -12,6 +12,7 @@ hypothetical program called `maelstrom-prog`. This configuration value could be
 specified via:
   - The `--config-value` command-line option.
   - The `MAELSTROM_PROG_CONFIG_VALUE` environment variable.
+  - The `MAELSTROM_CONFIG_VALUE` environment variable.
   - The `config-value` key in a configuration file.
 
 ## Command-Line Options
@@ -82,6 +83,22 @@ whitespace.
 
 Any empty list value can be specified with an empty string, or one containing
 only whitespace.
+
+If the program-specific environment variable isn't found, then a
+generic Maelstrom environment variable is checked. The name of this environment
+variable is found by prepending `MAELSTROM_` to the configuration value in
+"screaming snake case".
+
+For example, `cargo-maelstrom` will first check `CARGO_MAELSTROM_BROKER`, then
+`MAELSTROM_BROKER`, for the address of the broker. Similarly,
+`maelstrom-pytest` will first check `MAELSTROM_PYTEST_BROKER`, then
+`MAELSTROM_BROKER`.
+
+The generic Maelstrom environment variable is checked for all configuration
+values, even ones that are unique to the program in question. For example,
+`MAELSTROM_MANIFEST_PATH` can be used to set the `manifest-path` configuration
+value for `cargo-maelstrom`, even though no other program has this particular
+configuration value.
 
 ## Configuration Files
 
