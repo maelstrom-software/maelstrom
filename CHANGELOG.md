@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### All Programs
 - Changed the short option for `--log-level` to `-L` instead of `-l`.
   \[[513](https://github.com/maelstrom-software/maelstrom/issues/513)\]
+- Added support for generic Maelstrom environment variables, like
+  `MAELSTROM_BROKER` in addition to program-specific ones like `MAELSTROM_PYTEST_BROKER`.
+  \[[492](https://github.com/maelstrom-software/maelstrom/issues/492)\]
 
 ## [0.13.0] - 2025-02-24
 
