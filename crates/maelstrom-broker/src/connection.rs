@@ -326,7 +326,55 @@ async fn unassigned_github_connection_main<TempFileT>(
     let (mut read_queue, mut write_queue) = queue.into_split();
     match net::read_message_from_github_queue(&mut read_queue, &log).await {
         Ok(Some(Hello::Client)) => {
-            warn!(log, "github queue said it was client");
+            let cid: ClientId = id_vendor.vend();
+            let log = log.new(o!("cid" => cid.to_string()));
+            let log_clone = log.clone();
+            let log_clone2 = log.clone();
+            debug!(log, "client connected");
+
+            let write_queue = Arc::new(tokio::sync::Mutex::new(write_queue));
+            let write_queue_clone = write_queue.clone();
+
+            connection_main(
+                scheduler_task_sender,
+                cid,
+                scheduler_task::Message::ClientConnected,
+                scheduler_task::Message::ClientDisconnected,
+                |scheduler_task_sender| async move {
+                    let _ = net::github_queue_reader(
+                        &mut read_queue,
+                        scheduler_task_sender,
+                        |msg| match msg {
+                            ClientToBroker::JobRequest(cjid, job_spec) => {
+                                assert!(!job_spec.must_be_run_locally());
+                                scheduler_task::Message::JobRequestFromClient(cid, cjid, job_spec)
+                            }
+                            ClientToBroker::ArtifactTransferred(digest, location) => {
+                                scheduler_task::Message::ArtifactTransferredFromClient(
+                                    cid, digest, location,
+                                )
+                            }
+                        },
+                        log_clone,
+                        "reading from client github queue",
+                    )
+                    .await;
+                },
+                |scheduler_task_receiver| async move {
+                    let mut write_queue = write_queue_clone.lock().await;
+                    let _ = net::github_queue_writer(
+                        scheduler_task_receiver,
+                        &mut write_queue,
+                        log_clone2,
+                        "writing to client github queue",
+                    )
+                    .await;
+                },
+            )
+            .await;
+            debug!(log, "client disconnected");
+            let _ = write_queue.lock().await.shut_down().await;
+            return;
         }
         Ok(Some(Hello::Worker { slots })) => {
             let wid: WorkerId = id_vendor.vend();
