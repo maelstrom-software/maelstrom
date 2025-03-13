@@ -13,20 +13,20 @@ use xdg::BaseDirectories;
 
 pub struct ConfigBag {
     args: ArgMatches,
-    env_prefix: String,
+    env_prefixes: Vec<String>,
     env: HashMap<String, String>,
     files: Vec<(PathBuf, Table)>,
 }
 
 enum GetResult<T> {
     Some(T),
-    None { key: String, env_var: String },
+    None { key: String, env_vars: Vec<String> },
 }
 
 impl ConfigBag {
     pub fn new(
         args: ArgMatches,
-        env_prefix: impl Into<String>,
+        env_prefixes: impl IntoIterator<Item = impl Into<String>>,
         env: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
         files: impl IntoIterator<Item = (impl Into<PathBuf>, impl Into<String>)>,
     ) -> Result<Self> {
@@ -40,9 +40,10 @@ impl ConfigBag {
                     .map(|table| (path.into(), table))
             })
             .collect::<std::result::Result<_, _>>()?;
+        let env_prefixes = env_prefixes.into_iter().map(Into::into).collect();
         Ok(Self {
             args,
-            env_prefix: env_prefix.into(),
+            env_prefixes,
             env,
             files,
         })
@@ -104,21 +105,25 @@ impl ConfigBag {
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
         let key = field.to_kebab_case();
-        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
 
         if let Some(value) = self.get_from_args(&key)? {
             return Ok(GetResult::Some(value));
         }
 
-        if let Some(value) = self.get_from_env(&env_var)? {
-            return Ok(GetResult::Some(value));
+        let mut env_vars = vec![];
+        for env_prefix in &self.env_prefixes {
+            let env_var = format!("{}{}", env_prefix, field.to_shouty_snake_case());
+            if let Some(value) = self.get_from_env(&env_var)? {
+                return Ok(GetResult::Some(value));
+            }
+            env_vars.push(env_var);
         }
 
         if let Some(value) = self.get_from_file(&key)? {
             return Ok(GetResult::Some(value));
         }
 
-        Ok(GetResult::None { key, env_var })
+        Ok(GetResult::None { key, env_vars })
     }
 
     fn get_flag_from_args<T>(&self, key: &str) -> Result<Option<T>>
@@ -186,10 +191,16 @@ impl ConfigBag {
         match self.get_internal(field) {
             Err(err) => Err(err),
             Ok(GetResult::Some(v)) => Ok(v),
-            Ok(GetResult::None { key, env_var }) => Err(anyhow!(
-                "config value `{key}` must be set via `--{key}` command-line option, \
-                `{env_var}` environment variable, or `{key}` key in config file"
-            )),
+            Ok(GetResult::None { key, env_vars }) => {
+                let env_vars = itertools::join(
+                    env_vars.into_iter().map(|env_var| format!("`{env_var}`")),
+                    " or ",
+                );
+                Err(anyhow!(
+                    "config value `{key}` must be set via `--{key}` command-line option, \
+                    {env_vars} environment variables, or `{key}` key in config file"
+                ))
+            }
         }
     }
 
@@ -227,14 +238,16 @@ impl ConfigBag {
         T: From<bool> + for<'a> Deserialize<'a>,
     {
         let key = field.to_kebab_case();
-        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
 
         if let Some(v) = self.get_flag_from_args(&key)? {
             return Ok(Some(v));
         }
 
-        if let Some(v) = self.get_flag_from_env(&env_var)? {
-            return Ok(Some(v));
+        for env_prefix in &self.env_prefixes {
+            let env_var = format!("{}{}", env_prefix, field.to_shouty_snake_case());
+            if let Some(v) = self.get_flag_from_env(&env_var)? {
+                return Ok(Some(v));
+            }
         }
 
         if let Some(v) = self.get_from_file(&key)? {
@@ -251,14 +264,16 @@ impl ConfigBag {
         T: FromIterator<String> + for<'a> Deserialize<'a> + Default,
     {
         let key = field.to_kebab_case();
-        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
 
         if let Some(v) = self.get_var_arg_from_args(&key)? {
             return Ok(v);
         }
 
-        if let Some(v) = self.get_var_arg_from_env(&env_var)? {
-            return Ok(v);
+        for env_prefix in &self.env_prefixes {
+            let env_var = format!("{}{}", env_prefix, field.to_shouty_snake_case());
+            if let Some(v) = self.get_var_arg_from_env(&env_var)? {
+                return Ok(v);
+            }
         }
 
         if let Some(v) = self.get_from_file(&key)? {
@@ -519,8 +534,12 @@ where
     let builder = T::add_command_line_options(builder, &base_directories);
     let command = U::augment_args(builder.build());
     let mut args = command.get_matches_from(args);
-    let env_var_prefix = env_var_prefix.to_string() + "_";
-    let env = env::vars().filter(|(key, _)| key.starts_with(&env_var_prefix));
+    let env_var_prefixes = [format!("{env_var_prefix}_"), "MAELSTROM_".to_string()];
+    let env = env::vars().filter(|(key, _)| {
+        env_var_prefixes
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
+    });
 
     let config_files = match args.remove_one::<String>("config-file").as_deref() {
         Some("-") => vec![],
@@ -539,7 +558,7 @@ where
 
     let print_config = args.remove_one::<bool>("print-config").unwrap();
 
-    let mut config_bag = ConfigBag::new(args, &env_var_prefix, env, files)
+    let mut config_bag = ConfigBag::new(args, &env_var_prefixes, env, files)
         .context("loading configuration from environment variables and config files")?;
 
     let config = T::from_config_bag(&mut config_bag, &base_directories)?;
@@ -604,6 +623,8 @@ mod tests {
             .arg(Arg::new("key-2").long("key-2").action(ArgAction::Set))
             .arg(Arg::new("key-3").long("key-3").action(ArgAction::Set))
             .arg(Arg::new("key-4").long("key-4").action(ArgAction::Set))
+            .arg(Arg::new("key-5").long("key-5").action(ArgAction::Set))
+            .arg(Arg::new("key-6").long("key-6").action(ArgAction::Set))
             .arg(
                 Arg::new("int-key-1")
                     .long("int-key-1")
@@ -625,6 +646,16 @@ mod tests {
                     .action(ArgAction::Set),
             )
             .arg(
+                Arg::new("int-key-5")
+                    .long("int-key-5")
+                    .action(ArgAction::Set),
+            )
+            .arg(
+                Arg::new("int-key-6")
+                    .long("int-key-6")
+                    .action(ArgAction::Set),
+            )
+            .arg(
                 Arg::new("bool-key-1")
                     .long("bool-key-1")
                     .action(ArgAction::SetTrue),
@@ -643,6 +674,16 @@ mod tests {
                 Arg::new("bool-key-4")
                     .long("bool-key-4")
                     .action(ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("bool-key-5")
+                    .long("bool-key-5")
+                    .action(ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("bool-key-6")
+                    .long("bool-key-6")
+                    .action(ArgAction::SetTrue),
             );
         let args = cmd.clone().get_matches_from([
             "command",
@@ -652,27 +693,33 @@ mod tests {
         ]);
         ConfigBag::new(
             args,
-            "PREFIX_",
+            ["PREFIX_", "OTHER_PREFIX_"],
             [
                 ("PREFIX_KEY_2", "value-2"),
                 ("PREFIX_INT_KEY_2", "2"),
                 ("PREFIX_BOOL_KEY_2", "true"),
+                ("OTHER_PREFIX_KEY_2", "shadowed-value"),
+                ("OTHER_PREFIX_INT_KEY_2", "shadowed-value"),
+                ("OTHER_PREFIX_BOOL_KEY_2", "shadowed-value"),
+                ("OTHER_PREFIX_KEY_3", "value-3"),
+                ("OTHER_PREFIX_INT_KEY_3", "3"),
+                ("OTHER_PREFIX_BOOL_KEY_3", "false"),
             ],
             [
                 (
                     "config-1.toml",
                     indoc! {r#"
-                        key-3 = "value-3"
-                        int-key-3 = 3
-                        bool-key-3 = true
+                        key-4 = "value-4"
+                        int-key-4 = 4
+                        bool-key-4 = true
                     "#},
                 ),
                 (
                     "config-2.toml",
                     indoc! {r#"
-                        key-4 = "value-4"
-                        int-key-4 = 4
-                        bool-key-4 = true
+                        key-5 = "value-5"
+                        int-key-5 = 5
+                        bool-key-5 = false
                     "#},
                 ),
             ],
@@ -685,19 +732,84 @@ mod tests {
         let config = get_config();
         assert_eq!(
             config.get::<String>("key_1").unwrap(),
-            "value-1".to_string()
+            "value-1".to_string(),
         );
         assert_eq!(
             config.get::<String>("key_2").unwrap(),
-            "value-2".to_string()
+            "value-2".to_string(),
         );
         assert_eq!(
             config.get::<String>("key_3").unwrap(),
-            "value-3".to_string()
+            "value-3".to_string(),
         );
         assert_eq!(
             config.get::<String>("key_4").unwrap(),
-            "value-4".to_string()
+            "value-4".to_string(),
+        );
+        assert_eq!(
+            config.get::<String>("key_5").unwrap(),
+            "value-5".to_string(),
+        );
+        assert_eq!(
+            config.get::<String>("key_6").unwrap_err().to_string(),
+            "config value `key-6` must be set via `--key-6` command-line option, \
+            `PREFIX_KEY_6` or `OTHER_PREFIX_KEY_6` environment variables, \
+            or `key-6` key in config file",
+        );
+    }
+
+    #[test]
+    fn string_option_values() {
+        let config = get_config();
+        assert_eq!(
+            config.get_option::<String>("key_1").unwrap(),
+            Some("value-1".to_string()),
+        );
+        assert_eq!(
+            config.get_option::<String>("key_2").unwrap(),
+            Some("value-2".to_string()),
+        );
+        assert_eq!(
+            config.get_option::<String>("key_3").unwrap(),
+            Some("value-3".to_string()),
+        );
+        assert_eq!(
+            config.get_option::<String>("key_4").unwrap(),
+            Some("value-4".to_string()),
+        );
+        assert_eq!(
+            config.get_option::<String>("key_5").unwrap(),
+            Some("value-5".to_string()),
+        );
+        assert_eq!(config.get_option::<String>("key_6").unwrap(), None,);
+    }
+
+    #[test]
+    fn string_or_else_values() {
+        let config = get_config();
+        assert_eq!(
+            config.get_or_else("key_1", || "else".to_string()).unwrap(),
+            "value-1".to_string(),
+        );
+        assert_eq!(
+            config.get_or_else("key_2", || "else".to_string()).unwrap(),
+            "value-2".to_string(),
+        );
+        assert_eq!(
+            config.get_or_else("key_3", || "else".to_string()).unwrap(),
+            "value-3".to_string(),
+        );
+        assert_eq!(
+            config.get_or_else("key_4", || "else".to_string()).unwrap(),
+            "value-4".to_string(),
+        );
+        assert_eq!(
+            config.get_or_else("key_5", || "else".to_string()).unwrap(),
+            "value-5".to_string(),
+        );
+        assert_eq!(
+            config.get_or_else("key_6", || "else".to_string()).unwrap(),
+            "else".to_string(),
         );
     }
 
@@ -708,6 +820,35 @@ mod tests {
         assert_eq!(config.get::<i32>("int_key_2").unwrap(), 2);
         assert_eq!(config.get::<i32>("int_key_3").unwrap(), 3);
         assert_eq!(config.get::<i32>("int_key_4").unwrap(), 4);
+        assert_eq!(config.get::<i32>("int_key_5").unwrap(), 5);
+        assert_eq!(
+            config.get::<i32>("int_key_6").unwrap_err().to_string(),
+            "config value `int-key-6` must be set via `--int-key-6` command-line option, \
+            `PREFIX_INT_KEY_6` or `OTHER_PREFIX_INT_KEY_6` environment variables, \
+            or `int-key-6` key in config file",
+        );
+    }
+
+    #[test]
+    fn int_option_values() {
+        let config = get_config();
+        assert_eq!(config.get_option::<i32>("int_key_1").unwrap(), Some(1));
+        assert_eq!(config.get_option::<i32>("int_key_2").unwrap(), Some(2));
+        assert_eq!(config.get_option::<i32>("int_key_3").unwrap(), Some(3));
+        assert_eq!(config.get_option::<i32>("int_key_4").unwrap(), Some(4));
+        assert_eq!(config.get_option::<i32>("int_key_5").unwrap(), Some(5));
+        assert_eq!(config.get_option::<i32>("int_key_6").unwrap(), None);
+    }
+
+    #[test]
+    fn int_or_else_values() {
+        let config = get_config();
+        assert_eq!(config.get_or_else("int_key_1", || 0).unwrap(), 1);
+        assert_eq!(config.get_or_else("int_key_2", || 0).unwrap(), 2);
+        assert_eq!(config.get_or_else("int_key_3", || 0).unwrap(), 3);
+        assert_eq!(config.get_or_else("int_key_4", || 0).unwrap(), 4);
+        assert_eq!(config.get_or_else("int_key_5", || 0).unwrap(), 5);
+        assert_eq!(config.get_or_else("int_key_6", || 0).unwrap(), 0);
     }
 
     #[test]
@@ -715,8 +856,10 @@ mod tests {
         let config = get_config();
         assert_eq!(config.get_flag("bool_key_1").unwrap(), Some(true));
         assert_eq!(config.get_flag("bool_key_2").unwrap(), Some(true));
-        assert_eq!(config.get_flag("bool_key_3").unwrap(), Some(true));
+        assert_eq!(config.get_flag("bool_key_3").unwrap(), Some(false));
         assert_eq!(config.get_flag("bool_key_4").unwrap(), Some(true));
+        assert_eq!(config.get_flag("bool_key_5").unwrap(), Some(false));
+        assert_eq!(config.get_flag::<bool>("bool_key_6").unwrap(), None);
     }
 
     #[test]
@@ -728,7 +871,7 @@ mod tests {
             .get_matches_from(["command", "--", "--a", "--b"]);
         let config = ConfigBag::new(
             args,
-            "PREFIX_",
+            ["PREFIX_", "OTHER_PREFIX_"],
             Vec::<(String, String)>::new(),
             Vec::<(String, String)>::new(),
         )
@@ -736,7 +879,7 @@ mod tests {
 
         assert_eq!(
             config.get_list::<Vec<String>>("var_args").unwrap(),
-            vec!["--a".to_owned(), "--b".to_owned()]
+            vec!["--a".to_owned(), "--b".to_owned()],
         );
     }
 
@@ -747,15 +890,37 @@ mod tests {
         let args = cmd.clone().get_matches_from(["command"]);
         let config = ConfigBag::new(
             args,
-            "PREFIX_",
-            [("PREFIX_VAR_ARGS", "--a --b")],
+            ["PREFIX_", "OTHER_PREFIX_"],
+            [
+                ("PREFIX_VAR_ARGS", "--a --b"),
+                ("OTHER_PREFIX_VAR_ARGS", "--c --d"),
+            ],
             Vec::<(String, String)>::new(),
         )
         .unwrap();
 
         assert_eq!(
             config.get_list::<Vec<String>>("var_args").unwrap(),
-            vec!["--a".to_owned(), "--b".to_owned()]
+            vec!["--a".to_owned(), "--b".to_owned()],
+        );
+    }
+
+    #[test]
+    fn list_from_env_2() {
+        let cmd =
+            Command::new("command").arg(Arg::new("var-args").last(true).action(ArgAction::Append));
+        let args = cmd.clone().get_matches_from(["command"]);
+        let config = ConfigBag::new(
+            args,
+            ["PREFIX_", "OTHER_PREFIX_"],
+            [("OTHER_PREFIX_VAR_ARGS", "--a --b")],
+            Vec::<(String, String)>::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.get_list::<Vec<String>>("var_args").unwrap(),
+            vec!["--a".to_owned(), "--b".to_owned()],
         );
     }
 
@@ -766,7 +931,7 @@ mod tests {
         let args = cmd.clone().get_matches_from(["command"]);
         let config = ConfigBag::new(
             args,
-            "PREFIX_",
+            ["PREFIX_", "OTHER_PREFIX_"],
             Vec::<(String, String)>::new(),
             [(
                 "config-1.toml",
@@ -779,7 +944,7 @@ mod tests {
 
         assert_eq!(
             config.get_list::<Vec<String>>("var_args").unwrap(),
-            vec!["--a".to_owned(), "--b".to_owned()]
+            vec!["--a".to_owned(), "--b".to_owned()],
         );
     }
 }
