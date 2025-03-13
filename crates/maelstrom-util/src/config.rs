@@ -112,7 +112,7 @@ impl ConfigBag {
 
         let mut env_vars = vec![];
         for env_prefix in &self.env_prefixes {
-            let env_var = format!("{}{}", env_prefix, field.to_shouty_snake_case());
+            let env_var = format!("{env_prefix}_{}", field.to_shouty_snake_case());
             if let Some(value) = self.get_from_env(&env_var)? {
                 return Ok(GetResult::Some(value));
             }
@@ -244,7 +244,7 @@ impl ConfigBag {
         }
 
         for env_prefix in &self.env_prefixes {
-            let env_var = format!("{}{}", env_prefix, field.to_shouty_snake_case());
+            let env_var = format!("{env_prefix}_{}", field.to_shouty_snake_case());
             if let Some(v) = self.get_flag_from_env(&env_var)? {
                 return Ok(Some(v));
             }
@@ -270,7 +270,7 @@ impl ConfigBag {
         }
 
         for env_prefix in &self.env_prefixes {
-            let env_var = format!("{}{}", env_prefix, field.to_shouty_snake_case());
+            let env_var = format!("{env_prefix}_{}", field.to_shouty_snake_case());
             if let Some(v) = self.get_var_arg_from_env(&env_var)? {
                 return Ok(v);
             }
@@ -557,7 +557,6 @@ where
     let builder = T::add_command_line_options(builder, &base_directories);
     let command = U::augment_args(builder.build());
     let mut args = command.get_matches_from(args);
-    let env_var_prefixes = Vec::from_iter(env_var_prefixes.iter().map(|prefix| format!("{prefix}_")));
     let env = env::vars().filter(|(key, _)| {
         env_var_prefixes
             .iter()
@@ -716,7 +715,7 @@ mod tests {
         ]);
         ConfigBag::new(
             args,
-            ["PREFIX_", "OTHER_PREFIX_"],
+            ["PREFIX", "OTHER_PREFIX"],
             [
                 ("PREFIX_KEY_2", "value-2"),
                 ("PREFIX_INT_KEY_2", "2"),
@@ -894,7 +893,7 @@ mod tests {
             .get_matches_from(["command", "--", "--a", "--b"]);
         let config = ConfigBag::new(
             args,
-            ["PREFIX_", "OTHER_PREFIX_"],
+            ["PREFIX", "OTHER_PREFIX"],
             Vec::<(String, String)>::new(),
             Vec::<(String, String)>::new(),
         )
@@ -913,7 +912,7 @@ mod tests {
         let args = cmd.clone().get_matches_from(["command"]);
         let config = ConfigBag::new(
             args,
-            ["PREFIX_", "OTHER_PREFIX_"],
+            ["PREFIX", "OTHER_PREFIX"],
             [
                 ("PREFIX_VAR_ARGS", "--a --b"),
                 ("OTHER_PREFIX_VAR_ARGS", "--c --d"),
@@ -935,7 +934,7 @@ mod tests {
         let args = cmd.clone().get_matches_from(["command"]);
         let config = ConfigBag::new(
             args,
-            ["PREFIX_", "OTHER_PREFIX_"],
+            ["PREFIX", "OTHER_PREFIX"],
             [("OTHER_PREFIX_VAR_ARGS", "--a --b")],
             Vec::<(String, String)>::new(),
         )
@@ -954,7 +953,7 @@ mod tests {
         let args = cmd.clone().get_matches_from(["command"]);
         let config = ConfigBag::new(
             args,
-            ["PREFIX_", "OTHER_PREFIX_"],
+            ["PREFIX", "OTHER_PREFIX"],
             Vec::<(String, String)>::new(),
             [(
                 "config-1.toml",
