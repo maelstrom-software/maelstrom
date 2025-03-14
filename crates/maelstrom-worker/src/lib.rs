@@ -15,11 +15,14 @@ mod types;
 use anyhow::{anyhow, bail, Context as _, Error, Result};
 use artifact_fetcher::{GitHubArtifactFetcher, TcpArtifactFetcher};
 use config::Config;
-use connection::{BrokerConnectionFactory, BrokerReadConnection as _, BrokerWriteConnection as _};
+use connection::{
+    BrokerConnectionFactory, BrokerReadConnection as _, BrokerWriteConnection as _,
+    GitHubQueueBrokerConnectionFactory, TcpBrokerConnectionFactory,
+};
 use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
 use executor::{MountDir, TmpfsDir};
-use maelstrom_github::{GitHubClient, GitHubQueue};
+use maelstrom_github::GitHubClient;
 use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux, Signal};
 use maelstrom_util::{
@@ -36,7 +39,6 @@ use num::integer;
 use slog::{debug, error, info, o, Logger};
 use std::{future::Future, sync::Arc};
 use tokio::{
-    net::TcpStream,
     signal::unix::{self as signal, SignalKind},
     sync::mpsc,
     task::{self, JoinHandle, JoinSet},
@@ -60,8 +62,12 @@ const MAX_ARTIFACT_FETCHES: usize = 1;
 pub fn main(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config);
     let err = match config.broker_connection {
-        ConfigBrokerConnection::Tcp => main_inner::<TcpStream>(config, &log).unwrap_err(),
-        ConfigBrokerConnection::GitHub => main_inner::<GitHubQueue>(config, &log).unwrap_err(),
+        ConfigBrokerConnection::Tcp => {
+            main_inner(TcpBrokerConnectionFactory, config, &log).unwrap_err()
+        }
+        ConfigBrokerConnection::GitHub => {
+            main_inner(GitHubQueueBrokerConnectionFactory, config, &log).unwrap_err()
+        }
     };
     info!(log, "exiting");
     Err(err)
@@ -70,14 +76,16 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
 #[tokio::main]
-async fn main_inner<ConnectionT: BrokerConnectionFactory>(
+async fn main_inner(
+    broker_connection_factory: impl BrokerConnectionFactory,
     config: Config,
     log: &Logger,
 ) -> Result<()> {
     check_open_file_limit(log, config.slots, 0)?;
 
-    let (read_stream, write_stream) =
-        ConnectionT::connect(&config.broker, config.slots, log).await?;
+    let (read_stream, write_stream) = broker_connection_factory
+        .connect(&config.broker, config.slots, log)
+        .await?;
 
     let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =

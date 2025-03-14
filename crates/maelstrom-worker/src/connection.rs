@@ -18,17 +18,21 @@ pub trait BrokerConnectionFactory: Sized {
     type Write: BrokerWriteConnection;
 
     async fn connect(
+        &self,
         addr: &BrokerAddr,
         slots: Slots,
         log: &Logger,
     ) -> Result<(Self::Read, Self::Write)>;
 }
 
-impl BrokerConnectionFactory for TcpStream {
+pub struct TcpBrokerConnectionFactory;
+
+impl BrokerConnectionFactory for TcpBrokerConnectionFactory {
     type Read = BufReader<tokio::net::tcp::OwnedReadHalf>;
     type Write = tokio::net::tcp::OwnedWriteHalf;
 
     async fn connect(
+        &self,
         addr: &BrokerAddr,
         slots: Slots,
         log: &Logger,
@@ -100,11 +104,14 @@ impl BrokerWriteConnection for tokio::net::tcp::OwnedWriteHalf {
     }
 }
 
-impl BrokerConnectionFactory for GitHubQueue {
+pub struct GitHubQueueBrokerConnectionFactory;
+
+impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory {
     type Read = GitHubReadQueue;
     type Write = GitHubWriteQueue;
 
     async fn connect(
+        &self,
         _addr: &BrokerAddr,
         slots: Slots,
         log: &Logger,
