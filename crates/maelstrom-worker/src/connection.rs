@@ -8,7 +8,7 @@ use maelstrom_util::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use slog::{error, Logger};
-use std::{fmt::Debug, future::Future, sync::Arc};
+use std::{fmt::Debug, future::Future};
 use tokio::{
     io::BufReader,
     net::TcpStream,
@@ -104,7 +104,7 @@ impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory<'_> {
     type Write = GitHubWriteQueue;
 
     async fn connect(&self, hello: &Hello) -> Result<(Self::Read, Self::Write)> {
-        let client = Arc::new(GitHubClient::new(&self.token, self.url.clone())?);
+        let client = GitHubClient::new(&self.token, self.url.clone())?;
         let (read, mut write) = GitHubQueue::connect(client, "maelstrom-broker")
             .await
             .map_err(|err| {

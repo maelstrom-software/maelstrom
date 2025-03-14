@@ -335,7 +335,8 @@ where
         }
     }
 
-    pub async fn connect(conn: Arc<ConnT>, id: &str) -> Result<Self> {
+    pub async fn connect(conn: ConnT, id: &str) -> Result<Self> {
+        let conn = Arc::new(conn);
         loop {
             if let Some(socket) = Self::maybe_connect(conn.clone(), id).await? {
                 return Ok(socket);
@@ -370,8 +371,9 @@ impl<ConnT> GitHubQueueAcceptor<ConnT>
 where
     ConnT: QueueConnection,
 {
-    pub async fn new(conn: Arc<ConnT>, id: &str) -> Result<Self> {
+    pub async fn new(conn: ConnT, id: &str) -> Result<Self> {
         let key = format!("{id}-listen");
+        let conn = Arc::new(conn);
         conn.create_blob(&key).await?;
         Ok(Self {
             id: id.into(),
@@ -420,9 +422,9 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    #[derive(Default)]
+    #[derive(Clone, Default)]
     struct FakeConnection {
-        blobs: Mutex<HashMap<String, FakeBlob>>,
+        blobs: Arc<Mutex<HashMap<String, FakeBlob>>>,
     }
 
     #[derive(Clone, Default)]
@@ -722,7 +724,7 @@ mod tests {
 
     #[tokio::test]
     async fn accept_and_connect() {
-        let conn = Arc::new(FakeConnection::default());
+        let conn = FakeConnection::default();
 
         let their_conn = conn.clone();
         tokio::task::spawn(async move {
@@ -737,9 +739,7 @@ mod tests {
     }
 
     async fn acceptor(client: GitHubClient) {
-        let mut acceptor = GitHubQueueAcceptor::new(Arc::new(client), "foo")
-            .await
-            .unwrap();
+        let mut acceptor = GitHubQueueAcceptor::new(client, "foo").await.unwrap();
 
         let mut handles = vec![];
         for _ in 0..2 {
@@ -760,7 +760,7 @@ mod tests {
     }
 
     async fn connector(client: GitHubClient) {
-        let mut sock = GitHubQueue::connect(Arc::new(client), "foo").await.unwrap();
+        let mut sock = GitHubQueue::connect(client, "foo").await.unwrap();
         while let Some(msg) = sock.read_msg().await.unwrap() {
             assert_eq!(msg, b"ping");
             sock.write_msg(&b"pong"[..]).await.unwrap();

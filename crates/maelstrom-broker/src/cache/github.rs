@@ -15,7 +15,7 @@ pub struct GitHubArtifactReader {
 impl GitHubArtifactReader {
     fn new() -> Result<Self> {
         Ok(Self {
-            client: crate::github_client()?,
+            client: Arc::new(crate::github_client()?),
         })
     }
 }

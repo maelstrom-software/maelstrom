@@ -25,11 +25,12 @@ pub struct GitHubArtifactFetcher {
 impl GitHubArtifactFetcher {
     pub fn new(
         max_simultaneous_fetches: NonZeroU32,
-        github_client: Arc<GitHubClient>,
+        github_client: GitHubClient,
         dispatcher_sender: DispatcherSender,
         log: Logger,
         temp_file_factory: TempFileFactory,
     ) -> Self {
+        let github_client = Arc::new(github_client);
         Self {
             github_client,
             dispatcher_sender,

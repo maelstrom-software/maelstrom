@@ -38,7 +38,7 @@ use maelstrom_util::{
 };
 use num::integer;
 use slog::{debug, error, info, o, Logger};
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 use tokio::{
     signal::unix::{self as signal, SignalKind},
     sync::mpsc,
@@ -51,11 +51,11 @@ fn env_or_error(key: &str) -> Result<String> {
     std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
 }
 
-fn github_client_factory() -> Result<Arc<GitHubClient>> {
+fn github_client_factory() -> Result<GitHubClient> {
     // XXX remi: I would prefer if we didn't read these from environment variables.
     let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
     let base_url = url::Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-    Ok(Arc::new(GitHubClient::new(&token, base_url)?))
+    Ok(GitHubClient::new(&token, base_url)?)
 }
 
 const MAX_PENDING_LAYERS_BUILDS: usize = 10;

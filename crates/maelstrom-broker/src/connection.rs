@@ -397,7 +397,7 @@ async fn unassigned_github_connection_main<TempFileT>(
 }
 
 pub async fn github_acceptor_main<TempFileT>(
-    client: Arc<GitHubClient>,
+    client: GitHubClient,
     scheduler_task_sender: scheduler_task::Sender<TempFileT>,
     id_vendor: Arc<IdVendor>,
     log: Logger,
