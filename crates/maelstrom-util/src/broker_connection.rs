@@ -1,11 +1,11 @@
-use anyhow::Result;
-use derive_more::Constructor;
-use maelstrom_base::proto::Hello;
-use maelstrom_github::{GitHubClient, GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
 use crate::{
     config::common::BrokerAddr,
     net::{self, AsRawFdExt as _},
 };
+use anyhow::Result;
+use derive_more::Constructor;
+use maelstrom_base::proto::Hello;
+use maelstrom_github::{GitHubClient, GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
 use serde::{de::DeserializeOwned, Serialize};
 use slog::{error, Logger};
 use std::{fmt::Debug, future::Future};
@@ -146,4 +146,3 @@ impl BrokerWriteConnection for GitHubWriteQueue {
         net::github_queue_writer(channel, &mut self, log, "reading from broker github queue").await
     }
 }
-

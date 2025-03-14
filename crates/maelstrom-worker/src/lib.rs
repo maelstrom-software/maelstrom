@@ -22,14 +22,14 @@ use maelstrom_github::GitHubClient;
 use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux, Signal};
 use maelstrom_util::{
+    broker_connection::{
+        BrokerConnectionFactory, BrokerReadConnection as _, BrokerWriteConnection as _,
+        GitHubQueueBrokerConnectionFactory, TcpBrokerConnectionFactory,
+    },
     cache::{self, fs::std::Fs as StdFs, TempFileFactory},
     config::common::{
         ArtifactTransferStrategy, BrokerConnection as ConfigBrokerConnection, CacheSize,
         InlineLimit, Slots,
-    },
-    broker_connection::{
-        BrokerConnectionFactory, BrokerReadConnection as _, BrokerWriteConnection as _,
-        GitHubQueueBrokerConnectionFactory, TcpBrokerConnectionFactory,
     },
     process::TERMINATION_SIGNALS,
     root::RootBuf,
@@ -54,7 +54,7 @@ fn github_client_factory() -> Result<GitHubClient> {
     // XXX remi: I would prefer if we didn't read these from environment variables.
     let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
     let base_url = url::Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-    Ok(GitHubClient::new(&token, base_url)?)
+    GitHubClient::new(&token, base_url)
 }
 
 const MAX_PENDING_LAYERS_BUILDS: usize = 10;

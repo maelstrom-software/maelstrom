@@ -71,7 +71,7 @@ fn github_client() -> Result<GitHubClient> {
     // XXX remi: I would prefer if we didn't read these from environment variables.
     let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
     let base_url = url::Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-    Ok(GitHubClient::new(&token, base_url)?)
+    GitHubClient::new(&token, base_url)
 }
 
 struct Listeners {
