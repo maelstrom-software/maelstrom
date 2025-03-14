@@ -1,5 +1,7 @@
-use crate::dispatcher::Message;
-use crate::types::{BrokerSocketOutgoingReceiver, DispatcherSender};
+use crate::{
+    dispatcher::Message,
+    types::{BrokerSocketOutgoingReceiver, DispatcherSender},
+};
 use anyhow::Result;
 use maelstrom_base::proto::Hello;
 use maelstrom_github::{GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
