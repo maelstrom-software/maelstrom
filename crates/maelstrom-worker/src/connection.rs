@@ -18,21 +18,24 @@ pub trait BrokerConnectionFactory: Sized {
     type Read: BrokerReadConnection;
     type Write: BrokerWriteConnection;
 
-    async fn connect(&self, slots: Slots, log: &Logger) -> Result<(Self::Read, Self::Write)>;
+    async fn connect(&self, slots: Slots) -> Result<(Self::Read, Self::Write)>;
 }
 
 #[derive(Constructor)]
-pub struct TcpBrokerConnectionFactory(BrokerAddr);
+pub struct TcpBrokerConnectionFactory<'a> {
+    broker: BrokerAddr,
+    log: &'a Logger,
+}
 
-impl BrokerConnectionFactory for TcpBrokerConnectionFactory {
+impl BrokerConnectionFactory for TcpBrokerConnectionFactory<'_> {
     type Read = BufReader<tokio::net::tcp::OwnedReadHalf>;
     type Write = tokio::net::tcp::OwnedWriteHalf;
 
-    async fn connect(&self, slots: Slots, log: &Logger) -> Result<(Self::Read, Self::Write)> {
-        let (read, mut write) = TcpStream::connect(self.0.inner())
+    async fn connect(&self, slots: Slots) -> Result<(Self::Read, Self::Write)> {
+        let (read, mut write) = TcpStream::connect(self.broker.inner())
             .await
             .map_err(|err| {
-                error!(log, "error connecting to broker"; "error" => %err);
+                error!(self.log, "error connecting to broker"; "error" => %err);
                 err
             })?
             .set_socket_options()?
@@ -43,7 +46,7 @@ impl BrokerConnectionFactory for TcpBrokerConnectionFactory {
             Hello::Worker {
                 slots: slots.into_inner().into(),
             },
-            log,
+            self.log,
         )
         .await?;
 
@@ -96,18 +99,21 @@ impl BrokerWriteConnection for tokio::net::tcp::OwnedWriteHalf {
     }
 }
 
-pub struct GitHubQueueBrokerConnectionFactory;
+#[derive(Constructor)]
+pub struct GitHubQueueBrokerConnectionFactory<'a> {
+    log: &'a Logger,
+}
 
-impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory {
+impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory<'_> {
     type Read = GitHubReadQueue;
     type Write = GitHubWriteQueue;
 
-    async fn connect(&self, slots: Slots, log: &Logger) -> Result<(Self::Read, Self::Write)> {
+    async fn connect(&self, slots: Slots) -> Result<(Self::Read, Self::Write)> {
         let client = crate::github_client_factory()?;
         let (read, mut write) = GitHubQueue::connect(client, "maelstrom-broker")
             .await
             .map_err(|err| {
-                error!(log, "error connecting to broker"; "error" => %err);
+                error!(self.log, "error connecting to broker"; "error" => %err);
                 err
             })?
             .into_split();
@@ -117,7 +123,7 @@ impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory {
             &Hello::Worker {
                 slots: slots.into_inner().into(),
             },
-            log,
+            self.log,
         )
         .await?;
 

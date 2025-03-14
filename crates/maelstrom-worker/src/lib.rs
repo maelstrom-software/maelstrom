@@ -62,11 +62,14 @@ const MAX_ARTIFACT_FETCHES: usize = 1;
 pub fn main(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config);
     let err = match config.broker_connection {
-        ConfigBrokerConnection::Tcp => {
-            main_inner(TcpBrokerConnectionFactory::new(config.broker), config, &log).unwrap_err()
-        }
+        ConfigBrokerConnection::Tcp => main_inner(
+            TcpBrokerConnectionFactory::new(config.broker, &log),
+            config,
+            &log,
+        )
+        .unwrap_err(),
         ConfigBrokerConnection::GitHub => {
-            main_inner(GitHubQueueBrokerConnectionFactory, config, &log).unwrap_err()
+            main_inner(GitHubQueueBrokerConnectionFactory::new(&log), config, &log).unwrap_err()
         }
     };
     info!(log, "exiting");
@@ -83,7 +86,7 @@ async fn main_inner(
 ) -> Result<()> {
     check_open_file_limit(log, config.slots, 0)?;
 
-    let (read_stream, write_stream) = broker_connection_factory.connect(config.slots, log).await?;
+    let (read_stream, write_stream) = broker_connection_factory.connect(config.slots).await?;
 
     let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =
