@@ -98,8 +98,11 @@ async fn main_inner(
 
     let mut join_set = JoinSet::new();
 
-    let reader_log = log.new(o!("task" => "reader"));
-    join_set.spawn(read_stream.read_messages(dispatcher_sender.clone(), reader_log));
+    join_set.spawn(read_stream.read_messages(
+        dispatcher_sender.clone(),
+        log.new(o!("task" => "reader")),
+        dispatcher::Message::Broker,
+    ));
 
     let writer_log = log.new(o!("task" => "writer"));
     join_set.spawn(write_stream.write_messages(broker_socket_outgoing_receiver, writer_log));

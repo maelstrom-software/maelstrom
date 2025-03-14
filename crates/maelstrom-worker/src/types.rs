@@ -118,4 +118,3 @@ impl dispatcher::Cache for Cache {
 pub type DispatcherReceiver = UnboundedReceiver<dispatcher::Message<StdFs>>;
 pub type DispatcherSender = UnboundedSender<dispatcher::Message<StdFs>>;
 pub type BrokerSocketOutgoingSender = UnboundedSender<WorkerToBroker>;
-pub type BrokerSocketOutgoingReceiver = UnboundedReceiver<WorkerToBroker>;

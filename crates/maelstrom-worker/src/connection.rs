@@ -1,7 +1,3 @@
-use crate::{
-    dispatcher::Message,
-    types::{BrokerSocketOutgoingReceiver, DispatcherSender},
-};
 use anyhow::Result;
 use derive_more::Constructor;
 use maelstrom_base::proto::Hello;
@@ -10,15 +6,37 @@ use maelstrom_util::{
     config::common::BrokerAddr,
     net::{self, AsRawFdExt as _},
 };
+use serde::{de::DeserializeOwned, Serialize};
 use slog::{error, Logger};
-use std::future::Future;
-use tokio::{io::BufReader, net::TcpStream};
+use std::{fmt::Debug, future::Future};
+use tokio::{
+    io::BufReader,
+    net::TcpStream,
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+};
 
 pub trait BrokerConnectionFactory: Sized {
     type Read: BrokerReadConnection;
     type Write: BrokerWriteConnection;
 
     async fn connect(&self, hello: &Hello) -> Result<(Self::Read, Self::Write)>;
+}
+
+pub trait BrokerReadConnection: Send + Sync + 'static {
+    fn read_messages<MessageT: Debug + DeserializeOwned, TransformedT: Send>(
+        self,
+        channel: UnboundedSender<TransformedT>,
+        log: Logger,
+        transform: impl Fn(MessageT) -> TransformedT + Send,
+    ) -> impl Future<Output = Result<()>> + Send;
+}
+
+pub trait BrokerWriteConnection: Send + Sync + 'static {
+    fn write_messages<MessageT: Debug + Send + Serialize + Sync>(
+        self,
+        channel: UnboundedReceiver<MessageT>,
+        log: Logger,
+    ) -> impl Future<Output = Result<()>> + Send;
 }
 
 #[derive(Constructor)]
@@ -47,48 +65,24 @@ impl BrokerConnectionFactory for TcpBrokerConnectionFactory<'_> {
     }
 }
 
-pub trait BrokerReadConnection: Send + Sync + 'static {
-    fn read_messages(
-        self,
-        dispatcher_sender: DispatcherSender,
-        log: Logger,
-    ) -> impl Future<Output = Result<()>> + Send;
-}
-
 impl BrokerReadConnection for BufReader<tokio::net::tcp::OwnedReadHalf> {
-    async fn read_messages(self, dispatcher_sender: DispatcherSender, log: Logger) -> Result<()> {
-        net::async_socket_reader(
-            self,
-            dispatcher_sender,
-            Message::Broker,
-            log,
-            "reading from broker socket",
-        )
-        .await
+    async fn read_messages<MessageT: Debug + DeserializeOwned, TransformedT: Send>(
+        self,
+        channel: UnboundedSender<TransformedT>,
+        log: Logger,
+        transform: impl Fn(MessageT) -> TransformedT + Send,
+    ) -> Result<()> {
+        net::async_socket_reader(self, channel, transform, log, "reading from broker socket").await
     }
 }
 
-pub trait BrokerWriteConnection: Send + Sync + 'static {
-    fn write_messages(
-        self,
-        broker_socket_outgoing_receiver: BrokerSocketOutgoingReceiver,
-        log: Logger,
-    ) -> impl Future<Output = Result<()>> + Send;
-}
-
 impl BrokerWriteConnection for tokio::net::tcp::OwnedWriteHalf {
-    async fn write_messages(
+    async fn write_messages<MessageT: Debug + Send + Serialize + Sync>(
         self,
-        broker_socket_outgoing_receiver: BrokerSocketOutgoingReceiver,
+        channel: UnboundedReceiver<MessageT>,
         log: Logger,
     ) -> Result<()> {
-        net::async_socket_writer(
-            broker_socket_outgoing_receiver,
-            self,
-            log,
-            "writing to broker socket",
-        )
-        .await
+        net::async_socket_writer(channel, self, log, "writing to broker socket").await
     }
 }
 
@@ -118,34 +112,29 @@ impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory<'_> {
 }
 
 impl BrokerReadConnection for GitHubReadQueue {
-    async fn read_messages(
+    async fn read_messages<MessageT: Debug + DeserializeOwned, TransformedT: Send>(
         mut self,
-        dispatcher_sender: DispatcherSender,
+        channel: UnboundedSender<TransformedT>,
         log: Logger,
+        transform: impl Fn(MessageT) -> TransformedT + Send,
     ) -> Result<()> {
         net::github_queue_reader(
             &mut self,
-            dispatcher_sender,
-            Message::Broker,
+            channel,
+            transform,
             log,
-            "writing to broker github queue",
+            "reading from broker github queue",
         )
         .await
     }
 }
 
 impl BrokerWriteConnection for GitHubWriteQueue {
-    async fn write_messages(
+    async fn write_messages<MessageT: Debug + Send + Serialize + Sync>(
         mut self,
-        broker_socket_outgoing_receiver: BrokerSocketOutgoingReceiver,
+        channel: UnboundedReceiver<MessageT>,
         log: Logger,
     ) -> Result<()> {
-        net::github_queue_writer(
-            broker_socket_outgoing_receiver,
-            &mut self,
-            log,
-            "reading from broker github queue",
-        )
-        .await
+        net::github_queue_writer(channel, &mut self, log, "reading from broker github queue").await
     }
 }
