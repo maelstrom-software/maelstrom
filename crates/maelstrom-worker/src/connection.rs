@@ -1,19 +1,20 @@
 use anyhow::Result;
 use derive_more::Constructor;
 use maelstrom_base::proto::Hello;
-use maelstrom_github::{GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
+use maelstrom_github::{GitHubClient, GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_util::{
     config::common::BrokerAddr,
     net::{self, AsRawFdExt as _},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use slog::{error, Logger};
-use std::{fmt::Debug, future::Future};
+use std::{fmt::Debug, future::Future, sync::Arc};
 use tokio::{
     io::BufReader,
     net::TcpStream,
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
+use url::Url;
 
 pub trait BrokerConnectionFactory: Sized {
     type Read: BrokerReadConnection;
@@ -86,9 +87,16 @@ impl BrokerWriteConnection for tokio::net::tcp::OwnedWriteHalf {
     }
 }
 
-#[derive(Constructor)]
 pub struct GitHubQueueBrokerConnectionFactory<'a> {
     log: &'a Logger,
+    token: String,
+    url: Url,
+}
+
+impl<'a> GitHubQueueBrokerConnectionFactory<'a> {
+    pub fn new(log: &'a Logger, token: String, url: Url) -> Result<Self> {
+        Ok(Self { log, token, url })
+    }
 }
 
 impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory<'_> {
@@ -96,7 +104,7 @@ impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory<'_> {
     type Write = GitHubWriteQueue;
 
     async fn connect(&self, hello: &Hello) -> Result<(Self::Read, Self::Write)> {
-        let client = crate::github_client_factory()?;
+        let client = Arc::new(GitHubClient::new(&self.token, self.url.clone())?);
         let (read, mut write) = GitHubQueue::connect(client, "maelstrom-broker")
             .await
             .map_err(|err| {

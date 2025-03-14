@@ -45,6 +45,7 @@ use tokio::{
     task::{self, JoinHandle, JoinSet},
 };
 use types::{BrokerSocketOutgoingSender, Cache, DispatcherReceiver, DispatcherSender};
+use url::Url;
 
 fn env_or_error(key: &str) -> Result<String> {
     std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
@@ -70,7 +71,15 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
         )
         .unwrap_err(),
         ConfigBrokerConnection::GitHub => {
-            main_inner(GitHubQueueBrokerConnectionFactory::new(&log), config, &log).unwrap_err()
+            // XXX remi: I would prefer if we didn't read these from environment variables.
+            let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
+            let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+            main_inner(
+                GitHubQueueBrokerConnectionFactory::new(&log, token, url)?,
+                config,
+                &log,
+            )
+            .unwrap_err()
         }
     };
     info!(log, "exiting");
