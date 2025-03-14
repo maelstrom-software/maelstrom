@@ -13,7 +13,7 @@ use slog::{error, Logger};
 use std::future::Future;
 use tokio::{io::BufReader, net::TcpStream};
 
-pub trait BrokerConnection: Sized {
+pub trait BrokerConnectionFactory: Sized {
     type Read: BrokerReadConnection;
     type Write: BrokerWriteConnection;
 
@@ -24,7 +24,7 @@ pub trait BrokerConnection: Sized {
     ) -> Result<(Self::Read, Self::Write)>;
 }
 
-impl BrokerConnection for TcpStream {
+impl BrokerConnectionFactory for TcpStream {
     type Read = BufReader<tokio::net::tcp::OwnedReadHalf>;
     type Write = tokio::net::tcp::OwnedWriteHalf;
 
@@ -100,7 +100,7 @@ impl BrokerWriteConnection for tokio::net::tcp::OwnedWriteHalf {
     }
 }
 
-impl BrokerConnection for GitHubQueue {
+impl BrokerConnectionFactory for GitHubQueue {
     type Read = GitHubReadQueue;
     type Write = GitHubWriteQueue;
 

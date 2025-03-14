@@ -15,7 +15,7 @@ mod types;
 use anyhow::{anyhow, bail, Context as _, Error, Result};
 use artifact_fetcher::{GitHubArtifactFetcher, TcpArtifactFetcher};
 use config::Config;
-use connection::{BrokerConnection, BrokerReadConnection as _, BrokerWriteConnection as _};
+use connection::{BrokerConnectionFactory, BrokerReadConnection as _, BrokerWriteConnection as _};
 use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
 use executor::{MountDir, TmpfsDir};
@@ -70,7 +70,10 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
 #[tokio::main]
-async fn main_inner<ConnectionT: BrokerConnection>(config: Config, log: &Logger) -> Result<()> {
+async fn main_inner<ConnectionT: BrokerConnectionFactory>(
+    config: Config,
+    log: &Logger,
+) -> Result<()> {
     check_open_file_limit(log, config.slots, 0)?;
 
     let (read_stream, write_stream) =
