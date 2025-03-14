@@ -4121,6 +4121,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "url 2.5.4",
  "walkdir",
  "xdg",
 ]

@@ -46,6 +46,7 @@ strum.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 toml.workspace = true
+url.workspace = true
 walkdir.workspace = true
 xdg.workspace = true
 

@@ -4,7 +4,6 @@ pub mod config;
 pub mod local_worker;
 
 mod artifact_fetcher;
-mod connection;
 mod dispatcher;
 mod dispatcher_adapter;
 mod executor;
@@ -15,10 +14,6 @@ mod types;
 use anyhow::{anyhow, bail, Context as _, Error, Result};
 use artifact_fetcher::{GitHubArtifactFetcher, TcpArtifactFetcher};
 use config::Config;
-use connection::{
-    BrokerConnectionFactory, BrokerReadConnection as _, BrokerWriteConnection as _,
-    GitHubQueueBrokerConnectionFactory, TcpBrokerConnectionFactory,
-};
 use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
 use executor::{MountDir, TmpfsDir};
@@ -31,6 +26,10 @@ use maelstrom_util::{
     config::common::{
         ArtifactTransferStrategy, BrokerConnection as ConfigBrokerConnection, CacheSize,
         InlineLimit, Slots,
+    },
+    broker_connection::{
+        BrokerConnectionFactory, BrokerReadConnection as _, BrokerWriteConnection as _,
+        GitHubQueueBrokerConnectionFactory, TcpBrokerConnectionFactory,
     },
     process::TERMINATION_SIGNALS,
     root::RootBuf,

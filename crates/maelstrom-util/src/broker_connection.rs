@@ -2,7 +2,7 @@ use anyhow::Result;
 use derive_more::Constructor;
 use maelstrom_base::proto::Hello;
 use maelstrom_github::{GitHubClient, GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
-use maelstrom_util::{
+use crate::{
     config::common::BrokerAddr,
     net::{self, AsRawFdExt as _},
 };
@@ -20,7 +20,7 @@ pub trait BrokerConnectionFactory: Sized {
     type Read: BrokerReadConnection;
     type Write: BrokerWriteConnection;
 
-    async fn connect(&self, hello: &Hello) -> Result<(Self::Read, Self::Write)>;
+    fn connect(&self, hello: &Hello) -> impl Future<Output = Result<(Self::Read, Self::Write)>>;
 }
 
 pub trait BrokerReadConnection: Send + Sync + 'static {
@@ -146,3 +146,4 @@ impl BrokerWriteConnection for GitHubWriteQueue {
         net::github_queue_writer(channel, &mut self, log, "reading from broker github queue").await
     }
 }
+
