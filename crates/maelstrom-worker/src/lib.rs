@@ -22,6 +22,7 @@ use connection::{
 use dispatcher::{Dispatcher, Message};
 use dispatcher_adapter::DispatcherAdapter;
 use executor::{MountDir, TmpfsDir};
+use maelstrom_base::proto::Hello;
 use maelstrom_github::GitHubClient;
 use maelstrom_layer_fs::BlobDir;
 use maelstrom_linux::{self as linux, Signal};
@@ -86,7 +87,10 @@ async fn main_inner(
 ) -> Result<()> {
     check_open_file_limit(log, config.slots, 0)?;
 
-    let (read_stream, write_stream) = broker_connection_factory.connect(config.slots).await?;
+    let hello = Hello::Worker {
+        slots: config.slots.into_inner().into(),
+    };
+    let (read_stream, write_stream) = broker_connection_factory.connect(&hello).await?;
 
     let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =

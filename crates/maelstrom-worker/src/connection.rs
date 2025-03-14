@@ -7,7 +7,7 @@ use derive_more::Constructor;
 use maelstrom_base::proto::Hello;
 use maelstrom_github::{GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_util::{
-    config::common::{BrokerAddr, Slots},
+    config::common::BrokerAddr,
     net::{self, AsRawFdExt as _},
 };
 use slog::{error, Logger};
@@ -18,7 +18,7 @@ pub trait BrokerConnectionFactory: Sized {
     type Read: BrokerReadConnection;
     type Write: BrokerWriteConnection;
 
-    async fn connect(&self, slots: Slots) -> Result<(Self::Read, Self::Write)>;
+    async fn connect(&self, hello: &Hello) -> Result<(Self::Read, Self::Write)>;
 }
 
 #[derive(Constructor)]
@@ -31,7 +31,7 @@ impl BrokerConnectionFactory for TcpBrokerConnectionFactory<'_> {
     type Read = BufReader<tokio::net::tcp::OwnedReadHalf>;
     type Write = tokio::net::tcp::OwnedWriteHalf;
 
-    async fn connect(&self, slots: Slots) -> Result<(Self::Read, Self::Write)> {
+    async fn connect(&self, hello: &Hello) -> Result<(Self::Read, Self::Write)> {
         let (read, mut write) = TcpStream::connect(self.broker.inner())
             .await
             .map_err(|err| {
@@ -41,14 +41,7 @@ impl BrokerConnectionFactory for TcpBrokerConnectionFactory<'_> {
             .set_socket_options()?
             .into_split();
 
-        net::write_message_to_async_socket(
-            &mut write,
-            Hello::Worker {
-                slots: slots.into_inner().into(),
-            },
-            self.log,
-        )
-        .await?;
+        net::write_message_to_async_socket(&mut write, hello, self.log).await?;
 
         Ok((BufReader::new(read), write))
     }
@@ -108,7 +101,7 @@ impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory<'_> {
     type Read = GitHubReadQueue;
     type Write = GitHubWriteQueue;
 
-    async fn connect(&self, slots: Slots) -> Result<(Self::Read, Self::Write)> {
+    async fn connect(&self, hello: &Hello) -> Result<(Self::Read, Self::Write)> {
         let client = crate::github_client_factory()?;
         let (read, mut write) = GitHubQueue::connect(client, "maelstrom-broker")
             .await
@@ -118,14 +111,7 @@ impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory<'_> {
             })?
             .into_split();
 
-        net::write_message_to_github_queue(
-            &mut write,
-            &Hello::Worker {
-                slots: slots.into_inner().into(),
-            },
-            self.log,
-        )
-        .await?;
+        net::write_message_to_github_queue(&mut write, hello, self.log).await?;
 
         Ok((read, write))
     }
