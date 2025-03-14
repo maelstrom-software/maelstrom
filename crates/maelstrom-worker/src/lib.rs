@@ -63,7 +63,7 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config);
     let err = match config.broker_connection {
         ConfigBrokerConnection::Tcp => {
-            main_inner(TcpBrokerConnectionFactory, config, &log).unwrap_err()
+            main_inner(TcpBrokerConnectionFactory::new(config.broker), config, &log).unwrap_err()
         }
         ConfigBrokerConnection::GitHub => {
             main_inner(GitHubQueueBrokerConnectionFactory, config, &log).unwrap_err()
@@ -83,9 +83,7 @@ async fn main_inner(
 ) -> Result<()> {
     check_open_file_limit(log, config.slots, 0)?;
 
-    let (read_stream, write_stream) = broker_connection_factory
-        .connect(&config.broker, config.slots, log)
-        .await?;
+    let (read_stream, write_stream) = broker_connection_factory.connect(config.slots, log).await?;
 
     let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =

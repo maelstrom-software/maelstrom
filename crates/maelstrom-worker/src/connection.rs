@@ -3,6 +3,7 @@ use crate::{
     types::{BrokerSocketOutgoingReceiver, DispatcherSender},
 };
 use anyhow::Result;
+use derive_more::Constructor;
 use maelstrom_base::proto::Hello;
 use maelstrom_github::{GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_util::{
@@ -17,27 +18,18 @@ pub trait BrokerConnectionFactory: Sized {
     type Read: BrokerReadConnection;
     type Write: BrokerWriteConnection;
 
-    async fn connect(
-        &self,
-        addr: &BrokerAddr,
-        slots: Slots,
-        log: &Logger,
-    ) -> Result<(Self::Read, Self::Write)>;
+    async fn connect(&self, slots: Slots, log: &Logger) -> Result<(Self::Read, Self::Write)>;
 }
 
-pub struct TcpBrokerConnectionFactory;
+#[derive(Constructor)]
+pub struct TcpBrokerConnectionFactory(BrokerAddr);
 
 impl BrokerConnectionFactory for TcpBrokerConnectionFactory {
     type Read = BufReader<tokio::net::tcp::OwnedReadHalf>;
     type Write = tokio::net::tcp::OwnedWriteHalf;
 
-    async fn connect(
-        &self,
-        addr: &BrokerAddr,
-        slots: Slots,
-        log: &Logger,
-    ) -> Result<(Self::Read, Self::Write)> {
-        let (read, mut write) = TcpStream::connect(addr.inner())
+    async fn connect(&self, slots: Slots, log: &Logger) -> Result<(Self::Read, Self::Write)> {
+        let (read, mut write) = TcpStream::connect(self.0.inner())
             .await
             .map_err(|err| {
                 error!(log, "error connecting to broker"; "error" => %err);
@@ -110,12 +102,7 @@ impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory {
     type Read = GitHubReadQueue;
     type Write = GitHubWriteQueue;
 
-    async fn connect(
-        &self,
-        _addr: &BrokerAddr,
-        slots: Slots,
-        log: &Logger,
-    ) -> Result<(Self::Read, Self::Write)> {
+    async fn connect(&self, slots: Slots, log: &Logger) -> Result<(Self::Read, Self::Write)> {
         let client = crate::github_client_factory()?;
         let (read, mut write) = GitHubQueue::connect(client, "maelstrom-broker")
             .await
