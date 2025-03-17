@@ -1,14 +1,9 @@
-mod github;
-mod tcp;
+pub mod github;
+pub mod tcp;
 
-use crate::progress::ProgressTracker;
 use anyhow::Result;
 use maelstrom_base::{ArtifactUploadLocation, Sha256Digest};
-use maelstrom_util::{
-    config::common::{ArtifactTransferStrategy, BrokerAddr},
-    r#async::Pool,
-};
-use slog::Logger;
+use maelstrom_util::r#async::Pool;
 use std::future::Future;
 use std::{
     num::NonZeroU32,
@@ -90,21 +85,4 @@ fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
     let short_digest = &digest_string[digest_string.len() - 7..];
     let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     format!("{short_digest} {file_name}")
-}
-
-pub fn start_task(
-    artifact_transfer_strategy: ArtifactTransferStrategy,
-    broker_addr: BrokerAddr,
-    join_set: &mut JoinSet<Result<()>>,
-    log: Logger,
-    receiver: Receiver,
-    upload_tracker: ProgressTracker,
-) -> Result<()> {
-    match artifact_transfer_strategy {
-        ArtifactTransferStrategy::TcpUpload => {
-            tcp::start_task(join_set, receiver, broker_addr, upload_tracker, log);
-            Ok(())
-        }
-        ArtifactTransferStrategy::GitHub => github::start_task(join_set, receiver, upload_tracker),
-    }
 }

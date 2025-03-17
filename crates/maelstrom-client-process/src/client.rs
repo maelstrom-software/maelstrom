@@ -9,6 +9,7 @@ use maelstrom_client_base::{
     MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::ContainerImageDepotDir;
+use maelstrom_github::GitHubClient;
 use maelstrom_util::{
     async_fs,
     broker_connection::{
@@ -26,6 +27,7 @@ use tokio::{
     sync::{mpsc, oneshot, RwLock},
     task::JoinSet,
 };
+use url::Url;
 
 pub struct Client(RwLock<ClientStateWrapper>);
 
@@ -184,14 +186,33 @@ impl Client {
             ));
 
             // Spawn a task for the artifact_pusher.
-            artifact_pusher::start_task(
-                artifact_transfer_strategy,
-                broker_addr,
-                &mut join_set,
-                log.new(o!("task" => "artifact pusher")),
-                artifact_pusher_receiver,
-                artifact_upload_tracker.clone(),
-            )?;
+            match artifact_transfer_strategy {
+                ArtifactTransferStrategy::TcpUpload => {
+                    artifact_pusher::tcp::start_task(
+                        &mut join_set,
+                        artifact_pusher_receiver,
+                        broker_addr,
+                        artifact_upload_tracker.clone(),
+                        log.new(o!("task" => "artifact pusher")),
+                    );
+                }
+                ArtifactTransferStrategy::GitHub => {
+                    fn env_or_error(key: &str) -> Result<String> {
+                        std::env::var(key)
+                            .map_err(|_| anyhow!("{key} environment variable missing"))
+                    }
+                    // XXX remi: I would prefer if we didn't read these from environment variables.
+                    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
+                    let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+                    let github_client = GitHubClient::new(token.as_str(), url)?;
+                    artifact_pusher::github::start_task(
+                        github_client,
+                        &mut join_set,
+                        artifact_pusher_receiver,
+                        artifact_upload_tracker.clone(),
+                    );
+                }
+            }
         } else {
             // We don't have a broker_addr, which means we're in standalone mode.
             standalone = true;

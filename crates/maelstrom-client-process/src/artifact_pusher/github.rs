@@ -1,6 +1,6 @@
 use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver, SuccessCb};
 use crate::progress::{ProgressTracker, UploadProgressReader};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use maelstrom_base::{ArtifactUploadLocation, Sha256Digest};
 use maelstrom_github::{FileStreamBuilder, GitHubClient, SeekableStream};
@@ -8,7 +8,6 @@ use maelstrom_util::async_fs::Fs;
 use std::time::Duration;
 use std::{path::PathBuf, sync::Arc};
 use tokio::task::JoinSet;
-use url::Url;
 
 fn two_hours_from_now() -> DateTime<Utc> {
     Utc::now() + Duration::from_secs(60 * 60 * 2)
@@ -40,19 +39,13 @@ pub async fn push_one_artifact(
     Ok(())
 }
 
-fn env_or_error(key: &str) -> Result<String> {
-    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
-}
-
 pub fn start_task(
+    github_client: GitHubClient,
     join_set: &mut JoinSet<Result<()>>,
     receiver: Receiver,
     upload_tracker: ProgressTracker,
-) -> Result<()> {
-    // XXX remi: I would prefer if we didn't read these from environment variables.
-    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-    let base_url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-    let github_client = Arc::new(GitHubClient::new(&token, base_url)?);
+) {
+    let github_client = Arc::new(github_client);
 
     start_task_inner(
         join_set,
@@ -73,5 +66,4 @@ pub fn start_task(
             }
         },
     );
-    Ok(())
 }
