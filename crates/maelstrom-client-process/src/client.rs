@@ -287,16 +287,16 @@ impl Client {
     #[allow(clippy::too_many_arguments)]
     pub async fn start(
         &self,
-        log: Logger,
-        broker_addr: Option<BrokerAddr>,
-        project_dir: RootBuf<ProjectDir>,
-        cache_dir: RootBuf<CacheDir>,
-        container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
-        cache_size: CacheSize,
-        inline_limit: InlineLimit,
-        slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
         artifact_transfer_strategy: ArtifactTransferStrategy,
+        broker_addr: Option<BrokerAddr>,
+        cache_dir: RootBuf<CacheDir>,
+        cache_size: CacheSize,
+        container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
+        inline_limit: InlineLimit,
+        log: Logger,
+        project_dir: RootBuf<ProjectDir>,
+        slots: Slots,
     ) -> Result<()> {
         let mut guard = self.0.write().await;
         let done = guard.take_to_start()?;
