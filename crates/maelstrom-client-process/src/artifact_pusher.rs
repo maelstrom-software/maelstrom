@@ -4,14 +4,16 @@ pub mod tcp;
 use anyhow::Result;
 use maelstrom_base::{ArtifactUploadLocation, Sha256Digest};
 use maelstrom_util::r#async::Pool;
-use std::future::Future;
 use std::{
+    future::Future,
     num::NonZeroU32,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::task::JoinSet;
+use tokio::{
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    task::JoinSet,
+};
 
 type SuccessCb = Box<dyn FnOnce(ArtifactUploadLocation) + Send + Sync>;
 

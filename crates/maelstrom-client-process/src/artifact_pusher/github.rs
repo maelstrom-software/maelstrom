@@ -1,12 +1,13 @@
-use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver, SuccessCb};
-use crate::progress::{ProgressTracker, UploadProgressReader};
+use crate::{
+    artifact_pusher::{construct_upload_name, start_task_inner, Receiver, SuccessCb},
+    progress::{ProgressTracker, UploadProgressReader},
+};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use maelstrom_base::{ArtifactUploadLocation, Sha256Digest};
 use maelstrom_github::{FileStreamBuilder, GitHubClient, SeekableStream};
 use maelstrom_util::async_fs::Fs;
-use std::time::Duration;
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::task::JoinSet;
 
 fn two_hours_from_now() -> DateTime<Utc> {
