@@ -125,16 +125,16 @@ impl Client {
 
     #[allow(clippy::too_many_arguments)]
     async fn try_to_start(
+        accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+        cache_dir: RootBuf<CacheDir>,
+        cache_size: CacheSize,
+        cluster_communication_strategy: Option<ClusterCommunicationStrategy>,
+        container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
+        done: EventSender,
+        inline_limit: InlineLimit,
         log: Logger,
         project_dir: RootBuf<ProjectDir>,
-        cache_dir: RootBuf<CacheDir>,
-        container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
-        cache_size: CacheSize,
-        inline_limit: InlineLimit,
         slots: Slots,
-        accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-        done: EventSender,
-        cluster_communication_strategy: Option<ClusterCommunicationStrategy>,
     ) -> Result<ClientState> {
         let fs = async_fs::Fs::new();
 
@@ -332,16 +332,16 @@ impl Client {
 
         *guard = ClientStateWrapper::Running(
             Self::try_to_start(
+                accept_invalid_remote_container_tls_certs,
+                cache_dir,
+                cache_size,
+                cluster_communication_strategy,
+                container_image_depot_cache_dir,
+                done,
+                inline_limit,
                 log.clone(),
                 project_dir,
-                cache_dir,
-                container_image_depot_cache_dir,
-                cache_size,
-                inline_limit,
                 slots,
-                accept_invalid_remote_container_tls_certs,
-                done,
-                cluster_communication_strategy,
             )
             .await?,
         );
