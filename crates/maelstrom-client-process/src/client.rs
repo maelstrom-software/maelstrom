@@ -97,6 +97,7 @@ const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 /// Maximum number of layers to build simultaneously
 const MAX_PENDING_LAYER_BUILDS: usize = 10;
 
+#[derive(Debug)]
 enum ClusterCommunicationStrategy {
     Tcp {
         broker: BrokerAddr,
@@ -125,7 +126,6 @@ impl Client {
     #[allow(clippy::too_many_arguments)]
     async fn try_to_start(
         log: Logger,
-        broker_addr: Option<BrokerAddr>,
         project_dir: RootBuf<ProjectDir>,
         cache_dir: RootBuf<CacheDir>,
         container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
@@ -133,25 +133,13 @@ impl Client {
         inline_limit: InlineLimit,
         slots: Slots,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-        artifact_transfer_strategy: ArtifactTransferStrategy,
         done: EventSender,
+        cluster_communication_strategy: Option<ClusterCommunicationStrategy>,
     ) -> Result<ClientState> {
-        let cluster_communication_strategy = match (broker_addr, artifact_transfer_strategy) {
-            (None, _) => None,
-            (Some(broker), ArtifactTransferStrategy::GitHub) => {
-                // XXX remi: I would prefer if we didn't read these from environment variables.
-                let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-                let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-                Some(ClusterCommunicationStrategy::Mixed { broker, token, url })
-            }
-            (Some(broker), ArtifactTransferStrategy::TcpUpload) => {
-                Some(ClusterCommunicationStrategy::Tcp { broker })
-            }
-        };
         let fs = async_fs::Fs::new();
 
         debug!(log, "client starting";
-            "broker_addr" => ?broker_addr,
+            "cluster_communication_strategy" => ?cluster_communication_strategy,
             "project_dir" => ?project_dir,
             "cache_dir" => ?cache_dir,
             "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
@@ -329,10 +317,22 @@ impl Client {
         let mut guard = self.0.write().await;
         let done = guard.take_to_start()?;
 
+        let cluster_communication_strategy = match (broker_addr, artifact_transfer_strategy) {
+            (None, _) => None,
+            (Some(broker), ArtifactTransferStrategy::GitHub) => {
+                // XXX remi: I would prefer if we didn't read these from environment variables.
+                let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
+                let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+                Some(ClusterCommunicationStrategy::Mixed { broker, token, url })
+            }
+            (Some(broker), ArtifactTransferStrategy::TcpUpload) => {
+                Some(ClusterCommunicationStrategy::Tcp { broker })
+            }
+        };
+
         *guard = ClientStateWrapper::Running(
             Self::try_to_start(
                 log.clone(),
-                broker_addr,
                 project_dir,
                 cache_dir,
                 container_image_depot_cache_dir,
@@ -340,8 +340,8 @@ impl Client {
                 inline_limit,
                 slots,
                 accept_invalid_remote_container_tls_certs,
-                artifact_transfer_strategy,
                 done,
+                cluster_communication_strategy,
             )
             .await?,
         );
