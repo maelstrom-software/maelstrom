@@ -22,11 +22,13 @@ use maelstrom_util::{
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
     inline_limit_pocket_definition, slots_pocket_definition,
 };
-use std::collections::{BTreeMap, HashMap};
-use std::ffi::OsString;
-use std::hash::Hash;
-use std::os::unix::ffi::OsStringExt as _;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ffi::OsString,
+    hash::Hash,
+    os::unix::ffi::OsStringExt as _,
+    path::{Path, PathBuf},
+};
 use url::Url;
 
 pub trait IntoProtoBuf {
