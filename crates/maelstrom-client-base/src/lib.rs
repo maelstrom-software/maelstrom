@@ -23,6 +23,7 @@ use maelstrom_util::{
     root::RootBuf,
 };
 use serde::Deserialize;
+use url::Url;
 
 /// The project directory is used for two things. First, any relative paths in layer specifications
 /// are resolved based on this path. Second, it's where the client process looks for the
@@ -183,6 +184,22 @@ pub enum JobStatus {
         client_job_id: ClientJobId,
         #[proto(option)]
         result: JobOutcomeResult,
+    },
+}
+
+#[derive(Debug)]
+pub enum ClusterCommunicationStrategy {
+    Tcp {
+        broker: BrokerAddr,
+    },
+    GitHub {
+        token: String,
+        url: Url,
+    },
+    Mixed {
+        broker: BrokerAddr,
+        token: String,
+        url: Url,
     },
 }
 

@@ -3746,6 +3746,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tuple",
+ "url 2.5.4",
  "versions",
 ]
 

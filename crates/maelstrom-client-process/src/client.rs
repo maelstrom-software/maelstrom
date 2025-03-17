@@ -5,8 +5,9 @@ use anyhow::{anyhow, bail, Error, Result};
 use maelstrom_base::proto::Hello;
 use maelstrom_client_base::{
     spec::{self, ContainerSpec},
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, JobStatus, ProjectDir,
-    MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, ClusterCommunicationStrategy,
+    IntrospectResponse, JobStatus, ProjectDir, MANIFEST_DIR, STUB_MANIFEST_DIR,
+    SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_github::GitHubClient;
@@ -96,23 +97,6 @@ const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 
 /// Maximum number of layers to build simultaneously
 const MAX_PENDING_LAYER_BUILDS: usize = 10;
-
-#[derive(Debug)]
-enum ClusterCommunicationStrategy {
-    Tcp {
-        broker: BrokerAddr,
-    },
-    #[allow(dead_code)]
-    GitHub {
-        token: String,
-        url: Url,
-    },
-    Mixed {
-        broker: BrokerAddr,
-        token: String,
-        url: Url,
-    },
-}
 
 fn env_or_error(key: &str) -> Result<String> {
     std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))

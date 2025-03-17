@@ -25,6 +25,7 @@ serde.workspace = true
 slog.workspace = true
 tonic.workspace = true
 tuple.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 indoc.workspace = true
