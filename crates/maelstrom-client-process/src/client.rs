@@ -169,7 +169,6 @@ impl Client {
             let broker_connection_factory = TcpBrokerConnectionFactory::new(broker_addr, &log);
             let (broker_socket_read_half, broker_socket_write_half) =
                 broker_connection_factory.connect(&Hello::Client).await?;
-            debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
             // Spawn a task to read from the socket and write to the router's channel.
             join_set.spawn(broker_socket_read_half.read_messages(

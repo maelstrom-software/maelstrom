@@ -7,7 +7,7 @@ use derive_more::Constructor;
 use maelstrom_base::proto::Hello;
 use maelstrom_github::{GitHubClient, GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
 use serde::{de::DeserializeOwned, Serialize};
-use slog::{error, Logger};
+use slog::{debug, error, Logger};
 use std::{fmt::Debug, future::Future};
 use tokio::{
     io::BufReader,
@@ -59,6 +59,8 @@ impl BrokerConnectionFactory for TcpBrokerConnectionFactory<'_> {
             })?
             .set_socket_options()?
             .into_split();
+
+        debug!(self.log, "connected to broker via TCP"; "broker_addr" => ?self.broker);
 
         net::write_message_to_async_socket(&mut write, hello, self.log).await?;
 
@@ -112,6 +114,8 @@ impl BrokerConnectionFactory for GitHubQueueBrokerConnectionFactory<'_> {
                 err
             })?
             .into_split();
+
+        debug!(self.log, "connected to broker via GitHub queue");
 
         net::write_message_to_github_queue(&mut write, hello, self.log).await?;
 
