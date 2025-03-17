@@ -91,10 +91,9 @@ impl ClientProcess for ArcHandler {
             self.client
                 .start(
                     request.accept_invalid_remote_container_tls_certs,
-                    request.artifact_transfer_strategy,
-                    request.broker_addr,
                     request.cache_dir,
                     request.cache_size,
+                    request.cluster_communication_strategy,
                     request.container_image_depot_dir,
                     request.inline_limit,
                     log,

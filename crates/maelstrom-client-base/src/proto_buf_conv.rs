@@ -1,5 +1,5 @@
 use crate::proto;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
     capture_file_system_changes_pocket_definition, client_job_id_pocket_definition,
@@ -27,6 +27,7 @@ use std::ffi::OsString;
 use std::hash::Hash;
 use std::os::unix::ffi::OsStringExt as _;
 use std::path::{Path, PathBuf};
+use url::Url;
 
 pub trait IntoProtoBuf {
     type ProtoBufType;
@@ -417,6 +418,22 @@ impl TryFromProtoBuf for slog::Level {
             proto::LogLevel::Debug => slog::Level::Debug,
             proto::LogLevel::Trace => slog::Level::Trace,
         })
+    }
+}
+
+impl IntoProtoBuf for Url {
+    type ProtoBufType = String;
+
+    fn into_proto_buf(self) -> String {
+        self.into()
+    }
+}
+
+impl TryFromProtoBuf for Url {
+    type ProtoBufType = String;
+
+    fn try_from_proto_buf(s: String) -> Result<Self> {
+        Self::parse(s.as_str()).map_err(Error::new)
     }
 }
 

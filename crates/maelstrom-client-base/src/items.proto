@@ -7,8 +7,30 @@ enum ArtifactTransferStrategy {
     ARTIFACT_TRANSFER_STRATEGY_GIT_HUB = 1;
 }
 
+message ClusterCommunicationStrategy {
+    oneof strategy {
+        TcpClusterCommunicationStrategy tcp = 1;
+        GitHubClusterCommunicationStrategy git_hub = 2;
+        MixedClusterCommunicationStrategy mixed = 3;
+    }
+}
+
+message TcpClusterCommunicationStrategy {
+    string broker = 1;
+}
+
+message GitHubClusterCommunicationStrategy {
+    string token = 1;
+    string url = 2;
+}
+
+message MixedClusterCommunicationStrategy {
+    string broker = 1;
+    string token = 2;
+    string url = 3;
+}
+
 message StartRequest {
-    optional string broker_addr = 1;
     bytes project_dir = 2;
     bytes cache_dir = 4;
     uint64 cache_size = 5;
@@ -16,7 +38,7 @@ message StartRequest {
     uint32 slots = 7;
     bytes container_image_depot_dir = 8;
     bool accept_invalid_remote_container_tls_certs = 9;
-    ArtifactTransferStrategy artifact_transfer_strategy = 10;
+    optional ClusterCommunicationStrategy cluster_communication_strategy = 11;
 }
 
 message TarLayer {

@@ -3719,6 +3719,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tower 0.5.2",
+ "url 2.5.4",
  "xdg",
 ]
 
@@ -3785,7 +3786,6 @@ dependencies = [
  "tokio",
  "toml",
  "tonic",
- "url 2.5.4",
 ]
 
 [[package]]

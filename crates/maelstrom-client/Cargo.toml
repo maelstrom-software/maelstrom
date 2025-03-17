@@ -28,6 +28,7 @@ slog.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tower.workspace = true
+url.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]

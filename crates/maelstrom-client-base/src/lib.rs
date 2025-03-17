@@ -19,7 +19,7 @@ use maelstrom_base::{
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 use maelstrom_util::{
-    config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
+    config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
     root::RootBuf,
 };
 use serde::Deserialize;
@@ -187,20 +187,36 @@ pub enum JobStatus {
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
+#[proto(proto_buf_type = proto::TcpClusterCommunicationStrategy)]
+pub struct TcpClusterCommunicationStrategy {
+    pub broker: BrokerAddr,
+}
+
+#[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
+#[proto(proto_buf_type = proto::GitHubClusterCommunicationStrategy)]
+pub struct GitHubClusterCommunicationStrategy {
+    pub token: String,
+    pub url: Url,
+}
+
+#[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
+#[proto(proto_buf_type = proto::MixedClusterCommunicationStrategy)]
+pub struct MixedClusterCommunicationStrategy {
+    pub broker: BrokerAddr,
+    pub token: String,
+    pub url: Url,
+}
+
+#[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
+#[proto(
+    proto_buf_type = "proto::ClusterCommunicationStrategy",
+    enum_type = "proto::cluster_communication_strategy::Strategy"
+)]
 pub enum ClusterCommunicationStrategy {
-    Tcp {
-        broker: BrokerAddr,
-    },
-    GitHub {
-        token: String,
-        url: Url,
-    },
-    Mixed {
-        broker: BrokerAddr,
-        token: String,
-        url: Url,
-    },
+    Tcp(TcpClusterCommunicationStrategy),
+    GitHub(GitHubClusterCommunicationStrategy),
+    Mixed(MixedClusterCommunicationStrategy),
 }
 
 //                                 _      __
@@ -213,7 +229,6 @@ pub enum ClusterCommunicationStrategy {
 #[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
 #[proto(proto_buf_type = "proto::StartRequest")]
 pub struct StartRequest {
-    pub broker_addr: Option<BrokerAddr>,
     pub project_dir: RootBuf<ProjectDir>,
     pub container_image_depot_dir: RootBuf<ContainerImageDepotDir>,
     pub cache_dir: RootBuf<CacheDir>,
@@ -221,7 +236,7 @@ pub struct StartRequest {
     pub inline_limit: InlineLimit,
     pub slots: Slots,
     pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-    pub artifact_transfer_strategy: ArtifactTransferStrategy,
+    pub cluster_communication_strategy: Option<ClusterCommunicationStrategy>,
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf)]

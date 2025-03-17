@@ -6,8 +6,9 @@ use maelstrom_base::proto::Hello;
 use maelstrom_client_base::{
     spec::{self, ContainerSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, ClusterCommunicationStrategy,
-    IntrospectResponse, JobStatus, ProjectDir, MANIFEST_DIR, STUB_MANIFEST_DIR,
-    SYMLINK_MANIFEST_DIR,
+    GitHubClusterCommunicationStrategy, IntrospectResponse, JobStatus,
+    MixedClusterCommunicationStrategy, ProjectDir, TcpClusterCommunicationStrategy, MANIFEST_DIR,
+    STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_github::GitHubClient;
@@ -17,7 +18,7 @@ use maelstrom_util::{
         BrokerConnectionFactory as _, BrokerReadConnection as _, BrokerWriteConnection as _,
         TcpBrokerConnectionFactory,
     },
-    config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
+    config::common::{CacheSize, InlineLimit, Slots},
     root::RootBuf,
     sync::EventSender,
 };
@@ -28,7 +29,6 @@ use tokio::{
     sync::{mpsc, oneshot, RwLock},
     task::JoinSet,
 };
-use url::Url;
 
 pub struct Client(RwLock<ClientStateWrapper>);
 
@@ -97,10 +97,6 @@ const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 
 /// Maximum number of layers to build simultaneously
 const MAX_PENDING_LAYER_BUILDS: usize = 10;
-
-fn env_or_error(key: &str) -> Result<String> {
-    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
-}
 
 impl Client {
     pub fn new(done: EventSender) -> Self {
@@ -173,8 +169,11 @@ impl Client {
 
             // Connect to the broker.
             match cluster_communication_strategy {
-                ClusterCommunicationStrategy::Tcp { broker }
-                | ClusterCommunicationStrategy::Mixed { broker, .. } => {
+                ClusterCommunicationStrategy::Tcp(TcpClusterCommunicationStrategy { broker })
+                | ClusterCommunicationStrategy::Mixed(MixedClusterCommunicationStrategy {
+                    broker,
+                    ..
+                }) => {
                     let broker_connection_factory = TcpBrokerConnectionFactory::new(broker, &log);
                     let (broker_socket_read_half, broker_socket_write_half) =
                         broker_connection_factory.connect(&Hello::Client).await?;
@@ -192,14 +191,16 @@ impl Client {
                         log.new(o!("task" => "broker socket writer")),
                     ));
                 }
-                ClusterCommunicationStrategy::GitHub { .. } => {
+                ClusterCommunicationStrategy::GitHub(GitHubClusterCommunicationStrategy {
+                    ..
+                }) => {
                     todo!();
                 }
             }
 
             // Spawn a task for the artifact_pusher.
             match cluster_communication_strategy {
-                ClusterCommunicationStrategy::Tcp { broker } => {
+                ClusterCommunicationStrategy::Tcp(TcpClusterCommunicationStrategy { broker }) => {
                     artifact_pusher::tcp::start_task(
                         &mut join_set,
                         artifact_pusher_receiver,
@@ -208,8 +209,15 @@ impl Client {
                         log.new(o!("task" => "artifact pusher")),
                     );
                 }
-                ClusterCommunicationStrategy::GitHub { token, url }
-                | ClusterCommunicationStrategy::Mixed { token, url, .. } => {
+                ClusterCommunicationStrategy::GitHub(GitHubClusterCommunicationStrategy {
+                    token,
+                    url,
+                })
+                | ClusterCommunicationStrategy::Mixed(MixedClusterCommunicationStrategy {
+                    token,
+                    url,
+                    ..
+                }) => {
                     let github_client = GitHubClient::new(token.as_str(), url.clone())?;
                     artifact_pusher::github::start_task(
                         github_client,
@@ -288,10 +296,9 @@ impl Client {
     pub async fn start(
         &self,
         accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-        artifact_transfer_strategy: ArtifactTransferStrategy,
-        broker_addr: Option<BrokerAddr>,
         cache_dir: RootBuf<CacheDir>,
         cache_size: CacheSize,
+        cluster_communication_strategy: Option<ClusterCommunicationStrategy>,
         container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
         inline_limit: InlineLimit,
         log: Logger,
@@ -300,19 +307,6 @@ impl Client {
     ) -> Result<()> {
         let mut guard = self.0.write().await;
         let done = guard.take_to_start()?;
-
-        let cluster_communication_strategy = match (broker_addr, artifact_transfer_strategy) {
-            (None, _) => None,
-            (Some(broker), ArtifactTransferStrategy::GitHub) => {
-                // XXX remi: I would prefer if we didn't read these from environment variables.
-                let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-                let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-                Some(ClusterCommunicationStrategy::Mixed { broker, token, url })
-            }
-            (Some(broker), ArtifactTransferStrategy::TcpUpload) => {
-                Some(ClusterCommunicationStrategy::Tcp { broker })
-            }
-        };
 
         *guard = ClientStateWrapper::Running(
             Self::try_to_start(
