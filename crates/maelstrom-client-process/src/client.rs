@@ -1,7 +1,7 @@
 pub mod layer_builder;
 
 use crate::{artifact_pusher, preparer, progress::ProgressTracker, router};
-use anyhow::{anyhow, bail, Context as _, Error, Result};
+use anyhow::{anyhow, bail, Error, Result};
 use maelstrom_base::proto::Hello;
 use maelstrom_client_base::{
     spec::{self, ContainerSpec},
@@ -11,8 +11,11 @@ use maelstrom_client_base::{
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_util::{
     async_fs,
+    broker_connection::{
+        BrokerConnectionFactory as _, BrokerReadConnection as _, BrokerWriteConnection as _,
+        TcpBrokerConnectionFactory,
+    },
     config::common::{ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, Slots},
-    net::{self, AsRawFdExt as _},
     root::RootBuf,
     sync::EventSender,
 };
@@ -20,7 +23,6 @@ use maelstrom_worker::local_worker;
 use slog::{debug, o, Logger};
 use std::mem;
 use tokio::{
-    net::TcpStream,
     sync::{mpsc, oneshot, RwLock},
     task::JoinSet,
 };
@@ -164,33 +166,22 @@ impl Client {
             standalone = false;
 
             // Connect to the broker.
-            let (broker_socket_read_half, mut broker_socket_write_half) =
-                TcpStream::connect(broker_addr.inner())
-                    .await
-                    .with_context(|| format!("failed to connect to {broker_addr}"))?
-                    .set_socket_options()?
-                    .into_split();
+            let broker_connection_factory = TcpBrokerConnectionFactory::new(broker_addr, &log);
+            let (broker_socket_read_half, broker_socket_write_half) =
+                broker_connection_factory.connect(&Hello::Client).await?;
             debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
-            // Send it a Hello message.
-            net::write_message_to_async_socket(&mut broker_socket_write_half, Hello::Client, &log)
-                .await?;
-
             // Spawn a task to read from the socket and write to the router's channel.
-            join_set.spawn(net::async_socket_reader(
-                broker_socket_read_half,
+            join_set.spawn(broker_socket_read_half.read_messages(
                 router_sender.clone(),
-                router::Message::Broker,
                 log.new(o!("task" => "broker socket reader")),
-                "reading from broker socket",
+                router::Message::Broker,
             ));
 
             // Spawn a task to read from the broker's channel and write to the socket.
-            join_set.spawn(net::async_socket_writer(
+            join_set.spawn(broker_socket_write_half.write_messages(
                 broker_receiver,
-                broker_socket_write_half,
                 log.new(o!("task" => "broker socket writer")),
-                "writing to broker socket",
             ));
 
             // Spawn a task for the artifact_pusher.
