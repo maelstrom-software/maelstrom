@@ -97,6 +97,26 @@ const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
 /// Maximum number of layers to build simultaneously
 const MAX_PENDING_LAYER_BUILDS: usize = 10;
 
+enum ClusterCommunicationStrategy {
+    Tcp {
+        broker: BrokerAddr,
+    },
+    #[allow(dead_code)]
+    GitHub {
+        token: String,
+        url: Url,
+    },
+    Mixed {
+        broker: BrokerAddr,
+        token: String,
+        url: Url,
+    },
+}
+
+fn env_or_error(key: &str) -> Result<String> {
+    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
+}
+
 impl Client {
     pub fn new(done: EventSender) -> Self {
         Self(RwLock::new(ClientStateWrapper::NotRunning(Some(done))))
@@ -116,6 +136,18 @@ impl Client {
         artifact_transfer_strategy: ArtifactTransferStrategy,
         done: EventSender,
     ) -> Result<ClientState> {
+        let cluster_communication_strategy = match (broker_addr, artifact_transfer_strategy) {
+            (None, _) => None,
+            (Some(broker), ArtifactTransferStrategy::GitHub) => {
+                // XXX remi: I would prefer if we didn't read these from environment variables.
+                let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
+                let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+                Some(ClusterCommunicationStrategy::Mixed { broker, token, url })
+            }
+            (Some(broker), ArtifactTransferStrategy::TcpUpload) => {
+                Some(ClusterCommunicationStrategy::Tcp { broker })
+            }
+        };
         let fs = async_fs::Fs::new();
 
         debug!(log, "client starting";
@@ -163,48 +195,50 @@ impl Client {
         let (router_sender, router_receiver) = router::channel();
 
         let standalone;
-        if let Some(broker_addr) = broker_addr {
-            // We have a broker_addr, which means we're not in standalone mode.
+        if let Some(cluster_communication_strategy) = cluster_communication_strategy {
+            // We have a cluster_communication_strategy, which means we're not in standalone mode.
             standalone = false;
 
             // Connect to the broker.
-            let broker_connection_factory = TcpBrokerConnectionFactory::new(broker_addr, &log);
-            let (broker_socket_read_half, broker_socket_write_half) =
-                broker_connection_factory.connect(&Hello::Client).await?;
+            match cluster_communication_strategy {
+                ClusterCommunicationStrategy::Tcp { broker }
+                | ClusterCommunicationStrategy::Mixed { broker, .. } => {
+                    let broker_connection_factory = TcpBrokerConnectionFactory::new(broker, &log);
+                    let (broker_socket_read_half, broker_socket_write_half) =
+                        broker_connection_factory.connect(&Hello::Client).await?;
 
-            // Spawn a task to read from the socket and write to the router's channel.
-            join_set.spawn(broker_socket_read_half.read_messages(
-                router_sender.clone(),
-                log.new(o!("task" => "broker socket reader")),
-                router::Message::Broker,
-            ));
+                    // Spawn a task to read from the socket and write to the router's channel.
+                    join_set.spawn(broker_socket_read_half.read_messages(
+                        router_sender.clone(),
+                        log.new(o!("task" => "broker socket reader")),
+                        router::Message::Broker,
+                    ));
 
-            // Spawn a task to read from the broker's channel and write to the socket.
-            join_set.spawn(broker_socket_write_half.write_messages(
-                broker_receiver,
-                log.new(o!("task" => "broker socket writer")),
-            ));
+                    // Spawn a task to read from the broker's channel and write to the socket.
+                    join_set.spawn(broker_socket_write_half.write_messages(
+                        broker_receiver,
+                        log.new(o!("task" => "broker socket writer")),
+                    ));
+                }
+                ClusterCommunicationStrategy::GitHub { .. } => {
+                    todo!();
+                }
+            }
 
             // Spawn a task for the artifact_pusher.
-            match artifact_transfer_strategy {
-                ArtifactTransferStrategy::TcpUpload => {
+            match cluster_communication_strategy {
+                ClusterCommunicationStrategy::Tcp { broker } => {
                     artifact_pusher::tcp::start_task(
                         &mut join_set,
                         artifact_pusher_receiver,
-                        broker_addr,
+                        broker,
                         artifact_upload_tracker.clone(),
                         log.new(o!("task" => "artifact pusher")),
                     );
                 }
-                ArtifactTransferStrategy::GitHub => {
-                    fn env_or_error(key: &str) -> Result<String> {
-                        std::env::var(key)
-                            .map_err(|_| anyhow!("{key} environment variable missing"))
-                    }
-                    // XXX remi: I would prefer if we didn't read these from environment variables.
-                    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-                    let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-                    let github_client = GitHubClient::new(token.as_str(), url)?;
+                ClusterCommunicationStrategy::GitHub { token, url }
+                | ClusterCommunicationStrategy::Mixed { token, url, .. } => {
+                    let github_client = GitHubClient::new(token.as_str(), url.clone())?;
                     artifact_pusher::github::start_task(
                         github_client,
                         &mut join_set,
@@ -214,7 +248,7 @@ impl Client {
                 }
             }
         } else {
-            // We don't have a broker_addr, which means we're in standalone mode.
+            // We don't have a cluster_communication_strategy, which means we're in standalone mode.
             standalone = true;
 
             // Drop the receivers for the artifact_pusher and the broker. We're not going to be
