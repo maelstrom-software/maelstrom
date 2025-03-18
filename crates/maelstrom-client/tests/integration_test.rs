@@ -9,8 +9,8 @@ use maelstrom_client::{
     ProjectDir, SpawnClientProcessFactory,
 };
 use maelstrom_util::{
-    config::common::BrokerConnection, elf::read_shared_libraries, fs::Fs, log::test_logger,
-    root::Root,
+    config::common::ClusterCommunicationStrategy, elf::read_shared_libraries, fs::Fs,
+    log::test_logger, root::Root,
 };
 use regex::Regex;
 use std::panic::Location;
@@ -60,7 +60,7 @@ impl ClientFixture {
             container_image_depot_root: Root::new(&container_image_depot_dir).to_owned(),
             accept_invalid_remote_container_tls_certs: true.into(),
             broker: None,
-            broker_connection: BrokerConnection::Tcp,
+            cluster_communication_strategy: ClusterCommunicationStrategy::Tcp,
             github_actions_token: None,
             github_actions_url: None,
         };

@@ -14,7 +14,7 @@ START_WORKER=1
 if [[ $# -gt 0 ]]; then
     export MAELSTROM_GITHUB_ACTIONS_TOKEN=$1
     export MAELSTROM_GITHUB_ACTIONS_URL=$2
-    export MAELSTROM_BROKER_CONNECTION=github
+    export MAELSTROM_CLUSTER_COMMUNICATION_STRATEGY=github
     # These are still required for the broker.
     export ACTIONS_RUNTIME_TOKEN=$1
     export ACTIONS_RESULTS_URL=$2

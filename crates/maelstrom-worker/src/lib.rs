@@ -27,7 +27,7 @@ use maelstrom_util::{
         GitHubQueueBrokerConnectionFactory, TcpBrokerConnectionFactory,
     },
     cache::{self, fs::std::Fs as StdFs, TempFileFactory},
-    config::common::{BrokerConnection as ConfigBrokerConnection, CacheSize, InlineLimit, Slots},
+    config::common::{CacheSize, ClusterCommunicationStrategy, InlineLimit, Slots},
     process::TERMINATION_SIGNALS,
     root::RootBuf,
     sync::EventSender,
@@ -47,23 +47,23 @@ const MAX_ARTIFACT_FETCHES: usize = 1;
 
 pub fn main(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config);
-    let err = match config.broker_connection {
-        ConfigBrokerConnection::Tcp => {
+    let err = match config.cluster_communication_strategy {
+        ClusterCommunicationStrategy::Tcp => {
             let Some(broker) = config.broker else {
                 bail!(
-                    "because config value `broker-connection` is set to `tcp`, config value \
-                    `broker` must be set via `--broker` command-line option, \
+                    "because config value `cluster-communication-strategy` is set to `tcp`, \
+                    config value `broker` must be set via `--broker` command-line option, \
                     `MAELSTROM_WORKER_BROKER` or `MAELSTROM_BROKER` environment variables, or \
                     `broker` key in config file"
                 );
             };
             main_inner(TcpBrokerConnectionFactory::new(broker, &log), config, &log).unwrap_err()
         }
-        ConfigBrokerConnection::GitHub => {
+        ClusterCommunicationStrategy::GitHub => {
             let Some(token) = &config.github_actions_token else {
                 bail!(
-                    "because config value `broker-connection` is set to `github`, config value \
-                    `github-actions-token` must be set via `--github-actions-token` \
+                    "because config value `cluster-communication-strategy` is set to `github`, \
+                    config value `github-actions-token` must be set via `--github-actions-token` \
                     command-line option, `MAELSTROM_WORKER_GITHUB_ACTIONS_TOKEN` or \
                     `MAELSTROM_GITHUB_ACTIONS_TOKEN` environment variables, or \
                     `github-actions-token` key in config file"
@@ -71,8 +71,8 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
             };
             let Some(url) = &config.github_actions_url else {
                 bail!(
-                    "because config value `broker-connection` is set to `github`, config value \
-                    `github-actions-url` must be set via `--github-actions-url` \
+                    "because config value `cluster-communication-strategy` is set to `github`, \
+                    config value `github-actions-url` must be set via `--github-actions-url` \
                     command-line option, `MAELSTROM_WORKER_GITHUB_ACTIONS_URL` or \
                     `MAELSTROM_GITHUB_ACTIONS_URL` environment variables, or \
                     `github-actions-url` key in config file"
@@ -205,8 +205,8 @@ fn start_dispatcher_task(
         .unwrap();
     let broker_sender = move |msg| broker_socket_outgoing_sender.send(msg);
 
-    match config.broker_connection {
-        ConfigBrokerConnection::Tcp => {
+    match config.cluster_communication_strategy {
+        ClusterCommunicationStrategy::Tcp => {
             let artifact_fetcher_factory = move |temp_file_factory| {
                 TcpArtifactFetcher::new(
                     max_simultaneous_fetches,
@@ -231,7 +231,7 @@ fn start_dispatcher_task(
                 tasks,
             )
         }
-        ConfigBrokerConnection::GitHub => {
+        ClusterCommunicationStrategy::GitHub => {
             let github_client = GitHubClient::new(
                 config.github_actions_token.as_ref().unwrap(),
                 config.github_actions_url.as_ref().unwrap().clone(),

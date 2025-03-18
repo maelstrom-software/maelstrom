@@ -289,14 +289,14 @@ impl ValueEnum for ArtifactTransferStrategy {
 #[derive(Copy, Clone, Debug, EnumString, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-pub enum BrokerConnection {
+pub enum ClusterCommunicationStrategy {
     Tcp = 0,
     #[serde(rename = "github")]
     #[strum(serialize = "github")]
     GitHub = 1,
 }
 
-impl ValueEnum for BrokerConnection {
+impl ValueEnum for ClusterCommunicationStrategy {
     fn value_variants<'a>() -> &'a [Self] {
         &[Self::Tcp, Self::GitHub][..]
     }

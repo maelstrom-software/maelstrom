@@ -10,7 +10,7 @@ use maelstrom_test_runner::{
     TestRunner as _,
 };
 use maelstrom_util::{
-    config::common::{BrokerConnection, CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{CacheSize, ClusterCommunicationStrategy, InlineLimit, LogLevel, Slots},
     fs::Fs,
     root::RootBuf,
 };
@@ -53,7 +53,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
                     inline_limit: InlineLimit::default(),
                     slots: Slots::default(),
                     accept_invalid_remote_container_tls_certs: true.into(),
-                    broker_connection: BrokerConnection::Tcp,
+                    cluster_communication_strategy: ClusterCommunicationStrategy::Tcp,
                     github_actions_token: None,
                     github_actions_url: None,
                 },

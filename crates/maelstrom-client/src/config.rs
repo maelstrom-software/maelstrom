@@ -2,7 +2,7 @@ use crate::AcceptInvalidRemoteContainerTlsCerts;
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_macro::Config;
 use maelstrom_util::{
-    config::common::{BrokerAddr, BrokerConnection, CacheSize, InlineLimit, Slots},
+    config::common::{BrokerAddr, CacheSize, ClusterCommunicationStrategy, InlineLimit, Slots},
     root::RootBuf,
 };
 use url::Url;
@@ -19,16 +19,20 @@ pub struct Config {
     )]
     pub broker: Option<BrokerAddr>,
 
-    /// Controls how we connect to the broker.
-    #[config(value_name = "BROKER_CONNECTION", default = r#""tcp""#, hide)]
-    pub broker_connection: BrokerConnection,
+    /// The cluster communication strategy: TCP or GitHub.
+    #[config(
+        value_name = "CLUSTER_COMMUNICATION_STRATEGY",
+        default = r#""tcp""#,
+        hide
+    )]
+    pub cluster_communication_strategy: ClusterCommunicationStrategy,
 
     /// This is required with `broker-conection=github`. This is passed to JavaScript GitHub
     /// actions as `ACTIONS_RUNTIME_TOKEN`.
     #[config(
         option,
         value_name = "GITHUB_ACTIONS_TOKEN",
-        default = r#""no default, must be specified if broker-connection is github""#,
+        default = r#""no default, must be specified if cluster-communication-strategy is github""#,
         hide
     )]
     pub github_actions_token: Option<String>,
@@ -38,7 +42,7 @@ pub struct Config {
     #[config(
         option,
         value_name = "GITHUB_ACTIONS_URL",
-        default = r#""no default, must be specified if broker-connection is github""#,
+        default = r#""no default, must be specified if cluster-communication-strategy is github""#,
         hide
     )]
     pub github_actions_url: Option<Url>,

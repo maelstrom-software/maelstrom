@@ -18,13 +18,15 @@ use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     spec::{ContainerSpec, JobSpec},
-    AddContainerRequest, ClusterCommunicationStrategy, GitHubClusterCommunicationStrategy,
-    IntoProtoBuf, MixedClusterCommunicationStrategy, StartRequest, TcpClusterCommunicationStrategy,
-    TryFromProtoBuf,
+    AddContainerRequest, ClusterCommunicationStrategy as ClientClusterCommunicationStrategy,
+    GitHubClusterCommunicationStrategy, IntoProtoBuf, MixedClusterCommunicationStrategy,
+    StartRequest, TcpClusterCommunicationStrategy, TryFromProtoBuf,
 };
 use maelstrom_linux::{self as linux, Fd, Pid, Signal, UnixStream};
 use maelstrom_util::{
-    config::common::{BrokerConnection, LogLevel},
+    config::common::{
+        ClusterCommunicationStrategy as ConfigClusterCommunicationStrategy, LogLevel,
+    },
     process::assert_single_threaded,
     root::Root,
 };
@@ -328,53 +330,56 @@ impl Client {
         let (send, recv) = tokio_mpsc::unbounded_channel();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
 
-        let cluster_communication_strategy = match (config.broker, config.broker_connection) {
-            (None, BrokerConnection::Tcp) => None,
-            (Some(broker), BrokerConnection::Tcp) => Some(ClusterCommunicationStrategy::Tcp(
-                TcpClusterCommunicationStrategy { broker },
-            )),
-            (Some(broker), BrokerConnection::GitHub) => {
-                let Some(token) = &config.github_actions_token else {
-                    bail!(
-                        "because config value `broker-connection` is set to `github`, config \
-                            value `github-actions-token` must be set"
-                    );
-                };
-                let Some(url) = &config.github_actions_url else {
-                    bail!(
-                        "because config value `broker-connection` is set to `github`, config \
-                            value `github-actions-url` must be set"
-                    );
-                };
-                Some(ClusterCommunicationStrategy::Mixed(
-                    MixedClusterCommunicationStrategy {
-                        broker,
-                        token: token.clone(),
-                        url: url.clone(),
-                    },
-                ))
-            }
-            (None, BrokerConnection::GitHub) => {
-                let Some(token) = &config.github_actions_token else {
-                    bail!(
-                        "because config value `broker-connection` is set to `github`, config \
-                            value `github-actions-token` must be set"
-                    );
-                };
-                let Some(url) = &config.github_actions_url else {
-                    bail!(
-                        "because config value `broker-connection` is set to `github`, config \
-                            value `github-actions-url` must be set"
-                    );
-                };
-                Some(ClusterCommunicationStrategy::GitHub(
-                    GitHubClusterCommunicationStrategy {
-                        token: token.clone(),
-                        url: url.clone(),
-                    },
-                ))
-            }
-        };
+        let cluster_communication_strategy =
+            match (config.broker, config.cluster_communication_strategy) {
+                (None, ConfigClusterCommunicationStrategy::Tcp) => None,
+                (Some(broker), ConfigClusterCommunicationStrategy::Tcp) => {
+                    Some(ClientClusterCommunicationStrategy::Tcp(
+                        TcpClusterCommunicationStrategy { broker },
+                    ))
+                }
+                (Some(broker), ConfigClusterCommunicationStrategy::GitHub) => {
+                    let Some(token) = &config.github_actions_token else {
+                        bail!(
+                            "because config value `cluster-communication-strategy` is set to \
+                            `github`, config value `github-actions-token` must be set"
+                        );
+                    };
+                    let Some(url) = &config.github_actions_url else {
+                        bail!(
+                            "because config value `cluster-communication-strategy` is set to \
+                            `github`, config value `github-actions-url` must be set"
+                        );
+                    };
+                    Some(ClientClusterCommunicationStrategy::Mixed(
+                        MixedClusterCommunicationStrategy {
+                            broker,
+                            token: token.clone(),
+                            url: url.clone(),
+                        },
+                    ))
+                }
+                (None, ConfigClusterCommunicationStrategy::GitHub) => {
+                    let Some(token) = &config.github_actions_token else {
+                        bail!(
+                            "because config value `cluster-communication-strategy` is set to \
+                            `github`, config value `github-actions-token` must be set"
+                        );
+                    };
+                    let Some(url) = &config.github_actions_url else {
+                        bail!(
+                            "because config value `cluster-communication-strategy` is set to \
+                            `github`, config value `github-actions-url` must be set"
+                        );
+                    };
+                    Some(ClientClusterCommunicationStrategy::GitHub(
+                        GitHubClusterCommunicationStrategy {
+                            token: token.clone(),
+                            url: url.clone(),
+                        },
+                    ))
+                }
+            };
 
         let start_req = StartRequest {
             project_dir: project_dir.as_ref().to_owned(),
