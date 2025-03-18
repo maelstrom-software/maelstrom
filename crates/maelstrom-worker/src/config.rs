@@ -58,7 +58,7 @@ pub struct Config {
         option,
         value_name = "GITHUB_ACTIONS_TOKEN",
         default = r#""no default, must be specified if broker-connection is github""#,
-        hide,
+        hide
     )]
     pub github_actions_token: Option<String>,
 
@@ -68,7 +68,7 @@ pub struct Config {
         option,
         value_name = "GITHUB_ACTIONS_URL",
         default = r#""no default, must be specified if broker-connection is github""#,
-        hide,
+        hide
     )]
     pub github_actions_url: Option<Url>,
 }
