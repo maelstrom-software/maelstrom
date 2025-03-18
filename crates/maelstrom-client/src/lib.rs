@@ -24,9 +24,7 @@ use maelstrom_client_base::{
 };
 use maelstrom_linux::{self as linux, Fd, Pid, Signal, UnixStream};
 use maelstrom_util::{
-    config::common::{
-        ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots,
-    },
+    config::common::{ArtifactTransferStrategy, LogLevel},
     process::assert_single_threaded,
     root::Root,
 };
@@ -324,47 +322,42 @@ fn env_or_error(key: &str) -> Result<String> {
 }
 
 impl Client {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        client_process_factory: &impl ClientProcessFactory,
-        broker_addr: Option<BrokerAddr>,
-        project_dir: impl AsRef<Root<ProjectDir>>,
-        container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
         cache_dir: impl AsRef<Root<CacheDir>>,
-        cache_size: CacheSize,
-        inline_limit: InlineLimit,
-        slots: Slots,
-        accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-        artifact_transfer_strategy: ArtifactTransferStrategy,
+        client_process_factory: &impl ClientProcessFactory,
+        config: &config::Config,
         log: Logger,
+        project_dir: impl AsRef<Root<ProjectDir>>,
     ) -> Result<Self> {
         let (client_process_handle, sock) = client_process_factory.new_client_process(&log)?;
         let (send, recv) = tokio_mpsc::unbounded_channel();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
 
-        let cluster_communication_strategy = match (broker_addr, artifact_transfer_strategy) {
-            (None, _) => None,
-            (Some(broker), ArtifactTransferStrategy::TcpUpload) => Some(
-                ClusterCommunicationStrategy::Tcp(TcpClusterCommunicationStrategy { broker }),
-            ),
-            (Some(broker), ArtifactTransferStrategy::GitHub) => {
-                // XXX remi: I would prefer if we didn't read these from environment variables.
-                let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-                let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-                Some(ClusterCommunicationStrategy::Mixed(
-                    MixedClusterCommunicationStrategy { broker, token, url },
-                ))
-            }
-        };
+        let cluster_communication_strategy =
+            match (config.broker, config.artifact_transfer_strategy) {
+                (None, _) => None,
+                (Some(broker), ArtifactTransferStrategy::TcpUpload) => Some(
+                    ClusterCommunicationStrategy::Tcp(TcpClusterCommunicationStrategy { broker }),
+                ),
+                (Some(broker), ArtifactTransferStrategy::GitHub) => {
+                    // XXX remi: I would prefer if we didn't read these from environment variables.
+                    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
+                    let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+                    Some(ClusterCommunicationStrategy::Mixed(
+                        MixedClusterCommunicationStrategy { broker, token, url },
+                    ))
+                }
+            };
 
         let start_req = StartRequest {
             project_dir: project_dir.as_ref().to_owned(),
             cache_dir: cache_dir.as_ref().to_owned(),
-            container_image_depot_dir: container_image_depot_dir.as_ref().to_owned(),
-            cache_size,
-            inline_limit,
-            slots,
-            accept_invalid_remote_container_tls_certs,
+            container_image_depot_dir: config.container_image_depot_root.to_owned(),
+            cache_size: config.cache_size,
+            inline_limit: config.inline_limit,
+            slots: config.slots,
+            accept_invalid_remote_container_tls_certs: config
+                .accept_invalid_remote_container_tls_certs,
             cluster_communication_strategy,
         };
         let s = Self {

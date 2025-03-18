@@ -4,10 +4,9 @@ use maelstrom_base::{
     JobTerminationStatus, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    environment_spec, glob_layer_spec, job_spec, paths_layer_spec, spec::LayerSpec,
-    stubs_layer_spec, symlink_spec, symlinks_layer_spec, tar_layer_spec,
-    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ContainerImageDepotDir, ProjectDir,
-    SpawnClientProcessFactory,
+    config::Config, environment_spec, glob_layer_spec, job_spec, paths_layer_spec, spec::LayerSpec,
+    stubs_layer_spec, symlink_spec, symlinks_layer_spec, tar_layer_spec, CacheDir, Client,
+    ProjectDir, SpawnClientProcessFactory,
 };
 use maelstrom_util::{
     config::common::ArtifactTransferStrategy, elf::read_shared_libraries, fs::Fs, log::test_logger,
@@ -54,18 +53,21 @@ impl ClientFixture {
         let client_process_factory = client_process_factory_factory();
         let log = test_logger();
         slog::info!(log, "connected unix socket to child");
+        let config = Config {
+            cache_size: "1mb".parse().unwrap(),
+            inline_limit: "1mb".parse().unwrap(),
+            slots: 2u16.try_into().unwrap(),
+            container_image_depot_root: Root::new(&container_image_depot_dir).to_owned(),
+            accept_invalid_remote_container_tls_certs: true.into(),
+            broker: None,
+            artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
+        };
         let client = Client::new(
-            &client_process_factory,
-            None, /* broker_addr */
-            Root::<ProjectDir>::new(&project_dir),
-            Root::<ContainerImageDepotDir>::new(&container_image_depot_dir),
             Root::<CacheDir>::new(&cache_dir),
-            "1mb".parse().unwrap(), /* cache_size */
-            "1mb".parse().unwrap(), /* inline_limit */
-            2u16.try_into().unwrap(),
-            AcceptInvalidRemoteContainerTlsCerts::from(true),
-            ArtifactTransferStrategy::TcpUpload,
+            &client_process_factory,
+            &config,
             log.clone(),
+            Root::<ProjectDir>::new(&project_dir),
         )
         .unwrap();
         slog::info!(log, "client connected via RPC");

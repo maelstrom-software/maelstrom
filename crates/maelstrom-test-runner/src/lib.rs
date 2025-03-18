@@ -408,19 +408,11 @@ fn run_app_once<TestRunnerT: TestRunner>(
     Fs.create_dir_all(&directories.cache)?;
 
     let client = Client::new(
-        client_process_factory,
-        parent_config.client.broker,
-        &directories.project,
-        &parent_config.client.container_image_depot_root,
         &directories.cache,
-        parent_config.client.cache_size,
-        parent_config.client.inline_limit,
-        parent_config.client.slots,
-        parent_config
-            .client
-            .accept_invalid_remote_container_tls_certs,
-        parent_config.client.artifact_transfer_strategy,
+        client_process_factory,
+        &parent_config.client,
         log.clone(),
+        &directories.project,
     )?;
 
     let test_collector = TestRunnerT::build_test_collector(

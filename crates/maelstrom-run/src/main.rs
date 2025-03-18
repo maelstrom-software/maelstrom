@@ -694,17 +694,11 @@ fn main_with_logger(
     fs.create_dir_all(&config.cache_root)?;
     fs.create_dir_all(&config.client.container_image_depot_root)?;
     let client = Client::new(
-        &client_process_factory,
-        config.client.broker,
-        Root::<ProjectDir>::new(".".as_ref()),
-        config.client.container_image_depot_root,
         config.cache_root,
-        config.client.cache_size,
-        config.client.inline_limit,
-        config.client.slots,
-        config.client.accept_invalid_remote_container_tls_certs,
-        config.client.artifact_transfer_strategy,
+        &client_process_factory,
+        &config.client,
         log,
+        Root::<ProjectDir>::new(".".as_ref()),
     )?;
     let job_spec_or_containers_iter = JobSpecOrContainers::iter_from_json_reader(reader);
     if extra_options.one_or_tty.any() {
