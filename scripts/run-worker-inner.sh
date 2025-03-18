@@ -2,8 +2,9 @@
 
 set -ex
 
-export ACTIONS_RUNTIME_TOKEN=$1
-export ACTIONS_RESULTS_URL=$2
-WORKER_ARGS="--artifact-transfer-strategy github --broker-connection github"
+export MAELSTROM_WORKER_BROKER_CONNECTION="github"
+export MAELSTROM_WORKER_BROKER="0.0.0.0:0"
+export MAELSTROM_WORKER_GITHUB_ACTIONS_TOKEN=$1
+export MAELSTROM_WORKER_GITHUB_ACTIONS_URL=$2
 
-cargo run --release --bin maelstrom-worker -- --broker=0.0.0.0:0 $WORKER_ARGS || true
+cargo run --release --bin maelstrom-worker || true
