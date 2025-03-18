@@ -16,7 +16,7 @@ use maelstrom_util::{
     async_fs,
     broker_connection::{
         BrokerConnectionFactory as _, BrokerReadConnection as _, BrokerWriteConnection as _,
-        TcpBrokerConnectionFactory,
+        GitHubQueueBrokerConnectionFactory, TcpBrokerConnectionFactory,
     },
     config::common::{CacheSize, InlineLimit, Slots},
     root::RootBuf,
@@ -192,9 +192,26 @@ impl Client {
                     ));
                 }
                 ClusterCommunicationStrategy::GitHub(GitHubClusterCommunicationStrategy {
-                    ..
+                    ref token,
+                    ref url,
                 }) => {
-                    todo!();
+                    let broker_connection_factory =
+                        GitHubQueueBrokerConnectionFactory::new(&log, token.clone(), url.clone())?;
+                    let (broker_socket_read_half, broker_socket_write_half) =
+                        broker_connection_factory.connect(&Hello::Client).await?;
+
+                    // Spawn a task to read from the socket and write to the router's channel.
+                    join_set.spawn(broker_socket_read_half.read_messages(
+                        router_sender.clone(),
+                        log.new(o!("task" => "broker socket reader")),
+                        router::Message::Broker,
+                    ));
+
+                    // Spawn a task to read from the broker's channel and write to the socket.
+                    join_set.spawn(broker_socket_write_half.write_messages(
+                        broker_receiver,
+                        log.new(o!("task" => "broker socket writer")),
+                    ));
                 }
             }
 
