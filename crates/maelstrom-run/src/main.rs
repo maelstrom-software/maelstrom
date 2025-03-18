@@ -5,8 +5,8 @@ use maelstrom_base::{
     JobOutputResult, JobTerminationStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
-    spec::JobSpec, AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ContainerImageDepotDir,
-    ForkClientProcessFactory, JobStatus, ProjectDir,
+    config::Config as ClientConfig, spec::JobSpec, CacheDir, Client, ForkClientProcessFactory,
+    JobStatus, ProjectDir,
 };
 use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow};
 use maelstrom_macro::Config;
@@ -15,9 +15,7 @@ use maelstrom_run::{
     job_spec_or_containers::JobSpecOrContainers,
 };
 use maelstrom_util::{
-    config::common::{
-        ArtifactTransferStrategy, BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots,
-    },
+    config::common::LogLevel,
     fs::Fs,
     log,
     process::{ExitCode, ExitCodeAccumulator},
@@ -44,14 +42,8 @@ use xdg::BaseDirectories;
 
 #[derive(Config, Debug)]
 pub struct Config {
-    /// Socket address of broker. If not provided, all jobs will be run locally.
-    #[config(
-        option,
-        short = 'b',
-        value_name = "SOCKADDR",
-        default = r#""standalone mode""#
-    )]
-    pub broker: Option<BrokerAddr>,
+    #[config(flatten)]
+    pub client: ClientConfig,
 
     /// Minimum log level to output.
     #[config(short = 'L', value_name = "LEVEL", default = r#""info""#)]
@@ -73,51 +65,6 @@ pub struct Config {
     /// using caret notation (e.g. "^C"), or as a hexadecimal escape (e.g. "\x1a").
     #[config(value_name = "CHARACTER", default = "EscapeChar::default()")]
     pub escape_char: EscapeChar,
-
-    /// The target amount of disk space to use for the cache. This bound won't be followed
-    /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
-    #[config(
-        value_name = "BYTES",
-        default = "CacheSize::default()",
-        next_help_heading = "Local Worker Config Options"
-    )]
-    pub cache_size: CacheSize,
-
-    /// The maximum amount of bytes to return inline for captured stdout and stderr.
-    #[config(value_name = "BYTES", default = "InlineLimit::default()")]
-    pub inline_limit: InlineLimit,
-
-    /// The number of job slots available.
-    #[config(value_name = "N", default = "Slots::default()")]
-    pub slots: Slots,
-
-    /// Directory in which to put cached container images.
-    #[config(
-        value_name = "PATH",
-        default = r#"|bd: &BaseDirectories| {
-            bd.get_cache_home()
-                .parent()
-                .unwrap()
-                .join("container/")
-                .into_os_string()
-                .into_string()
-                .unwrap()
-        }"#,
-        next_help_heading = "Container Image Config Options"
-    )]
-    pub container_image_depot_root: RootBuf<ContainerImageDepotDir>,
-
-    /// Accept invalid TLS certificates when downloading container images.
-    #[config(flag)]
-    pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-
-    /// Controls how we upload artifacts when communicating with a remote broker.
-    #[config(
-        value_name = "ARTIFACT_TRANSFER_STRATEGY",
-        default = r#""tcp-upload""#,
-        hide
-    )]
-    pub artifact_transfer_strategy: ArtifactTransferStrategy,
 }
 
 #[derive(Args)]
@@ -745,18 +692,18 @@ fn main_with_logger(
         None => Box::new(io::stdin().lock()),
     };
     fs.create_dir_all(&config.cache_root)?;
-    fs.create_dir_all(&config.container_image_depot_root)?;
+    fs.create_dir_all(&config.client.container_image_depot_root)?;
     let client = Client::new(
         &client_process_factory,
-        config.broker,
+        config.client.broker,
         Root::<ProjectDir>::new(".".as_ref()),
-        config.container_image_depot_root,
+        config.client.container_image_depot_root,
         config.cache_root,
-        config.cache_size,
-        config.inline_limit,
-        config.slots,
-        config.accept_invalid_remote_container_tls_certs,
-        config.artifact_transfer_strategy,
+        config.client.cache_size,
+        config.client.inline_limit,
+        config.client.slots,
+        config.client.accept_invalid_remote_container_tls_certs,
+        config.client.artifact_transfer_strategy,
         log,
     )?;
     let job_spec_or_containers_iter = JobSpecOrContainers::iter_from_json_reader(reader);
