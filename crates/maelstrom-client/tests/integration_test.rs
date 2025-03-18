@@ -9,7 +9,7 @@ use maelstrom_client::{
     ProjectDir, SpawnClientProcessFactory,
 };
 use maelstrom_util::{
-    config::common::ArtifactTransferStrategy, elf::read_shared_libraries, fs::Fs, log::test_logger,
+    config::common::BrokerConnection, elf::read_shared_libraries, fs::Fs, log::test_logger,
     root::Root,
 };
 use regex::Regex;
@@ -60,7 +60,9 @@ impl ClientFixture {
             container_image_depot_root: Root::new(&container_image_depot_dir).to_owned(),
             accept_invalid_remote_container_tls_certs: true.into(),
             broker: None,
-            artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
+            broker_connection: BrokerConnection::Tcp,
+            github_actions_token: None,
+            github_actions_url: None,
         };
         let client = Client::new(
             Root::<CacheDir>::new(&cache_dir),

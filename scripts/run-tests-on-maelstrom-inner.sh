@@ -12,12 +12,11 @@ PYTEST_ARGS=""
 START_WORKER=1
 
 if [[ $# -gt 0 ]]; then
-    export ACTIONS_RUNTIME_TOKEN=$1
-    export ACTIONS_RESULTS_URL=$2
+    export MAELSTROM_GITHUB_ACTIONS_TOKEN=$1
+    export MAELSTROM_GITHUB_ACTIONS_URL=$2
+    export MAELSTROM_BROKER_CONNECTION=github
     BROKER_ARGS="$BROKER_ARGS --artifact-transfer-strategy github"
     START_WORKER=0
-    CARGO_ARGS="$CARGO_ARGS --artifact-transfer-strategy github"
-    PYTEST_ARGS="$PYTEST_ARGS --artifact-transfer-strategy github"
     echo "using github for artifact transfer"
 fi
 

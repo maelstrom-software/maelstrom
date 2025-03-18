@@ -4,7 +4,7 @@ use maelstrom_container::local_registry;
 use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
 use maelstrom_test_runner::ui::{SimpleUi, UiKind};
 use maelstrom_util::{
-    config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{BrokerConnection, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::ExitCode,
     root::RootBuf,
@@ -101,7 +101,9 @@ fn do_maelstrom_pytest_test(
                     inline_limit: InlineLimit::default(),
                     slots: Slots::default(),
                     accept_invalid_remote_container_tls_certs: true.into(),
-                    artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
+                    broker_connection: BrokerConnection::Tcp,
+                    github_actions_token: None,
+                    github_actions_url: None,
                 },
                 log_level: LogLevel::Debug,
                 timeout: None,

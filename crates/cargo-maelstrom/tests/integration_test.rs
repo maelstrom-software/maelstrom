@@ -10,7 +10,7 @@ use maelstrom_test_runner::{
     TestRunner as _,
 };
 use maelstrom_util::{
-    config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{BrokerConnection, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     root::RootBuf,
 };
@@ -53,7 +53,9 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
                     inline_limit: InlineLimit::default(),
                     slots: Slots::default(),
                     accept_invalid_remote_container_tls_certs: true.into(),
-                    artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
+                    broker_connection: BrokerConnection::Tcp,
+                    github_actions_token: None,
+                    github_actions_url: None,
                 },
                 log_level: LogLevel::Debug,
                 timeout: None,

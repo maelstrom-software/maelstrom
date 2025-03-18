@@ -2,7 +2,7 @@ use indicatif::InMemoryTerm;
 use maelstrom_go_test::{cli::ExtraCommandLineOptions, Config, LoggerBuilder};
 use maelstrom_test_runner::ui::{self, SimpleUi};
 use maelstrom_util::{
-    config::common::{ArtifactTransferStrategy, CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{BrokerConnection, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::ExitCode,
     root::RootBuf,
@@ -31,7 +31,9 @@ fn do_maelstrom_go_test_test(
                     inline_limit: InlineLimit::default(),
                     slots: Slots::default(),
                     accept_invalid_remote_container_tls_certs: true.into(),
-                    artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
+                    broker_connection: BrokerConnection::Tcp,
+                    github_actions_token: None,
+                    github_actions_url: None,
                 },
                 timeout: None,
                 log_level: LogLevel::Debug,

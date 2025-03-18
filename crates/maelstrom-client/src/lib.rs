@@ -10,7 +10,7 @@ pub use maelstrom_client_base::{
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
-use anyhow::{anyhow, Context as _, Error, Result};
+use anyhow::{anyhow, bail, Context as _, Error, Result};
 use futures::stream::StreamExt as _;
 use http::Uri;
 use hyper_util::rt::TokioIo;
@@ -18,13 +18,13 @@ use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     spec::{ContainerSpec, JobSpec},
-    AddContainerRequest, ClusterCommunicationStrategy, IntoProtoBuf,
-    MixedClusterCommunicationStrategy, StartRequest, TcpClusterCommunicationStrategy,
+    AddContainerRequest, ClusterCommunicationStrategy, GitHubClusterCommunicationStrategy,
+    IntoProtoBuf, MixedClusterCommunicationStrategy, StartRequest, TcpClusterCommunicationStrategy,
     TryFromProtoBuf,
 };
 use maelstrom_linux::{self as linux, Fd, Pid, Signal, UnixStream};
 use maelstrom_util::{
-    config::common::{ArtifactTransferStrategy, LogLevel},
+    config::common::{BrokerConnection, LogLevel},
     process::assert_single_threaded,
     root::Root,
 };
@@ -54,7 +54,6 @@ use tokio::{
     sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
     task,
 };
-use url::Url;
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type RequestFn = Box<
@@ -317,10 +316,6 @@ fn wait_for_job_completed_blocking(
     }
 }
 
-fn env_or_error(key: &str) -> Result<String> {
-    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
-}
-
 impl Client {
     pub fn new(
         cache_dir: impl AsRef<Root<CacheDir>>,
@@ -333,21 +328,53 @@ impl Client {
         let (send, recv) = tokio_mpsc::unbounded_channel();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
 
-        let cluster_communication_strategy =
-            match (config.broker, config.artifact_transfer_strategy) {
-                (None, _) => None,
-                (Some(broker), ArtifactTransferStrategy::TcpUpload) => Some(
-                    ClusterCommunicationStrategy::Tcp(TcpClusterCommunicationStrategy { broker }),
-                ),
-                (Some(broker), ArtifactTransferStrategy::GitHub) => {
-                    // XXX remi: I would prefer if we didn't read these from environment variables.
-                    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-                    let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-                    Some(ClusterCommunicationStrategy::Mixed(
-                        MixedClusterCommunicationStrategy { broker, token, url },
-                    ))
-                }
-            };
+        let cluster_communication_strategy = match (config.broker, config.broker_connection) {
+            (None, BrokerConnection::Tcp) => None,
+            (Some(broker), BrokerConnection::Tcp) => Some(ClusterCommunicationStrategy::Tcp(
+                TcpClusterCommunicationStrategy { broker },
+            )),
+            (Some(broker), BrokerConnection::GitHub) => {
+                let Some(token) = &config.github_actions_token else {
+                    bail!(
+                        "because config value `broker-connection` is set to `github`, config \
+                            value `github-actions-token` must be set"
+                    );
+                };
+                let Some(url) = &config.github_actions_url else {
+                    bail!(
+                        "because config value `broker-connection` is set to `github`, config \
+                            value `github-actions-url` must be set"
+                    );
+                };
+                Some(ClusterCommunicationStrategy::Mixed(
+                    MixedClusterCommunicationStrategy {
+                        broker,
+                        token: token.clone(),
+                        url: url.clone(),
+                    },
+                ))
+            }
+            (None, BrokerConnection::GitHub) => {
+                let Some(token) = &config.github_actions_token else {
+                    bail!(
+                        "because config value `broker-connection` is set to `github`, config \
+                            value `github-actions-token` must be set"
+                    );
+                };
+                let Some(url) = &config.github_actions_url else {
+                    bail!(
+                        "because config value `broker-connection` is set to `github`, config \
+                            value `github-actions-url` must be set"
+                    );
+                };
+                Some(ClusterCommunicationStrategy::GitHub(
+                    GitHubClusterCommunicationStrategy {
+                        token: token.clone(),
+                        url: url.clone(),
+                    },
+                ))
+            }
+        };
 
         let start_req = StartRequest {
             project_dir: project_dir.as_ref().to_owned(),
