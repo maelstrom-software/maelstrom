@@ -13,6 +13,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+clap.workspace = true
 futures.workspace = true
 http.workspace = true
 hyper-util.workspace = true
@@ -22,6 +23,7 @@ maelstrom-client-base.workspace = true
 maelstrom-client-process.workspace = true
 maelstrom-container.workspace = true
 maelstrom-linux.workspace = true
+maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
 serde.workspace = true
 slog.workspace = true

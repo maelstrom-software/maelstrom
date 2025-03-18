@@ -44,20 +44,22 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         ["--client-process"],
         Config {
             parent: maelstrom_test_runner::config::Config {
-                broker: None,
+                client: maelstrom_client::config::Config {
+                    broker: None,
+                    container_image_depot_root: RootBuf::new(PathBuf::from(
+                        ".cache/maelstrom/container",
+                    )),
+                    cache_size: CacheSize::default(),
+                    inline_limit: InlineLimit::default(),
+                    slots: Slots::default(),
+                    accept_invalid_remote_container_tls_certs: true.into(),
+                    artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
+                },
                 log_level: LogLevel::Debug,
-                container_image_depot_root: RootBuf::new(PathBuf::from(
-                    ".cache/maelstrom/container",
-                )),
                 timeout: None,
-                cache_size: CacheSize::default(),
-                inline_limit: InlineLimit::default(),
-                slots: Slots::default(),
-                accept_invalid_remote_container_tls_certs: true.into(),
                 ui: UiKind::Simple,
                 repeat: Default::default(),
                 stop_after: None,
-                artifact_transfer_strategy: ArtifactTransferStrategy::TcpUpload,
             },
             cargo: CargoConfig {
                 feature_selection_options: FeatureSelectionOptions::default(),

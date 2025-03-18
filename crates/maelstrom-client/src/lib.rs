@@ -1,3 +1,5 @@
+pub mod config;
+
 pub use maelstrom_client_base::{
     container_container_parent, container_ref, container_spec, converted_image, environment_spec,
     glob_layer_spec, image_container_parent, image_ref, job_spec, paths_layer_spec, prefix_options,

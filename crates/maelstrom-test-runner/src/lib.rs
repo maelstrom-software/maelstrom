@@ -409,15 +409,17 @@ fn run_app_once<TestRunnerT: TestRunner>(
 
     let client = Client::new(
         client_process_factory,
-        parent_config.broker,
+        parent_config.client.broker,
         &directories.project,
-        &parent_config.container_image_depot_root,
+        &parent_config.client.container_image_depot_root,
         &directories.cache,
-        parent_config.cache_size,
-        parent_config.inline_limit,
-        parent_config.slots,
-        parent_config.accept_invalid_remote_container_tls_certs,
-        parent_config.artifact_transfer_strategy,
+        parent_config.client.cache_size,
+        parent_config.client.inline_limit,
+        parent_config.client.slots,
+        parent_config
+            .client
+            .accept_invalid_remote_container_tls_certs,
+        parent_config.client.artifact_transfer_strategy,
         log.clone(),
     )?;
 
