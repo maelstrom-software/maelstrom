@@ -35,12 +35,14 @@ PORT=$( \
 )
 if [[ $START_WORKER -gt 0 ]]; then
     cargo run --release --bin maelstrom-worker -- --broker=localhost:$PORT $WORKER_ARGS &
+    CARGO_ARGS="$CARGO_ARGS --broker=localhost:$PORT"
+    PYTEST_ARGS="$PYTEST_ARGS --broker=localhost:$PORT"
 fi
 
-cargo run --release --bin cargo-maelstrom -- --broker=localhost:$PORT $CARGO_ARGS
+cargo run --release --bin cargo-maelstrom -- $CARGO_ARGS
 CARGO_MAELSTROM_STATUS=$?
 
-cargo run --release --bin maelstrom-pytest -- --broker=localhost:$PORT $PYTEST_ARGS
+cargo run --release --bin maelstrom-pytest -- $PYTEST_ARGS
 MAELSTROM_PYTEST_STATUS=$?
 
 kill -15 $BROKER_PID
