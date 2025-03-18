@@ -3,6 +3,7 @@ use maelstrom_util::{
     config::common::{BrokerAddr, BrokerConnection, CacheSize, InlineLimit, LogLevel, Slots},
     root::RootBuf,
 };
+use url::Url;
 use xdg::BaseDirectories;
 
 pub struct CacheDir;
@@ -43,6 +44,24 @@ pub struct Config {
     pub log_level: LogLevel,
 
     /// Controls how we connect to the broker.
-    #[config(value_name = "BROKER_CONNECTION", default = r#""tcp""#, hide)]
+    #[config(value_name = "BROKER_CONNECTION", default = r#""tcp""#)]
     pub broker_connection: BrokerConnection,
+
+    /// This is required with `broker-conection=github`. This is passed to JavaScript GitHub
+    /// actions as `ACTIONS_RUNTIME_TOKEN`.
+    #[config(
+        option,
+        value_name = "GITHUB_ACTIONS_TOKEN",
+        default = r#""no default, must be specified if broker-connection is github""#
+    )]
+    pub github_actions_token: Option<String>,
+
+    /// This is required with `broker-conection=github`. This is passed to JavaScript GitHub
+    /// actions as `ACTIONS_RESULTS_URL`.
+    #[config(
+        option,
+        value_name = "GITHUB_ACTIONS_URL",
+        default = r#""no default, must be specified if broker-connection is github""#
+    )]
+    pub github_actions_url: Option<Url>,
 }

@@ -41,18 +41,6 @@ use tokio::{
     task::{self, JoinHandle, JoinSet},
 };
 use types::{BrokerSocketOutgoingSender, Cache, DispatcherReceiver, DispatcherSender};
-use url::Url;
-
-fn env_or_error(key: &str) -> Result<String> {
-    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
-}
-
-fn github_client_factory() -> Result<GitHubClient> {
-    // XXX remi: I would prefer if we didn't read these from environment variables.
-    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-    let base_url = url::Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-    GitHubClient::new(&token, base_url)
-}
 
 const MAX_PENDING_LAYERS_BUILDS: usize = 10;
 const MAX_ARTIFACT_FETCHES: usize = 1;
@@ -67,11 +55,26 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
         )
         .unwrap_err(),
         ConfigBrokerConnection::GitHub => {
-            // XXX remi: I would prefer if we didn't read these from environment variables.
-            let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-            let url = Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
+            let Some(token) = &config.github_actions_token else {
+                bail!(
+                    "because config value `broker-connection` is set to `tcp`, config value \
+                    `github-actions-token` must be set via `--github-actions-token` \
+                    command-line option, `MAELSTROM_WORKER_GITHUB_ACTIONS_TOKEN` or \
+                    `MAELSTROM_GITHUB_ACTIONS_TOKEN` environment variables, or \
+                    `github-actions-token` key in config file"
+                );
+            };
+            let Some(url) = &config.github_actions_url else {
+                bail!(
+                    "because config value `broker-connection` is set to `tcp`, config value \
+                    `github-actions-url` must be set via `--github-actions-url` \
+                    command-line option, `MAELSTROM_WORKER_GITHUB_ACTIONS_URL` or \
+                    `MAELSTROM_GITHUB_ACTIONS_URL` environment variables, or \
+                    `github-actions-url` key in config file"
+                );
+            };
             main_inner(
-                GitHubQueueBrokerConnectionFactory::new(&log, token, url)?,
+                GitHubQueueBrokerConnectionFactory::new(&log, token.clone(), url.clone())?,
                 config,
                 &log,
             )
@@ -224,7 +227,10 @@ fn start_dispatcher_task(
             )
         }
         ConfigBrokerConnection::GitHub => {
-            let github_client = github_client_factory().context("creating GitHub client")?;
+            let github_client = GitHubClient::new(
+                config.github_actions_token.as_ref().unwrap(),
+                config.github_actions_url.as_ref().unwrap().clone(),
+            )?;
             let artifact_fetcher_factory = move |temp_file_factory| {
                 GitHubArtifactFetcher::new(
                     max_simultaneous_fetches,
