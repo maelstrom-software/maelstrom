@@ -15,6 +15,9 @@ if [[ $# -gt 0 ]]; then
     export MAELSTROM_GITHUB_ACTIONS_TOKEN=$1
     export MAELSTROM_GITHUB_ACTIONS_URL=$2
     export MAELSTROM_BROKER_CONNECTION=github
+    # These are still required for the broker.
+    export ACTIONS_RUNTIME_TOKEN=$1
+    export ACTIONS_RESULTS_URL=$2
     BROKER_ARGS="$BROKER_ARGS --artifact-transfer-strategy github"
     START_WORKER=0
     echo "using github for artifact transfer"
