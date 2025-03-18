@@ -6,9 +6,8 @@ use maelstrom_base::proto::Hello;
 use maelstrom_client_base::{
     spec::{self, ContainerSpec},
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, ClusterCommunicationStrategy,
-    GitHubClusterCommunicationStrategy, IntrospectResponse, JobStatus,
-    MixedClusterCommunicationStrategy, ProjectDir, TcpClusterCommunicationStrategy, MANIFEST_DIR,
-    STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    GitHubClusterCommunicationStrategy, IntrospectResponse, JobStatus, ProjectDir,
+    TcpClusterCommunicationStrategy, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_github::GitHubClient;
@@ -169,11 +168,7 @@ impl Client {
 
             // Connect to the broker.
             match cluster_communication_strategy {
-                ClusterCommunicationStrategy::Tcp(TcpClusterCommunicationStrategy { broker })
-                | ClusterCommunicationStrategy::Mixed(MixedClusterCommunicationStrategy {
-                    broker,
-                    ..
-                }) => {
+                ClusterCommunicationStrategy::Tcp(TcpClusterCommunicationStrategy { broker }) => {
                     let broker_connection_factory = TcpBrokerConnectionFactory::new(broker, &log);
                     let (broker_socket_read_half, broker_socket_write_half) =
                         broker_connection_factory.connect(&Hello::Client).await?;
@@ -229,11 +224,6 @@ impl Client {
                 ClusterCommunicationStrategy::GitHub(GitHubClusterCommunicationStrategy {
                     token,
                     url,
-                })
-                | ClusterCommunicationStrategy::Mixed(MixedClusterCommunicationStrategy {
-                    token,
-                    url,
-                    ..
                 }) => {
                     let github_client = GitHubClient::new(token.as_str(), url.clone())?;
                     artifact_pusher::github::start_task(

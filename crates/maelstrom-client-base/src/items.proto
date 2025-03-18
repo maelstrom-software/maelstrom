@@ -11,7 +11,6 @@ message ClusterCommunicationStrategy {
     oneof strategy {
         TcpClusterCommunicationStrategy tcp = 1;
         GitHubClusterCommunicationStrategy git_hub = 2;
-        MixedClusterCommunicationStrategy mixed = 3;
     }
 }
 
@@ -22,12 +21,6 @@ message TcpClusterCommunicationStrategy {
 message GitHubClusterCommunicationStrategy {
     string token = 1;
     string url = 2;
-}
-
-message MixedClusterCommunicationStrategy {
-    string broker = 1;
-    string token = 2;
-    string url = 3;
 }
 
 message StartRequest {

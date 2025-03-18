@@ -19,8 +19,8 @@ use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     spec::{ContainerSpec, JobSpec},
     AddContainerRequest, ClusterCommunicationStrategy as ClientClusterCommunicationStrategy,
-    GitHubClusterCommunicationStrategy, IntoProtoBuf, MixedClusterCommunicationStrategy,
-    StartRequest, TcpClusterCommunicationStrategy, TryFromProtoBuf,
+    GitHubClusterCommunicationStrategy, IntoProtoBuf, StartRequest,
+    TcpClusterCommunicationStrategy, TryFromProtoBuf,
 };
 use maelstrom_linux::{self as linux, Fd, Pid, Signal, UnixStream};
 use maelstrom_util::{
@@ -338,28 +338,7 @@ impl Client {
                         TcpClusterCommunicationStrategy { broker },
                     ))
                 }
-                (Some(broker), ConfigClusterCommunicationStrategy::GitHub) => {
-                    let Some(token) = &config.github_actions_token else {
-                        bail!(
-                            "because config value `cluster-communication-strategy` is set to \
-                            `github`, config value `github-actions-token` must be set"
-                        );
-                    };
-                    let Some(url) = &config.github_actions_url else {
-                        bail!(
-                            "because config value `cluster-communication-strategy` is set to \
-                            `github`, config value `github-actions-url` must be set"
-                        );
-                    };
-                    Some(ClientClusterCommunicationStrategy::Mixed(
-                        MixedClusterCommunicationStrategy {
-                            broker,
-                            token: token.clone(),
-                            url: url.clone(),
-                        },
-                    ))
-                }
-                (None, ConfigClusterCommunicationStrategy::GitHub) => {
+                (_, ConfigClusterCommunicationStrategy::GitHub) => {
                     let Some(token) = &config.github_actions_token else {
                         bail!(
                             "because config value `cluster-communication-strategy` is set to \

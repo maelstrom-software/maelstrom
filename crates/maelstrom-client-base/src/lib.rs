@@ -201,14 +201,6 @@ pub struct GitHubClusterCommunicationStrategy {
 }
 
 #[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
-#[proto(proto_buf_type = proto::MixedClusterCommunicationStrategy)]
-pub struct MixedClusterCommunicationStrategy {
-    pub broker: BrokerAddr,
-    pub token: String,
-    pub url: Url,
-}
-
-#[derive(Clone, Debug, IntoProtoBuf, TryFromProtoBuf)]
 #[proto(
     proto_buf_type = "proto::ClusterCommunicationStrategy",
     enum_type = "proto::cluster_communication_strategy::Strategy"
@@ -216,7 +208,6 @@ pub struct MixedClusterCommunicationStrategy {
 pub enum ClusterCommunicationStrategy {
     Tcp(TcpClusterCommunicationStrategy),
     GitHub(GitHubClusterCommunicationStrategy),
-    Mixed(MixedClusterCommunicationStrategy),
 }
 
 //                                 _      __
