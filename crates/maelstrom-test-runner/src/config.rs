@@ -65,9 +65,6 @@ pub trait AsParts {
 
 #[derive(Config, Debug)]
 pub struct Config {
-    #[config(flatten)]
-    pub client: ClientConfig,
-
     /// Minimum log level to output.
     #[config(short = 'L', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
@@ -100,9 +97,12 @@ pub struct Config {
         short = 't',
         value_name = "SECONDS",
         default = r#""whatever individual tests specify""#,
-        next_help_heading = "Test Override Config Options"
+        next_help_heading = "Test Override Config Values"
     )]
     pub timeout: Option<u32>,
+
+    #[config(flatten, next_help_heading = "Cluster Communication Config Values")]
+    pub client: ClientConfig,
 }
 
 #[derive(Args, Default)]

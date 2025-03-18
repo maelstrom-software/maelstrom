@@ -6,7 +6,7 @@ pub struct Config {
     #[config(flatten)]
     pub parent: TestRunnerConfig,
 
-    #[config(flatten, next_help_heading = "Go Testing Options")]
+    #[config(flatten, next_help_heading = "Go Test Config Values")]
     pub go_test: GoTestConfig,
 }
 

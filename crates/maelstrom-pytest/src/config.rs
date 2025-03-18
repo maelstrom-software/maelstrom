@@ -6,7 +6,7 @@ pub struct Config {
     #[config(flatten)]
     pub parent: TestRunnerConfig,
 
-    #[config(flatten, next_help_heading = "Pytest Config Options")]
+    #[config(flatten, next_help_heading = "Pytest Config Values")]
     pub pytest: PytestConfig,
 }
 

@@ -13,13 +13,13 @@ pub struct Config {
 
 #[derive(Clone, Config, Debug)]
 pub struct CargoConfig {
-    #[config(flatten, next_help_heading = "Feature Selection Config Options")]
+    #[config(flatten, next_help_heading = "Feature Selection Config Values")]
     pub feature_selection_options: FeatureSelectionOptions,
 
-    #[config(flatten, next_help_heading = "Compilation Config Options")]
+    #[config(flatten, next_help_heading = "Compilation Config Values")]
     pub compilation_options: CompilationOptions,
 
-    #[config(flatten, next_help_heading = "Manifest Config Options")]
+    #[config(flatten, next_help_heading = "Manifest Config Values")]
     pub manifest_options: ManifestOptions,
 
     /// Extra arguments to pass to the test binary. Refer to the help text of a test binary.

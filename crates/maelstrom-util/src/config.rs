@@ -383,7 +383,7 @@ impl CommandBuilder {
                         variables and files."
                     ))
             )
-            .next_help_heading("Config Options")
+            .next_help_heading("Config Values")
             ;
 
         Self {

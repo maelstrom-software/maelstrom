@@ -9,12 +9,29 @@ use xdg::BaseDirectories;
 
 #[derive(Config, Debug)]
 pub struct Config {
+    /// Socket address of broker. If not provided, all tests will be run locally.
+    #[config(
+        option,
+        short = 'b',
+        value_name = "SOCKADDR",
+        default = r#""standalone mode""#
+    )]
+    pub broker: Option<BrokerAddr>,
+
+    /// Controls how we upload artifacts when communicating with a remote broker.
+    #[config(
+        value_name = "ARTIFACT_TRANSFER_STRATEGY",
+        default = r#""tcp-upload""#,
+        hide
+    )]
+    pub artifact_transfer_strategy: ArtifactTransferStrategy,
+
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
     #[config(
         value_name = "BYTES",
         default = "CacheSize::default()",
-        next_help_heading = "Local Worker Config Options"
+        next_help_heading = "Local Worker Config Values"
     )]
     pub cache_size: CacheSize,
 
@@ -38,29 +55,11 @@ pub struct Config {
                 .into_string()
                 .unwrap()
         }"#,
-        next_help_heading = "Container Image Config Options"
+        next_help_heading = "Container Image Config Values"
     )]
     pub container_image_depot_root: RootBuf<ContainerImageDepotDir>,
 
     /// Accept invalid TLS certificates when downloading container images.
     #[config(flag)]
     pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-
-    /// Socket address of broker. If not provided, all tests will be run locally.
-    #[config(
-        option,
-        short = 'b',
-        value_name = "SOCKADDR",
-        default = r#""standalone mode""#,
-        next_help_heading = "Test Runner Config Options"
-    )]
-    pub broker: Option<BrokerAddr>,
-
-    /// Controls how we upload artifacts when communicating with a remote broker.
-    #[config(
-        value_name = "ARTIFACT_TRANSFER_STRATEGY",
-        default = r#""tcp-upload""#,
-        hide
-    )]
-    pub artifact_transfer_strategy: ArtifactTransferStrategy,
 }

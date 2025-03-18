@@ -42,9 +42,6 @@ use xdg::BaseDirectories;
 
 #[derive(Config, Debug)]
 pub struct Config {
-    #[config(flatten)]
-    pub client: ClientConfig,
-
     /// Minimum log level to output.
     #[config(short = 'L', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
@@ -65,6 +62,9 @@ pub struct Config {
     /// using caret notation (e.g. "^C"), or as a hexadecimal escape (e.g. "\x1a").
     #[config(value_name = "CHARACTER", default = "EscapeChar::default()")]
     pub escape_char: EscapeChar,
+
+    #[config(flatten)]
+    pub client: ClientConfig,
 }
 
 #[derive(Args)]
