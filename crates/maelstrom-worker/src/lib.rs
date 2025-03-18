@@ -48,16 +48,21 @@ const MAX_ARTIFACT_FETCHES: usize = 1;
 pub fn main(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config);
     let err = match config.broker_connection {
-        ConfigBrokerConnection::Tcp => main_inner(
-            TcpBrokerConnectionFactory::new(config.broker, &log),
-            config,
-            &log,
-        )
-        .unwrap_err(),
+        ConfigBrokerConnection::Tcp => {
+            let Some(broker) = config.broker else {
+                bail!(
+                    "because config value `broker-connection` is set to `tcp`, config value \
+                    `broker` must be set via `--broker` command-line option, \
+                    `MAELSTROM_WORKER_BROKER` or `MAELSTROM_BROKER` environment variables, or \
+                    `broker` key in config file"
+                );
+            };
+            main_inner(TcpBrokerConnectionFactory::new(broker, &log), config, &log).unwrap_err()
+        }
         ConfigBrokerConnection::GitHub => {
             let Some(token) = &config.github_actions_token else {
                 bail!(
-                    "because config value `broker-connection` is set to `tcp`, config value \
+                    "because config value `broker-connection` is set to `github`, config value \
                     `github-actions-token` must be set via `--github-actions-token` \
                     command-line option, `MAELSTROM_WORKER_GITHUB_ACTIONS_TOKEN` or \
                     `MAELSTROM_GITHUB_ACTIONS_TOKEN` environment variables, or \
@@ -66,7 +71,7 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
             };
             let Some(url) = &config.github_actions_url else {
                 bail!(
-                    "because config value `broker-connection` is set to `tcp`, config value \
+                    "because config value `broker-connection` is set to `github`, config value \
                     `github-actions-url` must be set via `--github-actions-url` \
                     command-line option, `MAELSTROM_WORKER_GITHUB_ACTIONS_URL` or \
                     `MAELSTROM_GITHUB_ACTIONS_URL` environment variables, or \
@@ -206,7 +211,7 @@ fn start_dispatcher_task(
                 TcpArtifactFetcher::new(
                     max_simultaneous_fetches,
                     dispatcher_sender_clone,
-                    config.broker,
+                    config.broker.unwrap(),
                     log.clone(),
                     temp_file_factory,
                 )

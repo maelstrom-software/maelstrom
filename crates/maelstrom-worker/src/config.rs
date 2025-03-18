@@ -11,8 +11,13 @@ pub struct CacheDir;
 #[derive(Config, Debug)]
 pub struct Config {
     /// Socket address of broker.
-    #[config(short = 'b', value_name = "SOCKADDR")]
-    pub broker: BrokerAddr,
+    #[config(
+        option,
+        short = 'b',
+        value_name = "SOCKADDR",
+        default = r#""no default, must be specified if broker-connection is tcp (the default)""#
+    )]
+    pub broker: Option<BrokerAddr>,
 
     /// The number of job slots available.
     #[config(value_name = "N", default = "Slots::default()")]
@@ -44,7 +49,7 @@ pub struct Config {
     pub log_level: LogLevel,
 
     /// Controls how we connect to the broker.
-    #[config(value_name = "BROKER_CONNECTION", default = r#""tcp""#)]
+    #[config(value_name = "BROKER_CONNECTION", default = r#""tcp""#, hide)]
     pub broker_connection: BrokerConnection,
 
     /// This is required with `broker-conection=github`. This is passed to JavaScript GitHub
@@ -52,7 +57,8 @@ pub struct Config {
     #[config(
         option,
         value_name = "GITHUB_ACTIONS_TOKEN",
-        default = r#""no default, must be specified if broker-connection is github""#
+        default = r#""no default, must be specified if broker-connection is github""#,
+        hide,
     )]
     pub github_actions_token: Option<String>,
 
@@ -61,7 +67,8 @@ pub struct Config {
     #[config(
         option,
         value_name = "GITHUB_ACTIONS_URL",
-        default = r#""no default, must be specified if broker-connection is github""#
+        default = r#""no default, must be specified if broker-connection is github""#,
+        hide,
     )]
     pub github_actions_url: Option<Url>,
 }
