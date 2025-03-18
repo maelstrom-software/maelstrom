@@ -27,10 +27,7 @@ use maelstrom_util::{
         GitHubQueueBrokerConnectionFactory, TcpBrokerConnectionFactory,
     },
     cache::{self, fs::std::Fs as StdFs, TempFileFactory},
-    config::common::{
-        ArtifactTransferStrategy, BrokerConnection as ConfigBrokerConnection, CacheSize,
-        InlineLimit, Slots,
-    },
+    config::common::{BrokerConnection as ConfigBrokerConnection, CacheSize, InlineLimit, Slots},
     process::TERMINATION_SIGNALS,
     root::RootBuf,
     sync::EventSender,
@@ -200,8 +197,8 @@ fn start_dispatcher_task(
         .unwrap();
     let broker_sender = move |msg| broker_socket_outgoing_sender.send(msg);
 
-    match config.artifact_transfer_strategy {
-        ArtifactTransferStrategy::TcpUpload => {
+    match config.broker_connection {
+        ConfigBrokerConnection::Tcp => {
             let artifact_fetcher_factory = move |temp_file_factory| {
                 TcpArtifactFetcher::new(
                     max_simultaneous_fetches,
@@ -226,7 +223,7 @@ fn start_dispatcher_task(
                 tasks,
             )
         }
-        ArtifactTransferStrategy::GitHub => {
+        ConfigBrokerConnection::GitHub => {
             let github_client = github_client_factory().context("creating GitHub client")?;
             let artifact_fetcher_factory = move |temp_file_factory| {
                 GitHubArtifactFetcher::new(

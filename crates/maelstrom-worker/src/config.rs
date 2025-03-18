@@ -1,9 +1,6 @@
 use maelstrom_macro::Config;
 use maelstrom_util::{
-    config::common::{
-        ArtifactTransferStrategy, BrokerAddr, BrokerConnection, CacheSize, InlineLimit, LogLevel,
-        Slots,
-    },
+    config::common::{BrokerAddr, BrokerConnection, CacheSize, InlineLimit, LogLevel, Slots},
     root::RootBuf,
 };
 use xdg::BaseDirectories;
@@ -44,14 +41,6 @@ pub struct Config {
     /// Minimum log level to output.
     #[config(short = 'L', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
-
-    /// Controls how we upload artifacts when communicating with the broker.
-    #[config(
-        value_name = "ARTIFACT_TRANSFER_STRATEGY",
-        default = r#""tcp-upload""#,
-        hide
-    )]
-    pub artifact_transfer_strategy: ArtifactTransferStrategy,
 
     /// Controls how we connect to the broker.
     #[config(value_name = "BROKER_CONNECTION", default = r#""tcp""#, hide)]
