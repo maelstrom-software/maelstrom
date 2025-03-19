@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-test-runner"
-description = "Library used by Maelstrom binaries to implement a test runner"
+description = "Library used by Maelstrom binaries to implement a test runner."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

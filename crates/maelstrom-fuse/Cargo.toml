@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-fuse"
-description = "Library for interacting with FUSE with async Rust"
+description = "Library for interacting with FUSE with async Rust."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-github"
-description = "Client code for communicating with GitHub APIs"
+description = "Client code for communicating with GitHub APIs."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

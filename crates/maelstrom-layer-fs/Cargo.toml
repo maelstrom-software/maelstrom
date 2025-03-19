@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-layer-fs"
-description = "FUSE filesystem for use with Maelstrom"
+description = "FUSE filesystem for use with Maelstrom."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

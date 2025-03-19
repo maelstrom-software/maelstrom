@@ -1,7 +1,7 @@
 [package]
 name = "maelstrom-broker"
 categories = ["development-tools::testing", "virtualization"]
-description = "The maelstrom broker. This process coordinates between clients and workers."
+description = "The Maelstrom broker. This process coordinates between clients and workers."
 keywords = ["cluster", "containers"]
 documentation.workspace = true
 edition.workspace = true

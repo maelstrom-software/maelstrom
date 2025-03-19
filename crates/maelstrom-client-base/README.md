@@ -1,6 +1,7 @@
-# Maelstrom Client Library
+# Maelstrom Client Library Base
 
-This library is how clients connect create jobs and submit them to a Maelstrom cluster.
+This library contains code that is shared between the Maelstrom client library
+and the Maelstrom client process.
 
 For more details, check out the
 [documentation](https://docs.rs/maelstrom-client/latest/maelstrom_client/). For
