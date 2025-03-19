@@ -65,7 +65,7 @@ where
         stream.read_exact(&mut msg_len)?;
         let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
         stream.read_exact(&mut buf)?;
-        Result::Ok(proto::deserialize_from(&mut &buf[..])?)
+        Result::Ok(proto::deserialize(&buf)?)
     })()
     .inspect(|msg| debug!(log, "received message"; "message" => #?msg))
     .inspect_err(|err| debug!(log, "error receiving message"; "error" => %err))
@@ -85,7 +85,7 @@ where
         stream.read_exact(&mut msg_len).await?;
         let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
         stream.read_exact(&mut buf).await?;
-        Result::Ok(proto::deserialize_from(&mut &buf[..])?)
+        Result::Ok(proto::deserialize(&buf)?)
     }
     .await
     .inspect(|msg| debug!(log, "received message"; "message" => #?msg))

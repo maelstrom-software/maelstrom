@@ -118,12 +118,6 @@ pub fn deserialize<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> bincode::Result<T
     bincode().deserialize(bytes)
 }
 
-pub fn deserialize_from<R: std::io::Read, T: serde::de::DeserializeOwned>(
-    reader: R,
-) -> bincode::Result<T> {
-    bincode().deserialize_from(reader)
-}
-
 fn fixint_bincode() -> impl Options {
     bincode().with_fixint_encoding()
 }
