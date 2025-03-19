@@ -58,8 +58,8 @@ pub struct Config {
     )]
     pub cluster_communication_strategy: ClusterCommunicationStrategy,
 
-    /// This is required with `broker-conection=github`. This is passed to JavaScript GitHub
-    /// actions as `ACTIONS_RUNTIME_TOKEN`.
+    /// This is required with `cluster-communication-strategy=github`. This is passed to JavaScript
+    /// GitHub actions as `ACTIONS_RUNTIME_TOKEN`.
     #[config(
         option,
         value_name = "GITHUB_ACTIONS_TOKEN",
@@ -68,8 +68,8 @@ pub struct Config {
     )]
     pub github_actions_token: Option<String>,
 
-    /// This is required with `broker-conection=github`. This is passed to JavaScript GitHub
-    /// actions as `ACTIONS_RESULTS_URL`.
+    /// This is required with `cluster-communication-strategy=github`. This is passed to JavaScript
+    /// GitHub actions as `ACTIONS_RESULTS_URL`.
     #[config(
         option,
         value_name = "GITHUB_ACTIONS_URL",
