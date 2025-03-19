@@ -4,6 +4,7 @@ use pin_project::pin_project;
 use std::{
     future::Future,
     num::NonZeroU32,
+    ops::ControlFlow,
     pin::Pin,
     sync::{Condvar, Mutex},
     task::{Context, Poll},
@@ -14,10 +15,12 @@ use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 /// no more channel senders.
 pub async fn channel_reader<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
-    mut processor: impl FnMut(MessageT),
+    mut processor: impl FnMut(MessageT) -> ControlFlow<Result<()>>,
 ) -> Result<()> {
     while let Some(x) = channel.recv().await {
-        processor(x);
+        if let ControlFlow::Break(result) = processor(x) {
+            return result;
+        }
     }
     Ok(())
 }
@@ -157,6 +160,7 @@ impl<T> Pool<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::anyhow;
     use core::time::Duration;
     use tokio::{sync::mpsc, task, time};
 
@@ -164,7 +168,12 @@ mod tests {
     async fn no_messages() {
         let (_, rx) = mpsc::unbounded_channel::<u8>();
         let mut vec = vec![];
-        channel_reader(rx, |s| vec.push(s)).await.unwrap();
+        channel_reader(rx, |s| {
+            vec.push(s);
+            ControlFlow::Continue(())
+        })
+        .await
+        .unwrap();
         assert!(vec.is_empty(), "{vec:?}");
     }
 
@@ -173,7 +182,12 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         task::spawn(async move { tx.send(1).unwrap() });
         let mut vec = vec![];
-        channel_reader(rx, |s| vec.push(s)).await.unwrap();
+        channel_reader(rx, |s| {
+            vec.push(s);
+            ControlFlow::Continue(())
+        })
+        .await
+        .unwrap();
 
         assert_eq!(vec, vec![1]);
     }
@@ -187,9 +201,61 @@ mod tests {
             tx.send(3).unwrap();
         });
         let mut vec = vec![];
-        channel_reader(rx, |s| vec.push(s)).await.unwrap();
+        channel_reader(rx, |s| {
+            vec.push(s);
+            ControlFlow::Continue(())
+        })
+        .await
+        .unwrap();
 
         assert_eq!(vec, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn three_messages_with_break_after_two() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        task::spawn(async move {
+            tx.send(1).unwrap();
+            tx.send(2).unwrap();
+            tx.send(3).unwrap();
+        });
+        let mut vec = vec![];
+        channel_reader(rx, |s| {
+            vec.push(s);
+            if s == 2 {
+                ControlFlow::Break(Ok(()))
+            } else {
+                ControlFlow::Continue(())
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(vec, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn three_messages_with_break_of_error_after_two() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        task::spawn(async move {
+            tx.send(1).unwrap();
+            tx.send(2).unwrap();
+            tx.send(3).unwrap();
+        });
+        let mut vec = vec![];
+        let err = channel_reader(rx, |s| {
+            vec.push(s);
+            if s == 2 {
+                ControlFlow::Break(Err(anyhow!("test error")))
+            } else {
+                ControlFlow::Continue(())
+            }
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(err.to_string(), "test error");
+
+        assert_eq!(vec, vec![1, 2]);
     }
 
     #[tokio::test]

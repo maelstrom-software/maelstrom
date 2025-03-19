@@ -12,7 +12,7 @@ use maelstrom_base::{
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
 use scheduler::Scheduler;
-use std::{path::PathBuf, sync::mpsc::Sender as SyncSender};
+use std::{ops::ControlFlow, path::PathBuf, sync::mpsc::Sender as SyncSender};
 use tokio::{
     io::AsyncRead,
     sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
@@ -425,68 +425,76 @@ where
     /// Besides, the [`scheduler::Deps`] interface doesn't give us a way to return an error, for
     /// precisely this reason.
     pub async fn run(mut self) {
-        sync::channel_reader(self.receiver, |msg| match msg {
-            Message::ClientConnected(id, sender) => {
-                self.scheduler
-                    .receive_client_connected(&mut self.artifact_gatherer, id, sender)
+        sync::channel_reader(self.receiver, |msg| {
+            match msg {
+                Message::ClientConnected(id, sender) => {
+                    self.scheduler
+                        .receive_client_connected(&mut self.artifact_gatherer, id, sender)
+                }
+                Message::ClientDisconnected(id) => self
+                    .scheduler
+                    .receive_client_disconnected(&mut self.artifact_gatherer, id),
+                Message::JobRequestFromClient(cid, cjid, spec) => self
+                    .scheduler
+                    .receive_job_request_from_client(&mut self.artifact_gatherer, cid, cjid, spec),
+                Message::ArtifactTransferredFromClient(cid, digest, location) => self
+                    .artifact_gatherer
+                    .receive_artifact_transferred(cid, digest, location),
+                Message::WorkerConnected(id, slots, sender) => {
+                    self.scheduler.receive_worker_connected(id, slots, sender)
+                }
+                Message::WorkerDisconnected(id) => self.scheduler.receive_worker_disconnected(id),
+                Message::JobResponseFromWorker(wid, jid, result) => {
+                    self.scheduler.receive_job_response_from_worker(
+                        &mut self.artifact_gatherer,
+                        wid,
+                        jid,
+                        result,
+                    )
+                }
+                Message::JobStatusUpdateFromWorker(wid, jid, status) => self
+                    .scheduler
+                    .receive_job_status_update_from_worker(wid, jid, status),
+                Message::MonitorConnected(id, sender) => {
+                    self.scheduler.receive_monitor_connected(id, sender)
+                }
+                Message::MonitorDisconnected(id) => self.scheduler.receive_monitor_disconnected(id),
+                Message::StatisticsRequestFromMonitor(mid) => {
+                    self.scheduler.receive_statistics_request_from_monitor(mid)
+                }
+                Message::StopRequestFromMonitor => {
+                    todo!();
+                }
+                Message::GotArtifact(digest, file) => {
+                    self.artifact_gatherer.receive_got_artifact(digest, file)
+                }
+                Message::GetArtifactForWorker(digest, sender) => self
+                    .artifact_gatherer
+                    .receive_get_artifact_for_worker(digest, sender),
+                Message::DecrementRefcount(digest) => self
+                    .artifact_gatherer
+                    .receive_decrement_refcount_from_worker(digest),
+                Message::StatisticsHeartbeat => self.scheduler.receive_statistics_heartbeat(),
+                Message::GotManifestEntry {
+                    manifest_digest,
+                    entry_digest,
+                } => {
+                    self.artifact_gatherer
+                        .receive_manifest_entry(manifest_digest, entry_digest);
+                }
+                Message::FinishedReadingManifest(digest, result) => self
+                    .artifact_gatherer
+                    .receive_finished_reading_manifest(digest, result),
+                Message::JobsReadyFromArtifactGatherer(jobs) => {
+                    self.scheduler
+                        .receive_jobs_ready_from_artifact_gatherer(jobs);
+                }
+                Message::JobsFailedFromArtifactGatherer(jobs, err) => {
+                    self.scheduler
+                        .receive_jobs_failed_from_artifact_gatherer(jobs, err);
+                }
             }
-            Message::ClientDisconnected(id) => self
-                .scheduler
-                .receive_client_disconnected(&mut self.artifact_gatherer, id),
-            Message::JobRequestFromClient(cid, cjid, spec) => self
-                .scheduler
-                .receive_job_request_from_client(&mut self.artifact_gatherer, cid, cjid, spec),
-            Message::ArtifactTransferredFromClient(cid, digest, location) => self
-                .artifact_gatherer
-                .receive_artifact_transferred(cid, digest, location),
-            Message::WorkerConnected(id, slots, sender) => {
-                self.scheduler.receive_worker_connected(id, slots, sender)
-            }
-            Message::WorkerDisconnected(id) => self.scheduler.receive_worker_disconnected(id),
-            Message::JobResponseFromWorker(wid, jid, result) => self
-                .scheduler
-                .receive_job_response_from_worker(&mut self.artifact_gatherer, wid, jid, result),
-            Message::JobStatusUpdateFromWorker(wid, jid, status) => self
-                .scheduler
-                .receive_job_status_update_from_worker(wid, jid, status),
-            Message::MonitorConnected(id, sender) => {
-                self.scheduler.receive_monitor_connected(id, sender)
-            }
-            Message::MonitorDisconnected(id) => self.scheduler.receive_monitor_disconnected(id),
-            Message::StatisticsRequestFromMonitor(mid) => {
-                self.scheduler.receive_statistics_request_from_monitor(mid)
-            }
-            Message::StopRequestFromMonitor => {
-                todo!();
-            }
-            Message::GotArtifact(digest, file) => {
-                self.artifact_gatherer.receive_got_artifact(digest, file)
-            }
-            Message::GetArtifactForWorker(digest, sender) => self
-                .artifact_gatherer
-                .receive_get_artifact_for_worker(digest, sender),
-            Message::DecrementRefcount(digest) => self
-                .artifact_gatherer
-                .receive_decrement_refcount_from_worker(digest),
-            Message::StatisticsHeartbeat => self.scheduler.receive_statistics_heartbeat(),
-            Message::GotManifestEntry {
-                manifest_digest,
-                entry_digest,
-            } => {
-                self.artifact_gatherer
-                    .receive_manifest_entry(manifest_digest, entry_digest);
-            }
-            Message::FinishedReadingManifest(digest, result) => self
-                .artifact_gatherer
-                .receive_finished_reading_manifest(digest, result),
-            Message::JobsReadyFromArtifactGatherer(jobs) => {
-                self.scheduler
-                    .receive_jobs_ready_from_artifact_gatherer(jobs);
-            }
-            Message::JobsFailedFromArtifactGatherer(jobs, err) => {
-                self.scheduler
-                    .receive_jobs_failed_from_artifact_gatherer(jobs, err);
-            }
+            ControlFlow::Continue(())
         })
         .await
         .unwrap();

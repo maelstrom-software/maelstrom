@@ -18,6 +18,7 @@ use slog::{debug, Logger};
 use std::{
     collections::{BTreeMap, HashSet},
     num::NonZeroUsize,
+    ops::ControlFlow,
     path::Path,
     sync::Arc,
 };
@@ -124,7 +125,8 @@ pub fn start(
     };
     let mut preparer = Preparer::new(adapter, max_pending_layer_builds);
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
-        preparer.receive_message(msg)
+        preparer.receive_message(msg);
+        ControlFlow::Continue(())
     }));
 
     Ok(())
