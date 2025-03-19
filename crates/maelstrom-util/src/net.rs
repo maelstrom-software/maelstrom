@@ -1,6 +1,6 @@
 //! Functions that are useful for reading/writing messages from/to sockets.
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{bail, Context as _, Result};
 use maelstrom_base::proto;
 use maelstrom_github::{GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_linux::{self as linux, Fd};
@@ -154,25 +154,18 @@ impl<T: AsRawFd> AsRawFdExt for T {
 pub async fn read_message_from_github_queue<MessageT>(
     queue: &mut GitHubReadQueue,
     log: &Logger,
-) -> Result<Option<MessageT>>
+) -> Result<MessageT>
 where
     MessageT: Debug + DeserializeOwned,
 {
     async {
-        queue
-            .read_msg()
-            .await?
-            .as_ref()
-            .map(|m| proto::deserialize(m))
-            .transpose()
-            .map_err(anyhow::Error::from)
+        let Some(buf) = queue.read_msg().await? else {
+            bail!("unexpected eof from github queue");
+        };
+        Result::Ok(proto::deserialize(&buf)?)
     }
     .await
-    .inspect(|msg| {
-        if let Some(msg) = msg {
-            debug!(log, "received message"; "message" => #?msg)
-        }
-    })
+    .inspect(|msg| debug!(log, "received message"; "message" => #?msg))
     .inspect_err(|err| debug!(log, "error receiving message"; "error" => %err))
 }
 
@@ -186,15 +179,14 @@ pub async fn github_queue_reader<MessageT, TransformedT>(
 where
     MessageT: Debug + DeserializeOwned,
 {
-    while let Some(msg) = read_message_from_github_queue(queue, &log)
-        .await
-        .context(context)?
-    {
+    loop {
+        let msg = read_message_from_github_queue(queue, &log)
+            .await
+            .context(context)?;
         if channel.send(transform(msg)).is_err() {
             return Ok(());
         }
     }
-    Err(anyhow!("queue closed")).context(context)
 }
 
 pub async fn write_message_to_github_queue(

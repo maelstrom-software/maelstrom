@@ -2,7 +2,7 @@ use crate::{
     config::common::BrokerAddr,
     net::{self, AsRawFdExt as _},
 };
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use derive_more::Constructor;
 use maelstrom_base::proto::Hello;
 use maelstrom_github::{GitHubClient, GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
@@ -170,9 +170,7 @@ impl BrokerReadConnection for GitHubReadQueue {
         &mut self,
         log: &Logger,
     ) -> Result<MessageT> {
-        net::read_message_from_github_queue(self, log)
-            .await?
-            .ok_or_else(|| anyhow!("GitHub queue closed"))
+        net::read_message_from_github_queue(self, log).await
     }
 }
 
@@ -185,11 +183,7 @@ impl BrokerWriteConnection for GitHubWriteQueue {
         net::github_queue_writer(channel, &mut self, log, "reading from broker github queue").await
     }
 
-    async fn write_message(
-        &mut self,
-        msg: &(impl Debug + Serialize),
-        log: &Logger,
-    ) -> Result<()> {
+    async fn write_message(&mut self, msg: &(impl Debug + Serialize), log: &Logger) -> Result<()> {
         net::write_message_to_github_queue(self, msg, log).await
     }
 }

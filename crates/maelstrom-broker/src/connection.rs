@@ -325,7 +325,7 @@ async fn unassigned_github_connection_main<TempFileT>(
 {
     let (mut read_queue, mut write_queue) = queue.into_split();
     match net::read_message_from_github_queue(&mut read_queue, &log).await {
-        Ok(Some(Hello::Client)) => {
+        Ok(Hello::Client) => {
             let cid: ClientId = id_vendor.vend();
             let log = log.new(o!("cid" => cid.to_string()));
             let log_clone = log.clone();
@@ -376,7 +376,7 @@ async fn unassigned_github_connection_main<TempFileT>(
             let _ = write_queue.lock().await.shut_down().await;
             return;
         }
-        Ok(Some(Hello::Worker { slots })) => {
+        Ok(Hello::Worker { slots }) => {
             let wid: WorkerId = id_vendor.vend();
             let log = log.new(o!("wid" => wid.to_string(), "slots" => slots));
             info!(log, "worker connected");
@@ -424,17 +424,14 @@ async fn unassigned_github_connection_main<TempFileT>(
 
             return;
         }
-        Ok(Some(Hello::Monitor)) => {
+        Ok(Hello::Monitor) => {
             warn!(log, "github queue said it was monitor");
         }
-        Ok(Some(Hello::ArtifactFetcher)) => {
+        Ok(Hello::ArtifactFetcher) => {
             warn!(log, "github queue said it was artifact fetcher");
         }
-        Ok(Some(Hello::ArtifactPusher)) => {
+        Ok(Hello::ArtifactPusher) => {
             warn!(log, "github queue said it was artifact pusher");
-        }
-        Ok(None) => {
-            warn!(log, "github queue shutdown");
         }
         Err(err) => {
             warn!(log, "error reading hello message"; "error" => %err);
