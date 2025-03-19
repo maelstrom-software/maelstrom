@@ -1,0 +1,23 @@
+[package]
+name = "maelstrom-admin"
+categories = ["development-tools::testing", "virtualization"]
+description = "The maelstrom admin program. This process is used to administer Maelstrom clusters."
+keywords = ["cluster", "containers"]
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+maelstrom-base.workspace = true
+maelstrom-macro.workspace = true
+maelstrom-util.workspace = true
+slog.workspace = true
+tokio.workspace = true
+url.workspace = true
+xdg.workspace = true

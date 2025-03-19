@@ -426,8 +426,9 @@ pub struct InstallCliArgs {
     destination: PathBuf,
 }
 
-const ARTIFACT_NAMES: [&str; 7] = [
+const ARTIFACT_NAMES: [&str; 8] = [
     "cargo-maelstrom",
+    "maelstrom-admin",
     "maelstrom-broker",
     "maelstrom-client",
     "maelstrom-go-test",

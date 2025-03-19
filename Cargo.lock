@@ -3627,6 +3627,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "maelstrom-admin"
+version = "0.13.1-dev"
+dependencies = [
+ "anyhow",
+ "clap",
+ "maelstrom-base",
+ "maelstrom-macro",
+ "maelstrom-util",
+ "slog",
+ "tokio",
+ "url 2.5.4",
+ "xdg",
+]
+
+[[package]]
 name = "maelstrom-base"
 version = "0.13.1-dev"
 dependencies = [

@@ -2,7 +2,7 @@ use crate::{
     config::common::BrokerAddr,
     net::{self, AsRawFdExt as _},
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use derive_more::Constructor;
 use maelstrom_base::proto::Hello;
 use maelstrom_github::{GitHubClient, GitHubQueue, GitHubReadQueue, GitHubWriteQueue};
@@ -30,6 +30,11 @@ pub trait BrokerReadConnection: Send + Sync + 'static {
         log: Logger,
         transform: impl Fn(MessageT) -> TransformedT + Send,
     ) -> impl Future<Output = Result<()>> + Send;
+
+    fn read_message<MessageT: Debug + DeserializeOwned>(
+        &mut self,
+        log: &Logger,
+    ) -> impl Future<Output = Result<MessageT>>;
 }
 
 pub trait BrokerWriteConnection: Send + Sync + 'static {
@@ -38,6 +43,12 @@ pub trait BrokerWriteConnection: Send + Sync + 'static {
         channel: UnboundedReceiver<MessageT>,
         log: Logger,
     ) -> impl Future<Output = Result<()>> + Send;
+
+    fn write_message<MessageT: Debug + Serialize>(
+        &mut self,
+        msg: MessageT,
+        log: &Logger,
+    ) -> impl Future<Output = Result<()>>;
 }
 
 #[derive(Constructor)]
@@ -77,6 +88,13 @@ impl BrokerReadConnection for BufReader<tokio::net::tcp::OwnedReadHalf> {
     ) -> Result<()> {
         net::async_socket_reader(self, channel, transform, log, "reading from broker socket").await
     }
+
+    fn read_message<MessageT: Debug + DeserializeOwned>(
+        &mut self,
+        log: &Logger,
+    ) -> impl Future<Output = Result<MessageT>> {
+        net::read_message_from_async_socket(self, log)
+    }
 }
 
 impl BrokerWriteConnection for tokio::net::tcp::OwnedWriteHalf {
@@ -86,6 +104,14 @@ impl BrokerWriteConnection for tokio::net::tcp::OwnedWriteHalf {
         log: Logger,
     ) -> Result<()> {
         net::async_socket_writer(channel, self, log, "writing to broker socket").await
+    }
+
+    fn write_message<MessageT: Debug + Serialize>(
+        &mut self,
+        msg: MessageT,
+        log: &Logger,
+    ) -> impl Future<Output = Result<()>> {
+        net::write_message_to_async_socket(self, msg, log)
     }
 }
 
@@ -139,6 +165,15 @@ impl BrokerReadConnection for GitHubReadQueue {
         )
         .await
     }
+
+    async fn read_message<MessageT: Debug + DeserializeOwned>(
+        &mut self,
+        log: &Logger,
+    ) -> Result<MessageT> {
+        net::read_message_from_github_queue(self, log)
+            .await?
+            .ok_or_else(|| anyhow!("GitHub queue closed"))
+    }
 }
 
 impl BrokerWriteConnection for GitHubWriteQueue {
@@ -148,5 +183,13 @@ impl BrokerWriteConnection for GitHubWriteQueue {
         log: Logger,
     ) -> Result<()> {
         net::github_queue_writer(channel, &mut self, log, "reading from broker github queue").await
+    }
+
+    async fn write_message<MessageT: Debug + Serialize>(
+        &mut self,
+        msg: MessageT,
+        log: &Logger,
+    ) -> Result<()> {
+        net::write_message_to_github_queue(self, &msg, log).await
     }
 }
