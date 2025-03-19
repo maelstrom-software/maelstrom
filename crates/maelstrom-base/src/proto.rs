@@ -140,9 +140,3 @@ pub fn fixint_serialized_size<T: ?Sized + Serialize>(value: &T) -> bincode::Resu
 pub fn fixint_deserialize<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> bincode::Result<T> {
     fixint_bincode().deserialize(bytes)
 }
-
-pub fn fixint_deserialize_from<R: std::io::Read, T: serde::de::DeserializeOwned>(
-    reader: R,
-) -> bincode::Result<T> {
-    fixint_bincode().deserialize_from(reader)
-}
