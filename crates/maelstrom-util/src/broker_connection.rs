@@ -44,9 +44,9 @@ pub trait BrokerWriteConnection: Send + Sync + 'static {
         log: Logger,
     ) -> impl Future<Output = Result<()>> + Send;
 
-    fn write_message<MessageT: Debug + Serialize>(
+    fn write_message(
         &mut self,
-        msg: MessageT,
+        msg: &(impl Debug + Serialize),
         log: &Logger,
     ) -> impl Future<Output = Result<()>>;
 }
@@ -106,9 +106,9 @@ impl BrokerWriteConnection for tokio::net::tcp::OwnedWriteHalf {
         net::async_socket_writer(channel, self, log, "writing to broker socket").await
     }
 
-    fn write_message<MessageT: Debug + Serialize>(
+    fn write_message(
         &mut self,
-        msg: MessageT,
+        msg: &(impl Debug + Serialize),
         log: &Logger,
     ) -> impl Future<Output = Result<()>> {
         net::write_message_to_async_socket(self, msg, log)
@@ -185,11 +185,11 @@ impl BrokerWriteConnection for GitHubWriteQueue {
         net::github_queue_writer(channel, &mut self, log, "reading from broker github queue").await
     }
 
-    async fn write_message<MessageT: Debug + Serialize>(
+    async fn write_message(
         &mut self,
-        msg: MessageT,
+        msg: &(impl Debug + Serialize),
         log: &Logger,
     ) -> Result<()> {
-        net::write_message_to_github_queue(self, &msg, log).await
+        net::write_message_to_github_queue(self, msg, log).await
     }
 }

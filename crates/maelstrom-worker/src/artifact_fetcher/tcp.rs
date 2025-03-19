@@ -90,12 +90,12 @@ fn main(
         None => {
             debug!(log, "artifact fetcher connecting to broker");
             let mut stream = TcpStream::connect(broker_addr.inner())?.set_socket_options()?;
-            net::write_message_to_socket(&mut stream, Hello::ArtifactFetcher, log)?;
+            net::write_message_to_socket(&mut stream, &Hello::ArtifactFetcher, log)?;
             stream
         }
     };
 
-    net::write_message_to_socket(&mut stream, ArtifactFetcherToBroker(digest.clone()), log)?;
+    net::write_message_to_socket(&mut stream, &ArtifactFetcherToBroker(digest.clone()), log)?;
 
     let BrokerToArtifactFetcher(result) = net::read_message_from_socket(&mut stream, log)?;
     let size = result.map_err(|e| anyhow!("broker error reading artifact: {e}"))?;

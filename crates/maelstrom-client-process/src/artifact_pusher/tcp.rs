@@ -51,7 +51,7 @@ async fn push_one_artifact_inner(
             let mut stream = TcpStream::connect(broker_addr.inner())
                 .await?
                 .set_socket_options()?;
-            net::write_message_to_async_socket(&mut stream, Hello::ArtifactPusher, &log).await?;
+            net::write_message_to_async_socket(&mut stream, &Hello::ArtifactPusher, &log).await?;
             stream
         }
     };
@@ -65,7 +65,7 @@ async fn push_one_artifact_inner(
 
     let mut file = UploadProgressReader::new(prog, file.chain(io::repeat(0)).take(size));
 
-    net::write_message_to_async_socket(&mut stream, ArtifactPusherToBroker(digest, size), &log)
+    net::write_message_to_async_socket(&mut stream, &ArtifactPusherToBroker(digest, size), &log)
         .await?;
     let copied = io::copy(&mut file, &mut stream).await?;
     assert_eq!(copied, size);

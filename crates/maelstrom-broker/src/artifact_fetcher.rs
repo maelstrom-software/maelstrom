@@ -73,7 +73,7 @@ where
             .map(|(_, size)| *size)
             .map_err(|e| e.to_string()),
     );
-    net::write_message_to_socket(&mut socket, msg, log)?;
+    net::write_message_to_socket(&mut socket, &msg, log)?;
 
     let (f, size) = result?;
     send_artifact(scheduler_task_sender, f, &mut socket, size, digest)?;

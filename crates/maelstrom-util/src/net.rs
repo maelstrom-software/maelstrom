@@ -18,11 +18,11 @@ use tokio::{
     time::Instant,
 };
 
-fn encode_message_to_vec(msg: impl Serialize) -> Result<Vec<u8>> {
-    let msg_len = proto::serialized_size(&msg)? as u32;
+fn encode_message_to_vec(msg: &impl Serialize) -> Result<Vec<u8>> {
+    let msg_len = proto::serialized_size(msg)? as u32;
     let mut buf = Vec::<u8>::with_capacity(msg_len as usize + 4);
     Write::write_all(&mut buf, &msg_len.to_be_bytes())?;
-    proto::serialize_into(&mut buf, &msg)?;
+    proto::serialize_into(&mut buf, msg)?;
     Ok(buf)
 }
 
@@ -31,7 +31,7 @@ fn encode_message_to_vec(msg: impl Serialize) -> Result<Vec<u8>> {
 /// any error encountered sending it.
 pub fn write_message_to_socket(
     stream: &mut impl Write,
-    msg: impl Debug + Serialize,
+    msg: &(impl Debug + Serialize),
     log: &Logger,
 ) -> Result<()> {
     debug!(log, "sending message"; "message" => #?msg);
@@ -44,7 +44,7 @@ pub fn write_message_to_socket(
 /// encountered sending it.
 pub async fn write_message_to_async_socket(
     stream: &mut (impl AsyncWrite + Unpin),
-    msg: impl Debug + Serialize,
+    msg: &(impl Debug + Serialize),
     log: &Logger,
 ) -> Result<()> {
     debug!(log, "sending message"; "message" => #?msg);
@@ -105,7 +105,7 @@ where
     MessageT: Debug + Serialize,
 {
     while let Some(msg) = channel.recv().await {
-        write_message_to_async_socket(&mut socket, msg, &log)
+        write_message_to_async_socket(&mut socket, &msg, &log)
             .await
             .context(context)?;
     }
@@ -197,14 +197,12 @@ where
     Err(anyhow!("queue closed")).context(context)
 }
 
-pub async fn write_message_to_github_queue<MessageT>(
+pub async fn write_message_to_github_queue(
     queue: &mut GitHubWriteQueue,
-    msg: &MessageT,
+    msg: &(impl Debug + Serialize),
     log: &Logger,
-) -> Result<()>
-where
-    MessageT: Debug + Serialize,
-{
+) -> Result<()> {
+    debug!(log, "sending message"; "message" => #?msg);
     queue
         .write_msg(&proto::serialize(msg).unwrap())
         .await

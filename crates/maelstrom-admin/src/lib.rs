@@ -65,7 +65,7 @@ async fn main_inner(
     let hello = Hello::Monitor;
     let (mut read_stream, mut write_stream) = broker_connection_factory.connect(&hello).await?;
     write_stream
-        .write_message(MonitorToBroker::StatisticsRequest, log)
+        .write_message(&MonitorToBroker::StatisticsRequest, log)
         .await?;
     let BrokerToMonitor::StatisticsResponse(BrokerStatistics {
         worker_statistics,
