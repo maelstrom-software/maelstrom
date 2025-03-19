@@ -130,15 +130,14 @@ async fn websocket_reader<TempFileT>(
         let Ok(msg) = proto::deserialize(&msg) else {
             break;
         };
-        match msg {
+        let msg = match msg {
             MonitorToBroker::StatisticsRequest => {
-                if scheduler_task_sender
-                    .send(scheduler_task::Message::StatisticsRequestFromMonitor(mid))
-                    .is_err()
-                {
-                    break;
-                }
+                scheduler_task::Message::StatisticsRequestFromMonitor(mid)
             }
+            MonitorToBroker::StopRequest => scheduler_task::Message::StopRequestFromMonitor,
+        };
+        if scheduler_task_sender.send(msg).is_err() {
+            break;
         }
     }
 }

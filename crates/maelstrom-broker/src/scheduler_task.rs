@@ -316,8 +316,11 @@ pub enum Message<
     /// The given monitor disconnected.
     MonitorDisconnected(MonitorId),
 
-    /// The given client has sent us the given message.
+    /// The given monitor has requested all statistics.
     StatisticsRequestFromMonitor(MonitorId),
+
+    /// A monitor has requested that we stop.
+    StopRequestFromMonitor,
 
     /// An artifact has been pushed to us. The artifact has the given digest and length. It is
     /// temporarily stored at the given path.
@@ -452,6 +455,9 @@ where
             Message::MonitorDisconnected(id) => self.scheduler.receive_monitor_disconnected(id),
             Message::StatisticsRequestFromMonitor(mid) => {
                 self.scheduler.receive_statistics_request_from_monitor(mid)
+            }
+            Message::StopRequestFromMonitor => {
+                todo!();
             }
             Message::GotArtifact(digest, file) => {
                 self.artifact_gatherer.receive_got_artifact(digest, file)

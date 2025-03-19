@@ -221,8 +221,12 @@ impl<RpcConnectionT: MonitorConnection> UiHandler<RpcConnectionT> {
                 self.freshness = now;
             }
 
-            if let Some(BrokerToMonitor::StatisticsResponse(stats)) = rpc.try_recv()? {
-                self.stats = Some(stats);
+            if let Some(msg) = rpc.try_recv()? {
+                match msg {
+                    BrokerToMonitor::StatisticsResponse(stats) => {
+                        self.stats = Some(stats);
+                    }
+                }
             }
         }
 

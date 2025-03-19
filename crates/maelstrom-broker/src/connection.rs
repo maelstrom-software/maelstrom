@@ -238,6 +238,9 @@ async fn unassigned_tcp_connection_main<TempFileFactoryT>(
                             MonitorToBroker::StatisticsRequest => {
                                 scheduler_task::Message::StatisticsRequestFromMonitor(mid)
                             }
+                            MonitorToBroker::StopRequest => {
+                                scheduler_task::Message::StopRequestFromMonitor
+                            }
                         },
                         log_clone,
                         "reading from monitor socket",

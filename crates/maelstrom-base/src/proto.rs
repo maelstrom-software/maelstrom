@@ -59,6 +59,7 @@ pub enum ClientToBroker {
 /// recevied a [`Hello`] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BrokerToMonitor {
+    /// Response to a [`MonitorToBroker::StatisticsRequest`].
     StatisticsResponse(BrokerStatistics),
 }
 
@@ -66,7 +67,12 @@ pub enum BrokerToMonitor {
 /// send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum MonitorToBroker {
+    /// Request a [`BrokerToMonitor::StatisticsResponse`] with the current statistics.
     StatisticsRequest,
+
+    /// Tell the broker to stop immediately. It will just shut down, closing all outstanding
+    /// connections.
+    StopRequest,
 }
 
 /// Message sent from the broker to an artifact fetcher. This will be in response to an
