@@ -9,12 +9,12 @@ mod connection;
 mod http;
 mod scheduler_task;
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{bail, Context as _, Result};
 use cache::{github::GithubCache, local::TcpUploadLocalCache, BrokerCache, SchedulerCache};
 use config::Config;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
 use maelstrom_github::GitHubClient;
-use maelstrom_util::config::common::ArtifactTransferStrategy;
+use maelstrom_util::config::common::ClusterCommunicationStrategy;
 use scheduler_task::SchedulerTask;
 use slog::{error, info, Logger};
 use std::{
@@ -63,17 +63,6 @@ async fn stats_heartbeat<TempFileT>(sender: scheduler_task::Sender<TempFileT>) {
     }
 }
 
-fn env_or_error(key: &str) -> Result<String> {
-    std::env::var(key).map_err(|_| anyhow!("{key} environment variable missing"))
-}
-
-fn github_client() -> Result<GitHubClient> {
-    // XXX remi: I would prefer if we didn't read these from environment variables.
-    let token = env_or_error("ACTIONS_RUNTIME_TOKEN")?;
-    let base_url = url::Url::parse(&env_or_error("ACTIONS_RESULTS_URL")?)?;
-    GitHubClient::new(&token, base_url)
-}
-
 struct Listeners {
     listener: TcpListener,
     #[cfg(feature = "web-ui")]
@@ -93,7 +82,7 @@ where
     <BrokerCacheT::Cache as SchedulerCache>::ArtifactStream:
         tokio::io::AsyncRead + Unpin + Send + 'static,
 {
-    let (cache, temp_file_factory) = BrokerCacheT::new(config, log.clone())?;
+    let (cache, temp_file_factory) = BrokerCacheT::new(&config, log.clone())?;
     let scheduler_task = SchedulerTask::new(cache);
     let id_vendor = Arc::new(IdVendor {
         id: AtomicU32::new(0),
@@ -116,7 +105,11 @@ where
         temp_file_factory,
         log.clone(),
     ));
-    if let Ok(client) = github_client() {
+    if let ClusterCommunicationStrategy::GitHub = config.cluster_communication_strategy {
+        let client = GitHubClient::new(
+            config.github_actions_token.unwrap().as_str(),
+            config.github_actions_url.unwrap().clone(),
+        )?;
         join_set.spawn(connection::github_acceptor_main(
             client,
             scheduler_task.scheduler_task_sender().clone(),
@@ -213,12 +206,24 @@ async fn start_listeners(config: &Config, log: &Logger) -> Result<Listeners> {
 async fn main_inner(config: Config, log: Logger) -> Result<()> {
     let listeners = start_listeners(&config, &log).await?;
 
-    match config.artifact_transfer_strategy {
-        ArtifactTransferStrategy::GitHub => {
-            main_inner_inner::<GithubCache>(listeners, config, log.clone()).await?;
-        }
-        ArtifactTransferStrategy::TcpUpload => {
+    match config.cluster_communication_strategy {
+        ClusterCommunicationStrategy::Tcp => {
             main_inner_inner::<TcpUploadLocalCache>(listeners, config, log.clone()).await?;
+        }
+        ClusterCommunicationStrategy::GitHub => {
+            if config.github_actions_token.is_none() {
+                bail!(
+                    "because config value `cluster-communication-strategy` is set to \
+                    `github`, config value `github-actions-token` must be set"
+                );
+            }
+            if config.github_actions_url.is_none() {
+                bail!(
+                    "because config value `cluster-communication-strategy` is set to \
+                            `github`, config value `github-actions-url` must be set"
+                );
+            }
+            main_inner_inner::<GithubCache>(listeners, config, log.clone()).await?;
         }
     }
 

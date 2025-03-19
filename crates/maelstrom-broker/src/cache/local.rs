@@ -53,10 +53,10 @@ impl BrokerCache for TcpUploadLocalCache {
     type TempFileFactory =
         maelstrom_util::cache::TempFileFactory<maelstrom_util::cache::fs::std::Fs>;
 
-    fn new(config: Config, log: Logger) -> Result<(Self::Cache, Self::TempFileFactory)> {
+    fn new(config: &Config, log: Logger) -> Result<(Self::Cache, Self::TempFileFactory)> {
         maelstrom_util::cache::Cache::new(
             maelstrom_util::cache::fs::std::Fs,
-            config.cache_root,
+            config.cache_root.clone(),
             config.cache_size,
             log.clone(),
             true,

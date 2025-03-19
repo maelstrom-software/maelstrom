@@ -64,7 +64,7 @@ pub trait BrokerCache {
         + Send
         + 'static;
 
-    fn new(config: Config, log: Logger) -> Result<(Self::Cache, Self::TempFileFactory)>;
+    fn new(config: &Config, log: Logger) -> Result<(Self::Cache, Self::TempFileFactory)>;
 }
 
 type LazyRead<FileT> =

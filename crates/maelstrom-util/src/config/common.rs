@@ -265,30 +265,6 @@ impl error::Error for SlotsFromStrError {}
 #[derive(Copy, Clone, Debug, EnumString, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-pub enum ArtifactTransferStrategy {
-    TcpUpload = 0,
-    #[serde(rename = "github")]
-    #[strum(serialize = "github")]
-    GitHub = 1,
-}
-
-impl ValueEnum for ArtifactTransferStrategy {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::TcpUpload, Self::GitHub][..]
-    }
-
-    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
-        match self {
-            Self::TcpUpload => Some(clap::builder::PossibleValue::new("tcp-upload")),
-            Self::GitHub => Some(clap::builder::PossibleValue::new("github")),
-        }
-    }
-}
-
-#[pocket_definition(export)]
-#[derive(Copy, Clone, Debug, EnumString, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[strum(serialize_all = "kebab-case")]
 pub enum ClusterCommunicationStrategy {
     Tcp = 0,
     #[serde(rename = "github")]

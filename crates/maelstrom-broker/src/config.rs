@@ -2,11 +2,12 @@ use derive_more::{Debug, From};
 use maelstrom_macro::Config;
 use maelstrom_util::{
     cache::CacheDir,
-    config::common::{ArtifactTransferStrategy, CacheSize, LogLevel},
+    config::common::{CacheSize, ClusterCommunicationStrategy, LogLevel},
     root::RootBuf,
 };
 use serde::Deserialize;
 use std::{result, str::FromStr};
+use url::Url;
 use xdg::BaseDirectories;
 
 #[derive(Deserialize, Debug, From)]
@@ -84,15 +85,35 @@ pub struct Config {
     #[config(value_name = "BYTES", default = "bytesize::ByteSize::gb(1)")]
     pub cache_size: CacheSize,
 
-    /// Controls how we deal with artifacts when communicating with clients and workers.
-    #[config(
-        value_name = "ARTIFACT_TRANSFER_STRATEGY",
-        default = r#""tcp-upload""#,
-        hide
-    )]
-    pub artifact_transfer_strategy: ArtifactTransferStrategy,
-
     /// Minimum log level to output.
     #[config(short = 'L', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
+
+    /// The cluster communication strategy: TCP or GitHub.
+    #[config(
+        value_name = "CLUSTER_COMMUNICATION_STRATEGY",
+        default = r#""tcp""#,
+        hide
+    )]
+    pub cluster_communication_strategy: ClusterCommunicationStrategy,
+
+    /// This is required with `broker-conection=github`. This is passed to JavaScript GitHub
+    /// actions as `ACTIONS_RUNTIME_TOKEN`.
+    #[config(
+        option,
+        value_name = "GITHUB_ACTIONS_TOKEN",
+        default = r#""no default, must be specified if cluster-communication-strategy is github""#,
+        hide
+    )]
+    pub github_actions_token: Option<String>,
+
+    /// This is required with `broker-conection=github`. This is passed to JavaScript GitHub
+    /// actions as `ACTIONS_RESULTS_URL`.
+    #[config(
+        option,
+        value_name = "GITHUB_ACTIONS_URL",
+        default = r#""no default, must be specified if cluster-communication-strategy is github""#,
+        hide
+    )]
+    pub github_actions_url: Option<Url>,
 }

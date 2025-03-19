@@ -1,21 +1,22 @@
-use crate::cache::LazyRead;
-use crate::cache::{remote, BrokerCache};
+use crate::{
+    cache::LazyRead,
+    cache::{remote, BrokerCache},
+};
 use anyhow::{anyhow, Result};
 use maelstrom_base::Sha256Digest;
 use maelstrom_github::GitHubClient;
-use std::io;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{io, pin::Pin, sync::Arc};
 use tokio::io::AsyncRead;
+use url::Url;
 
 pub struct GitHubArtifactReader {
     client: Arc<GitHubClient>,
 }
 
 impl GitHubArtifactReader {
-    fn new() -> Result<Self> {
+    fn new(token: &str, url: Url) -> Result<Self> {
         Ok(Self {
-            client: Arc::new(crate::github_client()?),
+            client: Arc::new(GitHubClient::new(token, url)?),
         })
     }
 }
@@ -58,11 +59,14 @@ impl BrokerCache for GithubCache {
     type TempFileFactory = remote::ErroringTempFileFactory;
 
     fn new(
-        _config: crate::config::Config,
+        config: &crate::config::Config,
         _log: slog::Logger,
     ) -> Result<(Self::Cache, Self::TempFileFactory)> {
         Ok((
-            Self::Cache::new(GitHubArtifactReader::new()?),
+            Self::Cache::new(GitHubArtifactReader::new(
+                config.github_actions_token.as_ref().unwrap().as_str(),
+                config.github_actions_url.as_ref().unwrap().clone(),
+            )?),
             remote::ErroringTempFileFactory,
         ))
     }
