@@ -117,26 +117,3 @@ pub fn serialized_size<T: ?Sized + Serialize>(value: &T) -> bincode::Result<u64>
 pub fn deserialize<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> bincode::Result<T> {
     bincode().deserialize(bytes)
 }
-
-fn fixint_bincode() -> impl Options {
-    bincode().with_fixint_encoding()
-}
-
-pub fn fixint_serialize<T: ?Sized + Serialize>(value: &T) -> bincode::Result<Vec<u8>> {
-    fixint_bincode().serialize(value)
-}
-
-pub fn fixint_serialize_into<W: std::io::Write, T: ?Sized + Serialize>(
-    writer: W,
-    value: &T,
-) -> bincode::Result<()> {
-    fixint_bincode().serialize_into(writer, value)
-}
-
-pub fn fixint_serialized_size<T: ?Sized + Serialize>(value: &T) -> bincode::Result<u64> {
-    fixint_bincode().serialized_size(value)
-}
-
-pub fn fixint_deserialize<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> bincode::Result<T> {
-    fixint_bincode().deserialize(bytes)
-}

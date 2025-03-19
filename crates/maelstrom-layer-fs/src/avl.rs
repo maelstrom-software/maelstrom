@@ -64,14 +64,12 @@ impl<KeyT, ValueT> AvlNode<KeyT, ValueT> {
 
 #[test]
 fn avl_node_encoding_size_remains_same() {
-    use maelstrom_base::proto;
-
     let mut n = AvlNode::new(12, 13);
-    let start_size = proto::fixint_serialized_size(&n).unwrap();
+    let start_size = crate::fixint_serialized_size(&n).unwrap();
     n.left = Some(AvlPtr::new(u64::MAX).unwrap());
     n.right = Some(AvlPtr::new(u64::MAX).unwrap());
     n.height = u32::MAX;
-    let end_size = proto::fixint_serialized_size(&n).unwrap();
+    let end_size = crate::fixint_serialized_size(&n).unwrap();
     assert_eq!(start_size, end_size);
 }
 

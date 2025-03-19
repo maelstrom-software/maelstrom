@@ -3932,6 +3932,7 @@ dependencies = [
  "anyhow",
  "anyhow_trace",
  "async-trait",
+ "bincode",
  "clap",
  "derive_more",
  "futures",

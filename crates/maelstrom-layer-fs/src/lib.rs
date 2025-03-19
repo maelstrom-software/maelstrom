@@ -110,6 +110,7 @@ pub use ty::{FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper};
 
 use anyhow::{anyhow, Result};
 use anyhow_trace::anyhow_trace;
+use bincode::Options;
 use futures::stream::StreamExt as _;
 use lru::LruCache;
 use maelstrom_base::Sha256Digest;
@@ -122,6 +123,7 @@ use maelstrom_util::{
     async_fs::Fs,
     root::{Root, RootBuf},
 };
+use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
@@ -132,7 +134,28 @@ use std::{
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
-                                              //
+
+// XXX neal: Maybe these should use the zerocopy library instead of bincode?
+fn fixint_bincode() -> impl Options {
+    bincode::options().with_big_endian().with_fixint_encoding()
+}
+
+fn fixint_serialize_into<W: std::io::Write, T: ?Sized + Serialize>(
+    writer: W,
+    value: &T,
+) -> bincode::Result<()> {
+    fixint_bincode().serialize_into(writer, value)
+}
+
+#[cfg(test)]
+fn fixint_serialized_size<T: ?Sized + Serialize>(value: &T) -> bincode::Result<u64> {
+    fixint_bincode().serialized_size(value)
+}
+
+fn fixint_deserialize<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> bincode::Result<T> {
+    fixint_bincode().deserialize(bytes)
+}
+
 fn to_eio<ValueT, ErrorT: std::fmt::Display>(
     log: slog::Logger,
     res: std::result::Result<ValueT, ErrorT>,

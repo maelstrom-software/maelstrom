@@ -13,6 +13,7 @@ version.workspace = true
 anyhow.workspace = true
 anyhow_trace.workspace = true
 async-trait.workspace = true
+bincode.workspace = true
 derive_more.workspace = true
 futures.workspace = true
 lru.workspace = true
