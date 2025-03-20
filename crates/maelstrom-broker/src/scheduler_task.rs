@@ -12,6 +12,7 @@ use maelstrom_base::{
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
 use scheduler::Scheduler;
+use slog::{info, Logger};
 use std::{ops::ControlFlow, path::PathBuf, sync::mpsc::Sender as SyncSender};
 use tokio::{
     io::AsyncRead,
@@ -424,7 +425,7 @@ where
     /// on its way to notify the scheduler. It is best to just ignore the error in that case.
     /// Besides, the [`scheduler::Deps`] interface doesn't give us a way to return an error, for
     /// precisely this reason.
-    pub async fn run(mut self) {
+    pub async fn run(mut self, log: Logger) {
         sync::channel_reader(self.receiver, |msg| {
             match msg {
                 Message::ClientConnected(id, sender) => {
@@ -463,7 +464,8 @@ where
                     self.scheduler.receive_statistics_request_from_monitor(mid)
                 }
                 Message::StopRequestFromMonitor => {
-                    todo!();
+                    info!(log, "received stop request from monitor");
+                    return ControlFlow::Break(Ok(()));
                 }
                 Message::GotArtifact(digest, file) => {
                     self.artifact_gatherer.receive_got_artifact(digest, file)

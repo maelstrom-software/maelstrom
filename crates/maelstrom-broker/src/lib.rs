@@ -124,7 +124,7 @@ where
     join_set.spawn(stats_heartbeat(
         scheduler_task.scheduler_task_sender().clone(),
     ));
-    join_set.spawn(scheduler_task.run());
+    join_set.spawn(scheduler_task.run(log.clone()));
     join_set.spawn(signal_handler(
         SignalKind::interrupt(),
         log.clone(),
