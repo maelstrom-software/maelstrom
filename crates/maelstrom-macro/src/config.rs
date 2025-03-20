@@ -411,6 +411,19 @@ impl ConfigInput {
                         ::clap::command!(), base_directories_prefix, env_var_prefixes, args,
                     )
                 }
+
+                #vis fn new_with_subcommand<U>(
+                    base_directories_prefix: &'static str,
+                    env_var_prefixes: impl ::std::iter::IntoIterator<Item = impl ::std::convert::Into<::std::string::String>>,
+                    args: impl ::std::iter::IntoIterator<Item = impl ::std::convert::Into<::std::ffi::OsString> + ::std::clone::Clone>,
+                ) -> ::anyhow::Result<(Self, U)>
+                where
+                    U: ::clap::Subcommand,
+                {
+                    ::maelstrom_util::config::new_config_with_subcommand(
+                        ::clap::command!(), base_directories_prefix, env_var_prefixes, args,
+                    )
+                }
             }
         })
     }
