@@ -136,7 +136,7 @@ jobs:
         key: maelstrom-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ env.RUST_VERSION }}
     - name: Expose GitHub Action Runtime
       uses: crazy-max/ghaction-github-runtime@v3
-    - name: Run Worker
+    - name: Run Broker
       run: ./scripts/run-broker.sh "${{ env.ACTIONS_RUNTIME_TOKEN }}" "${{ env.ACTIONS_RESULTS_URL }}"
 
   github_api_tests:
