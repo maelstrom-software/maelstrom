@@ -419,10 +419,11 @@ impl CommandBuilder {
             format!("{help} [default: {default}] [env: {env_vars}]")
         };
         let mut arg = Arg::new(name.clone())
-            .value_name(value_name)
             .action(action)
+            .global(true)
             .help(help)
-            .hide(hide);
+            .hide(hide)
+            .value_name(value_name);
         if is_var_arg {
             arg = arg.last(true);
         } else {
