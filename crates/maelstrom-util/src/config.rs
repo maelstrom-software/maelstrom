@@ -539,15 +539,16 @@ impl CommandBuilder {
     }
 }
 
-pub fn new_config_with_extra_from_args<T, U, AI, AT>(
+fn new_config_with_extra_or_subcommand_from_args<T, U, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
     args: AI,
+    augment: impl Fn(Command) -> Command,
 ) -> Result<(T, U)>
 where
     T: Config + Debug,
-    U: Args,
+    U: FromArgMatches,
     AI: IntoIterator<Item = AT>,
     AT: Into<OsString> + Clone,
 {
@@ -556,7 +557,7 @@ where
         .context("searching for config files")?;
     let builder = CommandBuilder::new(command, &base_directories, &env_var_prefixes);
     let builder = T::add_command_line_options(builder, &base_directories);
-    let command = U::augment_args(builder.build());
+    let command = augment(builder.build());
     let mut args = command.get_matches_from(args);
     let env = env::vars().filter(|(key, _)| {
         env_var_prefixes
@@ -595,6 +596,27 @@ where
     Ok((config, extra))
 }
 
+pub fn new_config_with_extra_from_args<T, U, AI, AT>(
+    command: Command,
+    base_directories_prefix: &'static str,
+    env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
+    args: AI,
+) -> Result<(T, U)>
+where
+    T: Config + Debug,
+    U: Args,
+    AI: IntoIterator<Item = AT>,
+    AT: Into<OsString> + Clone,
+{
+    new_config_with_extra_or_subcommand_from_args(
+        command,
+        base_directories_prefix,
+        env_var_prefixes,
+        args,
+        U::augment_args,
+    )
+}
+
 pub fn new_config_with_subcommand_from_args<T, U, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
@@ -607,48 +629,13 @@ where
     AI: IntoIterator<Item = AT>,
     AT: Into<OsString> + Clone,
 {
-    let env_var_prefixes = Vec::from_iter(env_var_prefixes.into_iter().map(Into::into));
-    let base_directories = BaseDirectories::with_prefix(base_directories_prefix)
-        .context("searching for config files")?;
-    let builder = CommandBuilder::new(command, &base_directories, &env_var_prefixes);
-    let builder = T::add_command_line_options(builder, &base_directories);
-    let command = U::augment_subcommands(builder.build());
-    let mut args = command.get_matches_from(args);
-    let env = env::vars().filter(|(key, _)| {
-        env_var_prefixes
-            .iter()
-            .any(|prefix| key.starts_with(prefix))
-    });
-
-    let config_files = match args.remove_one::<String>("config-file").as_deref() {
-        Some("-") => vec![],
-        Some(config_file) => vec![PathBuf::from(config_file)],
-        None => base_directories
-            .find_config_files("config.toml")
-            .rev()
-            .collect(),
-    };
-    let mut files = vec![];
-    for config_file in config_files {
-        let contents = fs::read_to_string(&config_file)
-            .with_context(|| format!("reading config file `{}`", config_file.to_string_lossy()))?;
-        files.push((config_file.clone(), contents));
-    }
-
-    let print_config = args.remove_one::<bool>("print-config").unwrap();
-
-    let mut config_bag = ConfigBag::new(args, &env_var_prefixes, env, files)
-        .context("loading configuration from environment variables and config files")?;
-
-    let config = T::from_config_bag(&mut config_bag, &base_directories)?;
-    let subcommand = U::from_arg_matches(&config_bag.into_args())?;
-
-    if print_config {
-        println!("{config:#?}");
-        process::exit(0);
-    }
-
-    Ok((config, subcommand))
+    new_config_with_extra_or_subcommand_from_args(
+        command,
+        base_directories_prefix,
+        env_var_prefixes,
+        args,
+        U::augment_subcommands,
+    )
 }
 
 struct NoExtraCommandLineOptions;
