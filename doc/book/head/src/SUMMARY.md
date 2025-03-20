@@ -71,6 +71,7 @@
     - [Configuration Values](broker/config.md)
     - [Running as `systemd` Service](broker/systemd-service.md)
     - [Web UI](broker/web-ui.md)
+- [`maelstrom-admin`](admin.md)
 - [`maelstrom-worker`](worker.md)
     - [Configuration Values](worker/config.md)
     - [Running as `systemd` Service](worker/systemd-service.md)

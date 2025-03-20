@@ -1,7 +1,8 @@
 # Web UI
 
 The broker has a web UI that is available by connecting via the [configured HTTP
-port](config.md#http-port).
+port](config.md#http-port), if the binary has been compiled with the `web-ui`
+feature.
 
 The following is an explanation of the various elements on the web UI.
 

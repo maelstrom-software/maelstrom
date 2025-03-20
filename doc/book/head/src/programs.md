@@ -12,18 +12,19 @@ Clients include the test runners ---
 
 ### Test Runners
 
-Test runners are the glue between their associated test frameworks (Cargo, Go,
-Pytest, etc.) and the Maelstrom system. Test runners know how to build test
-binaries (if applicable), what dependencies to package up into containers to
-run the test binaries, and how to execute individual tests using the test
-binaries. They then use this information to build tests, execute them on the
-Maelstrom system, and then collect and present the results.
+Test runners are the glue between their associated test frameworks
+([Cargo](cargo-maelstrom.md), [Go](go-test.md), [Pytest](pytest.md), etc.) and
+the Maelstrom system. Test runners know how to build test binaries (if
+applicable), what dependencies to package up into containers to run the test
+binaries, and how to execute individual tests using the test binaries. They
+then use this information to build tests, execute them on the Maelstrom system,
+and then collect and present the results.
 
 We currently have three test runners, but we plan to add more. Please let us
 know if there is a specific test framework you are interested in, and we'll
 work to prioritize it.
 
-### `maelstrom-run`
+### [`maelstrom-run`](run.md)
 
 In addition to the test runners, there is also a general-purpose CLI for
 running arbitrary jobs in the Maelstrom environment: `maelstrom-run`.
@@ -50,14 +51,14 @@ optional. While standalone mode can be useful in certain applications,
 Maelstrom becomes even more powerful when jobs are executed on a cluster. The
 Maelstrom daemon programs are used to create Maelstrom clusters.
 
-### `maelstrom-worker`
+### [`maelstrom-worker`](worker.md)
 
 Each Maelstrom cluster must have at least one worker. Workers are where jobs
 are actually executed. The worker executes each jobs in its own rootless
 container. Our custom-built container implementation ensures that there is very
 little overhead for container startup or teardown.
 
-### `maelstrom-broker`
+### [`maelstrom-broker`](broker.md)
 
 Each Maelstrom cluster has exactly one broker. The broker coordinates between
 clients and workers. It caches artifacts, and schedules jobs on the workers.
@@ -66,12 +67,18 @@ The broker should be run on a machine that has good network connectivity with
 both the workers and clients, and which has a reasonably large amount of disk
 space available for caching artifacts.
 
+### [`maelstrom-admin`](admin.md)
+
+This program provides a way to get the cluster status from the broker, and to
+send the broker administrative commands. It can be run on any machine as it
+interacts with the broker over the network.
+
 ## Summary
 
 You'll probably be mostly interested in a specific Maelstrom client: the test
 runner for your test framework. You may also be interested in the
-general-purpose `maelstrom-run` client, either for scripting against the
-cluster, or for exploring the containers used by your tests.
+general-purpose [`maelstrom-run`](run.md) client, either for scripting against
+the cluster, or for exploring the containers used by your tests.
 
 If you have access to multiple machines and want to build a Maelstrom cluster,
 you'll need to install one instance of the broker daemon and as many instances

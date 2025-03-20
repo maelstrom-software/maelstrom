@@ -20,12 +20,13 @@ The easiest way to install Maelstrom binaries is to use
 you to pick and choose the binaries you want to install:
 
 ```bash
-cargo binstall maelstrom-run
 cargo binstall cargo-maelstrom
 cargo binstall maelstrom-go-test
 cargo binstall maelstrom-pytest
+cargo binstall maelstrom-run
 cargo binstall maelstrom-broker
 cargo binstall maelstrom-worker
+cargo binstall maelstrom-admin
 ```
 
 These commands retrieve the pre-built binaries from the [Maelstrom GitHub
@@ -42,6 +43,23 @@ This will download and extract the latest release of `cargo-maelstrom` for
 Linux on the x86-64 architecture.
 
 The pre-built binaries have shared-library dependencies on libc and OpenSSL.
+
+## Installing on Arch Linux
+
+[David Runge](https://github.com/dvzrv) graciously maintains the Arch Linux
+[packages for
+Maelstrom](https://archlinux.org/packages/?sort=&q=maelstrom&maintainer=dvzrv).
+These can be installed using [`pacman`](https://wiki.archlinux.org/title/Pacman):
+
+```bash
+pacman -S cargo-maelstrom
+pacman -S maelstrom-go-test
+pacman -S maelstrom-pytest
+pacman -S maelstrom-run
+pacman -S maelstrom-broker
+pacman -S maelstrom-worker
+pacman -S maelstrom-admin
+```
 
 ## Installing Using Nix
 
@@ -65,11 +83,13 @@ cargo install maelstrom-go-test
 cargo install maelstrom-pytest
 cargo install maelstrom-worker
 cargo install maelstrom-broker
+cargo install maelstrom-admin
 ```
 
-There is an optional `web-ui` feature for `maelstrom-broker`, which is off by
-default. With this feature enabled, `maelstrom-broker` will serve a basic web
-UI dashboard. To enable it, some extra dependencies must be installed:
+There is an optional `web-ui` feature for `maelstrom-broker`, which is turned
+off by default. With this feature enabled, `maelstrom-broker` will serve a
+basic web UI dashboard. To enable it, some extra dependencies must be
+installed:
 
 ```bash
 rustup target add wasm32-unknown-unknown
