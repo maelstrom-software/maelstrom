@@ -17,7 +17,25 @@ use maelstrom_util::{
 };
 use slog::Logger;
 
-pub fn main(config: Config, log: Logger) -> Result<()> {
+#[derive(clap::Subcommand)]
+#[command(disable_help_subcommand = true)]
+pub enum Subcommand {
+    /// Print cluster status and exit.
+    #[command(
+        aliases = ["stats", "stat"],
+        verbatim_doc_comment
+    )]
+    Status,
+
+    /// Tell broker to stop.
+    #[command(
+        aliases = ["shut-down", "shutdown"],
+        verbatim_doc_comment
+    )]
+    Stop,
+}
+
+pub fn main(config: Config, log: Logger, subcommand: Subcommand) -> Result<()> {
     match config.cluster_communication_strategy {
         ClusterCommunicationStrategy::Tcp => {
             let Some(broker) = config.broker else {
@@ -28,7 +46,11 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
                     `broker` key in config file"
                 );
             };
-            main_inner(TcpBrokerConnectionFactory::new(broker, &log), &log)
+            main_inner(
+                TcpBrokerConnectionFactory::new(broker, &log),
+                &log,
+                subcommand,
+            )
         }
         ClusterCommunicationStrategy::GitHub => {
             let Some(token) = config.github_actions_token else {
@@ -52,6 +74,7 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
             main_inner(
                 GitHubQueueBrokerConnectionFactory::new(&log, token, url)?,
                 &log,
+                subcommand,
             )
         }
     }
@@ -61,24 +84,37 @@ pub fn main(config: Config, log: Logger) -> Result<()> {
 async fn main_inner(
     broker_connection_factory: impl BrokerConnectionFactory,
     log: &Logger,
+    subcommand: Subcommand,
 ) -> Result<()> {
     let hello = Hello::Monitor;
     let (mut read_stream, mut write_stream) = broker_connection_factory.connect(&hello).await?;
-    write_stream
-        .write_message(&MonitorToBroker::StatisticsRequest, log)
-        .await?;
-    let BrokerToMonitor::StatisticsResponse(BrokerStatistics {
-        worker_statistics,
-        job_statistics,
-    }) = read_stream.read_message(log).await?;
-    println!("Number of workers: {}", worker_statistics.len());
-    println!(
-        "Number of clients: {}",
-        job_statistics
-            .iter()
-            .last()
-            .map(|sample| sample.client_to_stats.len())
-            .unwrap_or(0)
-    );
+    match subcommand {
+        Subcommand::Status => {
+            write_stream
+                .write_message(&MonitorToBroker::StatisticsRequest, log)
+                .await?;
+            let BrokerToMonitor::StatisticsResponse(BrokerStatistics {
+                worker_statistics,
+                job_statistics,
+            }) = read_stream.read_message(log).await?;
+            println!("Number of workers: {}", worker_statistics.len());
+            println!(
+                "Number of clients: {}",
+                job_statistics
+                    .iter()
+                    .last()
+                    .map(|sample| sample.client_to_stats.len())
+                    .unwrap_or(0)
+            );
+        }
+        Subcommand::Stop => {
+            write_stream
+                .write_message(&MonitorToBroker::StopRequest, log)
+                .await?;
+            if let Ok(message) = read_stream.read_message::<BrokerToMonitor>(log).await {
+                bail!("expected broker to disconnect, but it sent message instead: {message:#?}");
+            }
+        }
+    }
     Ok(())
 }
