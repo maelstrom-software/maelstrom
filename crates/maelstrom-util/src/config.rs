@@ -539,18 +539,16 @@ impl CommandBuilder {
     }
 }
 
-fn new_config_with_extra_args_or_subcommand<T, U, AI, AT>(
+fn new_config_with_extra_args_or_subcommand<T, U>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
-    args: AI,
+    args: impl IntoIterator<Item = impl Into<OsString> + Clone>,
     augment: impl Fn(Command) -> Command,
 ) -> Result<(T, U)>
 where
     T: Config + Debug,
     U: FromArgMatches,
-    AI: IntoIterator<Item = AT>,
-    AT: Into<OsString> + Clone,
 {
     let env_var_prefixes = Vec::from_iter(env_var_prefixes.into_iter().map(Into::into));
     let base_directories = BaseDirectories::with_prefix(base_directories_prefix)
@@ -596,17 +594,15 @@ where
     Ok((config, extra))
 }
 
-pub fn new_config_with_extra_args<T, U, AI, AT>(
+pub fn new_config_with_extra_args<T, U>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
-    args: AI,
+    args: impl IntoIterator<Item = impl Into<OsString> + Clone>,
 ) -> Result<(T, U)>
 where
     T: Config + Debug,
     U: Args,
-    AI: IntoIterator<Item = AT>,
-    AT: Into<OsString> + Clone,
 {
     new_config_with_extra_args_or_subcommand(
         command,
@@ -617,17 +613,15 @@ where
     )
 }
 
-pub fn new_config_with_subcommand<T, U, AI, AT>(
+pub fn new_config_with_subcommand<T, U>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
-    args: AI,
+    args: impl IntoIterator<Item = impl Into<OsString> + Clone>,
 ) -> Result<(T, U)>
 where
     T: Config + Debug,
     U: Subcommand,
-    AI: IntoIterator<Item = AT>,
-    AT: Into<OsString> + Clone,
 {
     new_config_with_extra_args_or_subcommand(
         command,

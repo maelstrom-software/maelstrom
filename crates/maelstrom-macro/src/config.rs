@@ -399,15 +399,13 @@ impl ConfigInput {
                     )
                 }
 
-                #vis fn new_with_extra_args<U, AI, AT>(
+                #vis fn new_with_extra_args<U>(
                     base_directories_prefix: &'static str,
                     env_var_prefixes: impl ::std::iter::IntoIterator<Item = impl ::std::convert::Into<::std::string::String>>,
-                    args: AI,
+                    args: impl ::std::iter::IntoIterator<Item = impl ::std::convert::Into<::std::ffi::OsString> + ::std::clone::Clone>,
                 ) -> ::anyhow::Result<(Self, U)>
                 where
                     U: ::clap::Args,
-                    AI: ::std::iter::IntoIterator<Item = AT>,
-                    AT: ::std::convert::Into<::std::ffi::OsString> + ::std::clone::Clone,
                 {
                     ::maelstrom_util::config::new_config_with_extra_args(
                         ::clap::command!(), base_directories_prefix, env_var_prefixes, args,
