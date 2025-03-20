@@ -428,7 +428,51 @@ async fn unassigned_github_connection_main<TempFileT>(
             return;
         }
         Ok(Hello::Monitor) => {
-            warn!(log, "github queue said it was monitor");
+            let mid: MonitorId = id_vendor.vend();
+            let log = log.new(o!("mid" => mid.to_string()));
+            let log_clone = log.clone();
+            let log_clone2 = log.clone();
+            debug!(log, "monitor connected");
+            let write_queue = Arc::new(tokio::sync::Mutex::new(write_queue));
+            let write_queue_clone = write_queue.clone();
+            connection_main(
+                scheduler_task_sender,
+                mid,
+                scheduler_task::Message::MonitorConnected,
+                scheduler_task::Message::MonitorDisconnected,
+                |scheduler_task_sender| async move {
+                    let _ = net::github_queue_reader(
+                        &mut read_queue,
+                        scheduler_task_sender,
+                        |msg| match msg {
+                            MonitorToBroker::StatisticsRequest => {
+                                scheduler_task::Message::StatisticsRequestFromMonitor(mid)
+                            }
+                            MonitorToBroker::StopRequest => {
+                                scheduler_task::Message::StopRequestFromMonitor
+                            }
+                        },
+                        log_clone,
+                        "reading from monitor github queue",
+                    )
+                    .await;
+                },
+                |scheduler_task_receiver| async move {
+                    let mut write_queue = write_queue_clone.lock().await;
+                    let _ = net::github_queue_writer(
+                        scheduler_task_receiver,
+                        &mut write_queue,
+                        log_clone2,
+                        "writing to monitor github queue",
+                    )
+                    .await;
+                },
+            )
+            .await;
+            debug!(log, "monitor disconnected");
+            let _ = write_queue.lock().await.shut_down().await;
+
+            return;
         }
         Ok(Hello::ArtifactFetcher) => {
             warn!(log, "github queue said it was artifact fetcher");
