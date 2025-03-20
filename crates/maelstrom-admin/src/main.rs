@@ -5,7 +5,7 @@ use maelstrom_util::config;
 use std::env;
 
 fn main() -> Result<()> {
-    let (config, subcommand): (Config, Subcommand) = config::new_config_with_subcommand_from_args(
+    let (config, subcommand): (Config, Subcommand) = config::new_config_with_subcommand(
         command!(),
         "maelstrom/admin",
         ["MAELSTROM_ADMIN", "MAELSTROM"],

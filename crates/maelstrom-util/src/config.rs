@@ -539,7 +539,7 @@ impl CommandBuilder {
     }
 }
 
-fn new_config_with_extra_or_subcommand_from_args<T, U, AI, AT>(
+fn new_config_with_extra_args_or_subcommand<T, U, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
@@ -596,7 +596,7 @@ where
     Ok((config, extra))
 }
 
-pub fn new_config_with_extra_from_args<T, U, AI, AT>(
+pub fn new_config_with_extra_args<T, U, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
@@ -608,7 +608,7 @@ where
     AI: IntoIterator<Item = AT>,
     AT: Into<OsString> + Clone,
 {
-    new_config_with_extra_or_subcommand_from_args(
+    new_config_with_extra_args_or_subcommand(
         command,
         base_directories_prefix,
         env_var_prefixes,
@@ -617,7 +617,7 @@ where
     )
 }
 
-pub fn new_config_with_subcommand_from_args<T, U, AI, AT>(
+pub fn new_config_with_subcommand<T, U, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
@@ -629,7 +629,7 @@ where
     AI: IntoIterator<Item = AT>,
     AT: Into<OsString> + Clone,
 {
-    new_config_with_extra_or_subcommand_from_args(
+    new_config_with_extra_args_or_subcommand(
         command,
         base_directories_prefix,
         env_var_prefixes,
@@ -668,7 +668,7 @@ pub fn new_config<T: Config + Debug>(
     base_directories_prefix: &'static str,
     env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
 ) -> Result<T> {
-    let (config, _): (_, NoExtraCommandLineOptions) = new_config_with_extra_from_args(
+    let (config, _): (_, NoExtraCommandLineOptions) = new_config_with_extra_args(
         command,
         base_directories_prefix,
         env_var_prefixes,

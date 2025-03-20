@@ -206,7 +206,7 @@ pub fn main<TestRunnerT: TestRunner>(
     args: impl IntoIterator<Item = String>,
 ) -> Result<ExitCode> {
     let (config, extra_options): (TestRunnerT::Config, TestRunnerT::ExtraCommandLineOptions) =
-        maelstrom_util::config::new_config_with_extra_from_args(
+        maelstrom_util::config::new_config_with_extra_args(
             command,
             TestRunnerT::BASE_DIRECTORIES_PREFIX,
             [TestRunnerT::ENVIRONMENT_VARIABLE_PREFIX, "MAELSTROM"],
