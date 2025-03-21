@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### General
+- Created new `maelstrom-admin` program. This program is minimal right now. It
+  provides a subcommand that allows one to stop a Maelstrom cluster, which is
+  useful for CI. It will definitely get more administrative functionality over time.
+  \[[494](https://github.com/maelstrom-software/maelstrom/issues/494)\]
+- Created GitHub actions for
+  [`maelstrom-broker`](https://github.com/maelstrom-software/maelstrom-broker-action),
+  [`maelstrom-worker`](https://github.com/maelstrom-software/maelstrom-worker-action),
+  [`cargo-maelstrom`](https://github.com/maelstrom-software/cargo-maelstrom-action),
+  [`maelstrom-go-test`](https://github.com/maelstrom-software/maelstrom-go-test-action),
+  [`maelstrom-pytest`](https://github.com/maelstrom-software/maelstrom-pytest),
+  and [`maelstrom-admin`](https://github.com/maelstrom-software/maelstrom-admin).
+  \[[483](https://github.com/maelstrom-software/maelstrom/issues/483)\]
+- Created an [example
+  repository](https://github.com/maelstrom-software/maelstrom-examples) that
+  has examples of how to configure Maelstrom
+  for individual tests as well as how to use Maelstrom in CI.
+  \[[484](https://github.com/maelstrom-software/maelstrom/issues/484)\], 
+  \[[491](https://github.com/maelstrom-software/maelstrom/issues/491)\]
+- Made many improvements to the GitHub integration:
+  - Clients can now communicate with the broker over the GitHub artifact store,
+    just like workers. This lets us run the broker in a different job than the
+    clients. This in turn lets us build a better GitHub action for the broker,
+    as well as the workflow have many different jobs run in parallel and
+    interact with the cluster.
+    \[[493](https://github.com/maelstrom-software/maelstrom/issues/493)\]
+  - Unified the configuration values used by Maelstrom programs on GitHub.
+
 ### All Test Runners (`cargo-maelstrom`, `maelstrom-go-test`, and `maelstrom-pytest`)
 - Made `--watch` flag visible in help.
 - Gave `--watch` a `-w` short option.
@@ -28,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added support for generic Maelstrom environment variables, like
   `MAELSTROM_BROKER` in addition to program-specific ones like `MAELSTROM_PYTEST_BROKER`.
   \[[492](https://github.com/maelstrom-software/maelstrom/issues/492)\]
+
+### `maelstrom-worker`
+- Fixed a test that would fail with `RUST_BACKTRACE=1`.
+  \[[510](https://github.com/maelstrom-software/maelstrom/issues/510)\]
 
 ## [0.13.0] - 2025-02-24
 
