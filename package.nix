@@ -45,6 +45,12 @@ let
       ln -s ${self.cargoVendorDir}/config.toml source/crates/maelstrom-web/.cargo/config.toml
     '';
 
+    cargoExtraArgs = "--locked --features=web-ui";
+
+    postInstall = ''
+      rm -f $out/bin/{xtask,layer-fs-cli,maelstrom-container,manifest-cli}
+    '';
+
     nativeBuildInputs = [
       binaryen
       black
