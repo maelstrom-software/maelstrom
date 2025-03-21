@@ -69,6 +69,14 @@ cargo binstall maelstrom-pytest
 
 This will install a pre-built binary from the [github releases page](https://github.com/maelstrom-software/maelstrom/releases).
 
+If you're on Arch Linux, you can install a package using `pacman`:
+
+```bash
+pacman -S cargo-maelstrom
+pacman -S maelstrom-go-test
+pacman -S maelstrom-pytest
+```
+
 If you don't have `cargo-binstall`, you can download the binaries manually.
 
 Check out the [book](https://maelstrom-software.com/doc/book/latest/installation.html) for more ways to get Maelstrom.
