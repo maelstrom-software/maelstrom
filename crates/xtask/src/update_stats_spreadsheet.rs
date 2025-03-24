@@ -155,6 +155,7 @@ struct DownloadsSheetsEntry {
     maelstrom_client: u64,
     maelstrom_broker: u64,
     maelstrom_worker: u64,
+    maelstrom_admin: u64,
 }
 
 impl DownloadsSheetsEntry {
@@ -248,6 +249,8 @@ fn downloads_data(releases: Vec<Release>) -> Result<Vec<DownloadsSheetsEntry>> {
                 entry.maelstrom_broker += asset.download_count;
             } else if asset.name.starts_with("maelstrom-worker") {
                 entry.maelstrom_worker += asset.download_count;
+            } else if asset.name.starts_with("maelstrom-admin") {
+                entry.maelstrom_admin += asset.download_count;
             } else {
                 bail!("unknown asset {}", asset.name);
             }
