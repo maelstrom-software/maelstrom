@@ -42,6 +42,5 @@ slog-term.workspace = true
 tar.workspace = true
 maelstrom-test.workspace = true
 maplit.workspace = true
-nonempty.workspace = true
 sha2.workspace = true
 tempfile.workspace = true

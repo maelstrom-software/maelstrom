@@ -63,7 +63,7 @@ countio = { version = "0.2", features = ["tokio"] }
 crossterm = { version = "0.28.1", default-features = false }
 darling = "0.20"
 derivative = "2.2.0"
-derive_more = { version = "2", features = ["add", "add_assign", "constructor", "debug", "deref", "deref_mut", "display", "from", "into"] }
+derive_more = { version = "2", features = ["add", "add_assign", "constructor", "debug", "deref", "deref_mut", "display", "error", "from", "into", "into_iterator"] }
 eframe = "0.26"
 egui = "0.26"
 egui-toast = "0.12"
@@ -119,7 +119,6 @@ memchr = "2"
 native-tls = "0.2"
 netlink-packet-core = "0.7"
 netlink-packet-route = "0.17"
-nonempty = { version = "0.10", features = ["serialize"] }
 notify = "8"
 num = "0.4.3"
 num-derive = "0.4.2"

@@ -19,7 +19,6 @@ get-size.workspace = true
 hex.workspace = true
 indoc.workspace = true
 maelstrom-macro.workspace = true
-nonempty.workspace = true
 serde.workspace = true
 serde_repr.workspace = true
 strum.workspace = true

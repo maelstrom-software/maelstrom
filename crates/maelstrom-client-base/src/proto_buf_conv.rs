@@ -458,12 +458,12 @@ impl<V: TryFromProtoBuf> TryFromProtoBuf for maelstrom_base::nonempty::NonEmpty<
     type ProtoBufType = Vec<V::ProtoBufType>;
 
     fn try_from_proto_buf(v: Vec<V::ProtoBufType>) -> Result<Self> {
-        maelstrom_base::nonempty::NonEmpty::from_vec(
+        maelstrom_base::nonempty::NonEmpty::try_from(
             v.into_iter()
                 .map(|v| TryFromProtoBuf::try_from_proto_buf(v))
                 .collect::<Result<Vec<_>>>()?,
         )
-        .ok_or_else(|| anyhow!("malformed NonEmpty"))
+        .map_err(Error::new)
     }
 }
 
