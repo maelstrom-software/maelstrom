@@ -2,6 +2,7 @@
 //! from wasm.
 
 pub mod manifest;
+pub mod nonempty;
 pub mod proto;
 pub mod ring_buffer;
 pub mod stats;
@@ -9,7 +10,6 @@ pub mod tty;
 
 pub use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 pub use enumset::{enum_set, EnumSet};
-pub use nonempty;
 
 use derive_more::{with_trait::Debug, Constructor, Display, From, Into};
 use enumset::EnumSetType;
