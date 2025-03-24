@@ -213,6 +213,12 @@ cargo maelstrom --broker=broker-host:1234
 maelstrom-pytest --broker=broker-host:1234
 ```
 
+## Running a Cluster in GitHub Actions
+
+You can use Maelstrom to run your tests in parallel in GitHub Actions. [This
+chapter](https://maelstrom-software.com/doc/book/latest/github.html) of the
+book explains how to set this up.
+
 # Learn More
 
 Find our complete documentation in the [book](https://maelstrom-software.com/doc/book/latest/).
