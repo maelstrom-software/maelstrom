@@ -8,7 +8,7 @@
 
 use crate::{StateDir, TestArtifactKey, TestCaseMetadata, TestFilter};
 use anyhow::{anyhow, bail, Result};
-use maelstrom_base::{nonempty, NonEmpty};
+use maelstrom_base::nonempty::{nonempty, NonEmpty};
 use maelstrom_util::{
     fs::Fs,
     root::{Root, RootBuf},
@@ -664,7 +664,6 @@ mod tests {
     use super::*;
     use crate::{NoCaseMetadata, SimpleFilter, StringArtifactKey};
     use indoc::indoc;
-    use maelstrom_base::nonempty;
     use maelstrom_test::millis;
     use maelstrom_util::ext::OptionExt as _;
     use pretty_assertions::assert_eq;

@@ -17,9 +17,10 @@ use crate::{
 use anyhow::anyhow;
 use itertools::Itertools as _;
 use maelstrom_base::{
-    devices_mount, nonempty, proc_mount, sys_mount, tmp_mount, ClientJobId, JobBrokerStatus,
-    JobCompleted, JobDevice, JobEffects, JobError, JobOutcome, JobOutputResult,
-    JobTerminationStatus, JobWorkerStatus, NonEmpty,
+    devices_mount,
+    nonempty::{nonempty, NonEmpty},
+    proc_mount, sys_mount, tmp_mount, ClientJobId, JobBrokerStatus, JobCompleted, JobDevice,
+    JobEffects, JobError, JobOutcome, JobOutputResult, JobTerminationStatus, JobWorkerStatus,
 };
 use maelstrom_client::{
     container_spec,

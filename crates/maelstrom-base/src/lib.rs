@@ -9,13 +9,14 @@ pub mod tty;
 
 pub use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 pub use enumset::{enum_set, EnumSet};
-pub use nonempty::{nonempty, NonEmpty};
+pub use nonempty;
 
 use derive_more::{with_trait::Debug, Constructor, Display, From, Into};
 use enumset::EnumSetType;
 use get_size::GetSize;
 use hex::{self, FromHexError};
 use maelstrom_macro::pocket_definition;
+use nonempty::NonEmpty;
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
@@ -483,7 +484,7 @@ macro_rules! job_spec {
                 program: $program.into(),
                 arguments: Default::default(),
                 environment: Default::default(),
-                layers: $crate::nonempty![$($layer),+],
+                layers: $crate::nonempty::nonempty![$($layer),+],
                 mounts: Default::default(),
                 network: Default::default(),
                 root_overlay: Default::default(),

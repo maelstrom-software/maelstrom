@@ -1,5 +1,5 @@
 use crate::types::CacheKey;
-use maelstrom_base::{ArtifactType, NonEmpty, Sha256Digest};
+use maelstrom_base::{nonempty::NonEmpty, ArtifactType, Sha256Digest};
 use maelstrom_util::ext::OptionExt as _;
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -378,7 +378,7 @@ impl LayerTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::{digest, manifest_digest, nonempty, tar_digest};
+    use maelstrom_base::{digest, manifest_digest, nonempty::nonempty, tar_digest};
     use maelstrom_test::path_buf;
     use maelstrom_util::ext::BoolExt as _;
     use maplit::hashset;

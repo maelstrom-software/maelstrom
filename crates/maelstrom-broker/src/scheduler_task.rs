@@ -5,10 +5,11 @@ use crate::cache::SchedulerCache;
 use artifact_gatherer::{ArtifactGatherer, StartJob};
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
+    nonempty::NonEmpty,
     proto::{BrokerToClient, BrokerToMonitor, BrokerToWorker},
     stats::BrokerStatistics,
     ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobBrokerStatus, JobId,
-    JobOutcomeResult, JobSpec, JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
+    JobOutcomeResult, JobSpec, JobWorkerStatus, MonitorId, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{manifest::AsyncManifestReader, sync};
 use scheduler::Scheduler;

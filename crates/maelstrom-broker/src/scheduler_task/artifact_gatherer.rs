@@ -2,7 +2,8 @@ use crate::cache::SchedulerCache;
 use derive_more::{Deref, DerefMut};
 use get_size::GetSize;
 use maelstrom_base::{
-    ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobId, NonEmpty, Sha256Digest,
+    nonempty::NonEmpty, ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobId,
+    Sha256Digest,
 };
 use maelstrom_util::{
     cache::GetArtifact,

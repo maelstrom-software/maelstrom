@@ -5,12 +5,13 @@ use crate::scheduler_task::artifact_gatherer::StartJob;
 use derivative::Derivative;
 use derive_more::{Constructor, Deref, DerefMut};
 use maelstrom_base::{
+    nonempty::NonEmpty,
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
     ArtifactType, ClientId, ClientJobId, JobBrokerStatus, JobError, JobId, JobOutcomeResult,
-    JobSpec, JobWorkerStatus, MonitorId, NonEmpty, Sha256Digest, WorkerId,
+    JobSpec, JobWorkerStatus, MonitorId, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
     duration,

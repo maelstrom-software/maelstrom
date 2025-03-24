@@ -1,7 +1,8 @@
 use indexmap::IndexSet;
 use maelstrom_base::{
-    ArtifactType, CaptureFileSystemChanges, EnumSet, GroupId, JobMount, JobNetwork, JobRootOverlay,
-    JobSpec as BaseJobSpec, JobTty, NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
+    nonempty::NonEmpty, ArtifactType, CaptureFileSystemChanges, EnumSet, GroupId, JobMount,
+    JobNetwork, JobRootOverlay, JobSpec as BaseJobSpec, JobTty, Sha256Digest, Timeout, UserId,
+    Utf8PathBuf,
 };
 use maelstrom_client_base::spec::{
     self, ContainerParent, ContainerSpec, ContainerUse, ConvertedImage, EnvironmentSpec, ImageRef,

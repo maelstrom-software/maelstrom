@@ -446,7 +446,7 @@ impl TryFromProtoBuf for Url {
 //
 //
 //
-impl<V: IntoProtoBuf> IntoProtoBuf for maelstrom_base::NonEmpty<V> {
+impl<V: IntoProtoBuf> IntoProtoBuf for maelstrom_base::nonempty::NonEmpty<V> {
     type ProtoBufType = Vec<V::ProtoBufType>;
 
     fn into_proto_buf(self) -> Self::ProtoBufType {
@@ -454,11 +454,11 @@ impl<V: IntoProtoBuf> IntoProtoBuf for maelstrom_base::NonEmpty<V> {
     }
 }
 
-impl<V: TryFromProtoBuf> TryFromProtoBuf for maelstrom_base::NonEmpty<V> {
+impl<V: TryFromProtoBuf> TryFromProtoBuf for maelstrom_base::nonempty::NonEmpty<V> {
     type ProtoBufType = Vec<V::ProtoBufType>;
 
     fn try_from_proto_buf(v: Vec<V::ProtoBufType>) -> Result<Self> {
-        maelstrom_base::NonEmpty::from_vec(
+        maelstrom_base::nonempty::NonEmpty::from_vec(
             v.into_iter()
                 .map(|v| TryFromProtoBuf::try_from_proto_buf(v))
                 .collect::<Result<Vec<_>>>()?,
