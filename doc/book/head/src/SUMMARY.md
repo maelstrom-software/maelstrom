@@ -75,4 +75,4 @@
 - [`maelstrom-worker`](worker.md)
     - [Configuration Values](worker/config.md)
     - [Running as `systemd` Service](worker/systemd-service.md)
-- [Experimental GitHub Integration](github.md)
+- [GitHub Integration](github.md)
