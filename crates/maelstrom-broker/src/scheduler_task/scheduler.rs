@@ -909,7 +909,7 @@ mod tests {
             ready: impl IntoIterator<Item = impl Into<JobId>>,
         ) {
             self.sut.receive_jobs_ready_from_artifact_gatherer(
-                NonEmpty::collect(ready.into_iter().map(Into::into)).unwrap(),
+                NonEmpty::try_from_iter(ready.into_iter().map(Into::into)).unwrap(),
             );
         }
 
@@ -919,7 +919,7 @@ mod tests {
             err: impl Into<String>,
         ) {
             self.sut.receive_jobs_failed_from_artifact_gatherer(
-                NonEmpty::collect(jobs.into_iter().map(Into::into)).unwrap(),
+                NonEmpty::try_from_iter(jobs.into_iter().map(Into::into)).unwrap(),
                 err.into(),
             );
         }
@@ -1021,7 +1021,7 @@ mod tests {
             layers: impl IntoIterator<Item = (impl Into<Sha256Digest>, impl Into<ArtifactType>)>,
             result: impl Into<StartJob>,
         ) -> Self {
-            let layers = NonEmpty::collect(
+            let layers = NonEmpty::try_from_iter(
                 layers
                     .into_iter()
                     .map(|(digest, type_)| (digest.into(), type_.into())),

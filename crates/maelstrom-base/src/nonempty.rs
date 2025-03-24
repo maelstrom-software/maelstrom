@@ -16,13 +16,12 @@ pub struct NonEmpty<T>(Vec<T>);
 #[macro_export]
 macro_rules! nonempty {
     ($($elem:expr),+ $(,)?) => {
-        $crate::nonempty::NonEmpty::collect([$($elem),+]).unwrap()
+        $crate::nonempty::NonEmpty::try_from_iter([$($elem),+]).unwrap()
     }
 }
 
 impl<T> NonEmpty<T> {
-    // XXX rename try_from_iter
-    pub fn collect(iter: impl IntoIterator<Item = T>) -> Option<Self> {
+    pub fn try_from_iter(iter: impl IntoIterator<Item = T>) -> Option<Self> {
         Self::try_from(Vec::from_iter(iter)).ok()
     }
 
@@ -31,7 +30,7 @@ impl<T> NonEmpty<T> {
     }
 
     pub fn map<U>(self, f: impl FnMut(T) -> U) -> NonEmpty<U> {
-        NonEmpty::collect(self.into_iter().map(f)).unwrap()
+        NonEmpty::try_from_iter(self.into_iter().map(f)).unwrap()
     }
 
     pub fn push(&mut self, elem: T) {

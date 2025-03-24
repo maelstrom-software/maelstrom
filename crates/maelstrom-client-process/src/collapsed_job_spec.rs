@@ -406,7 +406,7 @@ impl CollapsedJobSpec {
         environment: Vec<String>,
     ) -> Result<BaseJobSpec, String> {
         self.check()?;
-        let layers = NonEmpty::collect(layers).unwrap();
+        let layers = NonEmpty::try_from_iter(layers).unwrap();
         assert_eq!(layers.len(), self.image_layers.len() + self.layers.len());
         let Self {
             layers: _,

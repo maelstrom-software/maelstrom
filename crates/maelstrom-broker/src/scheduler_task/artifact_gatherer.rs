@@ -522,7 +522,7 @@ where
                         false
                     }
                 });
-                if let Some(jobs) = NonEmpty::collect(jobs) {
+                if let Some(jobs) = NonEmpty::try_from_iter(jobs) {
                     self.deps
                         .send_jobs_failed_to_scheduler(jobs, err.to_string());
                 }
@@ -550,7 +550,7 @@ where
                     );
                     job.have_all_artifacts()
                 });
-                if let Some(ready) = NonEmpty::collect(ready) {
+                if let Some(ready) = NonEmpty::try_from_iter(ready) {
                     self.deps.send_jobs_ready_to_scheduler(ready);
                 }
             }
@@ -605,7 +605,7 @@ where
                     job.manifests_being_read.remove(&digest).assert_is_true();
                     self.drop_job(*jid, job);
                 }
-                if let Some(jobs) = NonEmpty::collect(jobs) {
+                if let Some(jobs) = NonEmpty::try_from_iter(jobs) {
                     self.deps
                         .send_jobs_failed_to_scheduler(jobs, err.to_string());
                 }
@@ -617,7 +617,7 @@ where
                     job.manifests_being_read.remove(&digest).assert_is_true();
                     job.have_all_artifacts()
                 });
-                if let Some(ready) = NonEmpty::collect(ready) {
+                if let Some(ready) = NonEmpty::try_from_iter(ready) {
                     self.deps.send_jobs_ready_to_scheduler(ready);
                 }
                 self.insert_manifest_into_cache(digest, entries);
@@ -994,7 +994,7 @@ mod tests {
         {
             let actual = self.sut.start_job(
                 jid.into(),
-                NonEmpty::collect(
+                NonEmpty::try_from_iter(
                     layers
                         .into_iter()
                         .map(|(digest, type_)| (digest.into(), type_)),

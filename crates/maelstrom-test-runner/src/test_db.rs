@@ -268,7 +268,7 @@ impl<ArtifactKeyT: TestArtifactKey, CaseMetadataT: TestCaseMetadata>
         fn add_timing(timings: &mut NonEmpty<Duration>, timing: Duration) {
             timings.push(timing);
             if timings.len() > MAX_TIMINGS_PER_CASE {
-                *timings = NonEmpty::collect(
+                *timings = NonEmpty::try_from_iter(
                     timings
                         .iter()
                         .skip(timings.len() - MAX_TIMINGS_PER_CASE)
@@ -432,7 +432,7 @@ impl<CaseMetadataT: TestCaseMetadata> From<OnDiskCaseData<CaseMetadataT>>
     for CaseData<CaseMetadataT>
 {
     fn from(on_disk: OnDiskCaseData<CaseMetadataT>) -> Self {
-        let timings = NonEmpty::collect(on_disk.timings);
+        let timings = NonEmpty::try_from_iter(on_disk.timings);
         let when_read = timings.map(|timings| {
             // We should never have an outcome of "new", but if we manage to
             // get it, just turn it into "failure".
