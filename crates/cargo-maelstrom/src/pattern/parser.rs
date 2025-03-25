@@ -14,7 +14,7 @@ use regex::Regex;
 use std::str::FromStr;
 
 #[cfg(test)]
-use regex_macro::regex;
+use regex_macro::{regex, LazyRegex};
 
 #[derive(From, Clone, Debug, PartialEq, Eq)]
 #[from(forward)]
@@ -135,9 +135,10 @@ impl GlobMatcherParameter {
 #[derive(Clone, Debug)]
 pub struct RegexMatcherParameter(pub Regex);
 
-impl From<&Regex> for RegexMatcherParameter {
-    fn from(r: &Regex) -> Self {
-        Self(r.clone())
+#[cfg(test)]
+impl From<&LazyRegex> for RegexMatcherParameter {
+    fn from(r: &LazyRegex) -> Self {
+        Self((&**r).clone())
     }
 }
 
