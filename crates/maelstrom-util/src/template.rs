@@ -1,26 +1,19 @@
 use anyhow::{anyhow, Result};
 use regex::Regex;
-use std::{collections::HashMap, convert::AsRef, sync::OnceLock};
+use regex_macro::regex;
+use std::{collections::HashMap, convert::AsRef};
 
 const IDENT: &str = "[a-zA-Z-][a-zA-Z0-9-]*";
 
 fn validate_ident(ident: &str) {
-    static IDENT_RE: OnceLock<Regex> = OnceLock::new();
-    let ident_re = IDENT_RE.get_or_init(|| Regex::new(&format!("^{IDENT}$")).unwrap());
-    if !ident_re.is_match(ident) {
+    if !regex!(&format!("^{IDENT}$")).is_match(ident) {
         panic!("invalid identifier {ident:?}");
     }
 }
 
 // Keep this in a function that won't be duplicated for each generic parameter.
 fn template_re() -> &'static Regex {
-    static TEMPLATE_RE: OnceLock<Regex> = OnceLock::new();
-    TEMPLATE_RE.get_or_init(|| {
-        // Opening angle brackets followed by identifier ending with a single closing angle
-        // bracket. We capture all of the leading brackets, since we support escaping brackets by
-        // doubling them.
-        Regex::new(&format!("(?<var><+{IDENT}>)")).unwrap()
-    })
+    regex!(&format!("(?<var><+{IDENT}>)"))
 }
 
 #[derive(Default)]

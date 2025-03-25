@@ -37,6 +37,7 @@ num_cpus.workspace = true
 pin-project.workspace = true
 rand.workspace = true
 regex.workspace = true
+regex-macro.workspace = true
 serde.workspace = true
 sha2.workspace = true
 slog-async.workspace = true
