@@ -77,7 +77,7 @@ impl LayerBuilds {
     }
 
     fn push<DepsT: Deps>(&mut self, deps: &DepsT, layer: LayerSpec) {
-        if self.pending < self.max_pending.into() {
+        if self.pending < self.max_pending.get() {
             self.pending += 1;
             deps.build_layer(layer);
         } else {
@@ -90,7 +90,7 @@ impl LayerBuilds {
             deps.build_layer(layer);
         } else {
             self.pending = self.pending.checked_sub(1).unwrap();
-            assert!(self.pending < self.max_pending.into());
+            assert!(self.pending < self.max_pending.get());
         }
     }
 }

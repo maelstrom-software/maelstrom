@@ -108,7 +108,7 @@ impl<'deps, DepsT: Deps> MainApp<'deps, DepsT> {
     fn failure_limit_reached(&self) -> bool {
         self.options
             .stop_after
-            .is_some_and(|limit| self.test_count(TestResult::Failed) >= limit.into())
+            .is_some_and(|limit| self.test_count(TestResult::Failed) >= limit.as_usize())
     }
 
     fn not_run_estimate(&self) -> NotRunEstimate {

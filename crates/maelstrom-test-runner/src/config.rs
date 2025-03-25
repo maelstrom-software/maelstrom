@@ -17,9 +17,15 @@ macro_rules! non_zero_usize_wrapper {
         #[serde(transparent)]
         pub struct $name(NonZeroUsize);
 
+        impl $name {
+            pub fn as_usize(self) -> usize {
+                self.0.get()
+            }
+        }
+
         impl From<$name> for usize {
             fn from(s: $name) -> usize {
-                s.0.into()
+                s.as_usize()
             }
         }
 
