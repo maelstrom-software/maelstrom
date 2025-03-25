@@ -28,6 +28,7 @@ http-body-util = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
 hyper-tungstenite = { workspace = true, optional = true }
+lru.workspace = true
 maelstrom-base.workspace = true
 maelstrom-github.workspace = true
 maelstrom-macro.workspace = true

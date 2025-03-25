@@ -1,6 +1,6 @@
 use crate::cache::SchedulerCache;
-use derive_more::{Deref, DerefMut};
 use get_size::GetSize;
+use lru::LruCache;
 use maelstrom_base::{
     nonempty::NonEmpty, ArtifactType, ArtifactUploadLocation, ClientId, ClientJobId, JobId,
     Sha256Digest,
@@ -8,7 +8,6 @@ use maelstrom_base::{
 use maelstrom_util::{
     cache::GetArtifact,
     ext::{BoolExt as _, OptionExt as _},
-    heap::{Heap, HeapDeps, HeapIndex},
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -105,36 +104,15 @@ struct ManifestReadEntry {
 #[derive(GetSize)]
 struct ManifestReadCacheEntry {
     entries: HashSet<Sha256Digest>,
-    heap_index: HeapIndex,
-    last_read: u64,
     size: usize,
-}
-
-#[derive(Default, Deref, DerefMut)]
-struct ManifestReadCacheMap(HashMap<Sha256Digest, ManifestReadCacheEntry>);
-
-impl HeapDeps for ManifestReadCacheMap {
-    type Element = Sha256Digest;
-
-    fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
-        let lhs = self.0.get(lhs).unwrap();
-        let rhs = self.0.get(rhs).unwrap();
-        lhs.last_read < rhs.last_read
-    }
-
-    fn update_index(&mut self, elem: &Self::Element, heap_index: HeapIndex) {
-        self.0.get_mut(elem).unwrap().heap_index = heap_index;
-    }
 }
 
 struct ManifestReads {
     entries: HashMap<Sha256Digest, ManifestReadEntry>,
-    cache: ManifestReadCacheMap,
-    cache_heap: Heap<ManifestReadCacheMap>,
+    cache: LruCache<Sha256Digest, ManifestReadCacheEntry>,
     waiting: VecDeque<Sha256Digest>,
     in_progress: usize,
     max_in_progress: NonZeroUsize,
-    next_read: u64,
     cache_size: usize,
     max_cache_size: usize,
 }
@@ -165,12 +143,10 @@ where
             tcp_upload_landing_pad: Default::default(),
             manifest_reads: ManifestReads {
                 entries: Default::default(),
-                cache: Default::default(),
-                cache_heap: Default::default(),
+                cache: LruCache::unbounded(),
                 waiting: Default::default(),
                 in_progress: 0,
                 max_in_progress: max_simultaneous_manifest_reads,
-                next_read: 0,
                 cache_size: 0,
                 max_cache_size,
             },
@@ -414,7 +390,6 @@ where
             return false;
         };
 
-        entry.last_read = manifest_reads.next_read;
         Self::start_acquiring_manifest_entries_for_job(
             cache,
             client_sender,
@@ -423,39 +398,20 @@ where
             jid,
             job,
         );
-        manifest_reads.next_read += 1;
-        let heap_index = entry.heap_index;
-        manifest_reads
-            .cache_heap
-            .sift_down(&mut manifest_reads.cache, heap_index);
 
         true
     }
 
     fn insert_manifest_into_cache(&mut self, digest: Sha256Digest, entries: HashSet<Sha256Digest>) {
-        let mut entry = ManifestReadCacheEntry {
-            entries,
-            heap_index: Default::default(),
-            last_read: self.manifest_reads.next_read,
-            size: 0,
-        };
+        let mut entry = ManifestReadCacheEntry { entries, size: 0 };
         entry.size = entry.get_size();
-        self.manifest_reads.next_read += 1;
         self.manifest_reads.cache_size += entry.size;
         self.manifest_reads
             .cache
-            .insert(digest.clone(), entry)
+            .put(digest.clone(), entry)
             .assert_is_none();
-        self.manifest_reads
-            .cache_heap
-            .push(&mut self.manifest_reads.cache, digest);
         while self.manifest_reads.cache_size > self.manifest_reads.max_cache_size {
-            let digest = self
-                .manifest_reads
-                .cache_heap
-                .pop(&mut self.manifest_reads.cache)
-                .unwrap();
-            let entry = self.manifest_reads.cache.remove(&digest).unwrap();
+            let (_, entry) = self.manifest_reads.cache.pop_lru().unwrap();
             self.manifest_reads.cache_size -= entry.size;
         }
     }
@@ -1967,7 +1923,7 @@ mod tests {
 
     #[test]
     fn manifest_reads_cache_lru() {
-        let mut fixture = Fixture::with_max_cache_size(336).with_client(1);
+        let mut fixture = Fixture::with_max_cache_size(304).with_client(1);
 
         fixture
             .expect()
@@ -1992,7 +1948,7 @@ mod tests {
             .when()
             .receive_finished_reading_manifest(3, Ok(()));
 
-        assert_eq!(fixture.sut.manifest_reads.cache_size, 168);
+        assert_eq!(fixture.sut.manifest_reads.cache_size, 152);
 
         fixture
             .expect()
@@ -2017,7 +1973,7 @@ mod tests {
             .when()
             .receive_finished_reading_manifest(4, Ok(()));
 
-        assert_eq!(fixture.sut.manifest_reads.cache_size, 336);
+        assert_eq!(fixture.sut.manifest_reads.cache_size, 304);
 
         fixture
             .expect()
@@ -2050,7 +2006,7 @@ mod tests {
             .when()
             .receive_finished_reading_manifest(5, Ok(()));
 
-        assert_eq!(fixture.sut.manifest_reads.cache_size, 336);
+        assert_eq!(fixture.sut.manifest_reads.cache_size, 304);
 
         fixture
             .expect()
