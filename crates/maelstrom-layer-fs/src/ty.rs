@@ -82,7 +82,7 @@ impl FileId {
     }
 
     pub fn as_u64(&self) -> u64 {
-        (self.layer_id.as_u32() as u64) << 32 | self.offset.get() as u64
+        ((self.layer_id.as_u32() as u64) << 32) | self.offset.get() as u64
     }
 
     pub fn layer(&self) -> LayerId {

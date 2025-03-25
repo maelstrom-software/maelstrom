@@ -332,7 +332,7 @@ fn start_and_exec_in_child_inner(
 /// distinguish between an error and no error.
 pub fn start_and_exec_in_child(write_sock: linux::UnixStream, syscalls: &mut [Syscall]) -> ! {
     let (index, errno) = start_and_exec_in_child_inner(&write_sock, syscalls);
-    let result = (index as u64) << 32 | errno.as_u64();
+    let result = ((index as u64) << 32) | errno.as_u64();
     // There's not really much to do if this write fails. Therefore, we just ignore the result.
     // However, it's hard to imagine any case where this could fail and we'd actually care.
     let _ = write_sock.send(result.to_ne_bytes().as_slice());
