@@ -27,6 +27,7 @@ maelstrom-macro.workspace = true
 maelstrom-test-runner.workspace = true
 maelstrom-util.workspace = true
 regex.workspace = true
+regex-macro.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true

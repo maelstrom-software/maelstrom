@@ -26,6 +26,7 @@ use maelstrom_util::{
     process::ExitCode,
     root::{Root, RootBuf},
 };
+use regex_macro::regex;
 use std::{fmt, path::Path, str::FromStr};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -123,7 +124,7 @@ impl GoImportPath {
         let mut comp = self.0.split('/').collect::<Vec<&str>>().into_iter().rev();
         let last = comp.next().unwrap();
 
-        let version_re = regex::Regex::new("^v[0-9]*$").unwrap();
+        let version_re = regex!("^v[0-9]*$");
         if version_re.is_match(last) {
             comp.next().unwrap()
         } else {

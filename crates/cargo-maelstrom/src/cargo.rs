@@ -13,7 +13,7 @@ use maelstrom_test_runner::{
     WaitStatus,
 };
 use maelstrom_util::{process::ExitCode, tty::open_pseudoterminal};
-use regex::Regex;
+use regex_macro::regex;
 use std::{
     collections::{HashMap, HashSet},
     ffi::{CString, OsString},
@@ -410,7 +410,7 @@ pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<V
         cmd.arg(filter);
     }
     let output = cmd.output()?;
-    Ok(Regex::new(r"\b([^ ]*): test")?
+    Ok(regex!(r"\b([^ ]*): test")
         .captures_iter(str::from_utf8(&output.stdout)?)
         .map(|capture| capture.get(1).unwrap().as_str().trim().to_string())
         .collect())

@@ -26,7 +26,7 @@ use maelstrom_test_runner::{
     TestCollector, TestFilter, TestPackage, TestPackageId, Wait, WaitStatus,
 };
 use maelstrom_util::{fs::Fs, root::RootBuf};
-use regex::Regex;
+use regex_macro::regex;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{
@@ -409,8 +409,8 @@ impl TestCollector for PytestTestCollector<'_> {
     }
 
     fn remove_fixture_output(_case_str: &str, mut lines: Vec<String>) -> Vec<String> {
-        let start_re = Regex::new("=+ FAILURES =+").unwrap();
-        let end_re = Regex::new("=+ short test summary info =+").unwrap();
+        let start_re = regex!("=+ FAILURES =+");
+        let end_re = regex!("=+ short test summary info =+");
 
         if let Some(pos) = lines.iter().position(|s| start_re.is_match(s.as_str())) {
             lines = lines[(pos + 2)..].to_vec();
