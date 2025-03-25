@@ -13,9 +13,6 @@ use globset::{Glob, GlobMatcher};
 use regex::Regex;
 use std::str::FromStr;
 
-#[cfg(test)]
-use regex_macro::{regex, LazyRegex};
-
 #[derive(From, Clone, Debug, PartialEq, Eq)]
 #[from(forward)]
 pub struct MatcherParameter(pub String);
@@ -60,32 +57,6 @@ impl MatcherParameter {
         })
         .map(Self)
     }
-}
-
-#[test]
-fn matcher_parameter_test() {
-    fn test_it(a: &str, b: &str) {
-        assert_eq!(
-            parse_str!(MatcherParameter, a),
-            Ok(MatcherParameter(b.into()))
-        );
-    }
-    test_it("[abc]", "abc");
-    test_it("{abc}", "abc");
-    test_it("<abc>", "abc");
-    test_it("[(hello)]", "(hello)");
-    test_it("((hello))", "(hello)");
-    test_it("(([hello]))", "([hello])");
-    test_it("(he[llo)", "he[llo");
-    test_it("()", "");
-    test_it("((()))", "(())");
-    test_it("((a)(b))", "(a)(b)");
-
-    fn test_err(a: &str) {
-        assert!(parse_str!(MatcherParameter, a).is_err());
-    }
-    test_err("[1)");
-    test_err("(((hello))");
 }
 
 pub fn err_construct<
@@ -135,13 +106,6 @@ impl GlobMatcherParameter {
 #[derive(Clone, Debug)]
 pub struct RegexMatcherParameter(pub Regex);
 
-#[cfg(test)]
-impl From<&LazyRegex> for RegexMatcherParameter {
-    fn from(r: &LazyRegex) -> Self {
-        Self((&**r).clone())
-    }
-}
-
 impl PartialEq for RegexMatcherParameter {
     fn eq(&self, other: &Self) -> bool {
         self.0.as_str() == other.0.as_str()
@@ -154,12 +118,6 @@ impl RegexMatcherParameter {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         err_construct(MatcherParameter::parser().map(|v| v.0), Regex::new).map(Self)
     }
-}
-
-#[test]
-fn regex_parser_test() {
-    parse_str!(RegexMatcherParameter, "/[a-z]/").unwrap();
-    parse_str!(RegexMatcherParameter, "/*/").unwrap_err();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -460,284 +418,327 @@ pub fn compile_filter(include_filter: &[String], exclude_filter: &[String]) -> R
     Ok(AndExpression::Diff(include.into(), Box::new(exclude.into())).into())
 }
 
-#[test]
-fn simple_expr() {
-    use SimpleSelectorName::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use regex_macro::{regex, LazyRegex};
 
-    fn test_it(a: &str, s: impl Into<SimpleExpression>) {
-        assert_eq!(parse_str!(SimpleExpression, a), Ok(s.into()));
-    }
-    test_it("all", All);
-    test_it("all()", All);
-    test_it("any", Any);
-    test_it("any()", Any);
-    test_it("true", True);
-    test_it("true()", True);
-    test_it("none", None);
-    test_it("none()", None);
-    test_it("false", False);
-    test_it("false()", False);
-
-    fn test_it_err(a: &str) {
-        assert!(parse_str!(SimpleExpression, a).is_err());
-    }
-    for n in ["name", "package"] {
-        test_it_err(n);
-        test_it_err(&format!("{n}()"));
-    }
-}
-
-#[test]
-fn simple_expr_prefix() {
-    use SimpleSelectorName::*;
-
-    fn test_it(a: &str, min: usize, s: impl Into<SimpleExpression>) {
-        let expected = s.into();
-        for i in min..=a.len() {
-            assert_eq!(parse_str!(SimpleExpression, &a[..i]), Ok(expected.clone()));
+    impl From<&LazyRegex> for RegexMatcherParameter {
+        fn from(r: &LazyRegex) -> Self {
+            Self((&**r).clone())
         }
     }
 
-    test_it("all", 2, All);
-    test_it("any", 2, Any);
-    test_it("true", 2, True);
-    test_it("none", 1, None);
-    test_it("false", 1, False);
-}
-
-#[test]
-fn simple_expr_compound() {
-    use CompoundSelectorName::*;
-    use Matcher::*;
-
-    fn test_it(a: &str, name: CompoundSelectorName, matcher: Matcher) {
-        assert_eq!(
-            parse_str!(SimpleExpression, a),
-            Ok(CompoundSelector { name, matcher }.into())
-        );
-    }
-    test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
-    test_it(
-        "package_import_path.ends_with[hey?]",
-        PackageImportPath,
-        EndsWith("hey?".into()),
-    );
-    test_it(
-        "package_path.ends_with[hey?]",
-        PackagePath,
-        EndsWith("hey?".into()),
-    );
-    test_it(
-        "package_name.ends_with[hey?]",
-        PackageName,
-        EndsWith("hey?".into()),
-    );
-}
-
-#[test]
-fn simple_expr_compound_prefix() {
-    use CompoundSelectorName::*;
-    use Matcher::*;
-
-    fn test_it(a: &str, name: CompoundSelectorName, matcher: Matcher) {
-        assert_eq!(
-            parse_str!(SimpleExpression, a),
-            Ok(CompoundSelector { name, matcher }.into())
-        );
-    }
-
-    test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
-    test_it("n.matches<foo>", Name, Matches(regex!("foo").into()));
-    test_it(
-        "p.ends_with[hey?]",
-        PackageImportPath,
-        EndsWith("hey?".into()),
-    );
-    test_it(
-        "package.ends_with[hey?]",
-        PackageImportPath,
-        EndsWith("hey?".into()),
-    );
-
-    test_it(
-        "package_p.ends_with[hey?]",
-        PackagePath,
-        EndsWith("hey?".into()),
-    );
-    test_it(
-        "package_n.ends_with[hey?]",
-        PackageName,
-        EndsWith("hey?".into()),
-    );
-}
-
-#[test]
-fn matcher_prefixes() {
-    use CompoundSelectorName::*;
-    use Matcher::*;
-
-    fn test_it(matcher_name: &str, min: usize, matcher: Matcher) {
-        for i in min..=matcher_name.len() {
-            let e = format!("name.{}<foo>", &matcher_name[..i]);
+    #[test]
+    fn matcher_parameter_test() {
+        fn test_it(a: &str, b: &str) {
             assert_eq!(
-                parse_str!(SimpleExpression, e.as_str()),
-                Ok(CompoundSelector {
-                    name: Name,
-                    matcher: matcher.clone()
-                }
-                .into())
+                parse_str!(MatcherParameter, a),
+                Ok(MatcherParameter(b.into()))
             );
         }
+        test_it("[abc]", "abc");
+        test_it("{abc}", "abc");
+        test_it("<abc>", "abc");
+        test_it("[(hello)]", "(hello)");
+        test_it("((hello))", "(hello)");
+        test_it("(([hello]))", "([hello])");
+        test_it("(he[llo)", "he[llo");
+        test_it("()", "");
+        test_it("((()))", "(())");
+        test_it("((a)(b))", "(a)(b)");
+
+        fn test_err(a: &str) {
+            assert!(parse_str!(MatcherParameter, a).is_err());
+        }
+        test_err("[1)");
+        test_err("(((hello))");
     }
 
-    test_it("matches", 1, Matches(regex!("foo").into()));
-    test_it("equals", 2, Equals("foo".into()));
-    test_it("starts_with", 1, StartsWith("foo".into()));
-    test_it("ends_with", 2, EndsWith("foo".into()));
-    test_it("contains", 1, Contains("foo".into()));
-}
-
-#[test]
-fn pattern_simple_boolean_expr() {
-    fn test_it(a: &str, pattern: impl Into<Pattern>) {
-        assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
+    #[test]
+    fn regex_parser_test() {
+        parse_str!(RegexMatcherParameter, "/[a-z]/").unwrap();
+        parse_str!(RegexMatcherParameter, "/*/").unwrap_err();
     }
-    test_it(
-        "!all",
-        NotExpression::Not(Box::new(SimpleSelectorName::All.into())),
-    );
-    test_it(
-        "all && any",
-        AndExpression::And(
-            SimpleSelectorName::All.into(),
-            Box::new(SimpleSelectorName::Any.into()),
-        ),
-    );
-    test_it(
-        "all || any",
-        OrExpression::Or(
-            SimpleSelectorName::All.into(),
-            Box::new(SimpleSelectorName::Any.into()),
-        ),
-    );
-}
 
-#[test]
-fn pattern_longer_boolean_expr() {
-    fn test_it(a: &str, pattern: impl Into<Pattern>) {
-        assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
+    #[test]
+    fn simple_expr() {
+        use SimpleSelectorName::*;
+
+        fn test_it(a: &str, s: impl Into<SimpleExpression>) {
+            assert_eq!(parse_str!(SimpleExpression, a), Ok(s.into()));
+        }
+        test_it("all", All);
+        test_it("all()", All);
+        test_it("any", Any);
+        test_it("any()", Any);
+        test_it("true", True);
+        test_it("true()", True);
+        test_it("none", None);
+        test_it("none()", None);
+        test_it("false", False);
+        test_it("false()", False);
+
+        fn test_it_err(a: &str) {
+            assert!(parse_str!(SimpleExpression, a).is_err());
+        }
+        for n in ["name", "package"] {
+            test_it_err(n);
+            test_it_err(&format!("{n}()"));
+        }
     }
-    test_it(
-        "all || any || none",
-        OrExpression::Or(
-            SimpleSelectorName::All.into(),
-            Box::new(OrExpression::Or(
-                SimpleSelectorName::Any.into(),
-                Box::new(SimpleSelectorName::None.into()),
-            )),
-        ),
-    );
-    test_it(
-        "all || any && none",
-        OrExpression::Or(
-            SimpleSelectorName::All.into(),
-            Box::new(
-                AndExpression::And(
-                    SimpleSelectorName::Any.into(),
-                    Box::new(SimpleSelectorName::None.into()),
-                )
-                .into(),
-            ),
-        ),
-    );
-    test_it(
-        "all && any || none",
-        OrExpression::Or(
+
+    #[test]
+    fn simple_expr_prefix() {
+        use SimpleSelectorName::*;
+
+        fn test_it(a: &str, min: usize, s: impl Into<SimpleExpression>) {
+            let expected = s.into();
+            for i in min..=a.len() {
+                assert_eq!(parse_str!(SimpleExpression, &a[..i]), Ok(expected.clone()));
+            }
+        }
+
+        test_it("all", 2, All);
+        test_it("any", 2, Any);
+        test_it("true", 2, True);
+        test_it("none", 1, None);
+        test_it("false", 1, False);
+    }
+
+    #[test]
+    fn simple_expr_compound() {
+        use CompoundSelectorName::*;
+        use Matcher::*;
+
+        fn test_it(a: &str, name: CompoundSelectorName, matcher: Matcher) {
+            assert_eq!(
+                parse_str!(SimpleExpression, a),
+                Ok(CompoundSelector { name, matcher }.into())
+            );
+        }
+        test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
+        test_it(
+            "package_import_path.ends_with[hey?]",
+            PackageImportPath,
+            EndsWith("hey?".into()),
+        );
+        test_it(
+            "package_path.ends_with[hey?]",
+            PackagePath,
+            EndsWith("hey?".into()),
+        );
+        test_it(
+            "package_name.ends_with[hey?]",
+            PackageName,
+            EndsWith("hey?".into()),
+        );
+    }
+
+    #[test]
+    fn simple_expr_compound_prefix() {
+        use CompoundSelectorName::*;
+        use Matcher::*;
+
+        fn test_it(a: &str, name: CompoundSelectorName, matcher: Matcher) {
+            assert_eq!(
+                parse_str!(SimpleExpression, a),
+                Ok(CompoundSelector { name, matcher }.into())
+            );
+        }
+
+        test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
+        test_it("n.matches<foo>", Name, Matches(regex!("foo").into()));
+        test_it(
+            "p.ends_with[hey?]",
+            PackageImportPath,
+            EndsWith("hey?".into()),
+        );
+        test_it(
+            "package.ends_with[hey?]",
+            PackageImportPath,
+            EndsWith("hey?".into()),
+        );
+
+        test_it(
+            "package_p.ends_with[hey?]",
+            PackagePath,
+            EndsWith("hey?".into()),
+        );
+        test_it(
+            "package_n.ends_with[hey?]",
+            PackageName,
+            EndsWith("hey?".into()),
+        );
+    }
+
+    #[test]
+    fn matcher_prefixes() {
+        use CompoundSelectorName::*;
+        use Matcher::*;
+
+        fn test_it(matcher_name: &str, min: usize, matcher: Matcher) {
+            for i in min..=matcher_name.len() {
+                let e = format!("name.{}<foo>", &matcher_name[..i]);
+                assert_eq!(
+                    parse_str!(SimpleExpression, e.as_str()),
+                    Ok(CompoundSelector {
+                        name: Name,
+                        matcher: matcher.clone()
+                    }
+                    .into())
+                );
+            }
+        }
+
+        test_it("matches", 1, Matches(regex!("foo").into()));
+        test_it("equals", 2, Equals("foo".into()));
+        test_it("starts_with", 1, StartsWith("foo".into()));
+        test_it("ends_with", 2, EndsWith("foo".into()));
+        test_it("contains", 1, Contains("foo".into()));
+    }
+
+    #[test]
+    fn pattern_simple_boolean_expr() {
+        fn test_it(a: &str, pattern: impl Into<Pattern>) {
+            assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
+        }
+        test_it(
+            "!all",
+            NotExpression::Not(Box::new(SimpleSelectorName::All.into())),
+        );
+        test_it(
+            "all && any",
             AndExpression::And(
                 SimpleSelectorName::All.into(),
                 Box::new(SimpleSelectorName::Any.into()),
             ),
-            Box::new(SimpleSelectorName::None.into()),
-        ),
-    );
-}
-
-#[test]
-fn pattern_complicated_boolean_expr() {
-    fn test_it(a: &str, pattern: impl Into<Pattern>) {
-        assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
-    }
-    test_it(
-        "( all || any ) && none - false",
-        AndExpression::And(
+        );
+        test_it(
+            "all || any",
             OrExpression::Or(
                 SimpleSelectorName::All.into(),
                 Box::new(SimpleSelectorName::Any.into()),
-            )
-            .into(),
-            Box::new(AndExpression::Diff(
-                SimpleSelectorName::None.into(),
-                Box::new(SimpleSelectorName::False.into()),
-            )),
-        ),
-    );
-    test_it(
-        "!( all || any ) && none",
-        AndExpression::And(
-            NotExpression::Not(Box::new(
-                OrExpression::Or(
-                    SimpleSelectorName::All.into(),
-                    Box::new(SimpleSelectorName::Any.into()),
-                )
-                .into(),
-            )),
-            Box::new(SimpleSelectorName::None.into()),
-        ),
-    );
-
-    test_it(
-        "not ( all or any ) and none minus false",
-        AndExpression::And(
-            NotExpression::Not(Box::new(
-                OrExpression::Or(
-                    SimpleSelectorName::All.into(),
-                    Box::new(SimpleSelectorName::Any.into()),
-                )
-                .into(),
-            )),
-            Box::new(AndExpression::Diff(
-                SimpleSelectorName::None.into(),
-                Box::new(SimpleSelectorName::False.into()),
-            )),
-        ),
-    );
-}
-
-#[test]
-fn pattern_complicated_boolean_expr_compound() {
-    fn test_it(a: &str, pattern: impl Into<Pattern>) {
-        assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
+            ),
+        );
     }
 
-    test_it(
-        "package.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/",
-        AndExpression::And(
-            CompoundSelector {
-                name: CompoundSelectorName::PackageImportPath,
-                matcher: Matcher::StartsWith("hi".into()),
-            }
-            .into(),
-            Box::new(
+    #[test]
+    fn pattern_longer_boolean_expr() {
+        fn test_it(a: &str, pattern: impl Into<Pattern>) {
+            assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
+        }
+        test_it(
+            "all || any || none",
+            OrExpression::Or(
+                SimpleSelectorName::All.into(),
+                Box::new(OrExpression::Or(
+                    SimpleSelectorName::Any.into(),
+                    Box::new(SimpleSelectorName::None.into()),
+                )),
+            ),
+        );
+        test_it(
+            "all || any && none",
+            OrExpression::Or(
+                SimpleSelectorName::All.into(),
+                Box::new(
+                    AndExpression::And(
+                        SimpleSelectorName::Any.into(),
+                        Box::new(SimpleSelectorName::None.into()),
+                    )
+                    .into(),
+                ),
+            ),
+        );
+        test_it(
+            "all && any || none",
+            OrExpression::Or(
+                AndExpression::And(
+                    SimpleSelectorName::All.into(),
+                    Box::new(SimpleSelectorName::Any.into()),
+                ),
+                Box::new(SimpleSelectorName::None.into()),
+            ),
+        );
+    }
+
+    #[test]
+    fn pattern_complicated_boolean_expr() {
+        fn test_it(a: &str, pattern: impl Into<Pattern>) {
+            assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
+        }
+        test_it(
+            "( all || any ) && none - false",
+            AndExpression::And(
+                OrExpression::Or(
+                    SimpleSelectorName::All.into(),
+                    Box::new(SimpleSelectorName::Any.into()),
+                )
+                .into(),
+                Box::new(AndExpression::Diff(
+                    SimpleSelectorName::None.into(),
+                    Box::new(SimpleSelectorName::False.into()),
+                )),
+            ),
+        );
+        test_it(
+            "!( all || any ) && none",
+            AndExpression::And(
+                NotExpression::Not(Box::new(
+                    OrExpression::Or(
+                        SimpleSelectorName::All.into(),
+                        Box::new(SimpleSelectorName::Any.into()),
+                    )
+                    .into(),
+                )),
+                Box::new(SimpleSelectorName::None.into()),
+            ),
+        );
+
+        test_it(
+            "not ( all or any ) and none minus false",
+            AndExpression::And(
+                NotExpression::Not(Box::new(
+                    OrExpression::Or(
+                        SimpleSelectorName::All.into(),
+                        Box::new(SimpleSelectorName::Any.into()),
+                    )
+                    .into(),
+                )),
+                Box::new(AndExpression::Diff(
+                    SimpleSelectorName::None.into(),
+                    Box::new(SimpleSelectorName::False.into()),
+                )),
+            ),
+        );
+    }
+
+    #[test]
+    fn pattern_complicated_boolean_expr_compound() {
+        fn test_it(a: &str, pattern: impl Into<Pattern>) {
+            assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
+        }
+
+        test_it(
+            "package.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/",
+            AndExpression::And(
                 CompoundSelector {
-                    name: CompoundSelectorName::Name,
-                    matcher: Matcher::Matches(regex!("([a-z]+::)*[a-z]+").into()),
+                    name: CompoundSelectorName::PackageImportPath,
+                    matcher: Matcher::StartsWith("hi".into()),
                 }
                 .into(),
+                Box::new(
+                    CompoundSelector {
+                        name: CompoundSelectorName::Name,
+                        matcher: Matcher::Matches(regex!("([a-z]+::)*[a-z]+").into()),
+                    }
+                    .into(),
+                ),
             ),
-        ),
-    );
+        );
 
-    test_it(
+        test_it(
         "( package.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/ ) || package.ends_with(jo)",
         OrExpression::Or(
             NotExpression::Simple(
@@ -767,4 +768,5 @@ fn pattern_complicated_boolean_expr_compound() {
             ),
         ),
     );
+    }
 }
