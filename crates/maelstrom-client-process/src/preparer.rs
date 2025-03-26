@@ -1,3 +1,20 @@
+//! This module contains the [`Preparer`] struct and its related types.
+//!
+//! The Job of the `Preparer` is to take [`maelstrom_client_base::spec::JobSpec`]s (which are
+//! called [`ClientJobSpec`]s in this module) and turn them into [`maelstrom_base::JobSpec`]s.
+//!
+//! This requires the `Preparer` do a few things.
+//!
+//! First, inheritance chain defined by the `parent` field of the [`ClientJobSpec`], it's `parent`,
+//! and so on needs to be "collapsed" down into a single [`CollapsedJobSpec`].
+//!
+//! Second, if the `JobSpec` is based on an image, the image must be fetched before building the
+//! `JobSpec` can be completed.
+//!
+//! Third, [`LayerSpec`]s need to be turned into [`Sha256Digest`]s by "building" the layers. Note,
+//! images' layers are treated as [`LayerSpec::Tar`]s. They also need to be "built" once the image
+//! is fetched.
+
 pub mod task;
 
 use crate::collapsed_job_spec::CollapsedJobSpec;

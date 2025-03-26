@@ -23,7 +23,7 @@ use std::{collections::BTreeMap, mem, time::Duration};
 /// collapsed into a single struct. In that regard, it much more closely resembles
 /// [`maelstrom_base::JobSpec`] than it does [`maelstrom_client_base::spec::JobSpec`].
 ///
-/// However, it is different in the sense that tracks if an image needs to be fetched, and if so,
+/// However, it is different in the sense that it tracks if an image needs to be fetched, and if so,
 /// what aspects of that image need to be integrated into the job spec. It also keeps tracks some
 /// fields separately to make the job of the [`crate::preparer::Preparer`] easier.
 #[derive(Debug, Eq, PartialEq)]
