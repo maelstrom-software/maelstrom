@@ -955,6 +955,7 @@ pub enum LayerSpec {
     Stubs(StubsLayerSpec),
     Symlinks(SymlinksLayerSpec),
     SharedLibraryDependencies(SharedLibraryDependenciesLayerSpec),
+    Program(ProgramLayerSpec),
 }
 
 enum LayerSpecType {
@@ -964,6 +965,7 @@ enum LayerSpecType {
     Stubs,
     Symlinks,
     SharedLibraryDependencies,
+    Program,
 }
 
 #[derive(
@@ -1146,6 +1148,43 @@ macro_rules! shared_library_dependencies_layer_spec {
     };
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    IntoProtoBuf,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    TryFromProtoBuf,
+)]
+#[proto(proto_buf_type = proto::ProgramLayer)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramLayerSpec {
+    pub program: Utf8PathBuf,
+    #[serde(default)]
+    pub arguments: Vec<String>,
+}
+
+#[macro_export]
+macro_rules! program_layer_spec {
+    ($program:expr $(,)?) => {
+        $crate::spec::LayerSpec::Program($crate::spec::ProgramLayerSpec {
+            program: $program.into(),
+            arguments: ::std::default::Default::default(),
+        })
+    };
+    ($program:expr, $($arguments:tt)+) => {
+        $crate::spec::LayerSpec::Program($crate::spec::ProgramLayerSpec {
+            program: $program.into(),
+            arguments: [$($arguments)+].into_iter().map(Into::into).collect(),
+        })
+    };
+}
+
 impl<'de> Deserialize<'de> for LayerSpec {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let content = Content::deserialize(deserializer)?;
@@ -1162,6 +1201,7 @@ impl<'de> Deserialize<'de> for LayerSpec {
                 "stubs" => Some(LayerSpecType::Stubs),
                 "symlinks" => Some(LayerSpecType::Symlinks),
                 "shared_library_dependencies" => Some(LayerSpecType::SharedLibraryDependencies),
+                "program" => Some(LayerSpecType::Program),
                 _ => None,
             })
         }) else {
@@ -1179,6 +1219,9 @@ impl<'de> Deserialize<'de> for LayerSpec {
             LayerSpecType::SharedLibraryDependencies => {
                 SharedLibraryDependenciesLayerSpec::deserialize(deserializer)
                     .map(Self::SharedLibraryDependencies)
+            }
+            LayerSpecType::Program => {
+                ProgramLayerSpec::deserialize(deserializer).map(Self::Program)
             }
         }
     }
@@ -1213,6 +1256,7 @@ impl LayerSpec {
                     *path = vars.replace(path)?.into();
                 }
             }
+            Self::Program(_) => {}
         }
         Ok(())
     }
@@ -3171,6 +3215,40 @@ mod tests {
             }
         }
 
+        mod program {
+            use super::*;
+
+            #[test]
+            fn program_without_arguments() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        program = "touch"
+                    "#}),
+                    program_layer_spec!("touch"),
+                );
+            }
+
+            #[test]
+            fn program_with_arguments() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        program = "cp"
+                        arguments = ["foo", "bar"]
+                    "#}),
+                    program_layer_spec!("cp", "foo", "bar"),
+                );
+            }
+
+            #[test]
+            fn unknown_field() {
+                assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
+                    program = "touch"
+                    foo_bar_baz = 3
+                "#})
+                .contains("unknown field `foo_bar_baz`"));
+            }
+        }
+
         mod replace_template_variables {
             use super::*;
 
@@ -3247,6 +3325,17 @@ mod tests {
                     symlinks_layer_spec!([
                         symlink_spec!("foo-value/symlink" => "bar-value/target")
                     ]),
+                );
+            }
+
+            #[test]
+            fn program() {
+                replace_template_variables_test(
+                    indoc! {r#"
+                        program = "cp"
+                        arguments = ["foo", "bar"]
+                    "#},
+                    program_layer_spec!("cp", "foo", "bar"),
                 );
             }
         }

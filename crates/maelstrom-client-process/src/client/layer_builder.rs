@@ -316,6 +316,9 @@ impl LayerBuilder {
                     .await?;
                 (manifest_path, ArtifactType::Manifest)
             }
+            LayerSpec::Program(_) => {
+                todo!("program layers");
+            }
         })
     }
 }
