@@ -10,6 +10,7 @@ pub mod clap;
 pub mod config;
 pub mod duration;
 pub mod elf;
+pub mod executor;
 pub mod ext;
 pub mod fs;
 pub mod heap;
