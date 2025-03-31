@@ -4,9 +4,10 @@ use std::{fmt::Debug, hash::Hash, mem, num::NonZeroUsize};
 pub trait Deps {
     type CompletedHandle;
     type Tag: Debug + Eq + Hash;
+    type State;
     type Output;
 
-    fn start(&self, tag: &Self::Tag, inputs: Vec<&Self::Output>);
+    fn start(&self, tag: &Self::Tag, state: &Self::State, inputs: Vec<&Self::Output>);
     fn completed(&self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
 }
 
@@ -24,19 +25,25 @@ enum EvaluationState<DepsT: Deps> {
     },
 }
 
-struct EvaluationEntry {
+struct EvaluationEntry<DepsT: Deps> {
     in_edges: Vec<usize>,
     out_edges: Vec<usize>,
+    state: DepsT::State,
 }
 
 #[derive(Default)]
 pub struct Executor<DepsT: Deps> {
-    evaluations: IndexMap<DepsT::Tag, EvaluationEntry>,
+    evaluations: IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
     states: Vec<EvaluationState<DepsT>>,
 }
 
 impl<DepsT: Deps> Executor<DepsT> {
-    pub fn add(&mut self, tag: DepsT::Tag, inputs: impl IntoIterator<Item = DepsT::Tag>) {
+    pub fn add(
+        &mut self,
+        tag: DepsT::Tag,
+        state: DepsT::State,
+        inputs: impl IntoIterator<Item = DepsT::Tag>,
+    ) {
         if !self.evaluations.contains_key(&tag) {
             let in_edges = inputs
                 .into_iter()
@@ -53,6 +60,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 EvaluationEntry {
                     in_edges: in_edges.clone(),
                     out_edges: Default::default(),
+                    state,
                 },
             );
             self.states.push(EvaluationState::NotStarted);
@@ -66,7 +74,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         deps: &mut DepsT,
         states: &[EvaluationState<DepsT>],
         tag: &DepsT::Tag,
-        entry: &EvaluationEntry,
+        entry: &EvaluationEntry<DepsT>,
     ) {
         let inputs = entry
             .in_edges
@@ -78,12 +86,12 @@ impl<DepsT: Deps> Executor<DepsT> {
                 output
             })
             .collect();
-        deps.start(tag, inputs);
+        deps.start(tag, &entry.state, inputs);
     }
 
     fn ensure_started_and_get_completed(
         deps: &mut DepsT,
-        evaluations: &IndexMap<DepsT::Tag, EvaluationEntry>,
+        evaluations: &IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
         states: &mut [EvaluationState<DepsT>],
         index: usize,
     ) -> bool {
@@ -181,7 +189,7 @@ mod tests {
 
     #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
     enum TestMessage {
-        Start(&'static str, Vec<char>),
+        Start(&'static str, &'static str, Vec<char>),
         Completed(i64, &'static str, char),
     }
 
@@ -194,10 +202,12 @@ mod tests {
         type Tag = &'static str;
         type CompletedHandle = i64;
         type Output = char;
+        type State = &'static str;
 
-        fn start(&self, tag: &Self::Tag, inputs: Vec<&Self::Output>) {
+        fn start(&self, tag: &Self::Tag, state: &Self::State, inputs: Vec<&Self::Output>) {
             self.borrow_mut().messages.push(TestMessage::Start(
                 tag,
+                state,
                 inputs.into_iter().copied().collect(),
             ));
         }
@@ -266,9 +276,9 @@ mod tests {
     script_test! {
         no_dependencies,
         Fixture::new(),
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a", "a-state", []) => {};
         |e, d| e.evaluate(d, 1, &"a") => {
-            Start("a", vec![]),
+            Start("a", "a-state", vec![]),
         };
         |e, d| e.evaluate(d, 2, &"a") => {};
         |e, d| e.receive_completed(d, &"a", 'a') => {
@@ -283,16 +293,16 @@ mod tests {
     script_test! {
         adding_multiple_times,
         Fixture::new(),
-        |e, _| e.add("a", []) => {};
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a", "a-state", []) => {};
+        |e, _| e.add("a", "a-state-2", []) => {};
         |e, d| e.evaluate(d, 1, &"a") => {
-            Start("a", vec![]),
+            Start("a", "a-state", vec![]),
         };
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a", "a-state-3", []) => {};
         |e, d| e.receive_completed(d, &"a", 'a') => {
             Completed(1, "a", 'a'),
         };
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a", "a-state-4", []) => {};
         |e, d| e.evaluate(d, 2, &"a") => {
             Completed(2, "a", 'a'),
         };
@@ -301,26 +311,26 @@ mod tests {
     script_test! {
         inputs,
         Fixture::new(),
-        |e, _| e.add("e", []) => {};
-        |e, _| e.add("d", ["e"]) => {};
-        |e, _| e.add("c", []) => {};
-        |e, _| e.add("b", ["d", "c"]) => {};
-        |e, _| e.add("a", ["b", "c"]) => {};
+        |e, _| e.add("e", "e-state", []) => {};
+        |e, _| e.add("d", "d-state", ["e"]) => {};
+        |e, _| e.add("c", "c-state", []) => {};
+        |e, _| e.add("b", "b-state", ["d", "c"]) => {};
+        |e, _| e.add("a", "a-state", ["b", "c"]) => {};
         |e, d| e.evaluate(d, 1, &"a") => {
-            Start("c", vec![]),
-            Start("e", vec![]),
+            Start("c", "c-state", vec![]),
+            Start("e", "e-state", vec![]),
         };
         |e, d| e.evaluate(d, 2, &"a") => {};
         |e, d| e.evaluate(d, 3, &"b") => {};
         |e, d| e.receive_completed(d, &"e", 'e') => {
-            Start("d", vec!['e']),
+            Start("d", "d-state", vec!['e']),
         };
         |e, d| e.receive_completed(d, &"c", 'c') => {};
         |e, d| e.receive_completed(d, &"d", 'd') => {
-            Start("b", vec!['d', 'c']),
+            Start("b", "b-state", vec!['d', 'c']),
         };
         |e, d| e.receive_completed(d, &"b", 'b') => {
-            Start("a", vec!['b', 'c']),
+            Start("a", "a-state", vec!['b', 'c']),
             Completed(3, "b", 'b'),
         };
         |e, d| e.receive_completed(d, &"a", 'a') => {
