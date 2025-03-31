@@ -29,21 +29,13 @@ struct EvaluationEntry {
     out_edges: Vec<usize>,
 }
 
+#[derive(Default)]
 pub struct Executor<DepsT: Deps> {
-    deps: DepsT,
     evaluations: IndexMap<DepsT::Tag, EvaluationEntry>,
     states: Vec<EvaluationState<DepsT>>,
 }
 
 impl<DepsT: Deps> Executor<DepsT> {
-    pub fn new(deps: DepsT) -> Self {
-        Self {
-            deps,
-            evaluations: Default::default(),
-            states: Default::default(),
-        }
-    }
-
     pub fn add(&mut self, tag: DepsT::Tag, inputs: impl IntoIterator<Item = DepsT::Tag>) {
         if !self.evaluations.contains_key(&tag) {
             let in_edges = inputs
@@ -127,14 +119,9 @@ impl<DepsT: Deps> Executor<DepsT> {
         }
     }
 
-    pub fn evaluate(&mut self, handle: DepsT::CompletedHandle, tag: &DepsT::Tag) {
+    pub fn evaluate(&mut self, deps: &mut DepsT, handle: DepsT::CompletedHandle, tag: &DepsT::Tag) {
         let index = self.evaluations.get_index_of(tag).unwrap();
-        Self::ensure_started_and_get_completed(
-            &mut self.deps,
-            &self.evaluations,
-            &mut self.states,
-            index,
-        );
+        Self::ensure_started_and_get_completed(deps, &self.evaluations, &mut self.states, index);
         match &mut self.states[index] {
             EvaluationState::NotStarted => {
                 panic!("unexpected state");
@@ -144,12 +131,12 @@ impl<DepsT: Deps> Executor<DepsT> {
                 handles.push(handle);
             }
             EvaluationState::Completed { output } => {
-                self.deps.completed(handle, tag, output);
+                deps.completed(handle, tag, output);
             }
         }
     }
 
-    pub fn receive_completed(&mut self, tag: &DepsT::Tag, output: DepsT::Output) {
+    pub fn receive_completed(&mut self, deps: &mut DepsT, tag: &DepsT::Tag, output: DepsT::Output) {
         let (index, _, entry) = self.evaluations.get_full(tag).unwrap();
         let state = &mut self.states[index];
         let EvaluationState::Running { handles: waiting } =
@@ -161,7 +148,7 @@ impl<DepsT: Deps> Executor<DepsT> {
             panic!("unexpected state");
         };
         for handle in waiting {
-            self.deps.completed(handle, tag, output);
+            deps.completed(handle, tag, output);
         }
 
         for out_edge_index in &entry.out_edges {
@@ -179,7 +166,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     };
                     let (out_edge_tag, out_edge_entry) =
                         self.evaluations.get_index(*out_edge_index).unwrap();
-                    Self::start(&mut self.deps, &self.states, out_edge_tag, out_edge_entry);
+                    Self::start(deps, &self.states, out_edge_tag, out_edge_entry);
                 }
             }
         }
@@ -229,13 +216,17 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
-            let test_state = Rc::new(RefCell::new(Default::default()));
-            let sut = Executor::new(test_state.clone());
-            Self { test_state, sut }
+            Self {
+                test_state: Rc::new(RefCell::new(Default::default())),
+                sut: Executor::default(),
+            }
         }
 
-        fn call_method(&mut self, method: impl FnOnce(&mut Executor<Rc<RefCell<TestState>>>)) {
-            method(&mut self.sut);
+        fn call_method(
+            &mut self,
+            method: impl FnOnce(&mut Executor<Rc<RefCell<TestState>>>, &mut Rc<RefCell<TestState>>),
+        ) {
+            method(&mut self.sut, &mut self.test_state);
         }
 
         fn expect_messages_in_any_order(&mut self, mut expected: Vec<TestMessage>) {
@@ -275,16 +266,16 @@ mod tests {
     script_test! {
         no_dependencies,
         Fixture::new(),
-        |e| e.add("a", []) => {};
-        |e| e.evaluate(1, &"a") => {
+        |e, _| e.add("a", []) => {};
+        |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", vec![]),
         };
-        |e| e.evaluate(2, &"a") => {};
-        |e| e.receive_completed(&"a", 'a') => {
+        |e, d| e.evaluate(d, 2, &"a") => {};
+        |e, d| e.receive_completed(d, &"a", 'a') => {
             Completed(1, "a", 'a'),
             Completed(2, "a", 'a'),
         };
-        |e| e.evaluate(3, &"a") => {
+        |e, d| e.evaluate(d, 3, &"a") => {
             Completed(3, "a", 'a'),
         };
     }
@@ -292,17 +283,17 @@ mod tests {
     script_test! {
         adding_multiple_times,
         Fixture::new(),
-        |e| e.add("a", []) => {};
-        |e| e.add("a", []) => {};
-        |e| e.evaluate(1, &"a") => {
+        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a", []) => {};
+        |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", vec![]),
         };
-        |e| e.add("a", []) => {};
-        |e| e.receive_completed(&"a", 'a') => {
+        |e, _| e.add("a", []) => {};
+        |e, d| e.receive_completed(d, &"a", 'a') => {
             Completed(1, "a", 'a'),
         };
-        |e| e.add("a", []) => {};
-        |e| e.evaluate(2, &"a") => {
+        |e, _| e.add("a", []) => {};
+        |e, d| e.evaluate(d, 2, &"a") => {
             Completed(2, "a", 'a'),
         };
     }
@@ -310,29 +301,29 @@ mod tests {
     script_test! {
         inputs,
         Fixture::new(),
-        |e| e.add("e", []) => {};
-        |e| e.add("d", ["e"]) => {};
-        |e| e.add("c", []) => {};
-        |e| e.add("b", ["d", "c"]) => {};
-        |e| e.add("a", ["b", "c"]) => {};
-        |e| e.evaluate(1, &"a") => {
+        |e, _| e.add("e", []) => {};
+        |e, _| e.add("d", ["e"]) => {};
+        |e, _| e.add("c", []) => {};
+        |e, _| e.add("b", ["d", "c"]) => {};
+        |e, _| e.add("a", ["b", "c"]) => {};
+        |e, d| e.evaluate(d, 1, &"a") => {
             Start("c", vec![]),
             Start("e", vec![]),
         };
-        |e| e.evaluate(2, &"a") => {};
-        |e| e.evaluate(3, &"b") => {};
-        |e| e.receive_completed(&"e", 'e') => {
+        |e, d| e.evaluate(d, 2, &"a") => {};
+        |e, d| e.evaluate(d, 3, &"b") => {};
+        |e, d| e.receive_completed(d, &"e", 'e') => {
             Start("d", vec!['e']),
         };
-        |e| e.receive_completed(&"c", 'c') => {};
-        |e| e.receive_completed(&"d", 'd') => {
+        |e, d| e.receive_completed(d, &"c", 'c') => {};
+        |e, d| e.receive_completed(d, &"d", 'd') => {
             Start("b", vec!['d', 'c']),
         };
-        |e| e.receive_completed(&"b", 'b') => {
+        |e, d| e.receive_completed(d, &"b", 'b') => {
             Start("a", vec!['b', 'c']),
             Completed(3, "b", 'b'),
         };
-        |e| e.receive_completed(&"a", 'a') => {
+        |e, d| e.receive_completed(d, &"a", 'a') => {
             Completed(1, "a", 'a'),
             Completed(2, "a", 'a'),
         };
