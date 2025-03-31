@@ -100,8 +100,34 @@ impl StringError {
     }
 }
 
+impl error::Error for StringError {}
+
+struct ByteSizeVisitor;
+impl Visitor<'_> for ByteSizeVisitor {
+    type Value = ByteSize;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("an integer or string")
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(ByteSize(value))
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(ByteSize(value.try_into().map_err(de::Error::custom)?))
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        ByteSize::from_str(v).map_err(de::Error::custom)
+    }
+}
+
 macro_rules! byte_size_u64_from_impls {
-    ($name:ident) => {
+    ($name:ident, $default:expr) => {
         impl From<$name> for u64 {
             fn from(l: $name) -> u64 {
                 (l.0).0
@@ -123,13 +149,25 @@ macro_rules! byte_size_u64_from_impls {
             }
         }
 
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                <Self as fmt::Display>::fmt(self, f)
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.display().si().fmt(f)
+            }
+        }
+
         impl Serialize for $name {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
                 if serializer.is_human_readable() {
-                    <str>::serialize(self.0.to_string().as_str(), serializer)
+                    <str>::serialize(self.0.display().si().to_string().as_str(), serializer)
                 } else {
                     self.0 .0.serialize(serializer)
                 }
@@ -141,29 +179,6 @@ macro_rules! byte_size_u64_from_impls {
             where
                 D: Deserializer<'de>,
             {
-                struct ByteSizeVisitor;
-                impl Visitor<'_> for ByteSizeVisitor {
-                    type Value = ByteSize;
-
-                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str("an integer or string")
-                    }
-
-                    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-                        Ok(ByteSize(value))
-                    }
-
-                    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-                        Ok(ByteSize(value.try_into().map_err(de::Error::custom)?))
-                    }
-
-                    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-                    where
-                        E: de::Error,
-                    {
-                        ByteSize::from_str(v).map_err(de::Error::custom)
-                    }
-                }
                 (if deserializer.is_human_readable() {
                     deserializer.deserialize_any(ByteSizeVisitor)
                 } else {
@@ -172,24 +187,26 @@ macro_rules! byte_size_u64_from_impls {
                 .map($name)
             }
         }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self($default)
+            }
+        }
     };
 }
 
-impl error::Error for StringError {}
-
 #[pocket_definition(export)]
-#[derive(Clone, Copy, Debug, Display, Eq, PartialEq, From, Into)]
-#[debug("{_0:?}")]
-#[display("{_0}")]
+#[derive(Clone, Copy, Eq, PartialEq, From, Into)]
 pub struct CacheSize(ByteSize);
 
-byte_size_u64_from_impls!(CacheSize);
+byte_size_u64_from_impls!(CacheSize, ByteSize::gb(1));
 
-impl Default for CacheSize {
-    fn default() -> Self {
-        Self(ByteSize::gb(1))
-    }
-}
+#[pocket_definition(export)]
+#[derive(Clone, Copy, Eq, PartialEq, From, Into)]
+pub struct InlineLimit(ByteSize);
+
+byte_size_u64_from_impls!(InlineLimit, ByteSize::mb(1));
 
 #[derive(Clone, Copy, Debug, Deserialize, EnumString, Serialize, ValueEnum)]
 #[clap(rename_all = "kebab_case")]
@@ -210,20 +227,6 @@ impl LogLevel {
             LogLevel::Info => slog::Level::Info,
             LogLevel::Debug => slog::Level::Debug,
         }
-    }
-}
-
-#[pocket_definition(export)]
-#[derive(Clone, Copy, Debug, Display, Eq, PartialEq, From, Into)]
-#[debug("{_0:?}")]
-#[display("{_0}")]
-pub struct InlineLimit(ByteSize);
-
-byte_size_u64_from_impls!(InlineLimit);
-
-impl Default for InlineLimit {
-    fn default() -> Self {
-        Self(ByteSize::mb(1))
     }
 }
 
@@ -485,9 +488,9 @@ mod tests {
         );
         assert_eq!(
             format!("{:?}", CacheSize::from(ByteSize::b(1234))),
-            "1.2 KB"
+            "1.2 kB"
         );
-        assert_eq!(format!("{}", CacheSize::from(ByteSize::b(1234))), "1.2 KB");
+        assert_eq!(format!("{}", CacheSize::from(ByteSize::b(1234))), "1.2 kB");
         assert_eq!(
             CacheSize::from_str("10 MB").unwrap(),
             CacheSize::from(ByteSize::mb(10))
@@ -586,11 +589,11 @@ mod tests {
         );
         assert_eq!(
             format!("{:?}", InlineLimit::from(ByteSize::b(1234))),
-            "1.2 KB"
+            "1.2 kB"
         );
         assert_eq!(
             format!("{}", InlineLimit::from(ByteSize::b(1234))),
-            "1.2 KB"
+            "1.2 kB"
         );
         assert_eq!(
             InlineLimit::from_str("10 MB").unwrap(),
