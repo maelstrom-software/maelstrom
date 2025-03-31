@@ -26,6 +26,7 @@ futures.workspace = true
 get-size.workspace = true
 globset.workspace = true
 heck.workspace = true
+indexmap.workspace = true
 itertools.workspace = true
 lddtree.workspace = true
 lru.workspace = true
@@ -53,6 +54,7 @@ xdg.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+colored-diff.workspace = true
 concat-idents.workspace = true
 indoc.workspace = true
 maelstrom-simex.workspace = true
