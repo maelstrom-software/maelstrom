@@ -4,7 +4,7 @@ use derive_more::{Debug, Display, From, Into};
 use maelstrom_macro::pocket_definition;
 use serde::{
     de::{self, Deserializer, Visitor},
-    Deserialize, Serialize,
+    Deserialize, Serialize, Serializer,
 };
 use slog::Level;
 use std::{
@@ -63,7 +63,7 @@ impl From<BrokerAddr> for String {
 }
 
 impl<'de> Deserialize<'de> for BrokerAddr {
-    fn deserialize<D>(deserializer: D) -> Result<BrokerAddr, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -85,7 +85,7 @@ impl<'de> Deserialize<'de> for BrokerAddr {
         if deserializer.is_human_readable() {
             deserializer.deserialize_str(BrokerAddrVisitor)
         } else {
-            SocketAddr::deserialize(deserializer).map(BrokerAddr::new)
+            SocketAddr::deserialize(deserializer).map(Self::new)
         }
     }
 }
@@ -113,32 +113,81 @@ macro_rules! byte_size_u64_from_impls {
                 ByteSize(v).into()
             }
         }
+
+        impl FromStr for $name {
+            type Err = StringError;
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(Self(
+                    <ByteSize as FromStr>::from_str(s).map_err(StringError)?,
+                ))
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                if serializer.is_human_readable() {
+                    <str>::serialize(self.0.to_string().as_str(), serializer)
+                } else {
+                    self.0 .0.serialize(serializer)
+                }
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct ByteSizeVisitor;
+                impl Visitor<'_> for ByteSizeVisitor {
+                    type Value = ByteSize;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                        formatter.write_str("an integer or string")
+                    }
+
+                    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                        Ok(ByteSize(value))
+                    }
+
+                    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                        Ok(ByteSize(value.try_into().map_err(de::Error::custom)?))
+                    }
+
+                    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                    where
+                        E: de::Error,
+                    {
+                        ByteSize::from_str(v).map_err(de::Error::custom)
+                    }
+                }
+                (if deserializer.is_human_readable() {
+                    deserializer.deserialize_any(ByteSizeVisitor)
+                } else {
+                    deserializer.deserialize_u64(ByteSizeVisitor)
+                })
+                .map($name)
+            }
+        }
     };
 }
 
 impl error::Error for StringError {}
 
 #[pocket_definition(export)]
-#[derive(Clone, Copy, Debug, Display, Deserialize, Eq, PartialEq, From, Into)]
-#[serde(transparent)]
+#[derive(Clone, Copy, Debug, Display, Eq, PartialEq, From, Into)]
 #[debug("{_0:?}")]
 #[display("{_0}")]
-pub struct CacheSize(#[serde(with = "bytesize_serde")] ByteSize);
+pub struct CacheSize(ByteSize);
 
 byte_size_u64_from_impls!(CacheSize);
 
 impl Default for CacheSize {
     fn default() -> Self {
         Self(ByteSize::gb(1))
-    }
-}
-
-impl FromStr for CacheSize {
-    type Err = StringError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(
-            <ByteSize as FromStr>::from_str(s).map_err(StringError)?,
-        ))
     }
 }
 
@@ -165,26 +214,16 @@ impl LogLevel {
 }
 
 #[pocket_definition(export)]
-#[derive(Clone, Copy, Debug, Display, Deserialize, Eq, PartialEq, From, Into)]
+#[derive(Clone, Copy, Debug, Display, Eq, PartialEq, From, Into)]
 #[debug("{_0:?}")]
 #[display("{_0}")]
-#[serde(transparent)]
-pub struct InlineLimit(#[serde(with = "bytesize_serde")] ByteSize);
+pub struct InlineLimit(ByteSize);
 
 byte_size_u64_from_impls!(InlineLimit);
 
 impl Default for InlineLimit {
     fn default() -> Self {
         Self(ByteSize::mb(1))
-    }
-}
-
-impl FromStr for InlineLimit {
-    type Err = StringError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(
-            <ByteSize as FromStr>::from_str(s).map_err(StringError)?,
-        ))
     }
 }
 
@@ -469,6 +508,70 @@ mod tests {
         );
     }
 
+    #[test]
+    fn cache_size_serialize_and_deserialize_human_readable() {
+        assert_tokens(
+            &CacheSize::from_str("10MB").unwrap().readable(),
+            &[Token::String("10.0 MB")],
+        );
+    }
+
+    #[test]
+    fn cache_size_serialize_and_deserialize_compact() {
+        assert_tokens(
+            &CacheSize::from_str("10MB").unwrap().compact(),
+            &[Token::U64(10000000)],
+        );
+    }
+
+    #[test]
+    fn cache_size_deserialize_from_string() {
+        assert_de_tokens(
+            &CacheSize::from_str("10 MB").unwrap().readable(),
+            &[Token::String("10 MB")],
+        );
+    }
+
+    #[test]
+    fn cache_size_deserialize_from_unsigned_integer() {
+        assert_de_tokens(
+            &CacheSize::from_str("10 MB").unwrap().readable(),
+            &[Token::U64(10000000)],
+        );
+        assert_de_tokens(
+            &CacheSize::from_str("10 MB").unwrap().readable(),
+            &[Token::U32(10000000)],
+        );
+        assert_de_tokens(
+            &CacheSize::from_str("10 kB").unwrap().readable(),
+            &[Token::U16(10000)],
+        );
+        assert_de_tokens(
+            &CacheSize::from_str("10 B").unwrap().readable(),
+            &[Token::U8(10)],
+        );
+    }
+
+    #[test]
+    fn cache_size_deserialize_from_signed_integer() {
+        assert_de_tokens(
+            &CacheSize::from_str("10 MB").unwrap().readable(),
+            &[Token::I64(10000000)],
+        );
+        assert_de_tokens(
+            &CacheSize::from_str("10 MB").unwrap().readable(),
+            &[Token::I32(10000000)],
+        );
+        assert_de_tokens(
+            &CacheSize::from_str("10 kB").unwrap().readable(),
+            &[Token::I16(10000)],
+        );
+        assert_de_tokens(
+            &CacheSize::from_str("10 B").unwrap().readable(),
+            &[Token::I8(10)],
+        );
+    }
+
     #[derive(Debug, Deserialize, Eq, PartialEq)]
     struct TwoInlineLimits {
         one: InlineLimit,
@@ -506,6 +609,70 @@ mod tests {
                 one: "1 kB".parse().unwrap(),
                 two: "1.23 MB".parse().unwrap()
             }
+        );
+    }
+
+    #[test]
+    fn inline_limit_serialize_and_deserialize_human_readable() {
+        assert_tokens(
+            &InlineLimit::from_str("10MB").unwrap().readable(),
+            &[Token::String("10.0 MB")],
+        );
+    }
+
+    #[test]
+    fn inline_limit_serialize_and_deserialize_compact() {
+        assert_tokens(
+            &InlineLimit::from_str("10MB").unwrap().compact(),
+            &[Token::U64(10000000)],
+        );
+    }
+
+    #[test]
+    fn inline_limit_deserialize_from_string() {
+        assert_de_tokens(
+            &InlineLimit::from_str("10 MB").unwrap().readable(),
+            &[Token::String("10 MB")],
+        );
+    }
+
+    #[test]
+    fn inline_limit_deserialize_from_unsigned_integer() {
+        assert_de_tokens(
+            &InlineLimit::from_str("10 MB").unwrap().readable(),
+            &[Token::U64(10000000)],
+        );
+        assert_de_tokens(
+            &InlineLimit::from_str("10 MB").unwrap().readable(),
+            &[Token::U32(10000000)],
+        );
+        assert_de_tokens(
+            &InlineLimit::from_str("10 kB").unwrap().readable(),
+            &[Token::U16(10000)],
+        );
+        assert_de_tokens(
+            &InlineLimit::from_str("10 B").unwrap().readable(),
+            &[Token::U8(10)],
+        );
+    }
+
+    #[test]
+    fn inline_limit_deserialize_from_signed_integer() {
+        assert_de_tokens(
+            &InlineLimit::from_str("10 MB").unwrap().readable(),
+            &[Token::I64(10000000)],
+        );
+        assert_de_tokens(
+            &InlineLimit::from_str("10 MB").unwrap().readable(),
+            &[Token::I32(10000000)],
+        );
+        assert_de_tokens(
+            &InlineLimit::from_str("10 kB").unwrap().readable(),
+            &[Token::I16(10000)],
+        );
+        assert_de_tokens(
+            &InlineLimit::from_str("10 B").unwrap().readable(),
+            &[Token::I8(10)],
         );
     }
 }

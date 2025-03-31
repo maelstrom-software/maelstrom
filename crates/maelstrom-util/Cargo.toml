@@ -16,7 +16,6 @@ async-trait.workspace = true
 async-walkdir.workspace = true
 byteorder.workspace = true
 bytesize.workspace = true
-bytesize-serde.workspace = true
 clap.workspace = true
 countio.workspace = true
 derive_more.workspace = true
