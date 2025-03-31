@@ -164,8 +164,8 @@ tokio-native-tls = "0.3"
 tokio-tar = "0.3"
 tokio-util = { version = "0.7.14", features = [ "compat" ] }
 toml = "0.8.20"
-tonic = "0.12"
-tonic-build = "0.12"
+tonic = "0.13"
+tonic-build = "0.13"
 tower = { version = "0.5", features = ["util"] }
 tuple = "0.5.2"
 tui-term = "0.2.0"
