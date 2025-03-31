@@ -65,6 +65,54 @@ impl<DepsT: Deps> Executor<DepsT> {
         }
     }
 
+    pub fn expand(
+        &mut self,
+        deps: &mut DepsT,
+        tag: &DepsT::Tag,
+        partial: DepsT::Partial,
+        added_inputs: impl IntoIterator<Item = DepsT::Tag>,
+    ) {
+        let added_in_edges = added_inputs
+            .into_iter()
+            .map(|in_edge_tag| {
+                self.evaluations
+                    .get_index_of(&in_edge_tag)
+                    .unwrap_or_else(|| {
+                        panic!("{tag:?} depends on {in_edge_tag:?}, which hasn't been added")
+                    })
+            })
+            .collect::<Vec<_>>();
+        let (index, _, entry) = self.evaluations.get_full_mut(tag).unwrap();
+        entry.partial = Some(partial);
+        entry.in_edges.append(&mut added_in_edges.clone());
+        for in_edge_index in &added_in_edges {
+            self.evaluations[*in_edge_index].out_edges.push(index);
+        }
+        let lacking = added_in_edges
+            .into_iter()
+            .filter(|in_edge_index| {
+                !Self::ensure_started_and_get_completed(
+                    deps,
+                    &self.evaluations,
+                    &mut self.states,
+                    *in_edge_index,
+                )
+            })
+            .count();
+        let EvaluationState::Running { handles } = &mut self.states[index] else {
+            panic!("unexpected state");
+        };
+        match NonZeroUsize::new(lacking) {
+            Some(lacking) => {
+                let handles = mem::take(handles);
+                self.states[index] = EvaluationState::WaitingOnInputs { lacking, handles };
+            }
+            None => {
+                Self::start(deps, &self.states, tag, &self.evaluations[index]);
+            }
+        }
+    }
+
     fn start(
         deps: &mut DepsT,
         states: &[EvaluationState<DepsT>],
@@ -337,5 +385,78 @@ mod tests {
             Completed(1, "a", 'a'),
             Completed(2, "a", 'a'),
         };
+    }
+
+    script_test! {
+        update_new_dependency_not_started,
+        Fixture::new(),
+        |e, _| e.add("a", []) => {};
+        |e, d| e.evaluate(d, 1, &"a") => {
+            Start("a", None, vec![]),
+        };
+        |e, _| e.add("b", []) => {};
+        |e, d| e.expand(d, &"a", "partial-a-1", ["b"]) => {
+            Start("b", None, vec![]),
+        };
+        |e, d| e.receive_completed(d, &"b", 'b') => {
+            Start("a", Some("partial-a-1"), vec!['b']),
+        };
+        |e, d| e.receive_completed(d, &"a", 'a') => {
+            Completed(1, "a", 'a'),
+        };
+    }
+
+    script_test! {
+        update_new_dependency_started,
+        Fixture::new(),
+        |e, _| e.add("a", []) => {};
+        |e, d| e.evaluate(d, 1, &"a") => {
+            Start("a", None, vec![]),
+        };
+        |e, _| e.add("b", []) => {};
+        |e, d| e.evaluate(d, 2, &"b") => {
+            Start("b", None, vec![]),
+        };
+        |e, d| e.expand(d, &"a", "partial-a-1", ["b"]) => {};
+        |e, d| e.receive_completed(d, &"b", 'b') => {
+            Completed(2, "b", 'b'),
+            Start("a", Some("partial-a-1"), vec!['b']),
+        };
+        |e, d| e.receive_completed(d, &"a", 'a') => {
+            Completed(1, "a", 'a'),
+        };
+    }
+
+    script_test! {
+        update_new_dependency_completed,
+        Fixture::new(),
+        |e, _| e.add("a", []) => {};
+        |e, d| e.evaluate(d, 1, &"a") => {
+            Start("a", None, vec![]),
+        };
+        |e, _| e.add("b", []) => {};
+        |e, d| e.evaluate(d, 2, &"b") => {
+            Start("b", None, vec![]),
+        };
+        |e, d| e.receive_completed(d, &"b", 'b') => {
+            Completed(2, "b", 'b'),
+        };
+        |e, d| e.expand(d, &"a", "partial-a-1", ["b"]) => {
+            Start("a", Some("partial-a-1"), vec!['b']),
+        };
+        |e, d| e.receive_completed(d, &"a", 'a') => {
+            Completed(1, "a", 'a'),
+        };
+    }
+
+    script_test! {
+        update_new_dependency_cycle,
+        Fixture::new(),
+        |e, _| e.add("a", []) => {};
+        |e, _| e.add("b", ["a"]) => {};
+        |e, d| e.evaluate(d, 1, &"b") => {
+            Start("a", None, vec![]),
+        };
+        |e, d| e.expand(d, &"a", "partial-a-1", ["b"]) => {};
     }
 }
