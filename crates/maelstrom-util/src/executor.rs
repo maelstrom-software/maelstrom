@@ -7,8 +7,8 @@ pub trait Deps {
     type Partial;
     type Output;
 
-    fn start(&self, tag: &Self::Tag, state: &Option<Self::Partial>, inputs: Vec<&Self::Output>);
-    fn completed(&self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
+    fn start(&mut self, tag: &Self::Tag, state: &Option<Self::Partial>, inputs: Vec<&Self::Output>);
+    fn completed(&mut self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
 }
 
 enum EvaluationState<DepsT: Deps> {
@@ -248,7 +248,7 @@ mod tests {
         type Partial = &'static str;
 
         fn start(
-            &self,
+            &mut self,
             tag: &Self::Tag,
             partial: &Option<Self::Partial>,
             inputs: Vec<&Self::Output>,
@@ -260,7 +260,12 @@ mod tests {
             ));
         }
 
-        fn completed(&self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output) {
+        fn completed(
+            &mut self,
+            handle: Self::CompletedHandle,
+            tag: &Self::Tag,
+            output: &Self::Output,
+        ) {
             self.borrow_mut()
                 .messages
                 .push(TestMessage::Completed(handle, tag, *output));
