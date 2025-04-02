@@ -52,7 +52,15 @@ impl<DepsT: Deps> Default for Executor<DepsT> {
 }
 
 impl<DepsT: Deps> Executor<DepsT> {
-    pub fn add(&mut self, tag: DepsT::Tag, inputs: impl IntoIterator<Item = DepsT::Tag>) {
+    pub fn add(&mut self, tag: DepsT::Tag) {
+        self.add_with_inputs(tag, []);
+    }
+
+    pub fn add_with_inputs(
+        &mut self,
+        tag: DepsT::Tag,
+        inputs: impl IntoIterator<Item = DepsT::Tag>,
+    ) {
         if !self.evaluations.contains_key(&tag) {
             let in_edges = inputs
                 .into_iter()
@@ -385,7 +393,7 @@ mod tests {
     script_test! {
         no_dependencies,
         Fixture::new(),
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", None, vec![]),
         };
@@ -402,16 +410,16 @@ mod tests {
     script_test! {
         adding_multiple_times,
         Fixture::new(),
-        |e, _| e.add("a", []) => {};
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a") => {};
+        |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", None, vec![]),
         };
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a") => {};
         |e, d| e.receive_completed(d, &"a", 'a') => {
             Completed(1, "a", 'a'),
         };
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 2, &"a") => {
             Completed(2, "a", 'a'),
         };
@@ -420,11 +428,11 @@ mod tests {
     script_test! {
         inputs,
         Fixture::new(),
-        |e, _| e.add("e", []) => {};
-        |e, _| e.add("d", ["e"]) => {};
-        |e, _| e.add("c", []) => {};
-        |e, _| e.add("b", ["d", "c"]) => {};
-        |e, _| e.add("a", ["b", "c"]) => {};
+        |e, _| e.add("e") => {};
+        |e, _| e.add_with_inputs("d", ["e"]) => {};
+        |e, _| e.add("c") => {};
+        |e, _| e.add_with_inputs("b", ["d", "c"]) => {};
+        |e, _| e.add_with_inputs("a", ["b", "c"]) => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("c", None, vec![]),
             Start("e", None, vec![]),
@@ -451,11 +459,11 @@ mod tests {
     script_test! {
         update_new_dependency_not_started,
         Fixture::new(),
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", None, vec![]),
         };
-        |e, _| e.add("b", []) => {};
+        |e, _| e.add("b") => {};
         |e, d| e.expand(d, &"a", "partial-a-1", ["b"]) => {
             Start("b", None, vec![]),
         };
@@ -470,11 +478,11 @@ mod tests {
     script_test! {
         update_new_dependency_started,
         Fixture::new(),
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", None, vec![]),
         };
-        |e, _| e.add("b", []) => {};
+        |e, _| e.add("b") => {};
         |e, d| e.evaluate(d, 2, &"b") => {
             Start("b", None, vec![]),
         };
@@ -491,11 +499,11 @@ mod tests {
     script_test! {
         update_new_dependency_completed,
         Fixture::new(),
-        |e, _| e.add("a", []) => {};
+        |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", None, vec![]),
         };
-        |e, _| e.add("b", []) => {};
+        |e, _| e.add("b") => {};
         |e, d| e.evaluate(d, 2, &"b") => {
             Start("b", None, vec![]),
         };
@@ -513,8 +521,8 @@ mod tests {
     script_test! {
         update_new_dependency_cycle,
         Fixture::new(),
-        |e, _| e.add("a", []) => {};
-        |e, _| e.add("b", ["a"]) => {};
+        |e, _| e.add("a") => {};
+        |e, _| e.add_with_inputs("b", ["a"]) => {};
         |e, d| e.evaluate(d, 1, &"b") => {
             Start("a", None, vec![]),
         };
