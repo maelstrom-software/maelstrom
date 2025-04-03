@@ -1,3 +1,4 @@
+use crate::ext::OptionExt as _;
 use indexmap::IndexMap;
 use std::{fmt::Debug, hash::Hash, mem, num::NonZeroUsize};
 
@@ -71,28 +72,31 @@ impl<DepsT: Deps> Executor<DepsT> {
         inputs: impl IntoIterator<Item = DepsT::Tag>,
     ) {
         if !self.evaluations.contains_key(&tag) {
+            self.states.push(State::NotStarted);
+            let index = self.evaluations.len();
             let in_edges = inputs
                 .into_iter()
                 .map(|in_edge_tag| {
-                    self.evaluations
-                        .get_index_of(&in_edge_tag)
+                    let (in_edge_index, _, entry) = self
+                        .evaluations
+                        .get_full_mut(&in_edge_tag)
                         .unwrap_or_else(|| {
                             panic!("{tag:?} depends on {in_edge_tag:?}, which hasn't been added")
-                        })
+                        });
+                    entry.out_edges.push(index);
+                    in_edge_index
                 })
                 .collect::<Vec<_>>();
-            let (index, _) = self.evaluations.insert_full(
-                tag,
-                Entry {
-                    in_edges: in_edges.clone(),
-                    out_edges: Default::default(),
-                    partial: Default::default(),
-                },
-            );
-            self.states.push(State::NotStarted);
-            for in_edge_index in in_edges {
-                self.evaluations[in_edge_index].out_edges.push(index);
-            }
+            self.evaluations
+                .insert(
+                    tag,
+                    Entry {
+                        in_edges,
+                        out_edges: Default::default(),
+                        partial: Default::default(),
+                    },
+                )
+                .assert_is_none();
         }
     }
 
