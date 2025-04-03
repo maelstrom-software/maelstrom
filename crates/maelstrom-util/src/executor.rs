@@ -40,14 +40,14 @@ enum State<DepsT: Deps> {
     },
 }
 
-struct EvaluationEntry<DepsT: Deps> {
+struct Entry<DepsT: Deps> {
     in_edges: Vec<usize>,
     out_edges: Vec<usize>,
     partial: Option<DepsT::Partial>,
 }
 
 pub struct Executor<DepsT: Deps> {
-    evaluations: IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
+    evaluations: IndexMap<DepsT::Tag, Entry<DepsT>>,
     states: Vec<State<DepsT>>,
 }
 
@@ -83,7 +83,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 .collect::<Vec<_>>();
             let (index, _) = self.evaluations.insert_full(
                 tag,
-                EvaluationEntry {
+                Entry {
                     in_edges: in_edges.clone(),
                     out_edges: Default::default(),
                     partial: Default::default(),
@@ -102,6 +102,19 @@ impl<DepsT: Deps> Executor<DepsT> {
         tag: &DepsT::Tag,
         partial: DepsT::Partial,
         added_inputs: impl IntoIterator<Item = DepsT::Tag>,
+    ) {
+        let mut deferred = vec![];
+        self.expand_inner(deps, tag, partial, added_inputs, &mut deferred);
+        self.do_deferred_work(deps, &mut deferred);
+    }
+
+    fn expand_inner(
+        &mut self,
+        deps: &mut DepsT,
+        tag: &DepsT::Tag,
+        partial: DepsT::Partial,
+        added_inputs: impl IntoIterator<Item = DepsT::Tag>,
+        deferred: &mut Vec<(usize, DepsT::Output)>,
     ) {
         let added_in_edges = added_inputs
             .into_iter()
@@ -127,6 +140,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     &self.evaluations,
                     &mut self.states,
                     *in_edge_index,
+                    deferred,
                 )
             })
             .count();
@@ -141,11 +155,11 @@ impl<DepsT: Deps> Executor<DepsT> {
             None => {
                 Self::start(
                     deps,
-                    &self.evaluations,
                     &mut self.states,
                     index,
                     tag,
                     &self.evaluations[index],
+                    deferred,
                 );
             }
         }
@@ -153,12 +167,12 @@ impl<DepsT: Deps> Executor<DepsT> {
 
     fn start(
         deps: &mut DepsT,
-        evaluations: &IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
         states: &mut [State<DepsT>],
         index: usize,
         tag: &DepsT::Tag,
-        entry: &EvaluationEntry<DepsT>,
-    ) -> bool {
+        entry: &Entry<DepsT>,
+        deferred: &mut Vec<(usize, DepsT::Output)>,
+    ) {
         let inputs = entry
             .in_edges
             .iter()
@@ -170,10 +184,9 @@ impl<DepsT: Deps> Executor<DepsT> {
             })
             .collect();
         match deps.start(tag, &entry.partial, inputs) {
-            StartResult::InProgress => false,
+            StartResult::InProgress => {}
             StartResult::Done(output) => {
-                Self::receive_completed_inner(deps, evaluations, states, index, tag, entry, output);
-                true
+                deferred.push((index, output));
             }
             StartResult::Expand { .. } => {
                 todo!();
@@ -183,9 +196,10 @@ impl<DepsT: Deps> Executor<DepsT> {
 
     fn ensure_started_and_get_completed(
         deps: &mut DepsT,
-        evaluations: &IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
+        evaluations: &IndexMap<DepsT::Tag, Entry<DepsT>>,
         states: &mut [State<DepsT>],
         index: usize,
+        deferred: &mut Vec<(usize, DepsT::Output)>,
     ) -> bool {
         let (tag, entry) = evaluations.get_index(index).unwrap();
         match states[index] {
@@ -199,6 +213,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                             evaluations,
                             states,
                             **in_edge_index,
+                            deferred,
                         )
                     })
                     .count();
@@ -206,22 +221,46 @@ impl<DepsT: Deps> Executor<DepsT> {
                 match NonZeroUsize::new(lacking) {
                     Some(lacking) => {
                         states[index] = State::WaitingOnInputs { lacking, handles };
-                        false
                     }
                     None => {
                         states[index] = State::Running { handles };
-                        Self::start(deps, evaluations, states, index, tag, entry)
+                        Self::start(deps, states, index, tag, entry, deferred);
                     }
                 }
+                false
             }
             State::WaitingOnInputs { .. } | State::Running { .. } => false,
             State::Completed { .. } => true,
         }
     }
 
+    fn do_deferred_work(&mut self, deps: &mut DepsT, deferred: &mut Vec<(usize, DepsT::Output)>) {
+        while let Some((index, output)) = deferred.pop() {
+            let (tag, entry) = self.evaluations.get_index(index).unwrap();
+            Self::receive_completed_inner(
+                deps,
+                &self.evaluations,
+                &mut self.states,
+                index,
+                tag,
+                entry,
+                output,
+                deferred,
+            );
+        }
+    }
+
     pub fn evaluate(&mut self, deps: &mut DepsT, handle: DepsT::CompletedHandle, tag: &DepsT::Tag) {
         let index = self.evaluations.get_index_of(tag).unwrap();
-        Self::ensure_started_and_get_completed(deps, &self.evaluations, &mut self.states, index);
+        let mut deferred = vec![];
+        Self::ensure_started_and_get_completed(
+            deps,
+            &self.evaluations,
+            &mut self.states,
+            index,
+            &mut deferred,
+        );
+        self.do_deferred_work(deps, &mut deferred);
         match &mut self.states[index] {
             State::NotStarted => {
                 panic!("unexpected state");
@@ -237,6 +276,7 @@ impl<DepsT: Deps> Executor<DepsT> {
 
     pub fn receive_completed(&mut self, deps: &mut DepsT, tag: &DepsT::Tag, output: DepsT::Output) {
         let (index, _, entry) = self.evaluations.get_full(tag).unwrap();
+        let mut deferred = vec![];
         Self::receive_completed_inner(
             deps,
             &self.evaluations,
@@ -245,17 +285,21 @@ impl<DepsT: Deps> Executor<DepsT> {
             tag,
             entry,
             output,
+            &mut deferred,
         );
+        self.do_deferred_work(deps, &mut deferred);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn receive_completed_inner(
         deps: &mut DepsT,
-        evaluations: &IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
+        evaluations: &IndexMap<DepsT::Tag, Entry<DepsT>>,
         states: &mut [State<DepsT>],
         index: usize,
         tag: &DepsT::Tag,
-        entry: &EvaluationEntry<DepsT>,
+        entry: &Entry<DepsT>,
         output: DepsT::Output,
+        deferred: &mut Vec<(usize, DepsT::Output)>,
     ) {
         let state = &mut states[index];
         let State::Running { handles: waiting } = mem::replace(state, State::Completed { output })
@@ -286,11 +330,11 @@ impl<DepsT: Deps> Executor<DepsT> {
                         evaluations.get_index(*out_edge_index).unwrap();
                     Self::start(
                         deps,
-                        evaluations,
                         states,
                         *out_edge_index,
                         out_edge_tag,
                         out_edge_entry,
+                        deferred,
                     );
                 }
             }
