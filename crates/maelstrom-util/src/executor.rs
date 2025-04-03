@@ -61,6 +61,18 @@ impl<DepsT: Deps> Default for Executor<DepsT> {
     }
 }
 
+#[derive(Default)]
+struct CountTrues(usize);
+
+impl Extend<bool> for CountTrues {
+    fn extend<T>(&mut self, iter: T)
+    where
+        T: IntoIterator<Item = bool>,
+    {
+        self.0 += iter.into_iter().filter(|b| *b).count();
+    }
+}
+
 impl<DepsT: Deps> Executor<DepsT> {
     pub fn add(&mut self, tag: DepsT::Tag) {
         self.add_with_inputs(tag, []);
@@ -77,13 +89,13 @@ impl<DepsT: Deps> Executor<DepsT> {
             let in_edges = inputs
                 .into_iter()
                 .map(|in_edge_tag| {
-                    let (in_edge_index, _, entry) = self
+                    let (in_edge_index, _, in_edge_entry) = self
                         .evaluations
                         .get_full_mut(&in_edge_tag)
                         .unwrap_or_else(|| {
                             panic!("{tag:?} depends on {in_edge_tag:?}, which hasn't been added")
                         });
-                    entry.out_edges.push(index);
+                    in_edge_entry.out_edges.push(index);
                     in_edge_index
                 })
                 .collect::<Vec<_>>();
@@ -120,34 +132,33 @@ impl<DepsT: Deps> Executor<DepsT> {
         added_inputs: impl IntoIterator<Item = DepsT::Tag>,
         deferred: &mut Vec<(usize, DepsT::Output)>,
     ) {
-        let added_in_edges = added_inputs
+        let index = self.evaluations.get_index_of(tag).unwrap();
+        let (added_in_edges, CountTrues(lacking)): (Vec<_>, CountTrues) = added_inputs
             .into_iter()
             .map(|in_edge_tag| {
-                self.evaluations
-                    .get_index_of(&in_edge_tag)
+                let (in_edge_index, _, in_edge_entry) = self
+                    .evaluations
+                    .get_full_mut(&in_edge_tag)
                     .unwrap_or_else(|| {
                         panic!("{tag:?} depends on {in_edge_tag:?}, which hasn't been added")
-                    })
-            })
-            .collect::<Vec<_>>();
-        let (index, _, entry) = self.evaluations.get_full_mut(tag).unwrap();
-        entry.partial = Some(partial);
-        entry.in_edges.append(&mut added_in_edges.clone());
-        for in_edge_index in &added_in_edges {
-            self.evaluations[*in_edge_index].out_edges.push(index);
-        }
-        let lacking = added_in_edges
-            .into_iter()
-            .filter(|in_edge_index| {
-                !Self::ensure_started_and_get_completed(
+                    });
+                in_edge_entry.out_edges.push(index);
+                // This is fine because if we start an entry and it immediately returns, then that
+                // will end up in `deferred`, and won't traverse the entry's out-edges immediately.
+                // When we do the deferred work, we will have properly set up `lacking` (below).
+                let lacking = !Self::ensure_started_and_get_completed(
                     deps,
                     &self.evaluations,
                     &mut self.states,
-                    *in_edge_index,
+                    in_edge_index,
                     deferred,
-                )
+                );
+                (in_edge_index, lacking)
             })
-            .count();
+            .unzip();
+        let entry = &mut self.evaluations[index];
+        entry.partial = Some(partial);
+        entry.in_edges.extend(added_in_edges);
         let State::Running { handles } = &mut self.states[index] else {
             panic!("unexpected state");
         };
