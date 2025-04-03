@@ -63,6 +63,10 @@ impl<DepsT: Deps> Default for Executor<DepsT> {
 
 enum DeferredWork<DepsT: Deps> {
     Completed(DepsT::Output),
+    Expand {
+        _partial: DepsT::Partial,
+        _added_inputs: Vec<(DepsT::Tag, Vec<DepsT::Tag>)>,
+    },
 }
 
 #[derive(Default)]
@@ -207,8 +211,17 @@ impl<DepsT: Deps> Executor<DepsT> {
             StartResult::Done(output) => {
                 deferred.push((index, DeferredWork::Completed(output)));
             }
-            StartResult::Expand { .. } => {
-                todo!();
+            StartResult::Expand {
+                partial,
+                added_inputs,
+            } => {
+                deferred.push((
+                    index,
+                    DeferredWork::Expand {
+                        _partial: partial,
+                        _added_inputs: added_inputs,
+                    },
+                ));
             }
         }
     }
@@ -272,6 +285,9 @@ impl<DepsT: Deps> Executor<DepsT> {
                         output,
                         deferred,
                     );
+                }
+                DeferredWork::Expand { .. } => {
+                    todo!();
                 }
             }
         }
