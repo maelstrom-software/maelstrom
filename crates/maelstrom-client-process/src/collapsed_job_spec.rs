@@ -341,7 +341,7 @@ impl CollapsedJobSpec {
     /// non-default values beforehand.
     ///
     /// After this function is called, `self.image` will be `None`.
-    pub fn integrate_image(&mut self, image: &ConvertedImage) -> Result<(), String> {
+    fn integrate_image(&mut self, image: &ConvertedImage) -> Result<(), String> {
         for image_use in self.image.take().unwrap().r#use {
             match image_use {
                 ImageUse::Layers => {
@@ -369,7 +369,7 @@ impl CollapsedJobSpec {
         self.image.as_ref()
     }
 
-    pub fn take_environment(&mut self) -> (BTreeMap<String, String>, Vec<EnvironmentSpec>) {
+    fn take_environment(&mut self) -> (BTreeMap<String, String>, Vec<EnvironmentSpec>) {
         (
             mem::take(&mut self.initial_environment),
             mem::take(&mut self.environment),
@@ -396,7 +396,7 @@ impl CollapsedJobSpec {
         }
     }
 
-    pub fn into_job_spec(
+    fn into_job_spec_inner(
         self,
         layers: impl IntoIterator<Item = (Sha256Digest, ArtifactType)>,
         environment: Vec<String>,
@@ -467,7 +467,7 @@ impl CollapsedJobSpec {
         assert!(self.image.is_none());
         let (initial_environment, environment) = self.take_environment();
         let environment = evaluate_environment(initial_environment, environment)?;
-        self.into_job_spec(layers, environment)
+        self.into_job_spec_inner(layers, environment)
     }
 
     pub fn into_job_spec_with_image(
