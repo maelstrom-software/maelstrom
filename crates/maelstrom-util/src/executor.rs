@@ -1,6 +1,15 @@
 use indexmap::IndexMap;
 use std::{fmt::Debug, hash::Hash, mem, num::NonZeroUsize};
 
+pub enum StartResult<TagT, PartialT, OutputT> {
+    InProgress,
+    Expand {
+        partial: PartialT,
+        added_inputs: Vec<(TagT, Vec<TagT>)>,
+    },
+    Done(OutputT),
+}
+
 pub trait Deps {
     type CompletedHandle;
     type Tag: Debug + Eq + Hash;
@@ -13,11 +22,11 @@ pub trait Deps {
         tag: &Self::Tag,
         state: &Option<Self::Partial>,
         inputs: Vec<&Self::Output>,
-    ) -> Option<Self::Output>;
+    ) -> StartResult<Self::Tag, Self::Partial, Self::Output>;
     fn completed(&mut self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
 }
 
-enum EvaluationState<DepsT: Deps> {
+enum State<DepsT: Deps> {
     NotStarted,
     WaitingOnInputs {
         lacking: NonZeroUsize,
@@ -39,7 +48,7 @@ struct EvaluationEntry<DepsT: Deps> {
 
 pub struct Executor<DepsT: Deps> {
     evaluations: IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
-    states: Vec<EvaluationState<DepsT>>,
+    states: Vec<State<DepsT>>,
 }
 
 impl<DepsT: Deps> Default for Executor<DepsT> {
@@ -80,7 +89,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     partial: Default::default(),
                 },
             );
-            self.states.push(EvaluationState::NotStarted);
+            self.states.push(State::NotStarted);
             for in_edge_index in in_edges {
                 self.evaluations[in_edge_index].out_edges.push(index);
             }
@@ -121,13 +130,13 @@ impl<DepsT: Deps> Executor<DepsT> {
                 )
             })
             .count();
-        let EvaluationState::Running { handles } = &mut self.states[index] else {
+        let State::Running { handles } = &mut self.states[index] else {
             panic!("unexpected state");
         };
         match NonZeroUsize::new(lacking) {
             Some(lacking) => {
                 let handles = mem::take(handles);
-                self.states[index] = EvaluationState::WaitingOnInputs { lacking, handles };
+                self.states[index] = State::WaitingOnInputs { lacking, handles };
             }
             None => {
                 Self::start(
@@ -145,7 +154,7 @@ impl<DepsT: Deps> Executor<DepsT> {
     fn start(
         deps: &mut DepsT,
         evaluations: &IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
-        states: &mut [EvaluationState<DepsT>],
+        states: &mut [State<DepsT>],
         index: usize,
         tag: &DepsT::Tag,
         entry: &EvaluationEntry<DepsT>,
@@ -154,29 +163,33 @@ impl<DepsT: Deps> Executor<DepsT> {
             .in_edges
             .iter()
             .map(|in_edge_index| {
-                let EvaluationState::Completed { ref output } = states[*in_edge_index] else {
+                let State::Completed { ref output } = states[*in_edge_index] else {
                     panic!("unexpected state");
                 };
                 output
             })
             .collect();
-        if let Some(output) = deps.start(tag, &entry.partial, inputs) {
-            Self::receive_completed_inner(deps, evaluations, states, index, tag, entry, output);
-            true
-        } else {
-            false
+        match deps.start(tag, &entry.partial, inputs) {
+            StartResult::InProgress => false,
+            StartResult::Done(output) => {
+                Self::receive_completed_inner(deps, evaluations, states, index, tag, entry, output);
+                true
+            }
+            StartResult::Expand { .. } => {
+                todo!();
+            }
         }
     }
 
     fn ensure_started_and_get_completed(
         deps: &mut DepsT,
         evaluations: &IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
-        states: &mut [EvaluationState<DepsT>],
+        states: &mut [State<DepsT>],
         index: usize,
     ) -> bool {
         let (tag, entry) = evaluations.get_index(index).unwrap();
         match states[index] {
-            EvaluationState::NotStarted => {
+            State::NotStarted => {
                 let lacking = entry
                     .in_edges
                     .iter()
@@ -192,17 +205,17 @@ impl<DepsT: Deps> Executor<DepsT> {
                 let handles = Default::default();
                 match NonZeroUsize::new(lacking) {
                     Some(lacking) => {
-                        states[index] = EvaluationState::WaitingOnInputs { lacking, handles };
+                        states[index] = State::WaitingOnInputs { lacking, handles };
                         false
                     }
                     None => {
-                        states[index] = EvaluationState::Running { handles };
+                        states[index] = State::Running { handles };
                         Self::start(deps, evaluations, states, index, tag, entry)
                     }
                 }
             }
-            EvaluationState::WaitingOnInputs { .. } | EvaluationState::Running { .. } => false,
-            EvaluationState::Completed { .. } => true,
+            State::WaitingOnInputs { .. } | State::Running { .. } => false,
+            State::Completed { .. } => true,
         }
     }
 
@@ -210,14 +223,13 @@ impl<DepsT: Deps> Executor<DepsT> {
         let index = self.evaluations.get_index_of(tag).unwrap();
         Self::ensure_started_and_get_completed(deps, &self.evaluations, &mut self.states, index);
         match &mut self.states[index] {
-            EvaluationState::NotStarted => {
+            State::NotStarted => {
                 panic!("unexpected state");
             }
-            EvaluationState::WaitingOnInputs { handles, .. }
-            | EvaluationState::Running { handles } => {
+            State::WaitingOnInputs { handles, .. } | State::Running { handles } => {
                 handles.push(handle);
             }
-            EvaluationState::Completed { output } => {
+            State::Completed { output } => {
                 deps.completed(handle, tag, output);
             }
         }
@@ -239,19 +251,18 @@ impl<DepsT: Deps> Executor<DepsT> {
     fn receive_completed_inner(
         deps: &mut DepsT,
         evaluations: &IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
-        states: &mut [EvaluationState<DepsT>],
+        states: &mut [State<DepsT>],
         index: usize,
         tag: &DepsT::Tag,
         entry: &EvaluationEntry<DepsT>,
         output: DepsT::Output,
     ) {
         let state = &mut states[index];
-        let EvaluationState::Running { handles: waiting } =
-            mem::replace(state, EvaluationState::Completed { output })
+        let State::Running { handles: waiting } = mem::replace(state, State::Completed { output })
         else {
             panic!("unexpected state");
         };
-        let EvaluationState::Completed { output } = state else {
+        let State::Completed { output } = state else {
             panic!("unexpected state");
         };
         for handle in waiting {
@@ -260,7 +271,7 @@ impl<DepsT: Deps> Executor<DepsT> {
 
         for out_edge_index in &entry.out_edges {
             let out_edge_state = &mut states[*out_edge_index];
-            let EvaluationState::WaitingOnInputs { handles, lacking } = out_edge_state else {
+            let State::WaitingOnInputs { handles, lacking } = out_edge_state else {
                 continue;
             };
             match NonZeroUsize::new(lacking.get() - 1) {
@@ -268,7 +279,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     *lacking = new_lacking;
                 }
                 None => {
-                    *out_edge_state = EvaluationState::Running {
+                    *out_edge_state = State::Running {
                         handles: mem::take(handles),
                     };
                     let (out_edge_tag, out_edge_entry) =
@@ -315,13 +326,13 @@ mod tests {
             tag: &Self::Tag,
             partial: &Option<Self::Partial>,
             inputs: Vec<&Self::Output>,
-        ) -> Option<Self::Output> {
+        ) -> StartResult<Self::Tag, Self::Partial, Self::Output> {
             self.borrow_mut().messages.push(TestMessage::Start(
                 tag,
                 *partial,
                 inputs.into_iter().copied().collect(),
             ));
-            None
+            StartResult::InProgress
         }
 
         fn completed(
