@@ -128,19 +128,20 @@ impl<DepsT: Deps> Executor<DepsT> {
         added_inputs: impl IntoIterator<Item = DepsT::Tag>,
     ) {
         let mut deferred = vec![];
-        self.expand_inner(deps, tag, partial, added_inputs, &mut deferred);
+        let index = self.evaluations.get_index_of(tag).unwrap();
+        self.expand_inner(deps, index, tag, partial, added_inputs, &mut deferred);
         self.do_deferred_work(deps, &mut deferred);
     }
 
     fn expand_inner(
         &mut self,
         deps: &mut DepsT,
+        index: usize,
         tag: &DepsT::Tag,
         partial: DepsT::Partial,
         added_inputs: impl IntoIterator<Item = DepsT::Tag>,
         deferred: &mut Vec<(usize, DeferredWork<DepsT>)>,
     ) {
-        let index = self.evaluations.get_index_of(tag).unwrap();
         let (added_in_edges, CountTrues(lacking)): (Vec<_>, CountTrues) = added_inputs
             .into_iter()
             .map(|in_edge_tag| {
