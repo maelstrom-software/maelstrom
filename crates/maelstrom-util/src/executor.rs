@@ -31,10 +31,18 @@ struct EvaluationEntry<DepsT: Deps> {
     partial: Option<DepsT::Partial>,
 }
 
-#[derive(Default)]
 pub struct Executor<DepsT: Deps> {
     evaluations: IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
     states: Vec<EvaluationState<DepsT>>,
+}
+
+impl<DepsT: Deps> Default for Executor<DepsT> {
+    fn default() -> Self {
+        Self {
+            evaluations: Default::default(),
+            states: Default::default(),
+        }
+    }
 }
 
 impl<DepsT: Deps> Executor<DepsT> {
