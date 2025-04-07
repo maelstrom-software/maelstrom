@@ -382,9 +382,9 @@ impl<DepsT: Deps> Preparer<DepsT> {
         .collect::<Vec<_>>();
 
         let tag = Tag::JobSpec(collapsed_job_spec);
-        self.executor.add_with_inputs(tag.clone(), inputs);
+        let evaluation_handle = self.executor.add_with_inputs(tag, inputs);
         self.executor
-            .evaluate(&mut self.executor_adapter, handle, &tag);
+            .evaluate(&mut self.executor_adapter, evaluation_handle, handle);
     }
 
     fn receive_add_container(
