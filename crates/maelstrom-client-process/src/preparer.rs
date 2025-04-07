@@ -18,15 +18,18 @@
 pub mod task;
 
 use crate::collapsed_job_spec::CollapsedJobSpec;
+use assert_matches::assert_matches;
 use maelstrom_base::{ArtifactType, JobSpec, Sha256Digest};
 use maelstrom_client_base::spec::{
     ContainerSpec, ConvertedImage, EnvironmentSpec, ImageRef, JobSpec as ClientJobSpec, LayerSpec,
 };
-use maelstrom_util::ext::OptionExt as _;
+use maelstrom_util::executor::{self, Executor, StartResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap, VecDeque},
+    fmt::Debug,
     mem,
     num::NonZeroUsize,
+    sync::{Arc, Mutex},
 };
 
 pub trait Deps {
@@ -59,23 +62,92 @@ pub enum Message<DepsT: Deps> {
 }
 
 pub struct Preparer<DepsT: Deps> {
-    deps: DepsT,
-    layer_builds: LayerBuilds,
+    executor_adapter: ExecutorAdapter<DepsT>,
     containers: HashMap<String, ContainerSpec>,
     images: HashMap<String, ImageEntry<DepsT>>,
-    layers: HashMap<LayerSpec, LayerEntry<DepsT>>,
-    jobs: HashMap<u64, Job<DepsT>>,
+    jobs: Arc<Mutex<HashMap<u64, Job<DepsT>>>>,
     next_ijid: u64,
+    executor: Executor<ExecutorAdapter<DepsT>>,
+}
+
+struct ExecutorAdapter<DepsT: Deps> {
+    deps: DepsT,
+    layer_builds: LayerBuilds,
+    jobs: Arc<Mutex<HashMap<u64, Job<DepsT>>>>,
+}
+
+enum CompletedHandle {
+    BuildLayer(bool, u64, usize),
+}
+
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum Tag {
+    BuildLayer(LayerSpec),
+}
+
+#[derive(Debug)]
+enum Output<DepsT: Deps> {
+    BuildLayer(Result<(Sha256Digest, ArtifactType), DepsT::Error>),
+}
+
+impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
+    type CompletedHandle = CompletedHandle;
+    type Tag = Tag;
+    type Partial = ();
+    type Output = Output<DepsT>;
+
+    fn start(
+        &mut self,
+        tag: &Self::Tag,
+        state: &Option<Self::Partial>,
+        inputs: Vec<&Self::Output>,
+    ) -> StartResult<Self::Tag, Self::Partial, Self::Output> {
+        match tag {
+            Tag::BuildLayer(layer_spec) => {
+                assert_matches!(state, None);
+                assert!(inputs.is_empty());
+                self.layer_builds.push(&self.deps, layer_spec.clone());
+                StartResult::InProgress
+            }
+        }
+    }
+
+    fn completed(
+        &mut self,
+        handle: Self::CompletedHandle,
+        _tag: &Self::Tag,
+        output: &Self::Output,
+    ) {
+        let CompletedHandle::BuildLayer(image, ijid, index) = handle;
+        let Output::BuildLayer(result) = output;
+        let mut jobs = self.jobs.lock().unwrap();
+        match result {
+            Err(err) => {
+                job_error(&self.deps, &mut *jobs, ijid, err.clone());
+            }
+            Ok((digest, artifact_type)) => {
+                let Entry::Occupied(mut job_entry) = jobs.entry(ijid) else {
+                    return;
+                };
+                let job = job_entry.get_mut();
+
+                (if image {
+                    &mut job.image_layers
+                } else {
+                    &mut job.layers
+                })[index] = Some((digest.clone(), *artifact_type));
+
+                if job.is_ready() {
+                    start_job(&self.deps, job_entry.remove());
+                }
+            }
+        }
+    }
 }
 
 enum ImageEntry<DepsT: Deps> {
     Got(Result<ConvertedImage, DepsT::Error>),
     Getting(Vec<u64>),
-}
-
-enum LayerEntry<DepsT: Deps> {
-    Got(Result<(Sha256Digest, ArtifactType), DepsT::Error>),
-    Getting(Vec<(bool, u64, usize)>),
 }
 
 struct LayerBuilds {
@@ -112,16 +184,37 @@ impl LayerBuilds {
     }
 }
 
+fn job_error<DepsT: Deps>(
+    deps: &DepsT,
+    spec_map: &mut HashMap<u64, Job<DepsT>>,
+    ijid: u64,
+    err: DepsT::Error,
+) {
+    if let Some(spec) = spec_map.remove(&ijid) {
+        deps.job_prepared(spec.handle, Err(err));
+    }
+}
+
+fn start_job<DepsT: Deps>(deps: &DepsT, job: Job<DepsT>) {
+    let (handle, result) = job.into_handle_and_spec(deps);
+    deps.job_prepared(handle, result);
+}
+
 impl<DepsT: Deps> Preparer<DepsT> {
     pub fn new(deps: DepsT, max_pending_layer_builds: NonZeroUsize) -> Self {
-        Self {
+        let jobs = Arc::new(Mutex::new(Default::default()));
+        let executor_adapter = ExecutorAdapter {
             deps,
             layer_builds: LayerBuilds::new(max_pending_layer_builds),
+            jobs: jobs.clone(),
+        };
+        Self {
+            executor_adapter,
             containers: Default::default(),
             images: Default::default(),
-            layers: Default::default(),
-            jobs: Default::default(),
+            jobs,
             next_ijid: Default::default(),
+            executor: Default::default(),
         }
     }
 
@@ -149,58 +242,69 @@ impl<DepsT: Deps> Preparer<DepsT> {
         let job_spec = match CollapsedJobSpec::new(job_spec, &|c| self.containers.get(c)) {
             Ok(job_spec) => job_spec,
             Err(err) => {
-                self.deps
+                self.executor_adapter
+                    .deps
                     .job_prepared(handle, Err(DepsT::error_from_string(err)));
                 return;
             }
         };
 
-        let layers = match Self::evaluate_layers(
-            &self.deps,
-            &mut self.layer_builds,
-            &mut self.layers,
-            job_spec.layers(),
-            ijid,
-            false,
-        ) {
-            Ok(layers) => layers,
-            Err(err) => {
-                self.deps.job_prepared(handle, Err(err));
-                return;
-            }
+        let has_image = job_spec.image().is_some();
+        let layer_specs = job_spec.layers().to_owned();
+        let mut jobs = self.jobs.lock().unwrap();
+        let Entry::Vacant(job_entry) = jobs.entry(ijid) else {
+            panic!("duplicate ijid {ijid}");
         };
-
-        let job = Job {
+        job_entry.insert(Job {
             handle,
             job_spec,
             image_layers: vec![],
-            layers,
-        };
+            layers: vec![None; layer_specs.len()],
+        });
+        drop(jobs);
 
-        if let Some(ImageRef { name, .. }) = job.job_spec.image() {
-            let image_name = name.clone();
-            self.jobs.insert(ijid, job).assert_is_none();
-            match self.images.get_mut(&image_name) {
-                None => {
-                    self.images
-                        .insert(image_name.clone(), ImageEntry::Getting(vec![ijid]));
-                    self.deps.get_image(image_name);
-                }
-                Some(ImageEntry::Getting(waiting)) => {
-                    waiting.push(ijid);
-                }
-                Some(ImageEntry::Got(Ok(image))) => {
-                    let image_clone = image.clone();
-                    self.got_image_success(ijid, &image_clone);
-                }
-                Some(ImageEntry::Got(Err(err))) => {
-                    Self::job_error(&self.deps, &mut self.jobs, ijid, err.clone());
+        for (index, layer_spec) in layer_specs.into_iter().enumerate() {
+            self.executor.add(Tag::BuildLayer(layer_spec.clone()));
+            self.executor.evaluate(
+                &mut self.executor_adapter,
+                CompletedHandle::BuildLayer(false, ijid, index),
+                &Tag::BuildLayer(layer_spec.clone()),
+            );
+        }
+
+        if has_image {
+            let mut jobs = self.jobs.lock().unwrap();
+            if let Some(job) = jobs.get_mut(&ijid) {
+                let ImageRef { name, .. } = job.job_spec.image().unwrap();
+                let image_name = name.clone();
+                match self.images.get_mut(&image_name) {
+                    None => {
+                        self.images
+                            .insert(image_name.clone(), ImageEntry::Getting(vec![ijid]));
+                        self.executor_adapter.deps.get_image(image_name);
+                    }
+                    Some(ImageEntry::Getting(waiting)) => {
+                        waiting.push(ijid);
+                    }
+                    Some(ImageEntry::Got(Ok(image))) => {
+                        let image_clone = image.clone();
+                        drop(jobs);
+                        self.got_image_success(ijid, &image_clone);
+                    }
+                    Some(ImageEntry::Got(Err(err))) => {
+                        job_error(&self.executor_adapter.deps, &mut *jobs, ijid, err.clone());
+                    }
                 }
             }
-        } else if job.is_ready() {
-            Self::start_job(&self.deps, job);
-        } else {
-            self.jobs.insert(ijid, job);
+        }
+
+        let mut jobs = self.jobs.lock().unwrap();
+        if let Entry::Occupied(job_entry) = jobs.entry(ijid) {
+            if job_entry.get().is_ready() {
+                let job = job_entry.remove();
+                drop(jobs);
+                start_job(&self.executor_adapter.deps, job);
+            }
         }
     }
 
@@ -210,7 +314,8 @@ impl<DepsT: Deps> Preparer<DepsT> {
         name: String,
         spec: ContainerSpec,
     ) {
-        self.deps
+        self.executor_adapter
+            .deps
             .container_added(handle, self.containers.insert(name, spec));
     }
 
@@ -230,7 +335,12 @@ impl<DepsT: Deps> Preparer<DepsT> {
                 }
                 Err(err) => {
                     for ijid in waiting {
-                        Self::job_error(&self.deps, &mut self.jobs, ijid, err.clone());
+                        job_error(
+                            &self.executor_adapter.deps,
+                            &mut self.jobs.lock().unwrap(),
+                            ijid,
+                            err.clone(),
+                        );
                     }
                 }
             },
@@ -239,7 +349,12 @@ impl<DepsT: Deps> Preparer<DepsT> {
 
     fn got_image_success(&mut self, ijid: u64, image: &ConvertedImage) {
         if let Err(err) = self.got_image_success_inner(ijid, image) {
-            Self::job_error(&self.deps, &mut self.jobs, ijid, err);
+            job_error(
+                &self.executor_adapter.deps,
+                &mut self.jobs.lock().unwrap(),
+                ijid,
+                err,
+            );
         }
     }
 
@@ -248,7 +363,8 @@ impl<DepsT: Deps> Preparer<DepsT> {
         ijid: u64,
         image: &ConvertedImage,
     ) -> Result<(), DepsT::Error> {
-        let Entry::Occupied(mut job_entry) = self.jobs.entry(ijid) else {
+        let mut jobs = self.jobs.lock().unwrap();
+        let Entry::Occupied(mut job_entry) = jobs.entry(ijid) else {
             return Ok(());
         };
         let job = job_entry.get_mut();
@@ -256,53 +372,29 @@ impl<DepsT: Deps> Preparer<DepsT> {
         job.job_spec
             .integrate_image(image)
             .map_err(DepsT::error_from_string)?;
-        job.image_layers = Self::evaluate_layers(
-            &self.deps,
-            &mut self.layer_builds,
-            &mut self.layers,
-            job.job_spec.image_layers(),
-            ijid,
-            true,
-        )?;
 
-        if job.is_ready() {
-            Self::start_job(&self.deps, job_entry.remove());
+        let layer_specs = job.job_spec.image_layers().to_owned();
+        job.image_layers = vec![None; layer_specs.len()];
+        drop(jobs);
+        for (index, layer_spec) in layer_specs.into_iter().enumerate() {
+            self.executor.add(Tag::BuildLayer(layer_spec.clone()));
+            self.executor.evaluate(
+                &mut self.executor_adapter,
+                CompletedHandle::BuildLayer(true, ijid, index),
+                &Tag::BuildLayer(layer_spec.clone()),
+            );
+        }
+
+        let mut jobs = self.jobs.lock().unwrap();
+        if let Entry::Occupied(job_entry) = jobs.entry(ijid) {
+            if job_entry.get().is_ready() {
+                let job = job_entry.remove();
+                drop(jobs);
+                start_job(&self.executor_adapter.deps, job);
+            }
         }
 
         Ok(())
-    }
-
-    fn evaluate_layers(
-        deps: &DepsT,
-        layer_builds: &mut LayerBuilds,
-        layer_map: &mut HashMap<LayerSpec, LayerEntry<DepsT>>,
-        layers: &[LayerSpec],
-        ijid: u64,
-        image: bool,
-    ) -> Result<Vec<Option<(Sha256Digest, ArtifactType)>>, DepsT::Error> {
-        layers
-            .iter()
-            .enumerate()
-            .map(
-                |(idx, layer_spec)| match layer_map.entry(layer_spec.clone()) {
-                    Entry::Occupied(entry) => match entry.into_mut() {
-                        LayerEntry::Got(Ok((digest, artifact_type))) => {
-                            Ok(Some((digest.clone(), *artifact_type)))
-                        }
-                        LayerEntry::Got(Err(err)) => Err(err.clone()),
-                        LayerEntry::Getting(ijids) => {
-                            ijids.push((image, ijid, idx));
-                            Ok(None)
-                        }
-                    },
-                    Entry::Vacant(entry) => {
-                        layer_builds.push(deps, entry.key().clone());
-                        entry.insert(LayerEntry::Getting(vec![(image, ijid, idx)]));
-                        Ok(None)
-                    }
-                },
-            )
-            .collect()
     }
 
     fn receive_got_layer(
@@ -310,60 +402,14 @@ impl<DepsT: Deps> Preparer<DepsT> {
         spec: LayerSpec,
         result: Result<(Sha256Digest, ArtifactType), DepsT::Error>,
     ) {
-        let Some(layer) = self.layers.get_mut(&spec) else {
-            panic!(r#"received `got_layer` for unexpected layer {spec:?}"#);
-        };
-        match mem::replace(layer, LayerEntry::Got(result.clone())) {
-            LayerEntry::Got(_) => {
-                panic!(r#"received `got_layer` for layer {spec:?} which we already have"#);
-            }
-            LayerEntry::Getting(waiting) => {
-                self.layer_builds.pop(&self.deps);
-                match result {
-                    Ok((digest, artifact_type)) => {
-                        for (image, ijid, idx) in waiting {
-                            let Entry::Occupied(mut job_entry) = self.jobs.entry(ijid) else {
-                                continue;
-                            };
-                            let job = job_entry.get_mut();
-
-                            *(if image {
-                                &mut job.image_layers
-                            } else {
-                                &mut job.layers
-                            })
-                            .get_mut(idx)
-                            .unwrap() = Some((digest.clone(), artifact_type));
-
-                            if job.is_ready() {
-                                Self::start_job(&self.deps, job_entry.remove());
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        for (_, ijid, _) in waiting {
-                            Self::job_error(&self.deps, &mut self.jobs, ijid, err.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn start_job(deps: &DepsT, job: Job<DepsT>) {
-        let (handle, result) = job.into_handle_and_spec(deps);
-        deps.job_prepared(handle, result);
-    }
-
-    fn job_error(
-        deps: &DepsT,
-        spec_map: &mut HashMap<u64, Job<DepsT>>,
-        ijid: u64,
-        err: DepsT::Error,
-    ) {
-        if let Some(spec) = spec_map.remove(&ijid) {
-            deps.job_prepared(spec.handle, Err(err));
-        }
+        self.executor.receive_completed(
+            &mut self.executor_adapter,
+            &Tag::BuildLayer(spec),
+            Output::BuildLayer(result),
+        );
+        self.executor_adapter
+            .layer_builds
+            .pop(&self.executor_adapter.deps);
     }
 }
 
