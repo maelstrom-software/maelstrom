@@ -365,10 +365,6 @@ impl CollapsedJobSpec {
         &self.layers
     }
 
-    pub fn image_layers(&self) -> &[LayerSpec] {
-        &self.image_layers
-    }
-
     pub fn image(&self) -> Option<&ImageRef> {
         self.image.as_ref()
     }
@@ -460,7 +456,6 @@ impl CollapsedJobSpec {
         })
     }
 
-    #[allow(dead_code)]
     pub fn into_job_spec_without_image(
         mut self,
         evaluate_environment: impl FnOnce(
@@ -475,7 +470,6 @@ impl CollapsedJobSpec {
         self.into_job_spec(layers, environment)
     }
 
-    #[allow(dead_code)]
     pub fn into_job_spec_with_image(
         mut self,
         evaluate_environment: impl FnOnce(
@@ -486,10 +480,6 @@ impl CollapsedJobSpec {
         image: &ConvertedImage,
         image_layers: impl IntoIterator<Item = (Sha256Digest, ArtifactType)>,
     ) -> Result<BaseJobSpec, String> {
-        let Some(image_ref) = &self.image else {
-            panic!("job_spec didn't have image");
-        };
-        assert!(image_ref.r#use.contains(ImageUse::Layers));
         self.integrate_image(image)?;
         self.into_job_spec_without_image(
             evaluate_environment,

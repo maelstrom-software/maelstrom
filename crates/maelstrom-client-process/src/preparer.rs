@@ -21,7 +21,8 @@ use crate::collapsed_job_spec::CollapsedJobSpec;
 use assert_matches::assert_matches;
 use maelstrom_base::{ArtifactType, JobSpec, Sha256Digest};
 use maelstrom_client_base::spec::{
-    ContainerSpec, ConvertedImage, EnvironmentSpec, ImageRef, JobSpec as ClientJobSpec, LayerSpec,
+    ContainerSpec, ConvertedImage, EnvironmentSpec, ImageRef, ImageUse, JobSpec as ClientJobSpec,
+    LayerSpec,
 };
 use maelstrom_util::executor::{self, Executor, StartResult};
 use std::{
@@ -44,7 +45,7 @@ pub trait Deps {
         &self,
         initial: BTreeMap<String, String>,
         specs: Vec<EnvironmentSpec>,
-    ) -> Result<Vec<String>, Self::Error>;
+    ) -> Result<Vec<String>, String>;
     fn job_prepared(&self, handle: Self::PrepareJobHandle, result: Result<JobSpec, Self::Error>);
     fn container_added(&self, handle: Self::AddContainerHandle, old: Option<ContainerSpec>);
     fn get_image(&self, name: String);
@@ -132,7 +133,10 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
                 let job = job_entry.get_mut();
 
                 (if image {
-                    &mut job.image_layers
+                    let JobImage::With { image_layers, .. } = &mut job.image else {
+                        panic!("wrong JobImage");
+                    };
+                    image_layers
                 } else {
                     &mut job.layers
                 })[index] = Some((digest.clone(), *artifact_type));
@@ -258,7 +262,11 @@ impl<DepsT: Deps> Preparer<DepsT> {
         job_entry.insert(Job {
             handle,
             job_spec,
-            image_layers: vec![],
+            image: if has_image {
+                JobImage::Getting
+            } else {
+                JobImage::Without
+            },
             layers: vec![None; layer_specs.len()],
         });
         drop(jobs);
@@ -368,14 +376,27 @@ impl<DepsT: Deps> Preparer<DepsT> {
             return Ok(());
         };
         let job = job_entry.get_mut();
-
-        job.job_spec
-            .integrate_image(image)
-            .map_err(DepsT::error_from_string)?;
-
-        let layer_specs = job.job_spec.image_layers().to_owned();
-        job.image_layers = vec![None; layer_specs.len()];
+        let layer_specs = if job
+            .job_spec
+            .image()
+            .unwrap()
+            .r#use
+            .contains(ImageUse::Layers)
+        {
+            image.layers().map_err(DepsT::error_from_string)?.clone()
+        } else {
+            vec![]
+        };
+        let old_image = mem::replace(
+            &mut job.image,
+            JobImage::With {
+                image: image.clone(),
+                image_layers: vec![None; layer_specs.len()],
+            },
+        );
+        assert_matches!(old_image, JobImage::Getting);
         drop(jobs);
+
         for (index, layer_spec) in layer_specs.into_iter().enumerate() {
             self.executor.add(Tag::BuildLayer(layer_spec.clone()));
             self.executor.evaluate(
@@ -413,10 +434,20 @@ impl<DepsT: Deps> Preparer<DepsT> {
     }
 }
 
+#[derive(Debug)]
+enum JobImage {
+    Without,
+    Getting,
+    With {
+        image: ConvertedImage,
+        image_layers: Vec<Option<(Sha256Digest, ArtifactType)>>,
+    },
+}
+
 struct Job<DepsT: Deps> {
     handle: DepsT::PrepareJobHandle,
     job_spec: CollapsedJobSpec,
-    image_layers: Vec<Option<(Sha256Digest, ArtifactType)>>,
+    image: JobImage,
     layers: Vec<Option<(Sha256Digest, ArtifactType)>>,
 }
 
@@ -428,33 +459,61 @@ impl<DepsT: Deps> Job<DepsT> {
         assert!(self.is_ready());
         let Job {
             handle,
-            mut job_spec,
-            image_layers,
+            job_spec,
+            image,
             layers,
         } = self;
         (handle, {
-            let (initial_environment, environment) = job_spec.take_environment();
-            deps.evaluate_environment(initial_environment, environment)
-                .and_then(|environment| {
-                    job_spec
-                        .into_job_spec(
-                            image_layers.into_iter().chain(layers).map(|layer| {
-                                let Some((digest, artifact_type)) = layer else {
-                                    panic!("shouldn't be called while awaiting any layers");
-                                };
-                                (digest, artifact_type)
-                            }),
-                            environment,
-                        )
-                        .map_err(DepsT::error_from_string)
-                })
+            match image {
+                JobImage::Getting => {
+                    panic!("job shouldn't still be getting image");
+                }
+                JobImage::Without => job_spec
+                    .into_job_spec_without_image(
+                        |initial_environment, environment| {
+                            deps.evaluate_environment(initial_environment, environment)
+                        },
+                        layers.into_iter().map(|layer| {
+                            let Some((digest, artifact_type)) = layer else {
+                                panic!("shouldn't be called while awaiting any layers");
+                            };
+                            (digest, artifact_type)
+                        }),
+                    )
+                    .map_err(DepsT::error_from_string),
+                JobImage::With {
+                    image,
+                    image_layers,
+                } => job_spec
+                    .into_job_spec_with_image(
+                        |initial_environment, environment| {
+                            deps.evaluate_environment(initial_environment, environment)
+                        },
+                        layers.into_iter().map(|layer| {
+                            let Some((digest, artifact_type)) = layer else {
+                                panic!("shouldn't be called while awaiting any layers");
+                            };
+                            (digest, artifact_type)
+                        }),
+                        &image,
+                        image_layers.into_iter().map(|layer| {
+                            let Some((digest, artifact_type)) = layer else {
+                                panic!("shouldn't be called while awaiting any layers");
+                            };
+                            (digest, artifact_type)
+                        }),
+                    )
+                    .map_err(DepsT::error_from_string),
+            }
         })
     }
 
     fn is_ready(&self) -> bool {
-        self.job_spec.image().is_none()
-            && self.image_layers.iter().all(Option::is_some)
-            && self.layers.iter().all(Option::is_some)
+        (match &self.image {
+            JobImage::Getting => false,
+            JobImage::Without => true,
+            JobImage::With { image_layers, .. } => image_layers.iter().all(Option::is_some),
+        }) && self.layers.iter().all(Option::is_some)
     }
 }
 
