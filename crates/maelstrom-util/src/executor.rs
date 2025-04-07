@@ -7,7 +7,13 @@ pub trait Deps {
     type Partial;
     type Output;
 
-    fn start(&mut self, tag: &Self::Tag, state: &Option<Self::Partial>, inputs: Vec<&Self::Output>);
+    #[must_use]
+    fn start(
+        &mut self,
+        tag: &Self::Tag,
+        state: &Option<Self::Partial>,
+        inputs: Vec<&Self::Output>,
+    ) -> Option<Self::Output>;
     fn completed(&mut self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
 }
 
@@ -116,17 +122,26 @@ impl<DepsT: Deps> Executor<DepsT> {
                 self.states[index] = EvaluationState::WaitingOnInputs { lacking, handles };
             }
             None => {
-                Self::start(deps, &self.states, tag, &self.evaluations[index]);
+                Self::start(
+                    deps,
+                    &self.evaluations,
+                    &mut self.states,
+                    index,
+                    tag,
+                    &self.evaluations[index],
+                );
             }
         }
     }
 
     fn start(
         deps: &mut DepsT,
-        states: &[EvaluationState<DepsT>],
+        evaluations: &IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
+        states: &mut [EvaluationState<DepsT>],
+        index: usize,
         tag: &DepsT::Tag,
         entry: &EvaluationEntry<DepsT>,
-    ) {
+    ) -> bool {
         let inputs = entry
             .in_edges
             .iter()
@@ -137,7 +152,12 @@ impl<DepsT: Deps> Executor<DepsT> {
                 output
             })
             .collect();
-        deps.start(tag, &entry.partial, inputs);
+        if let Some(output) = deps.start(tag, &entry.partial, inputs) {
+            Self::receive_completed_inner(deps, evaluations, states, index, tag, entry, output);
+            true
+        } else {
+            false
+        }
     }
 
     fn ensure_started_and_get_completed(
@@ -165,13 +185,13 @@ impl<DepsT: Deps> Executor<DepsT> {
                 match NonZeroUsize::new(lacking) {
                     Some(lacking) => {
                         states[index] = EvaluationState::WaitingOnInputs { lacking, handles };
+                        false
                     }
                     None => {
                         states[index] = EvaluationState::Running { handles };
-                        Self::start(deps, states, tag, entry);
+                        Self::start(deps, evaluations, states, index, tag, entry)
                     }
                 }
-                false
             }
             EvaluationState::WaitingOnInputs { .. } | EvaluationState::Running { .. } => false,
             EvaluationState::Completed { .. } => true,
@@ -197,7 +217,27 @@ impl<DepsT: Deps> Executor<DepsT> {
 
     pub fn receive_completed(&mut self, deps: &mut DepsT, tag: &DepsT::Tag, output: DepsT::Output) {
         let (index, _, entry) = self.evaluations.get_full(tag).unwrap();
-        let state = &mut self.states[index];
+        Self::receive_completed_inner(
+            deps,
+            &self.evaluations,
+            &mut self.states,
+            index,
+            tag,
+            entry,
+            output,
+        );
+    }
+
+    fn receive_completed_inner(
+        deps: &mut DepsT,
+        evaluations: &IndexMap<DepsT::Tag, EvaluationEntry<DepsT>>,
+        states: &mut [EvaluationState<DepsT>],
+        index: usize,
+        tag: &DepsT::Tag,
+        entry: &EvaluationEntry<DepsT>,
+        output: DepsT::Output,
+    ) {
+        let state = &mut states[index];
         let EvaluationState::Running { handles: waiting } =
             mem::replace(state, EvaluationState::Completed { output })
         else {
@@ -211,7 +251,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         }
 
         for out_edge_index in &entry.out_edges {
-            let out_edge_state = &mut self.states[*out_edge_index];
+            let out_edge_state = &mut states[*out_edge_index];
             let EvaluationState::WaitingOnInputs { handles, lacking } = out_edge_state else {
                 continue;
             };
@@ -224,8 +264,15 @@ impl<DepsT: Deps> Executor<DepsT> {
                         handles: mem::take(handles),
                     };
                     let (out_edge_tag, out_edge_entry) =
-                        self.evaluations.get_index(*out_edge_index).unwrap();
-                    Self::start(deps, &self.states, out_edge_tag, out_edge_entry);
+                        evaluations.get_index(*out_edge_index).unwrap();
+                    Self::start(
+                        deps,
+                        evaluations,
+                        states,
+                        *out_edge_index,
+                        out_edge_tag,
+                        out_edge_entry,
+                    );
                 }
             }
         }
@@ -260,12 +307,13 @@ mod tests {
             tag: &Self::Tag,
             partial: &Option<Self::Partial>,
             inputs: Vec<&Self::Output>,
-        ) {
+        ) -> Option<Self::Output> {
             self.borrow_mut().messages.push(TestMessage::Start(
                 tag,
                 *partial,
                 inputs.into_iter().copied().collect(),
             ));
+            None
         }
 
         fn completed(
