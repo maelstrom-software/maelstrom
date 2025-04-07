@@ -206,7 +206,7 @@ pub enum JobMountForTomlAndJson {
 }
 
 #[pocket_definition(export)]
-#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum JobMount {
     Bind {
         mount_point: Utf8PathBuf,
@@ -304,7 +304,9 @@ impl From<JobMountForTomlAndJson> for JobMount {
 }
 
 #[pocket_definition(export)]
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum JobNetwork {
     #[default]
@@ -314,7 +316,7 @@ pub enum JobNetwork {
 }
 
 #[pocket_definition(export)]
-#[derive(Clone, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct CaptureFileSystemChanges {
     pub upper: Utf8PathBuf,
     pub work: Utf8PathBuf,
