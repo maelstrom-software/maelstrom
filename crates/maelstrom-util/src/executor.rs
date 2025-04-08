@@ -22,7 +22,7 @@ pub trait Deps {
     #[must_use]
     fn start(
         &mut self,
-        tag: &Self::Tag,
+        tag: Self::Tag,
         state: Option<Self::Partial>,
         inputs: Vec<&Self::Output>,
         graph: &mut Graph<Self>,
@@ -231,8 +231,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 output
             })
             .collect();
-        let tag = tag.clone();
-        match deps.start(&tag, partial, inputs, evaluations) {
+        match deps.start(tag.clone(), partial, inputs, evaluations) {
             StartResult::InProgress => {}
             StartResult::Done(output) => {
                 deferred.push((index, DeferredWork::Completed(output)));
@@ -457,7 +456,7 @@ mod tests {
 
         fn start(
             &mut self,
-            tag: &Self::Tag,
+            tag: Self::Tag,
             partial: Option<Self::Partial>,
             inputs: Vec<&Self::Output>,
             _graph: &mut Graph<Self>,
