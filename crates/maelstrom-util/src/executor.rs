@@ -11,11 +11,11 @@ pub enum StartResult<TagT, PartialT, OutputT> {
     Done(OutputT),
 }
 
-pub struct Graph<DepsT: Deps>(IndexMap<DepsT::Tag, Entry>);
+pub struct Graph<DepsT: Deps + ?Sized>(IndexMap<DepsT::Tag, Entry>);
 
 pub trait Deps {
     type CompletedHandle;
-    type Tag: Debug + Eq + Hash;
+    type Tag: Clone + Debug + Eq + Hash;
     type Partial;
     type Output;
 
@@ -25,6 +25,7 @@ pub trait Deps {
         tag: &Self::Tag,
         state: Option<Self::Partial>,
         inputs: Vec<&Self::Output>,
+        graph: &mut Graph<Self>,
     ) -> StartResult<Self::Tag, Self::Partial, Self::Output>;
     fn completed(&mut self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
 }
@@ -230,7 +231,8 @@ impl<DepsT: Deps> Executor<DepsT> {
                 output
             })
             .collect();
-        match deps.start(tag, partial, inputs) {
+        let tag = tag.clone();
+        match deps.start(&tag, partial, inputs, evaluations) {
             StartResult::InProgress => {}
             StartResult::Done(output) => {
                 deferred.push((index, DeferredWork::Completed(output)));
@@ -458,6 +460,7 @@ mod tests {
             tag: &Self::Tag,
             partial: Option<Self::Partial>,
             inputs: Vec<&Self::Output>,
+            _graph: &mut Graph<Self>,
         ) -> StartResult<Self::Tag, Self::Partial, Self::Output> {
             let mut test_state = self.borrow_mut();
             test_state.messages.push(TestMessage::Start(
