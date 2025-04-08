@@ -122,7 +122,7 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
             Tag::ImageWithLayers(_) => match partial {
                 None => match &inputs[..] {
                     [Output::Image(Ok(converted_image))] => match converted_image.layers() {
-                        Err(err) => StartResult::Done(Output::ImageWithLayers(Err(
+                        Err(err) => StartResult::Completed(Output::ImageWithLayers(Err(
                             DepsT::error_from_string(err.clone()),
                         ))),
                         Ok(layers) => StartResult::Expand {
@@ -134,7 +134,7 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
                         },
                     },
                     [Output::Image(Err(err))] => {
-                        StartResult::Done(Output::ImageWithLayers(Err(err.clone())))
+                        StartResult::Completed(Output::ImageWithLayers(Err(err.clone())))
                     }
                     _ => {
                         panic!("expected exactly one Output::Image as input");
@@ -152,8 +152,8 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
                             })
                             .collect();
                         match layers {
-                            Err(err) => StartResult::Done(Output::ImageWithLayers(Err(err))),
-                            Ok(layers) => StartResult::Done(Output::ImageWithLayers(Ok((
+                            Err(err) => StartResult::Completed(Output::ImageWithLayers(Err(err))),
+                            Ok(layers) => StartResult::Completed(Output::ImageWithLayers(Ok((
                                 converted_image.clone(),
                                 layers,
                             )))),
@@ -178,8 +178,8 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
                             })
                             .collect();
                         match layers {
-                            Err(err) => StartResult::Done(Output::JobSpec(Err(err))),
-                            Ok(layers) => StartResult::Done(Output::JobSpec(
+                            Err(err) => StartResult::Completed(Output::JobSpec(Err(err))),
+                            Ok(layers) => StartResult::Completed(Output::JobSpec(
                                 collapsed_job_spec
                                     .clone()
                                     .into_job_spec_without_image(
@@ -197,7 +197,7 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
                     }
                     Some(image) if !image.r#use.contains(ImageUse::Layers) => match &inputs[..] {
                         [Output::Image(Err(err)), ..] => {
-                            StartResult::Done(Output::JobSpec(Err(err.clone())))
+                            StartResult::Completed(Output::JobSpec(Err(err.clone())))
                         }
                         [Output::Image(Ok(image)), layers @ ..] => {
                             let layers: Result<Vec<_>, _> = layers
@@ -210,8 +210,8 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
                                 })
                                 .collect();
                             match layers {
-                                Err(err) => StartResult::Done(Output::JobSpec(Err(err))),
-                                Ok(layers) => StartResult::Done(Output::JobSpec(
+                                Err(err) => StartResult::Completed(Output::JobSpec(Err(err))),
+                                Ok(layers) => StartResult::Completed(Output::JobSpec(
                                     collapsed_job_spec
                                         .clone()
                                         .into_job_spec_with_image(
@@ -235,7 +235,7 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
                     },
                     Some(_) => match &inputs[..] {
                         [Output::ImageWithLayers(Err(err)), ..] => {
-                            StartResult::Done(Output::JobSpec(Err(err.clone())))
+                            StartResult::Completed(Output::JobSpec(Err(err.clone())))
                         }
                         [Output::ImageWithLayers(Ok((image, image_layers))), layers @ ..] => {
                             let layers: Result<Vec<_>, _> = layers
@@ -248,8 +248,8 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
                                 })
                                 .collect();
                             match layers {
-                                Err(err) => StartResult::Done(Output::JobSpec(Err(err))),
-                                Ok(layers) => StartResult::Done(Output::JobSpec(
+                                Err(err) => StartResult::Completed(Output::JobSpec(Err(err))),
+                                Ok(layers) => StartResult::Completed(Output::JobSpec(
                                     collapsed_job_spec
                                         .clone()
                                         .into_job_spec_with_image(
