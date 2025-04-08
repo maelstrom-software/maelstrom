@@ -1326,7 +1326,7 @@ pub struct ImageConfig {
 
 /// A convenience struct for extracting parts of an OCI image for use in a
 /// [`maelstrom_base::JobSpec`].
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ConvertedImage {
     name: String,
     layers: Vec<PathBuf>,
