@@ -23,7 +23,7 @@ pub trait Deps {
     fn start(
         &mut self,
         tag: &Self::Tag,
-        state: Option<Self::Partial>,
+        state: &Option<Self::Partial>,
         inputs: Vec<&Self::Output>,
     ) -> StartResult<Self::Tag, Self::Partial, Self::Output>;
     fn completed(&mut self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
@@ -230,7 +230,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 output
             })
             .collect();
-        match deps.start(tag, partial, inputs) {
+        match deps.start(tag, &partial, inputs) {
             StartResult::InProgress => {}
             StartResult::Done(output) => {
                 deferred.push((index, DeferredWork::Completed(output)));
@@ -456,13 +456,13 @@ mod tests {
         fn start(
             &mut self,
             tag: &Self::Tag,
-            partial: Option<Self::Partial>,
+            partial: &Option<Self::Partial>,
             inputs: Vec<&Self::Output>,
         ) -> StartResult<Self::Tag, Self::Partial, Self::Output> {
             let mut test_state = self.borrow_mut();
             test_state.messages.push(TestMessage::Start(
                 tag,
-                partial,
+                *partial,
                 inputs.into_iter().copied().collect(),
             ));
             if let Some(results) = test_state.start_results.get_mut(tag) {
