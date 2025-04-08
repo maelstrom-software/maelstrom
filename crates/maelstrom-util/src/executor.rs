@@ -11,6 +11,8 @@ pub enum StartResult<TagT, PartialT, OutputT> {
     Done(OutputT),
 }
 
+pub struct Graph<DepsT: Deps>(IndexMap<DepsT::Tag, Entry<DepsT>>);
+
 pub trait Deps {
     type CompletedHandle;
     type Tag: Debug + Eq + Hash;
@@ -48,14 +50,14 @@ struct Entry<DepsT: Deps> {
 }
 
 pub struct Executor<DepsT: Deps> {
-    evaluations: IndexMap<DepsT::Tag, Entry<DepsT>>,
+    evaluations: Graph<DepsT>,
     states: Vec<State<DepsT>>,
 }
 
 impl<DepsT: Deps> Default for Executor<DepsT> {
     fn default() -> Self {
         Self {
-            evaluations: Default::default(),
+            evaluations: Graph(Default::default()),
             states: Default::default(),
         }
     }
@@ -74,7 +76,7 @@ pub struct Handle(usize);
 
 impl<DepsT: Deps> Executor<DepsT> {
     pub fn get(&self, tag: &DepsT::Tag) -> Handle {
-        Handle(self.evaluations.get_index_of(tag).unwrap())
+        Handle(self.evaluations.0.get_index_of(tag).unwrap())
     }
 
     pub fn add(&mut self, tag: DepsT::Tag) -> Handle {
@@ -94,16 +96,17 @@ impl<DepsT: Deps> Executor<DepsT> {
         tag: DepsT::Tag,
         inputs: impl IntoIterator<Item = DepsT::Tag>,
     ) -> usize {
-        match self.evaluations.get_index_of(&tag) {
+        match self.evaluations.0.get_index_of(&tag) {
             Some(index) => index,
             None => {
                 self.states.push(State::NotStarted);
-                let index = self.evaluations.len();
+                let index = self.evaluations.0.len();
                 let in_edges = inputs
                     .into_iter()
                     .map(|in_edge_tag| {
                         let (in_edge_index, _, in_edge_entry) = self
                             .evaluations
+                            .0
                             .get_full_mut(&in_edge_tag)
                             .unwrap_or_else(|| {
                                 panic!(
@@ -115,6 +118,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     })
                     .collect::<Vec<_>>();
                 self.evaluations
+                    .0
                     .insert(
                         tag,
                         Entry {
@@ -137,13 +141,14 @@ impl<DepsT: Deps> Executor<DepsT> {
         added_inputs: impl IntoIterator<Item = DepsT::Tag>,
     ) {
         let mut deferred = vec![];
-        let index = self.evaluations.get_index_of(tag).unwrap();
+        let index = self.evaluations.0.get_index_of(tag).unwrap();
 
         let added_in_edges = added_inputs
             .into_iter()
             .map(|in_edge_tag| {
                 let (in_edge_index, _, in_edge_entry) = self
                     .evaluations
+                    .0
                     .get_full_mut(&in_edge_tag)
                     .unwrap_or_else(|| {
                         panic!("{tag:?} depends on {in_edge_tag:?}, which hasn't been added")
@@ -180,7 +185,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 )
             })
             .count();
-        let (_, entry) = self.evaluations.get_index_mut(index).unwrap();
+        let (_, entry) = self.evaluations.0.get_index_mut(index).unwrap();
         entry.partial = Some(partial);
         entry.in_edges.extend(added_in_edges);
         let State::Running { handles } = &mut self.states[index] else {
@@ -199,12 +204,12 @@ impl<DepsT: Deps> Executor<DepsT> {
 
     fn start(
         deps: &mut DepsT,
-        evaluations: &IndexMap<DepsT::Tag, Entry<DepsT>>,
+        evaluations: &Graph<DepsT>,
         states: &mut [State<DepsT>],
         index: usize,
         deferred: &mut Vec<(usize, DeferredWork<DepsT>)>,
     ) {
-        let (tag, entry) = evaluations.get_index(index).unwrap();
+        let (tag, entry) = evaluations.0.get_index(index).unwrap();
         let inputs = entry
             .in_edges
             .iter()
@@ -237,14 +242,14 @@ impl<DepsT: Deps> Executor<DepsT> {
 
     fn ensure_started_and_get_completed(
         deps: &mut DepsT,
-        evaluations: &IndexMap<DepsT::Tag, Entry<DepsT>>,
+        evaluations: &Graph<DepsT>,
         states: &mut [State<DepsT>],
         index: usize,
         deferred: &mut Vec<(usize, DeferredWork<DepsT>)>,
     ) -> bool {
         match states[index] {
             State::NotStarted => {
-                let lacking = evaluations[index]
+                let lacking = evaluations.0[index]
                     .in_edges
                     .iter()
                     .filter(|in_edge_index| {
@@ -282,7 +287,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         while let Some((index, work)) = deferred.pop() {
             match work {
                 DeferredWork::Completed(output) => {
-                    let (tag, entry) = self.evaluations.get_index(index).unwrap();
+                    let (tag, entry) = self.evaluations.0.get_index(index).unwrap();
                     Self::receive_completed_inner(
                         deps,
                         &self.evaluations,
@@ -303,7 +308,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                         .map(|(in_edge_tag, in_edge_inputs)| {
                             let in_edge_index =
                                 self.add_with_inputs_inner(in_edge_tag, in_edge_inputs);
-                            self.evaluations[in_edge_index].out_edges.push(index);
+                            self.evaluations.0[in_edge_index].out_edges.push(index);
                             in_edge_index
                         })
                         .collect();
@@ -337,14 +342,14 @@ impl<DepsT: Deps> Executor<DepsT> {
                 handles.push(completed_handle);
             }
             State::Completed { output } => {
-                let (tag, _) = self.evaluations.get_index(index).unwrap();
+                let (tag, _) = self.evaluations.0.get_index(index).unwrap();
                 deps.completed(completed_handle, tag, output);
             }
         }
     }
 
     pub fn receive_completed(&mut self, deps: &mut DepsT, tag: &DepsT::Tag, output: DepsT::Output) {
-        let (index, _, entry) = self.evaluations.get_full(tag).unwrap();
+        let (index, _, entry) = self.evaluations.0.get_full(tag).unwrap();
         let mut deferred = vec![];
         Self::receive_completed_inner(
             deps,
@@ -362,7 +367,7 @@ impl<DepsT: Deps> Executor<DepsT> {
     #[allow(clippy::too_many_arguments)]
     fn receive_completed_inner(
         deps: &mut DepsT,
-        evaluations: &IndexMap<DepsT::Tag, Entry<DepsT>>,
+        evaluations: &Graph<DepsT>,
         states: &mut [State<DepsT>],
         index: usize,
         tag: &DepsT::Tag,
