@@ -286,17 +286,16 @@ macro_rules! container_container_parent {
 }
 
 #[derive(
+    IntoProtoBuf,
+    TryFromProtoBuf,
     Clone,
     Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    IntoProtoBuf,
-    Ord,
     PartialEq,
+    Eq,
     PartialOrd,
+    Ord,
     Serialize,
-    TryFromProtoBuf,
+    Deserialize,
 )]
 #[proto(proto_buf_type = "proto::EnvironmentSpec")]
 pub struct EnvironmentSpec {

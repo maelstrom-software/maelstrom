@@ -26,7 +26,7 @@ use std::{collections::BTreeMap, mem, time::Duration};
 /// However, it is different in the sense that it tracks if an image needs to be fetched, and if so,
 /// what aspects of that image need to be integrated into the job spec. It also keeps tracks some
 /// fields separately to make the job of the [`crate::preparer::Preparer`] easier.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct CollapsedJobSpec {
     layers: Vec<LayerSpec>,
     enable_writable_file_system: Option<bool>,
@@ -476,7 +476,7 @@ impl CollapsedJobSpec {
             BTreeMap<String, String>,
             Vec<EnvironmentSpec>,
         ) -> Result<Vec<String>, String>,
-        layers: impl IntoIterator<Item = (Sha256Digest, ArtifactType)>,
+        layers: impl Iterator<Item = (Sha256Digest, ArtifactType)>,
         image: &ConvertedImage,
         image_layers: impl IntoIterator<Item = (Sha256Digest, ArtifactType)>,
     ) -> Result<BaseJobSpec, String> {
