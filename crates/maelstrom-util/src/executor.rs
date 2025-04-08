@@ -65,12 +65,8 @@ impl<DepsT: Deps> Default for Executor<DepsT> {
 }
 
 enum DeferredWork<DepsT: Deps> {
-    Completed {
-        index: usize,
-        output: DepsT::Output,
-    },
+    Completed(DepsT::Output),
     Expand {
-        index: usize,
         partial: DepsT::Partial,
         added_inputs: Vec<(DepsT::Tag, Vec<DepsT::Tag>)>,
     },
@@ -172,7 +168,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         index: usize,
         partial: DepsT::Partial,
         added_in_edges: Vec<usize>,
-        deferred: &mut Vec<DeferredWork<DepsT>>,
+        deferred: &mut Vec<(usize, DeferredWork<DepsT>)>,
     ) {
         // This is fine because if we start an entry and it immediately returns, then that will end
         // up in `deferred`, and won't traverse the entry's out-edges immediately. When we do the
@@ -221,7 +217,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         evaluations: &mut Graph<DepsT>,
         states: &mut [State<DepsT>],
         index: usize,
-        deferred: &mut Vec<DeferredWork<DepsT>>,
+        deferred: &mut Vec<(usize, DeferredWork<DepsT>)>,
         partial: Option<DepsT::Partial>,
     ) {
         let (tag, entry) = evaluations.0.get_index(index).unwrap();
@@ -238,17 +234,19 @@ impl<DepsT: Deps> Executor<DepsT> {
         match deps.start(tag.clone(), partial, inputs, evaluations) {
             StartResult::InProgress => {}
             StartResult::Done(output) => {
-                deferred.push(DeferredWork::Completed { index, output });
+                deferred.push((index, DeferredWork::Completed(output)));
             }
             StartResult::Expand {
                 partial,
                 added_inputs,
             } => {
-                deferred.push(DeferredWork::Expand {
+                deferred.push((
                     index,
-                    partial,
-                    added_inputs,
-                });
+                    DeferredWork::Expand {
+                        partial,
+                        added_inputs,
+                    },
+                ));
             }
         }
     }
@@ -258,7 +256,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         evaluations: &mut Graph<DepsT>,
         states: &mut [State<DepsT>],
         index: usize,
-        deferred: &mut Vec<DeferredWork<DepsT>>,
+        deferred: &mut Vec<(usize, DeferredWork<DepsT>)>,
     ) -> bool {
         match states[index] {
             State::NotStarted => {
@@ -297,10 +295,14 @@ impl<DepsT: Deps> Executor<DepsT> {
         }
     }
 
-    fn do_deferred_work(&mut self, deps: &mut DepsT, deferred: &mut Vec<DeferredWork<DepsT>>) {
-        while let Some(work) = deferred.pop() {
+    fn do_deferred_work(
+        &mut self,
+        deps: &mut DepsT,
+        deferred: &mut Vec<(usize, DeferredWork<DepsT>)>,
+    ) {
+        while let Some((index, work)) = deferred.pop() {
             match work {
-                DeferredWork::Completed { index, output } => {
+                DeferredWork::Completed(output) => {
                     Self::receive_completed_inner(
                         deps,
                         &mut self.evaluations,
@@ -311,7 +313,6 @@ impl<DepsT: Deps> Executor<DepsT> {
                     );
                 }
                 DeferredWork::Expand {
-                    index,
                     partial,
                     added_inputs,
                 } => {
@@ -380,7 +381,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         states: &mut [State<DepsT>],
         index: usize,
         output: DepsT::Output,
-        deferred: &mut Vec<DeferredWork<DepsT>>,
+        deferred: &mut Vec<(usize, DeferredWork<DepsT>)>,
     ) {
         let state = &mut states[index];
         let State::Running { handles: waiting } = mem::replace(state, State::Completed { output })
