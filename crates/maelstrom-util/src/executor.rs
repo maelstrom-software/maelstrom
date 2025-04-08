@@ -11,7 +11,7 @@ pub enum StartResult<TagT, PartialT, OutputT> {
     Done(OutputT),
 }
 
-pub struct Graph<DepsT: Deps>(IndexMap<DepsT::Tag, Entry>);
+pub struct Graph<DepsT: Deps>(IndexMap<DepsT::Tag, Entry<DepsT>>);
 
 pub trait Deps {
     type CompletedHandle;
@@ -34,7 +34,6 @@ enum State<DepsT: Deps> {
     WaitingOnInputs {
         lacking: NonZeroUsize,
         handles: Vec<DepsT::CompletedHandle>,
-        partial: Option<DepsT::Partial>,
     },
     Running {
         handles: Vec<DepsT::CompletedHandle>,
@@ -44,9 +43,10 @@ enum State<DepsT: Deps> {
     },
 }
 
-struct Entry {
+struct Entry<DepsT: Deps> {
     in_edges: Vec<usize>,
     out_edges: Vec<usize>,
+    partial: Option<DepsT::Partial>,
 }
 
 pub struct Executor<DepsT: Deps> {
@@ -124,6 +124,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                         Entry {
                             in_edges,
                             out_edges: Default::default(),
+                            partial: Default::default(),
                         },
                     )
                     .assert_is_none();
@@ -185,6 +186,7 @@ impl<DepsT: Deps> Executor<DepsT> {
             })
             .count();
         let (_, entry) = self.evaluations.0.get_index_mut(index).unwrap();
+        entry.partial = Some(partial);
         entry.in_edges.extend(added_in_edges);
         let State::Running { handles } = &mut self.states[index] else {
             panic!("unexpected state");
@@ -192,11 +194,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         match NonZeroUsize::new(lacking) {
             Some(lacking) => {
                 let handles = mem::take(handles);
-                self.states[index] = State::WaitingOnInputs {
-                    lacking,
-                    handles,
-                    partial: Some(partial),
-                };
+                self.states[index] = State::WaitingOnInputs { lacking, handles };
             }
             None => {
                 Self::start(
@@ -205,7 +203,6 @@ impl<DepsT: Deps> Executor<DepsT> {
                     &mut self.states,
                     index,
                     deferred,
-                    Some(partial),
                 );
             }
         }
@@ -217,7 +214,6 @@ impl<DepsT: Deps> Executor<DepsT> {
         states: &mut [State<DepsT>],
         index: usize,
         deferred: &mut Vec<(usize, DeferredWork<DepsT>)>,
-        partial: Option<DepsT::Partial>,
     ) {
         let (tag, entry) = evaluations.0.get_index(index).unwrap();
         let inputs = entry
@@ -230,7 +226,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 output
             })
             .collect();
-        match deps.start(tag, &partial, inputs) {
+        match deps.start(tag, &entry.partial, inputs) {
             StartResult::InProgress => {}
             StartResult::Done(output) => {
                 deferred.push((index, DeferredWork::Completed(output)));
@@ -273,18 +269,13 @@ impl<DepsT: Deps> Executor<DepsT> {
                     })
                     .count();
                 let handles = Default::default();
-                let partial = None;
                 match NonZeroUsize::new(lacking) {
                     Some(lacking) => {
-                        states[index] = State::WaitingOnInputs {
-                            lacking,
-                            handles,
-                            partial,
-                        };
+                        states[index] = State::WaitingOnInputs { lacking, handles };
                     }
                     None => {
                         states[index] = State::Running { handles };
-                        Self::start(deps, evaluations, states, index, deferred, partial);
+                        Self::start(deps, evaluations, states, index, deferred);
                     }
                 }
                 false
@@ -399,12 +390,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         let out_edges = entry.out_edges.clone();
         for out_edge_index in out_edges {
             let out_edge_state = &mut states[out_edge_index];
-            let State::WaitingOnInputs {
-                handles,
-                lacking,
-                partial,
-            } = out_edge_state
-            else {
+            let State::WaitingOnInputs { handles, lacking } = out_edge_state else {
                 continue;
             };
             match NonZeroUsize::new(lacking.get() - 1) {
@@ -412,11 +398,10 @@ impl<DepsT: Deps> Executor<DepsT> {
                     *lacking = new_lacking;
                 }
                 None => {
-                    let partial = partial.take();
                     *out_edge_state = State::Running {
                         handles: mem::take(handles),
                     };
-                    Self::start(deps, evaluations, states, out_edge_index, deferred, partial);
+                    Self::start(deps, evaluations, states, out_edge_index, deferred);
                 }
             }
         }
