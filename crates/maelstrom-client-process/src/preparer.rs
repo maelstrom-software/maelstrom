@@ -103,8 +103,8 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
         tag: Self::Tag,
         partial: Option<Self::Partial>,
         inputs: Vec<&Self::Output>,
-        _graph: &mut Graph<Self>,
-    ) -> StartResult<Self::Tag, Self::Partial, Self::Output> {
+        graph: &mut Graph<Self>,
+    ) -> StartResult<Self::Partial, Self::Output> {
         eprintln!("got {tag:?} {partial:?}");
         match tag {
             Tag::Layer(layer_spec) => {
@@ -129,7 +129,7 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
                             partial: Partial::ImageWithLayersStage2,
                             added_inputs: layers
                                 .iter()
-                                .map(|layer_spec| (Tag::Layer(layer_spec.clone()), vec![]))
+                                .map(|layer_spec| graph.add(Tag::Layer(layer_spec.clone())))
                                 .collect(),
                         },
                     },
