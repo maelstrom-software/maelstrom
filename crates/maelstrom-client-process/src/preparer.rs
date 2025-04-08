@@ -360,28 +360,30 @@ impl<DepsT: Deps> Preparer<DepsT> {
             }
         };
 
-        let tag = Tag::JobSpec(collapsed_job_spec.clone());
-        let evaluation_handle = self.executor.add_with_inputs(tag, |graph| {
-            (match collapsed_job_spec.image() {
-                None => None,
-                Some(image) if !image.r#use.contains(ImageUse::Layers) => {
-                    Some(graph.add(Tag::Image(image.name.clone())))
-                }
-                Some(image) => Some(
-                    graph.add_with_inputs(Tag::ImageWithLayers(image.name.clone()), |graph| {
-                        [graph.add(Tag::Image(image.name.clone()))]
-                    }),
-                ),
-            })
-            .into_iter()
-            .chain(
-                collapsed_job_spec
-                    .layers()
-                    .iter()
-                    .map(|layer_spec| graph.add(Tag::Layer(layer_spec.clone()))),
-            )
-            .collect::<Vec<_>>()
-        });
+        let inputs = (match collapsed_job_spec.image() {
+            None => None,
+            Some(image) if !image.r#use.contains(ImageUse::Layers) => {
+                Some(self.executor.add(Tag::Image(image.name.clone())))
+            }
+            Some(image) => {
+                let image_handle = self.executor.add(Tag::Image(image.name.clone()));
+                Some(
+                    self.executor
+                        .add_with_inputs(Tag::ImageWithLayers(image.name.clone()), [image_handle]),
+                )
+            }
+        })
+        .into_iter()
+        .chain(
+            collapsed_job_spec
+                .layers()
+                .iter()
+                .map(|layer_spec| self.executor.add(Tag::Layer(layer_spec.clone()))),
+        )
+        .collect::<Vec<_>>();
+
+        let tag = Tag::JobSpec(collapsed_job_spec);
+        let evaluation_handle = self.executor.add_with_inputs(tag, inputs);
         self.executor
             .evaluate(&mut self.executor_adapter, evaluation_handle, handle);
     }
