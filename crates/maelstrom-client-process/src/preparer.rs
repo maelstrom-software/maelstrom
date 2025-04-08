@@ -101,7 +101,7 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
     fn start(
         &mut self,
         tag: &Self::Tag,
-        partial: &Option<Self::Partial>,
+        partial: Option<Self::Partial>,
         inputs: Vec<&Self::Output>,
     ) -> StartResult<Self::Tag, Self::Partial, Self::Output> {
         eprintln!("got {tag:?} {partial:?}");
