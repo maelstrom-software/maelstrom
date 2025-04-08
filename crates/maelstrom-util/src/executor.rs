@@ -2,70 +2,16 @@ use crate::ext::OptionExt as _;
 use indexmap::IndexMap;
 use std::{fmt::Debug, hash::Hash, mem, num::NonZeroUsize};
 
-pub enum StartResult<PartialT, OutputT> {
+pub enum StartResult<TagT, PartialT, OutputT> {
     InProgress,
     Expand {
         partial: PartialT,
-        added_inputs: Vec<Handle>,
+        added_inputs: Vec<(TagT, Vec<TagT>)>,
     },
     Completed(OutputT),
 }
 
 pub struct Graph<DepsT: Deps + ?Sized>(IndexMap<DepsT::Tag, Entry>);
-
-impl<DepsT: Deps + ?Sized> Graph<DepsT> {
-    pub fn get(&self, tag: &DepsT::Tag) -> Handle {
-        Handle(self.0.get_index_of(tag).unwrap())
-    }
-
-    pub fn add(&mut self, tag: DepsT::Tag) -> Handle {
-        self.add_with_inputs(tag, [])
-    }
-
-    pub fn add_with_inputs(
-        &mut self,
-        tag: DepsT::Tag,
-        inputs: impl IntoIterator<Item = DepsT::Tag>,
-    ) -> Handle {
-        Handle(self.add_with_inputs_inner(tag, inputs))
-    }
-
-    fn add_with_inputs_inner(
-        &mut self,
-        tag: DepsT::Tag,
-        inputs: impl IntoIterator<Item = DepsT::Tag>,
-    ) -> usize {
-        match self.0.get_index_of(&tag) {
-            Some(index) => index,
-            None => {
-                let index = self.0.len();
-                let in_edges = inputs
-                    .into_iter()
-                    .map(|in_edge_tag| {
-                        let (in_edge_index, _, in_edge_entry) =
-                            self.0.get_full_mut(&in_edge_tag).unwrap_or_else(|| {
-                                panic!(
-                                    "{tag:?} depends on {in_edge_tag:?}, which hasn't been added"
-                                )
-                            });
-                        in_edge_entry.out_edges.push(index);
-                        in_edge_index
-                    })
-                    .collect::<Vec<_>>();
-                self.0
-                    .insert(
-                        tag,
-                        Entry {
-                            in_edges,
-                            out_edges: Default::default(),
-                        },
-                    )
-                    .assert_is_none();
-                index
-            }
-        }
-    }
-}
 
 pub trait Deps {
     type CompletedHandle;
@@ -80,7 +26,7 @@ pub trait Deps {
         state: Option<Self::Partial>,
         inputs: Vec<&Self::Output>,
         graph: &mut Graph<Self>,
-    ) -> StartResult<Self::Partial, Self::Output>;
+    ) -> StartResult<Self::Tag, Self::Partial, Self::Output>;
     fn completed(&mut self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
 }
 
@@ -126,7 +72,7 @@ enum DeferredWork<DepsT: Deps> {
     Expand {
         index: usize,
         partial: DepsT::Partial,
-        added_inputs: Vec<Handle>,
+        added_inputs: Vec<(DepsT::Tag, Vec<DepsT::Tag>)>,
     },
 }
 
@@ -135,11 +81,11 @@ pub struct Handle(usize);
 
 impl<DepsT: Deps> Executor<DepsT> {
     pub fn get(&self, tag: &DepsT::Tag) -> Handle {
-        self.evaluations.get(tag)
+        Handle(self.evaluations.0.get_index_of(tag).unwrap())
     }
 
     pub fn add(&mut self, tag: DepsT::Tag) -> Handle {
-        self.evaluations.add(tag)
+        self.add_with_inputs(tag, [])
     }
 
     pub fn add_with_inputs(
@@ -147,7 +93,47 @@ impl<DepsT: Deps> Executor<DepsT> {
         tag: DepsT::Tag,
         inputs: impl IntoIterator<Item = DepsT::Tag>,
     ) -> Handle {
-        self.evaluations.add_with_inputs(tag, inputs)
+        Handle(self.add_with_inputs_inner(tag, inputs))
+    }
+
+    fn add_with_inputs_inner(
+        &mut self,
+        tag: DepsT::Tag,
+        inputs: impl IntoIterator<Item = DepsT::Tag>,
+    ) -> usize {
+        match self.evaluations.0.get_index_of(&tag) {
+            Some(index) => index,
+            None => {
+                let index = self.evaluations.0.len();
+                let in_edges = inputs
+                    .into_iter()
+                    .map(|in_edge_tag| {
+                        let (in_edge_index, _, in_edge_entry) = self
+                            .evaluations
+                            .0
+                            .get_full_mut(&in_edge_tag)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "{tag:?} depends on {in_edge_tag:?}, which hasn't been added"
+                                )
+                            });
+                        in_edge_entry.out_edges.push(index);
+                        in_edge_index
+                    })
+                    .collect::<Vec<_>>();
+                self.evaluations
+                    .0
+                    .insert(
+                        tag,
+                        Entry {
+                            in_edges,
+                            out_edges: Default::default(),
+                        },
+                    )
+                    .assert_is_none();
+                index
+            }
+        }
     }
 
     pub fn expand(
@@ -335,7 +321,9 @@ impl<DepsT: Deps> Executor<DepsT> {
                 } => {
                     let added_in_edges = added_inputs
                         .into_iter()
-                        .map(|Handle(in_edge_index)| {
+                        .map(|(in_edge_tag, in_edge_inputs)| {
+                            let in_edge_index =
+                                self.add_with_inputs_inner(in_edge_tag, in_edge_inputs);
                             self.evaluations.0[in_edge_index].out_edges.push(index);
                             in_edge_index
                         })
@@ -466,13 +454,7 @@ mod tests {
         Completed(i64, &'static str, char),
     }
 
-    enum TestStartResult {
-        Completed(char),
-        Expand {
-            partial: &'static str,
-            added_inputs: Vec<&'static str>,
-        },
-    }
+    type TestStartResult = StartResult<&'static str, &'static str, char>;
 
     #[derive(Default)]
     struct TestState {
@@ -491,8 +473,8 @@ mod tests {
             tag: Self::Tag,
             partial: Option<Self::Partial>,
             inputs: Vec<&Self::Output>,
-            graph: &mut Graph<Self>,
-        ) -> StartResult<Self::Partial, Self::Output> {
+            _graph: &mut Graph<Self>,
+        ) -> StartResult<Self::Tag, Self::Partial, Self::Output> {
             let mut test_state = self.borrow_mut();
             test_state.messages.push(TestMessage::Start(
                 tag,
@@ -500,19 +482,10 @@ mod tests {
                 inputs.into_iter().copied().collect(),
             ));
             if let Some(results) = test_state.start_results.get_mut(tag) {
-                match results.pop_front() {
-                    Some(TestStartResult::Completed(output)) => StartResult::Completed(output),
-                    Some(TestStartResult::Expand {
-                        partial,
-                        added_inputs,
-                    }) => StartResult::Expand {
-                        partial,
-                        added_inputs: added_inputs
-                            .into_iter()
-                            .map(|added_input| graph.add(added_input))
-                            .collect(),
-                    },
-                    None => StartResult::InProgress,
+                if let Some(front) = results.pop_front() {
+                    front
+                } else {
+                    StartResult::InProgress
                 }
             } else {
                 StartResult::InProgress
@@ -635,7 +608,7 @@ mod tests {
     script_test! {
         no_dependencies_immediate,
         Fixture::new([
-            ("a", TestStartResult::Completed('a')),
+            ("a", StartResult::Completed('a')),
         ]),
         |e, d| {
             let handle = e.add("a");
@@ -725,11 +698,11 @@ mod tests {
     script_test! {
         inputs_immediate,
         Fixture::new([
-            ("a", TestStartResult::Completed('a')),
-            ("b", TestStartResult::Completed('b')),
-            ("c", TestStartResult::Completed('c')),
-            ("d", TestStartResult::Completed('d')),
-            ("e", TestStartResult::Completed('e')),
+            ("a", StartResult::Completed('a')),
+            ("b", StartResult::Completed('b')),
+            ("c", StartResult::Completed('c')),
+            ("d", StartResult::Completed('d')),
+            ("e", StartResult::Completed('e')),
         ]),
         |e, _| {
             e.add("e");
@@ -789,9 +762,9 @@ mod tests {
     script_test! {
         expand_new_dependency_not_started_immediate,
         Fixture::new([
-            ("a", TestStartResult::Expand {
+            ("a", StartResult::Expand {
                 partial: "partial-a-1",
-                added_inputs: vec!["b"],
+                added_inputs: vec![("b", vec![])],
             }),
         ]),
         |e, d| {
