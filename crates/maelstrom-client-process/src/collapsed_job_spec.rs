@@ -402,7 +402,7 @@ impl CollapsedJobSpec {
 
     pub fn into_job_spec(
         self,
-        layers: impl IntoIterator<Item = (Sha256Digest, ArtifactType)>,
+        layers: impl Iterator<Item = (Sha256Digest, ArtifactType)>,
         environment: Vec<String>,
     ) -> Result<BaseJobSpec, String> {
         self.check()?;
@@ -458,43 +458,6 @@ impl CollapsedJobSpec {
             allocate_tty,
             priority,
         })
-    }
-
-    #[allow(dead_code)]
-    pub fn into_job_spec_without_image(
-        mut self,
-        evaluate_environment: impl FnOnce(
-            BTreeMap<String, String>,
-            Vec<EnvironmentSpec>,
-        ) -> Result<Vec<String>, String>,
-        layers: impl IntoIterator<Item = (Sha256Digest, ArtifactType)>,
-    ) -> Result<BaseJobSpec, String> {
-        assert!(self.image.is_none());
-        let (initial_environment, environment) = self.take_environment();
-        let environment = evaluate_environment(initial_environment, environment)?;
-        self.into_job_spec(layers, environment)
-    }
-
-    #[allow(dead_code)]
-    pub fn into_job_spec_with_image(
-        mut self,
-        evaluate_environment: impl FnOnce(
-            BTreeMap<String, String>,
-            Vec<EnvironmentSpec>,
-        ) -> Result<Vec<String>, String>,
-        layers: impl Iterator<Item = (Sha256Digest, ArtifactType)>,
-        image: &ConvertedImage,
-        image_layers: impl IntoIterator<Item = (Sha256Digest, ArtifactType)>,
-    ) -> Result<BaseJobSpec, String> {
-        let Some(image_ref) = &self.image else {
-            panic!("job_spec didn't have image");
-        };
-        assert!(image_ref.r#use.contains(ImageUse::Layers));
-        self.integrate_image(image)?;
-        self.into_job_spec_without_image(
-            evaluate_environment,
-            image_layers.into_iter().chain(layers),
-        )
     }
 }
 
