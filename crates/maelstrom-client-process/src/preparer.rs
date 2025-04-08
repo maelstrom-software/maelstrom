@@ -100,7 +100,7 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
 
     fn start(
         &mut self,
-        tag: Self::Tag,
+        tag: &Self::Tag,
         partial: Option<Self::Partial>,
         inputs: Vec<&Self::Output>,
         _graph: &mut Graph<Self>,
