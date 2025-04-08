@@ -19,27 +19,27 @@ impl<DepsT: Deps + ?Sized> Graph<DepsT> {
     }
 
     pub fn add(&mut self, tag: DepsT::Tag) -> Handle {
-        self.add_with_inputs(tag, [])
+        self.add_with_inputs(tag, |_| [])
     }
 
-    pub fn add_with_inputs(
-        &mut self,
-        tag: DepsT::Tag,
-        inputs: impl IntoIterator<Item = Handle>,
-    ) -> Handle {
+    pub fn add_with_inputs<F, I>(&mut self, tag: DepsT::Tag, inputs: F) -> Handle
+    where
+        F: FnOnce(&mut Self) -> I,
+        I: IntoIterator<Item = Handle>,
+    {
         Handle(self.add_with_inputs_inner(tag, inputs))
     }
 
-    fn add_with_inputs_inner(
-        &mut self,
-        tag: DepsT::Tag,
-        inputs: impl IntoIterator<Item = Handle>,
-    ) -> usize {
+    fn add_with_inputs_inner<F, I>(&mut self, tag: DepsT::Tag, inputs: F) -> usize
+    where
+        F: FnOnce(&mut Self) -> I,
+        I: IntoIterator<Item = Handle>,
+    {
         match self.0.get_index_of(&tag) {
             Some(index) => index,
             None => {
                 let index = self.0.len();
-                let in_edges = inputs
+                let in_edges = inputs(self)
                     .into_iter()
                     .map(|Handle(in_edge_index)| {
                         self.0[in_edge_index].out_edges.push(index);
@@ -136,11 +136,11 @@ impl<DepsT: Deps> Executor<DepsT> {
         self.evaluations.add(tag)
     }
 
-    pub fn add_with_inputs(
-        &mut self,
-        tag: DepsT::Tag,
-        inputs: impl IntoIterator<Item = Handle>,
-    ) -> Handle {
+    pub fn add_with_inputs<F, I>(&mut self, tag: DepsT::Tag, inputs: F) -> Handle
+    where
+        F: FnOnce(&mut Graph<DepsT>) -> I,
+        I: IntoIterator<Item = Handle>,
+    {
         self.evaluations.add_with_inputs(tag, inputs)
     }
 
@@ -679,10 +679,10 @@ mod tests {
         Fixture::default(),
         |exec, _| {
             let e = exec.add("e");
-            let d = exec.add_with_inputs("d", [e]);
+            let d = exec.add_with_inputs("d", |_| [e]);
             let c = exec.add("c");
-            let b = exec.add_with_inputs("b", [d, c]);
-            exec.add_with_inputs("a", [b, c]);
+            let b = exec.add_with_inputs("b", |_| [d, c]);
+            exec.add_with_inputs("a", |_| [b, c]);
         } => {};
         |e, d| {
             let a = e.get(&"a");
@@ -727,10 +727,10 @@ mod tests {
         ]),
         |exec, _| {
             let e = exec.add("e");
-            let d = exec.add_with_inputs("d", [e]);
+            let d = exec.add_with_inputs("d", |_| [e]);
             let c = exec.add("c");
-            let b = exec.add_with_inputs("b", [d, c]);
-            exec.add_with_inputs("a", [b, c]);
+            let b = exec.add_with_inputs("b", |_| [d, c]);
+            exec.add_with_inputs("a", |_| [b, c]);
         } => {};
         |e, d| {
             let a = e.get(&"a");
@@ -859,7 +859,7 @@ mod tests {
         Fixture::default(),
         |e, d| {
             let a = e.add("a");
-            let b = e.add_with_inputs("b", [a]);
+            let b = e.add_with_inputs("b", |_| [a]);
             e.evaluate(d, b, 1);
         } => {
             Start("a", None, vec![]),
@@ -872,8 +872,8 @@ mod tests {
         Fixture::default(),
         |e, d| {
             let a = e.add("a");
-            let b = e.add_with_inputs("b", [a]);
-            e.add_with_inputs("c", [a]);
+            let b = e.add_with_inputs("b", |_| [a]);
+            e.add_with_inputs("c", |_| [a]);
             e.evaluate(d, b, 1);
         } => {
             Start("a", None, vec![]),
