@@ -8,7 +8,7 @@ pub enum StartResult<TagT, PartialT, OutputT> {
         partial: PartialT,
         added_inputs: Vec<(TagT, Vec<TagT>)>,
     },
-    Completed(OutputT),
+    Done(OutputT),
 }
 
 pub struct Graph<DepsT: Deps + ?Sized>(IndexMap<DepsT::Tag, Entry>);
@@ -237,7 +237,7 @@ impl<DepsT: Deps> Executor<DepsT> {
             .collect();
         match deps.start(tag.clone(), partial, inputs, evaluations) {
             StartResult::InProgress => {}
-            StartResult::Completed(output) => {
+            StartResult::Done(output) => {
                 deferred.push(DeferredWork::Completed { index, output });
             }
             StartResult::Expand {
@@ -593,7 +593,7 @@ mod tests {
     script_test! {
         no_dependencies_immediate,
         Fixture::new([
-            ("a", StartResult::Completed('a')),
+            ("a", StartResult::Done('a')),
         ]),
         |e, d| {
             let handle = e.add("a");
@@ -683,11 +683,11 @@ mod tests {
     script_test! {
         inputs_immediate,
         Fixture::new([
-            ("a", StartResult::Completed('a')),
-            ("b", StartResult::Completed('b')),
-            ("c", StartResult::Completed('c')),
-            ("d", StartResult::Completed('d')),
-            ("e", StartResult::Completed('e')),
+            ("a", StartResult::Done('a')),
+            ("b", StartResult::Done('b')),
+            ("c", StartResult::Done('c')),
+            ("d", StartResult::Done('d')),
+            ("e", StartResult::Done('e')),
         ]),
         |e, _| {
             e.add("e");
