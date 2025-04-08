@@ -363,23 +363,24 @@ impl<DepsT: Deps> Preparer<DepsT> {
         let inputs = (match collapsed_job_spec.image() {
             None => None,
             Some(image) if !image.r#use.contains(ImageUse::Layers) => {
-                Some(self.executor.add(Tag::Image(image.name.clone())))
+                let tag = Tag::Image(image.name.clone());
+                self.executor.add(tag.clone());
+                Some(tag)
             }
             Some(image) => {
-                let image_handle = self.executor.add(Tag::Image(image.name.clone()));
-                Some(
-                    self.executor
-                        .add_with_inputs(Tag::ImageWithLayers(image.name.clone()), [image_handle]),
-                )
+                let image_tag = Tag::Image(image.name.clone());
+                self.executor.add(image_tag.clone());
+                let tag = Tag::ImageWithLayers(image.name.clone());
+                self.executor.add_with_inputs(tag.clone(), [image_tag]);
+                Some(tag)
             }
         })
         .into_iter()
-        .chain(
-            collapsed_job_spec
-                .layers()
-                .iter()
-                .map(|layer_spec| self.executor.add(Tag::Layer(layer_spec.clone()))),
-        )
+        .chain(collapsed_job_spec.layers().iter().map(|layer_spec| {
+            let tag = Tag::Layer(layer_spec.clone());
+            self.executor.add(tag.clone());
+            tag
+        }))
         .collect::<Vec<_>>();
 
         let tag = Tag::JobSpec(collapsed_job_spec);

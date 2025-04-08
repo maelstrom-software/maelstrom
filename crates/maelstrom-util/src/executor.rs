@@ -25,7 +25,7 @@ impl<DepsT: Deps + ?Sized> Graph<DepsT> {
     pub fn add_with_inputs(
         &mut self,
         tag: DepsT::Tag,
-        inputs: impl IntoIterator<Item = Handle>,
+        inputs: impl IntoIterator<Item = DepsT::Tag>,
     ) -> Handle {
         Handle(self.add_with_inputs_inner(tag, inputs))
     }
@@ -33,7 +33,7 @@ impl<DepsT: Deps + ?Sized> Graph<DepsT> {
     fn add_with_inputs_inner(
         &mut self,
         tag: DepsT::Tag,
-        inputs: impl IntoIterator<Item = Handle>,
+        inputs: impl IntoIterator<Item = DepsT::Tag>,
     ) -> usize {
         match self.0.get_index_of(&tag) {
             Some(index) => index,
@@ -41,8 +41,14 @@ impl<DepsT: Deps + ?Sized> Graph<DepsT> {
                 let index = self.0.len();
                 let in_edges = inputs
                     .into_iter()
-                    .map(|Handle(in_edge_index)| {
-                        self.0[in_edge_index].out_edges.push(index);
+                    .map(|in_edge_tag| {
+                        let (in_edge_index, _, in_edge_entry) =
+                            self.0.get_full_mut(&in_edge_tag).unwrap_or_else(|| {
+                                panic!(
+                                    "{tag:?} depends on {in_edge_tag:?}, which hasn't been added"
+                                )
+                            });
+                        in_edge_entry.out_edges.push(index);
                         in_edge_index
                     })
                     .collect::<Vec<_>>();
@@ -139,7 +145,7 @@ impl<DepsT: Deps> Executor<DepsT> {
     pub fn add_with_inputs(
         &mut self,
         tag: DepsT::Tag,
-        inputs: impl IntoIterator<Item = Handle>,
+        inputs: impl IntoIterator<Item = DepsT::Tag>,
     ) -> Handle {
         self.evaluations.add_with_inputs(tag, inputs)
     }
@@ -677,12 +683,12 @@ mod tests {
     script_test! {
         inputs,
         Fixture::default(),
-        |exec, _| {
-            let e = exec.add("e");
-            let d = exec.add_with_inputs("d", [e]);
-            let c = exec.add("c");
-            let b = exec.add_with_inputs("b", [d, c]);
-            exec.add_with_inputs("a", [b, c]);
+        |e, _| {
+            e.add("e");
+            e.add_with_inputs("d", ["e"]);
+            e.add("c");
+            e.add_with_inputs("b", ["d", "c"]);
+            e.add_with_inputs("a", ["b", "c"]);
         } => {};
         |e, d| {
             let a = e.get(&"a");
@@ -725,12 +731,12 @@ mod tests {
             ("d", TestStartResult::Completed('d')),
             ("e", TestStartResult::Completed('e')),
         ]),
-        |exec, _| {
-            let e = exec.add("e");
-            let d = exec.add_with_inputs("d", [e]);
-            let c = exec.add("c");
-            let b = exec.add_with_inputs("b", [d, c]);
-            exec.add_with_inputs("a", [b, c]);
+        |e, _| {
+            e.add("e");
+            e.add_with_inputs("d", ["e"]);
+            e.add("c");
+            e.add_with_inputs("b", ["d", "c"]);
+            e.add_with_inputs("a", ["b", "c"]);
         } => {};
         |e, d| {
             let a = e.get(&"a");
@@ -858,8 +864,8 @@ mod tests {
         expand_new_dependency_cycle,
         Fixture::default(),
         |e, d| {
-            let a = e.add("a");
-            let b = e.add_with_inputs("b", [a]);
+            e.add("a");
+            let b = e.add_with_inputs("b", ["a"]);
             e.evaluate(d, b, 1);
         } => {
             Start("a", None, vec![]),
@@ -871,9 +877,9 @@ mod tests {
         evaluate_after_dependency_completed,
         Fixture::default(),
         |e, d| {
-            let a = e.add("a");
-            let b = e.add_with_inputs("b", [a]);
-            e.add_with_inputs("c", [a]);
+            e.add("a");
+            let b = e.add_with_inputs("b", ["a"]);
+            e.add_with_inputs("c", ["a"]);
             e.evaluate(d, b, 1);
         } => {
             Start("a", None, vec![]),
