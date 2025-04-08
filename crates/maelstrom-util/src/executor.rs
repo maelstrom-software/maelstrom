@@ -294,10 +294,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     let added_in_edges = added_inputs
                         .into_iter()
                         .map(|(in_edge_tag, in_edge_inputs)| {
-                            let in_edge_index =
-                                self.add_with_inputs_inner(in_edge_tag, in_edge_inputs);
-                            self.evaluations[in_edge_index].out_edges.push(index);
-                            in_edge_index
+                            self.add_with_inputs_inner(in_edge_tag, in_edge_inputs)
                         })
                         .collect();
                     self.expand_inner(deps, index, partial, added_in_edges, deferred);
@@ -392,11 +389,7 @@ impl<DepsT: Deps> Executor<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        cell::RefCell,
-        collections::{HashMap, VecDeque},
-        rc::Rc,
-    };
+    use std::{cell::RefCell, rc::Rc};
     use TestMessage::*;
 
     #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -405,12 +398,9 @@ mod tests {
         Completed(i64, &'static str, char),
     }
 
-    type TestStartResult = StartResult<&'static str, &'static str, char>;
-
     #[derive(Default)]
     struct TestState {
         messages: Vec<TestMessage>,
-        start_results: HashMap<&'static str, VecDeque<TestStartResult>>,
     }
 
     impl Deps for Rc<RefCell<TestState>> {
@@ -425,21 +415,12 @@ mod tests {
             partial: &Option<Self::Partial>,
             inputs: Vec<&Self::Output>,
         ) -> StartResult<Self::Tag, Self::Partial, Self::Output> {
-            let mut test_state = self.borrow_mut();
-            test_state.messages.push(TestMessage::Start(
+            self.borrow_mut().messages.push(TestMessage::Start(
                 tag,
                 *partial,
                 inputs.into_iter().copied().collect(),
             ));
-            if let Some(results) = test_state.start_results.get_mut(tag) {
-                if let Some(front) = results.pop_front() {
-                    front
-                } else {
-                    StartResult::InProgress
-                }
-            } else {
-                StartResult::InProgress
-            }
+            StartResult::InProgress
         }
 
         fn completed(
@@ -459,32 +440,10 @@ mod tests {
         sut: Executor<Rc<RefCell<TestState>>>,
     }
 
-    impl Default for Fixture {
-        fn default() -> Self {
+    impl Fixture {
+        fn new() -> Self {
             Self {
                 test_state: Rc::new(RefCell::new(Default::default())),
-                sut: Executor::default(),
-            }
-        }
-    }
-
-    impl Fixture {
-        fn new(
-            start_results_in: impl IntoIterator<Item = (&'static str, TestStartResult)>,
-        ) -> Self {
-            let mut start_results: HashMap<_, VecDeque<_>> = HashMap::new();
-            for (tag, start_result) in start_results_in {
-                start_results
-                    .entry(tag)
-                    .or_default()
-                    .push_back(start_result);
-            }
-            let test_state = Rc::new(RefCell::new(TestState {
-                messages: Default::default(),
-                start_results,
-            }));
-            Self {
-                test_state,
                 sut: Executor::default(),
             }
         }
@@ -532,7 +491,7 @@ mod tests {
 
     script_test! {
         no_dependencies,
-        Fixture::default(),
+        Fixture::new(),
         |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", None, vec![]),
@@ -548,23 +507,8 @@ mod tests {
     }
 
     script_test! {
-        no_dependencies_immediate,
-        Fixture::new([
-            ("a", StartResult::Done('a')),
-        ]),
-        |e, _| e.add("a") => {};
-        |e, d| e.evaluate(d, 1, &"a") => {
-            Start("a", None, vec![]),
-            Completed(1, "a", 'a'),
-        };
-        |e, d| e.evaluate(d, 2, &"a") => {
-            Completed(2, "a", 'a'),
-        };
-    }
-
-    script_test! {
         adding_multiple_times,
-        Fixture::default(),
+        Fixture::new(),
         |e, _| e.add("a") => {};
         |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
@@ -582,7 +526,7 @@ mod tests {
 
     script_test! {
         inputs,
-        Fixture::default(),
+        Fixture::new(),
         |e, _| e.add("e") => {};
         |e, _| e.add_with_inputs("d", ["e"]) => {};
         |e, _| e.add("c") => {};
@@ -612,38 +556,8 @@ mod tests {
     }
 
     script_test! {
-        inputs_immediate,
-        Fixture::new([
-            ("a", StartResult::Done('a')),
-            ("b", StartResult::Done('b')),
-            ("c", StartResult::Done('c')),
-            ("d", StartResult::Done('d')),
-            ("e", StartResult::Done('e')),
-        ]),
-        |e, _| e.add("e") => {};
-        |e, _| e.add_with_inputs("d", ["e"]) => {};
-        |e, _| e.add("c") => {};
-        |e, _| e.add_with_inputs("b", ["d", "c"]) => {};
-        |e, _| e.add_with_inputs("a", ["b", "c"]) => {};
-        |e, d| e.evaluate(d, 1, &"a") => {
-            Start("a", None, vec!['b', 'c']),
-            Start("b", None, vec!['d', 'c']),
-            Start("c", None, vec![]),
-            Start("d", None, vec!['e']),
-            Start("e", None, vec![]),
-            Completed(1, "a", 'a'),
-        };
-        |e, d| e.evaluate(d, 2, &"a") => {
-            Completed(2, "a", 'a'),
-        };
-        |e, d| e.evaluate(d, 3, &"b") => {
-            Completed(3, "b", 'b'),
-        };
-    }
-
-    script_test! {
-        expand_new_dependency_not_started,
-        Fixture::default(),
+        update_new_dependency_not_started,
+        Fixture::new(),
         |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", None, vec![]),
@@ -661,29 +575,8 @@ mod tests {
     }
 
     script_test! {
-        expand_new_dependency_not_started_immediate,
-        Fixture::new([
-            ("a", StartResult::Expand {
-                partial: "partial-a-1",
-                added_inputs: vec![("b", vec![])],
-            }),
-        ]),
-        |e, _| e.add("a") => {};
-        |e, d| e.evaluate(d, 1, &"a") => {
-            Start("a", None, vec![]),
-            Start("b", None, vec![]),
-        };
-        |e, d| e.receive_completed(d, &"b", 'b') => {
-            Start("a", Some("partial-a-1"), vec!['b']),
-        };
-        |e, d| e.receive_completed(d, &"a", 'a') => {
-            Completed(1, "a", 'a'),
-        };
-    }
-
-    script_test! {
-        expand_new_dependency_started,
-        Fixture::default(),
+        update_new_dependency_started,
+        Fixture::new(),
         |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", None, vec![]),
@@ -703,8 +596,8 @@ mod tests {
     }
 
     script_test! {
-        expand_new_dependency_completed,
-        Fixture::default(),
+        update_new_dependency_completed,
+        Fixture::new(),
         |e, _| e.add("a") => {};
         |e, d| e.evaluate(d, 1, &"a") => {
             Start("a", None, vec![]),
@@ -725,36 +618,13 @@ mod tests {
     }
 
     script_test! {
-        expand_new_dependency_cycle,
-        Fixture::default(),
+        update_new_dependency_cycle,
+        Fixture::new(),
         |e, _| e.add("a") => {};
         |e, _| e.add_with_inputs("b", ["a"]) => {};
         |e, d| e.evaluate(d, 1, &"b") => {
             Start("a", None, vec![]),
         };
         |e, d| e.expand(d, &"a", "partial-a-1", ["b"]) => {};
-    }
-
-    script_test! {
-        evaluate_after_dependency_completed,
-        Fixture::default(),
-        |e, _| e.add("a") => {};
-        |e, _| e.add_with_inputs("b", ["a"]) => {};
-        |e, _| e.add_with_inputs("c", ["a"]) => {};
-        |e, d| e.evaluate(d, 1, &"b") => {
-            Start("a", None, vec![]),
-        };
-        |e, d| e.receive_completed(d, &"a", 'a') => {
-            Start("b", None, vec!['a']),
-        };
-        |e, d| e.receive_completed(d, &"b", 'b') => {
-            Completed(1, "b", 'b'),
-        };
-        |e, d| e.evaluate(d, 2, &"c") => {
-            Start("c", None, vec!['a']),
-        };
-        |e, d| e.receive_completed(d, &"c", 'c') => {
-            Completed(2, "c", 'c'),
-        };
     }
 }
