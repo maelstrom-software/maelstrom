@@ -23,7 +23,7 @@ use maelstrom_base::{ArtifactType, JobSpec, Sha256Digest};
 use maelstrom_client_base::spec::{
     ContainerSpec, ConvertedImage, EnvironmentSpec, ImageUse, JobSpec as ClientJobSpec, LayerSpec,
 };
-use maelstrom_util::executor::{self, Executor, StartResult};
+use maelstrom_util::executor::{self, Executor, Graph, StartResult};
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fmt::Debug,
@@ -103,6 +103,7 @@ impl<DepsT: Deps> executor::Deps for ExecutorAdapter<DepsT> {
         tag: &Self::Tag,
         partial: Option<Self::Partial>,
         inputs: Vec<&Self::Output>,
+        _graph: &mut Graph<Self>,
     ) -> StartResult<Self::Tag, Self::Partial, Self::Output> {
         eprintln!("got {tag:?} {partial:?}");
         match tag {
