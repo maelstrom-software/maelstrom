@@ -218,8 +218,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 let partial = None;
                 match NonZeroUsize::new(lacking) {
                     Some(lacking) => {
-                        Self::set_state(
-                            &mut self.states,
+                        self.set_state(
                             index,
                             State::WaitingOnInputs {
                                 lacking,
@@ -229,7 +228,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                         );
                     }
                     None => {
-                        Self::set_state(&mut self.states, index, State::Running { handles });
+                        self.set_state(index, State::Running { handles });
                         self.start(deps, index, deferred, partial);
                     }
                 }
@@ -362,8 +361,8 @@ impl<DepsT: Deps> Executor<DepsT> {
         states.get_mut(index).unwrap()
     }
 
-    fn set_state(states: &mut Vec<State<DepsT>>, index: usize, state: State<DepsT>) {
-        *Self::get_state_mut(states, index) = state;
+    fn set_state(&mut self, index: usize, state: State<DepsT>) {
+        *Self::get_state_mut(&mut self.states, index) = state;
     }
 }
 
