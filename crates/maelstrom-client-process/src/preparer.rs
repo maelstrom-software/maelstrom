@@ -359,33 +359,32 @@ impl<DepsT: Deps> Preparer<DepsT> {
             }
         };
 
-        let evaluation_handle =
-            self.executor
-                .add_with_inputs(Tag::JobSpec(collapsed_job_spec.clone()), |graph| {
-                    (match collapsed_job_spec.image() {
-                        None => None,
-                        Some(image) if !image.r#use.contains(ImageUse::Layers) => {
-                            Some(graph.add(Tag::Image(image.name.clone())))
-                        }
-                        Some(image) => {
-                            Some(graph.add_with_inputs(
-                                Tag::ImageWithLayers(image.name.clone()),
-                                |graph| [graph.add(Tag::Image(image.name.clone()))],
-                            ))
-                        }
-                    })
-                    .into_iter()
-                    .chain(
-                        collapsed_job_spec
-                            .layers()
-                            .iter()
-                            .map(|layer_spec| graph.add(Tag::Layer(layer_spec.clone()))),
-                    )
-                    .collect::<Vec<_>>()
-                });
-
-        self.executor
-            .evaluate(&mut self.executor_adapter, evaluation_handle, handle);
+        self.executor.evaluate_with_inputs(
+            &mut self.executor_adapter,
+            handle,
+            Tag::JobSpec(collapsed_job_spec.clone()),
+            |graph| {
+                (match collapsed_job_spec.image() {
+                    None => None,
+                    Some(image) if !image.r#use.contains(ImageUse::Layers) => {
+                        Some(graph.add(Tag::Image(image.name.clone())))
+                    }
+                    Some(image) => Some(
+                        graph.add_with_inputs(Tag::ImageWithLayers(image.name.clone()), |graph| {
+                            [graph.add(Tag::Image(image.name.clone()))]
+                        }),
+                    ),
+                })
+                .into_iter()
+                .chain(
+                    collapsed_job_spec
+                        .layers()
+                        .iter()
+                        .map(|layer_spec| graph.add(Tag::Layer(layer_spec.clone()))),
+                )
+                .collect::<Vec<_>>()
+            },
+        );
     }
 
     fn receive_add_container(
