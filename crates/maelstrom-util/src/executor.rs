@@ -14,10 +14,6 @@ pub enum StartResult<PartialT, OutputT> {
 pub struct Graph<DepsT: Deps + ?Sized>(IndexMap<DepsT::Tag, Entry>);
 
 impl<DepsT: Deps + ?Sized> Graph<DepsT> {
-    pub fn get(&self, tag: &DepsT::Tag) -> Handle {
-        Handle(self.0.get_index_of(tag).unwrap())
-    }
-
     pub fn add(&mut self, tag: DepsT::Tag) -> Handle {
         self.add_with_inputs(tag, |_| [])
     }
@@ -129,10 +125,6 @@ enum DeferredWork<DepsT: Deps> {
 pub struct Handle(usize);
 
 impl<DepsT: Deps> Executor<DepsT> {
-    pub fn get(&self, tag: &DepsT::Tag) -> Handle {
-        self.evaluations.get(tag)
-    }
-
     pub fn add(&mut self, tag: DepsT::Tag) -> Handle {
         self.evaluations.add(tag)
     }
