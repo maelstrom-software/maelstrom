@@ -139,13 +139,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         let lacking = added_in_edges
             .iter()
             .filter(|in_edge_index| {
-                !Self::ensure_started_and_get_completed(
-                    deps,
-                    &mut self.graph,
-                    &mut self.states,
-                    **in_edge_index,
-                    deferred,
-                )
+                !self.ensure_started_and_get_completed(deps, **in_edge_index, deferred)
             })
             .count();
         let (_, entry) = self.graph.0.get_index_mut(index).unwrap();
@@ -214,25 +208,18 @@ impl<DepsT: Deps> Executor<DepsT> {
     }
 
     fn ensure_started_and_get_completed(
+        &mut self,
         deps: &mut DepsT,
-        graph: &mut Graph<DepsT>,
-        states: &mut Vec<State<DepsT>>,
         index: usize,
         deferred: &mut Vec<DeferredWork<DepsT>>,
     ) -> bool {
-        match Self::get_state_mut(states, index) {
+        match Self::get_state_mut(&mut self.states, index) {
             State::NotStarted => {
-                let in_edges = graph.0[index].in_edges.clone();
+                let in_edges = self.graph.0[index].in_edges.clone();
                 let lacking = in_edges
                     .into_iter()
                     .filter(|in_edge_index| {
-                        !Self::ensure_started_and_get_completed(
-                            deps,
-                            graph,
-                            states,
-                            *in_edge_index,
-                            deferred,
-                        )
+                        !self.ensure_started_and_get_completed(deps, *in_edge_index, deferred)
                     })
                     .count();
                 let handles = Default::default();
@@ -240,7 +227,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 match NonZeroUsize::new(lacking) {
                     Some(lacking) => {
                         Self::set_state(
-                            states,
+                            &mut self.states,
                             index,
                             State::WaitingOnInputs {
                                 lacking,
@@ -250,8 +237,15 @@ impl<DepsT: Deps> Executor<DepsT> {
                         );
                     }
                     None => {
-                        Self::set_state(states, index, State::Running { handles });
-                        Self::start(deps, graph, states, index, deferred, partial);
+                        Self::set_state(&mut self.states, index, State::Running { handles });
+                        Self::start(
+                            deps,
+                            &mut self.graph,
+                            &mut self.states,
+                            index,
+                            deferred,
+                            partial,
+                        );
                     }
                 }
                 false
@@ -306,13 +300,7 @@ impl<DepsT: Deps> Executor<DepsT> {
     {
         let Handle(index) = self.graph.add_with_inputs(tag, inputs);
         let mut deferred = vec![];
-        Self::ensure_started_and_get_completed(
-            deps,
-            &mut self.graph,
-            &mut self.states,
-            index,
-            &mut deferred,
-        );
+        self.ensure_started_and_get_completed(deps, index, &mut deferred);
         self.do_deferred_work(deps, &mut deferred);
         match &mut self.states[index] {
             State::NotStarted => {
