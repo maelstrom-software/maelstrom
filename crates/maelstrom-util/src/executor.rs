@@ -158,38 +158,30 @@ impl<DepsT: Deps> Executor<DepsT> {
                 };
             }
             None => {
-                Self::start(
-                    deps,
-                    &mut self.graph,
-                    &mut self.states,
-                    index,
-                    deferred,
-                    Some(partial),
-                );
+                self.start(deps, index, deferred, Some(partial));
             }
         }
     }
 
     fn start(
+        &mut self,
         deps: &mut DepsT,
-        graph: &mut Graph<DepsT>,
-        states: &mut [State<DepsT>],
         index: usize,
         deferred: &mut Vec<DeferredWork<DepsT>>,
         partial: Option<DepsT::Partial>,
     ) {
-        let (tag, entry) = graph.0.get_index(index).unwrap();
+        let (tag, entry) = self.graph.0.get_index(index).unwrap();
         let inputs = entry
             .in_edges
             .iter()
             .map(|in_edge_index| {
-                let State::Completed { ref output } = states[*in_edge_index] else {
+                let State::Completed { ref output } = self.states[*in_edge_index] else {
                     panic!("unexpected state");
                 };
                 output
             })
             .collect();
-        match deps.start(tag.clone(), partial, inputs, graph) {
+        match deps.start(tag.clone(), partial, inputs, &mut self.graph) {
             StartResult::InProgress => {}
             StartResult::Completed(output) => {
                 deferred.push(DeferredWork::Completed { index, output });
@@ -238,14 +230,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     }
                     None => {
                         Self::set_state(&mut self.states, index, State::Running { handles });
-                        Self::start(
-                            deps,
-                            &mut self.graph,
-                            &mut self.states,
-                            index,
-                            deferred,
-                            partial,
-                        );
+                        self.start(deps, index, deferred, partial);
                     }
                 }
                 false
@@ -364,14 +349,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     *out_edge_state = State::Running {
                         handles: mem::take(handles),
                     };
-                    Self::start(
-                        deps,
-                        &mut self.graph,
-                        &mut self.states,
-                        out_edge_index,
-                        deferred,
-                        partial,
-                    );
+                    self.start(deps, out_edge_index, deferred, partial);
                 }
             }
         }
