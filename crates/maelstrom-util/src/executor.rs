@@ -144,7 +144,7 @@ impl<DepsT: Deps> Executor<DepsT> {
             .count();
         let (_, entry) = self.graph.0.get_index_mut(index).unwrap();
         entry.in_edges.extend(added_in_edges);
-        let state = Self::get_state_mut(&mut self.states, index);
+        let state = self.get_state_mut(index);
         let State::Running { handles } = state else {
             panic!("unexpected state");
         };
@@ -205,7 +205,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         index: usize,
         deferred: &mut Vec<DeferredWork<DepsT>>,
     ) -> bool {
-        match Self::get_state_mut(&mut self.states, index) {
+        match self.get_state_mut(index) {
             State::NotStarted => {
                 let in_edges = self.graph.0[index].in_edges.clone();
                 let lacking = in_edges
@@ -330,7 +330,7 @@ impl<DepsT: Deps> Executor<DepsT> {
 
         let out_edges = entry.out_edges.clone();
         for out_edge_index in out_edges {
-            let out_edge_state = Self::get_state_mut(&mut self.states, out_edge_index);
+            let out_edge_state = self.get_state_mut(out_edge_index);
             let State::WaitingOnInputs {
                 handles,
                 lacking,
@@ -354,15 +354,15 @@ impl<DepsT: Deps> Executor<DepsT> {
         }
     }
 
-    fn get_state_mut(states: &mut Vec<State<DepsT>>, index: usize) -> &mut State<DepsT> {
-        if index >= states.len() {
-            states.resize_with(index + 1, || State::NotStarted);
+    fn get_state_mut(&mut self, index: usize) -> &mut State<DepsT> {
+        if index >= self.states.len() {
+            self.states.resize_with(index + 1, || State::NotStarted);
         }
-        states.get_mut(index).unwrap()
+        self.states.get_mut(index).unwrap()
     }
 
     fn set_state(&mut self, index: usize, state: State<DepsT>) {
-        *Self::get_state_mut(&mut self.states, index) = state;
+        *self.get_state_mut(index) = state;
     }
 }
 
