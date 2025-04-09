@@ -2,31 +2,95 @@ use crate::ext::OptionExt as _;
 use indexmap::IndexMap;
 use std::{fmt::Debug, hash::Hash, mem, num::NonZeroUsize};
 
+/// The dependencies that an [`Executor`] has on its environment. These must be provided by a
+/// client of the `Executor`.
+pub trait Deps {
+    /// An instance of this type is provided to the `Executor` when an evaluation is started. The
+    /// `Executor` in turn provides it back to the client when an evaluation completes (via
+    /// the [`Deps::completed`] callback).
+    type CompletedHandle;
+
+    /// The "key" as it were of an evaluation. This must uniquely specify an evaluation. At most
+    /// one evaluation will be run for a given tag. The completed value for the first evaluation
+    /// will be used for any subsequent evaluations with the same tag.
+    type Tag: Clone + Debug + Eq + Hash;
+
+    /// The state of a partially completed evaluation. This is provided by [`StartResult::Expand`]
+    /// and then passed to [`Deps::completed`].
+    type Partial;
+
+    /// The "return value" type of an evaluation. This is returned by [`Executor::evaluation`], and
+    /// is also provided as an input to other evaluations.
+    type Output;
+
+    /// Start or continue executing an evaluation. If `partial` is `None`, then this is the first
+    /// time that this method will have been called for the provided `tag`. On the other hande, if
+    /// `partial` is `Some`, then the value will have been provided by a previous
+    /// [`StartResult::Expand`].
+    fn start(
+        &mut self,
+        tag: Self::Tag,
+        partial: Option<Self::Partial>,
+        inputs: Vec<&Self::Output>,
+        graph: &mut Graph<Self>,
+    ) -> StartResult<Self::Partial, Self::Output>;
+
+    /// Notify the client that an evaluation has completed. This may be called immediately
+    /// (recursively) from [`Executor::evaluate`], or later from [`Executor::receive_completed`].
+    fn completed(&mut self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
+}
+
+/// Return type for [`Deps::start`].
 pub enum StartResult<PartialT, OutputT> {
+    /// The evaluation has been started but will complete at some later time. When the evaluation
+    /// completes, [`Executor::receive_completed`] will be called.
     InProgress,
+
+    /// The evaluation has more inputs that need to be completed before it can complete. The
+    /// `Executor` must ensure the added inputs are complete before calling [`Deps::start`] again.
+    /// When it does, it will be called with the provided `partial`.
     Expand {
         partial: PartialT,
         added_inputs: Vec<Handle>,
     },
+
+    /// The evaluation has completed immediately. There will be no call to
+    /// [`Executor::receive_completed`].
     Completed(OutputT),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Handle(usize);
+
+#[derive(Default)]
+struct Entry {
+    in_edges: Vec<usize>,
+    out_edges: Vec<usize>,
+}
+
+/// A type that can be used to add dependencies from within [`Deps::start`],
+/// [`Executor::evaluate`], and [`Executor::evaluate_with_inputs`].
 pub struct Graph<DepsT: Deps + ?Sized>(IndexMap<DepsT::Tag, Entry>);
 
 impl<DepsT: Deps + ?Sized> Graph<DepsT> {
+    /// Add the provided `tag` to the graph and return a [`Handle`] pointing to it. If the `tag`
+    /// has already been added, just return its `Handle`.
     pub fn add(&mut self, tag: DepsT::Tag) -> Handle {
         self.add_with_inputs(tag, |_| [])
     }
 
-    pub fn add_with_inputs<F, I>(&mut self, tag: DepsT::Tag, inputs: F) -> Handle
+    /// Add the provided `tag` to the graph and return a [`Handle`] pointing to it. If the `tag`
+    /// has already been added, just return its `Handle`. Otherwise, call `f` to get a list of
+    /// inputs, and then add the `tag` with those dependencies.
+    pub fn add_with_inputs<F, I>(&mut self, tag: DepsT::Tag, f: F) -> Handle
     where
         F: FnOnce(&mut Self) -> I,
         I: IntoIterator<Item = Handle>,
     {
-        Handle(self.add_with_inputs_inner(tag, inputs))
+        Handle(self.add_with_inputs_inner(tag, f))
     }
 
-    fn add_with_inputs_inner<F, I>(&mut self, tag: DepsT::Tag, inputs: F) -> usize
+    fn add_with_inputs_inner<F, I>(&mut self, tag: DepsT::Tag, f: F) -> usize
     where
         F: FnOnce(&mut Self) -> I,
         I: IntoIterator<Item = Handle>,
@@ -44,7 +108,7 @@ impl<DepsT: Deps + ?Sized> Graph<DepsT> {
                 // out-edges.
                 let (index, old_value) = self.0.insert_full(tag, Default::default());
                 old_value.assert_is_none();
-                self.0[index].in_edges = inputs(self)
+                self.0[index].in_edges = f(self)
                     .into_iter()
                     .map(|Handle(in_edge_index)| {
                         self.0[in_edge_index].out_edges.push(index);
@@ -57,21 +121,16 @@ impl<DepsT: Deps + ?Sized> Graph<DepsT> {
     }
 }
 
-pub trait Deps {
-    type CompletedHandle;
-    type Tag: Clone + Debug + Eq + Hash;
-    type Partial;
-    type Output;
-
-    #[must_use]
-    fn start(
-        &mut self,
-        tag: Self::Tag,
-        state: Option<Self::Partial>,
-        inputs: Vec<&Self::Output>,
-        graph: &mut Graph<Self>,
-    ) -> StartResult<Self::Partial, Self::Output>;
-    fn completed(&mut self, handle: Self::CompletedHandle, tag: &Self::Tag, output: &Self::Output);
+enum DeferredWork<DepsT: Deps> {
+    Completed {
+        index: usize,
+        output: DepsT::Output,
+    },
+    Expand {
+        index: usize,
+        partial: DepsT::Partial,
+        added_inputs: Vec<Handle>,
+    },
 }
 
 enum State<DepsT: Deps> {
@@ -89,12 +148,6 @@ enum State<DepsT: Deps> {
     },
 }
 
-#[derive(Default)]
-struct Entry {
-    in_edges: Vec<usize>,
-    out_edges: Vec<usize>,
-}
-
 pub struct Executor<DepsT: Deps> {
     graph: Graph<DepsT>,
     states: Vec<State<DepsT>>,
@@ -109,94 +162,49 @@ impl<DepsT: Deps> Default for Executor<DepsT> {
     }
 }
 
-enum DeferredWork<DepsT: Deps> {
-    Completed {
-        index: usize,
-        output: DepsT::Output,
-    },
-    Expand {
-        index: usize,
-        partial: DepsT::Partial,
-        added_inputs: Vec<Handle>,
-    },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Handle(usize);
-
 impl<DepsT: Deps> Executor<DepsT> {
-    fn expand_inner(
+    pub fn evaluate(
         &mut self,
         deps: &mut DepsT,
-        index: usize,
-        partial: DepsT::Partial,
-        added_in_edges: Vec<usize>,
-        deferred: &mut Vec<DeferredWork<DepsT>>,
+        completed_handle: DepsT::CompletedHandle,
+        tag: DepsT::Tag,
     ) {
-        // This is fine because if we start an entry and it immediately returns, then that will end
-        // up in `deferred`, and won't traverse the entry's out-edges immediately. When we do the
-        // deferred work, we will have properly set up `lacking` (below).
-        let lacking = added_in_edges
-            .iter()
-            .filter(|in_edge_index| {
-                !self.ensure_started_and_get_completed(deps, **in_edge_index, deferred)
-            })
-            .count();
-        let (_, entry) = self.graph.0.get_index_mut(index).unwrap();
-        entry.in_edges.extend(added_in_edges);
-        let state = self.get_state_mut(index);
-        let State::Running { handles } = state else {
-            panic!("unexpected state");
-        };
-        match NonZeroUsize::new(lacking) {
-            Some(lacking) => {
-                let handles = mem::take(handles);
-                *state = State::WaitingOnInputs {
-                    lacking,
-                    handles,
-                    partial: Some(partial),
-                };
+        self.evaluate_with_inputs(deps, completed_handle, tag, |_| []);
+    }
+
+    pub fn evaluate_with_inputs<F, I>(
+        &mut self,
+        deps: &mut DepsT,
+        completed_handle: DepsT::CompletedHandle,
+        tag: DepsT::Tag,
+        inputs: F,
+    ) where
+        F: FnOnce(&mut Graph<DepsT>) -> I,
+        I: IntoIterator<Item = Handle>,
+    {
+        let Handle(index) = self.graph.add_with_inputs(tag, inputs);
+        let mut deferred = vec![];
+        self.ensure_started_and_get_completed(deps, index, &mut deferred);
+        self.do_deferred_work(deps, &mut deferred);
+        match &mut self.states[index] {
+            State::NotStarted => {
+                panic!("unexpected state");
             }
-            None => {
-                self.start(deps, index, deferred, Some(partial));
+            State::WaitingOnInputs { handles, .. } | State::Running { handles } => {
+                handles.push(completed_handle);
+            }
+            State::Completed { output } => {
+                let (tag, _) = self.graph.0.get_index(index).unwrap();
+                deps.completed(completed_handle, tag, output);
             }
         }
     }
 
-    fn start(
-        &mut self,
-        deps: &mut DepsT,
-        index: usize,
-        deferred: &mut Vec<DeferredWork<DepsT>>,
-        partial: Option<DepsT::Partial>,
-    ) {
-        let (tag, entry) = self.graph.0.get_index(index).unwrap();
-        let inputs = entry
-            .in_edges
-            .iter()
-            .map(|in_edge_index| {
-                let State::Completed { ref output } = self.states[*in_edge_index] else {
-                    panic!("unexpected state");
-                };
-                output
-            })
-            .collect();
-        match deps.start(tag.clone(), partial, inputs, &mut self.graph) {
-            StartResult::InProgress => {}
-            StartResult::Completed(output) => {
-                deferred.push(DeferredWork::Completed { index, output });
-            }
-            StartResult::Expand {
-                partial,
-                added_inputs,
-            } => {
-                deferred.push(DeferredWork::Expand {
-                    index,
-                    partial,
-                    added_inputs,
-                });
-            }
-        }
+    pub fn receive_completed(&mut self, deps: &mut DepsT, tag: &DepsT::Tag, output: DepsT::Output) {
+        let index = self.graph.0.get_index_of(tag).unwrap();
+        let mut deferred = vec![];
+        self.receive_completed_inner(deps, index, output, &mut deferred);
+        self.do_deferred_work(deps, &mut deferred);
     }
 
     fn ensure_started_and_get_completed(
@@ -257,54 +265,10 @@ impl<DepsT: Deps> Executor<DepsT> {
                             in_edge_index
                         })
                         .collect();
-                    self.expand_inner(deps, index, partial, added_in_edges, deferred);
+                    self.expand(deps, index, partial, added_in_edges, deferred);
                 }
             }
         }
-    }
-
-    pub fn evaluate(
-        &mut self,
-        deps: &mut DepsT,
-        completed_handle: DepsT::CompletedHandle,
-        tag: DepsT::Tag,
-    ) {
-        self.evaluate_with_inputs(deps, completed_handle, tag, |_| []);
-    }
-
-    pub fn evaluate_with_inputs<F, I>(
-        &mut self,
-        deps: &mut DepsT,
-        completed_handle: DepsT::CompletedHandle,
-        tag: DepsT::Tag,
-        inputs: F,
-    ) where
-        F: FnOnce(&mut Graph<DepsT>) -> I,
-        I: IntoIterator<Item = Handle>,
-    {
-        let Handle(index) = self.graph.add_with_inputs(tag, inputs);
-        let mut deferred = vec![];
-        self.ensure_started_and_get_completed(deps, index, &mut deferred);
-        self.do_deferred_work(deps, &mut deferred);
-        match &mut self.states[index] {
-            State::NotStarted => {
-                panic!("unexpected state");
-            }
-            State::WaitingOnInputs { handles, .. } | State::Running { handles } => {
-                handles.push(completed_handle);
-            }
-            State::Completed { output } => {
-                let (tag, _) = self.graph.0.get_index(index).unwrap();
-                deps.completed(completed_handle, tag, output);
-            }
-        }
-    }
-
-    pub fn receive_completed(&mut self, deps: &mut DepsT, tag: &DepsT::Tag, output: DepsT::Output) {
-        let index = self.graph.0.get_index_of(tag).unwrap();
-        let mut deferred = vec![];
-        self.receive_completed_inner(deps, index, output, &mut deferred);
-        self.do_deferred_work(deps, &mut deferred);
     }
 
     fn receive_completed_inner(
@@ -354,15 +318,89 @@ impl<DepsT: Deps> Executor<DepsT> {
         }
     }
 
+    fn start(
+        &mut self,
+        deps: &mut DepsT,
+        index: usize,
+        deferred: &mut Vec<DeferredWork<DepsT>>,
+        partial: Option<DepsT::Partial>,
+    ) {
+        let (tag, entry) = self.graph.0.get_index(index).unwrap();
+        let inputs = entry
+            .in_edges
+            .iter()
+            .map(|in_edge_index| {
+                let State::Completed { ref output } = self.states[*in_edge_index] else {
+                    panic!("unexpected state");
+                };
+                output
+            })
+            .collect();
+        match deps.start(tag.clone(), partial, inputs, &mut self.graph) {
+            StartResult::InProgress => {}
+            StartResult::Completed(output) => {
+                deferred.push(DeferredWork::Completed { index, output });
+            }
+            StartResult::Expand {
+                partial,
+                added_inputs,
+            } => {
+                deferred.push(DeferredWork::Expand {
+                    index,
+                    partial,
+                    added_inputs,
+                });
+            }
+        }
+    }
+
+    fn expand(
+        &mut self,
+        deps: &mut DepsT,
+        index: usize,
+        partial: DepsT::Partial,
+        added_in_edges: Vec<usize>,
+        deferred: &mut Vec<DeferredWork<DepsT>>,
+    ) {
+        // This is fine because if we start an entry and it immediately returns, then that will end
+        // up in `deferred`, and won't traverse the entry's out-edges immediately. When we do the
+        // deferred work, we will have properly set up `lacking` (below).
+        let lacking = added_in_edges
+            .iter()
+            .filter(|in_edge_index| {
+                !self.ensure_started_and_get_completed(deps, **in_edge_index, deferred)
+            })
+            .count();
+        let (_, entry) = self.graph.0.get_index_mut(index).unwrap();
+        entry.in_edges.extend(added_in_edges);
+        let state = self.get_state_mut(index);
+        let State::Running { handles } = state else {
+            panic!("unexpected state");
+        };
+        match NonZeroUsize::new(lacking) {
+            Some(lacking) => {
+                let handles = mem::take(handles);
+                *state = State::WaitingOnInputs {
+                    lacking,
+                    handles,
+                    partial: Some(partial),
+                };
+            }
+            None => {
+                self.start(deps, index, deferred, Some(partial));
+            }
+        }
+    }
+
+    fn set_state(&mut self, index: usize, state: State<DepsT>) {
+        *self.get_state_mut(index) = state;
+    }
+
     fn get_state_mut(&mut self, index: usize) -> &mut State<DepsT> {
         if index >= self.states.len() {
             self.states.resize_with(index + 1, || State::NotStarted);
         }
         self.states.get_mut(index).unwrap()
-    }
-
-    fn set_state(&mut self, index: usize, state: State<DepsT>) {
-        *self.get_state_mut(index) = state;
     }
 }
 
