@@ -96,14 +96,14 @@ struct Entry {
 }
 
 pub struct Executor<DepsT: Deps> {
-    evaluations: Graph<DepsT>,
+    graph: Graph<DepsT>,
     states: Vec<State<DepsT>>,
 }
 
 impl<DepsT: Deps> Default for Executor<DepsT> {
     fn default() -> Self {
         Self {
-            evaluations: Graph(Default::default()),
+            graph: Graph(Default::default()),
             states: Default::default(),
         }
     }
@@ -141,14 +141,14 @@ impl<DepsT: Deps> Executor<DepsT> {
             .filter(|in_edge_index| {
                 !Self::ensure_started_and_get_completed(
                     deps,
-                    &mut self.evaluations,
+                    &mut self.graph,
                     &mut self.states,
                     **in_edge_index,
                     deferred,
                 )
             })
             .count();
-        let (_, entry) = self.evaluations.0.get_index_mut(index).unwrap();
+        let (_, entry) = self.graph.0.get_index_mut(index).unwrap();
         entry.in_edges.extend(added_in_edges);
         let state = Self::get_state_mut(&mut self.states, index);
         let State::Running { handles } = state else {
@@ -166,7 +166,7 @@ impl<DepsT: Deps> Executor<DepsT> {
             None => {
                 Self::start(
                     deps,
-                    &mut self.evaluations,
+                    &mut self.graph,
                     &mut self.states,
                     index,
                     deferred,
@@ -178,13 +178,13 @@ impl<DepsT: Deps> Executor<DepsT> {
 
     fn start(
         deps: &mut DepsT,
-        evaluations: &mut Graph<DepsT>,
+        graph: &mut Graph<DepsT>,
         states: &mut [State<DepsT>],
         index: usize,
         deferred: &mut Vec<DeferredWork<DepsT>>,
         partial: Option<DepsT::Partial>,
     ) {
-        let (tag, entry) = evaluations.0.get_index(index).unwrap();
+        let (tag, entry) = graph.0.get_index(index).unwrap();
         let inputs = entry
             .in_edges
             .iter()
@@ -195,7 +195,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 output
             })
             .collect();
-        match deps.start(tag.clone(), partial, inputs, evaluations) {
+        match deps.start(tag.clone(), partial, inputs, graph) {
             StartResult::InProgress => {}
             StartResult::Completed(output) => {
                 deferred.push(DeferredWork::Completed { index, output });
@@ -215,20 +215,20 @@ impl<DepsT: Deps> Executor<DepsT> {
 
     fn ensure_started_and_get_completed(
         deps: &mut DepsT,
-        evaluations: &mut Graph<DepsT>,
+        graph: &mut Graph<DepsT>,
         states: &mut Vec<State<DepsT>>,
         index: usize,
         deferred: &mut Vec<DeferredWork<DepsT>>,
     ) -> bool {
         match Self::get_state_mut(states, index) {
             State::NotStarted => {
-                let in_edges = evaluations.0[index].in_edges.clone();
+                let in_edges = graph.0[index].in_edges.clone();
                 let lacking = in_edges
                     .into_iter()
                     .filter(|in_edge_index| {
                         !Self::ensure_started_and_get_completed(
                             deps,
-                            evaluations,
+                            graph,
                             states,
                             *in_edge_index,
                             deferred,
@@ -251,7 +251,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     }
                     None => {
                         Self::set_state(states, index, State::Running { handles });
-                        Self::start(deps, evaluations, states, index, deferred, partial);
+                        Self::start(deps, graph, states, index, deferred, partial);
                     }
                 }
                 false
@@ -267,7 +267,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                 DeferredWork::Completed { index, output } => {
                     Self::receive_completed_inner(
                         deps,
-                        &mut self.evaluations,
+                        &mut self.graph,
                         &mut self.states,
                         index,
                         output,
@@ -282,7 +282,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     let added_in_edges = added_inputs
                         .into_iter()
                         .map(|Handle(in_edge_index)| {
-                            self.evaluations.0[in_edge_index].out_edges.push(index);
+                            self.graph.0[in_edge_index].out_edges.push(index);
                             in_edge_index
                         })
                         .collect();
@@ -311,11 +311,11 @@ impl<DepsT: Deps> Executor<DepsT> {
         F: FnOnce(&mut Graph<DepsT>) -> I,
         I: IntoIterator<Item = Handle>,
     {
-        let Handle(index) = self.evaluations.add_with_inputs(tag, inputs);
+        let Handle(index) = self.graph.add_with_inputs(tag, inputs);
         let mut deferred = vec![];
         Self::ensure_started_and_get_completed(
             deps,
-            &mut self.evaluations,
+            &mut self.graph,
             &mut self.states,
             index,
             &mut deferred,
@@ -329,18 +329,18 @@ impl<DepsT: Deps> Executor<DepsT> {
                 handles.push(completed_handle);
             }
             State::Completed { output } => {
-                let (tag, _) = self.evaluations.0.get_index(index).unwrap();
+                let (tag, _) = self.graph.0.get_index(index).unwrap();
                 deps.completed(completed_handle, tag, output);
             }
         }
     }
 
     pub fn receive_completed(&mut self, deps: &mut DepsT, tag: &DepsT::Tag, output: DepsT::Output) {
-        let index = self.evaluations.0.get_index_of(tag).unwrap();
+        let index = self.graph.0.get_index_of(tag).unwrap();
         let mut deferred = vec![];
         Self::receive_completed_inner(
             deps,
-            &mut self.evaluations,
+            &mut self.graph,
             &mut self.states,
             index,
             output,
@@ -351,7 +351,7 @@ impl<DepsT: Deps> Executor<DepsT> {
 
     fn receive_completed_inner(
         deps: &mut DepsT,
-        evaluations: &mut Graph<DepsT>,
+        graph: &mut Graph<DepsT>,
         states: &mut Vec<State<DepsT>>,
         index: usize,
         output: DepsT::Output,
@@ -366,7 +366,7 @@ impl<DepsT: Deps> Executor<DepsT> {
             panic!("unexpected state");
         };
 
-        let (tag, entry) = evaluations.0.get_index(index).unwrap();
+        let (tag, entry) = graph.0.get_index(index).unwrap();
         for handle in waiting {
             deps.completed(handle, tag, output);
         }
@@ -391,7 +391,7 @@ impl<DepsT: Deps> Executor<DepsT> {
                     *out_edge_state = State::Running {
                         handles: mem::take(handles),
                     };
-                    Self::start(deps, evaluations, states, out_edge_index, deferred, partial);
+                    Self::start(deps, graph, states, out_edge_index, deferred, partial);
                 }
             }
         }
