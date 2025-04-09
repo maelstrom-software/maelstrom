@@ -137,35 +137,6 @@ impl<DepsT: Deps> Executor<DepsT> {
         self.evaluations.add_with_inputs(tag, inputs)
     }
 
-    pub fn expand(
-        &mut self,
-        deps: &mut DepsT,
-        tag: &DepsT::Tag,
-        partial: DepsT::Partial,
-        added_inputs: impl IntoIterator<Item = DepsT::Tag>,
-    ) {
-        let mut deferred = vec![];
-        let index = self.evaluations.0.get_index_of(tag).unwrap();
-
-        let added_in_edges = added_inputs
-            .into_iter()
-            .map(|in_edge_tag| {
-                let (in_edge_index, _, in_edge_entry) = self
-                    .evaluations
-                    .0
-                    .get_full_mut(&in_edge_tag)
-                    .unwrap_or_else(|| {
-                        panic!("{tag:?} depends on {in_edge_tag:?}, which hasn't been added")
-                    });
-                in_edge_entry.out_edges.push(index);
-                in_edge_index
-            })
-            .collect();
-
-        self.expand_inner(deps, index, partial, added_in_edges, &mut deferred);
-        self.do_deferred_work(deps, &mut deferred);
-    }
-
     fn expand_inner(
         &mut self,
         deps: &mut DepsT,
@@ -760,26 +731,6 @@ mod tests {
     }
 
     script_test! {
-        expand_new_dependency_not_started,
-        Fixture::default(),
-        |e, d| e.evaluate(d, 1, "a") => {
-            Start("a", None, vec![]),
-        };
-        |e, d| {
-            e.add("b");
-            e.expand(d, &"a", "partial-a-1", ["b"]);
-        } => {
-            Start("b", None, vec![]),
-        };
-        |e, d| e.receive_completed(d, &"b", 'b') => {
-            Start("a", Some("partial-a-1"), vec!['b']),
-        };
-        |e, d| e.receive_completed(d, &"a", 'a') => {
-            Completed(1, "a", 'a'),
-        };
-    }
-
-    script_test! {
         expand_new_dependency_not_started_immediate,
         Fixture::new([
             ("a", TestStartResult::Expand {
@@ -800,51 +751,41 @@ mod tests {
     }
 
     script_test! {
-        expand_new_dependency_started,
-        Fixture::default(),
-        |e, d| e.evaluate(d, 1, "a") => {
-            Start("a", None, vec![]),
-        };
-        |e, d| e.evaluate(d, 2, "b") => {
-            Start("b", None, vec![]),
-        };
-        |e, d| e.expand(d, &"a", "partial-a-1", ["b"]) => {};
-        |e, d| e.receive_completed(d, &"b", 'b') => {
-            Completed(2, "b", 'b'),
-            Start("a", Some("partial-a-1"), vec!['b']),
-        };
-        |e, d| e.receive_completed(d, &"a", 'a') => {
-            Completed(1, "a", 'a'),
-        };
-    }
-
-    script_test! {
         expand_new_dependency_completed,
-        Fixture::default(),
-        |e, d| e.evaluate(d, 1, "a") => {
-            Start("a", None, vec![]),
-        };
-        |e, d| e.evaluate(d, 2, "b") => {
+        Fixture::new([(
+            "a",
+            TestStartResult::Expand {
+                partial: "partial-a-1",
+                added_inputs: vec!["b"],
+            },
+        )]),
+        |e, d| e.evaluate(d, 1, "b") => {
             Start("b", None, vec![]),
         };
         |e, d| e.receive_completed(d, &"b", 'b') => {
-            Completed(2, "b", 'b'),
+            Completed(1, "b", 'b'),
         };
-        |e, d| e.expand(d, &"a", "partial-a-1", ["b"]) => {
+        |e, d| e.evaluate(d, 2, "a") => {
+            Start("a", None, vec![]),
             Start("a", Some("partial-a-1"), vec!['b']),
         };
         |e, d| e.receive_completed(d, &"a", 'a') => {
-            Completed(1, "a", 'a'),
+            Completed(2, "a", 'a'),
         };
     }
 
     script_test! {
         expand_new_dependency_cycle,
-        Fixture::default(),
+        Fixture::new([(
+            "a",
+            TestStartResult::Expand {
+                partial: "partial-a-1",
+                added_inputs: vec!["b"],
+            },
+        )]),
         |e, d| e.evaluate_with_inputs(d, 1, "b", |graph| [graph.add("a")]) => {
             Start("a", None, vec![]),
         };
-        |e, d| e.expand(d, &"a", "partial-a-1", ["b"]) => {};
     }
 
     script_test! {
