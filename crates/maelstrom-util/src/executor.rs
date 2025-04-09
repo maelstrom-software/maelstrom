@@ -125,18 +125,6 @@ enum DeferredWork<DepsT: Deps> {
 pub struct Handle(usize);
 
 impl<DepsT: Deps> Executor<DepsT> {
-    pub fn add(&mut self, tag: DepsT::Tag) -> Handle {
-        self.evaluations.add(tag)
-    }
-
-    pub fn add_with_inputs<F, I>(&mut self, tag: DepsT::Tag, inputs: F) -> Handle
-    where
-        F: FnOnce(&mut Graph<DepsT>) -> I,
-        I: IntoIterator<Item = Handle>,
-    {
-        self.evaluations.add_with_inputs(tag, inputs)
-    }
-
     fn expand_inner(
         &mut self,
         deps: &mut DepsT,
@@ -323,7 +311,7 @@ impl<DepsT: Deps> Executor<DepsT> {
         F: FnOnce(&mut Graph<DepsT>) -> I,
         I: IntoIterator<Item = Handle>,
     {
-        let Handle(index) = self.add_with_inputs(tag, inputs);
+        let Handle(index) = self.evaluations.add_with_inputs(tag, inputs);
         let mut deferred = vec![];
         Self::ensure_started_and_get_completed(
             deps,
@@ -611,71 +599,32 @@ mod tests {
     script_test! {
         adding_multiple_times,
         Fixture::default(),
-        |e, d| {
-            let handle = e.add("a");
-            let handle2 = e.add("a");
-            assert_eq!(handle, handle2);
-            e.evaluate(d, 1, "a");
-        } => {
+        |e, d| e.evaluate(d, 1, "a") => {
             Start("a", None, vec![]),
         };
-        |e, _| e.add("a") => {};
+        |e, d| e.evaluate(d, 2, "a") => {};
         |e, d| e.receive_completed(d, &"a", 'a') => {
             Completed(1, "a", 'a'),
-        };
-        |e, _| e.add("a") => {};
-        |e, d| e.evaluate(d, 2, "a") => {
             Completed(2, "a", 'a'),
+        };
+        |e, d| e.evaluate(d, 3, "a") => {
+            Completed(3, "a", 'a'),
         };
     }
 
     script_test! {
         inputs,
         Fixture::default(),
-        |exec, _| {
-            let e = exec.add("e");
-            let d = exec.add_with_inputs("d", |_| [e]);
-            let c = exec.add("c");
-            let b = exec.add_with_inputs("b", |_| [d, c]);
-            exec.add_with_inputs("a", |_| [b, c]);
-        } => {};
-        |e, d| e.evaluate(d, 1, "a") => {
-            Start("c", None, vec![]),
-            Start("e", None, vec![]),
-        };
-        |e, d| e.evaluate(d, 2, "a") => {};
-        |e, d| e.evaluate(d, 3, "b") => {};
-        |e, d| e.receive_completed(d, &"e", 'e') => {
-            Start("d", None, vec!['e']),
-        };
-        |e, d| e.receive_completed(d, &"c", 'c') => {};
-        |e, d| e.receive_completed(d, &"d", 'd') => {
-            Start("b", None, vec!['d', 'c']),
-        };
-        |e, d| e.receive_completed(d, &"b", 'b') => {
-            Start("a", None, vec!['b', 'c']),
-            Completed(3, "b", 'b'),
-        };
-        |e, d| e.receive_completed(d, &"a", 'a') => {
-            Completed(1, "a", 'a'),
-            Completed(2, "a", 'a'),
-        };
-    }
-
-    script_test! {
-        inputs_nested,
-        Fixture::default(),
-        |exec, _| {
-            exec.add_with_inputs("a", |graph| {
+        |e, d| e.evaluate_with_inputs(
+            d, 1, "a", |graph| {
                 let c = graph.add("c");
                 let b = graph.add_with_inputs("b", |graph| [
                     graph.add_with_inputs("d", |graph| [graph.add("e")]),
                     c,
                 ]);
                 [b, c]
-            });
-        } => {};
-        |e, d| e.evaluate(d, 1, "a") => {
+            },
+        ) => {
             Start("c", None, vec![]),
             Start("e", None, vec![]),
         };
@@ -707,14 +656,16 @@ mod tests {
             ("d", TestStartResult::Completed('d')),
             ("e", TestStartResult::Completed('e')),
         ]),
-        |exec, _| {
-            let e = exec.add("e");
-            let d = exec.add_with_inputs("d", |_| [e]);
-            let c = exec.add("c");
-            let b = exec.add_with_inputs("b", |_| [d, c]);
-            exec.add_with_inputs("a", |_| [b, c]);
-        } => {};
-        |e, d| e.evaluate(d, 1, "a") => {
+        |e, d| e.evaluate_with_inputs(
+            d, 1, "a", |graph| {
+                let c = graph.add("c");
+                let b = graph.add_with_inputs("b", |graph| [
+                    graph.add_with_inputs("d", |graph| [graph.add("e")]),
+                    c,
+                ]);
+                [b, c]
+            },
+        ) => {
             Start("a", None, vec!['b', 'c']),
             Start("b", None, vec!['d', 'c']),
             Start("c", None, vec![]),
@@ -791,11 +742,7 @@ mod tests {
     script_test! {
         evaluate_after_dependency_completed,
         Fixture::default(),
-        |e, d| {
-            let a = e.add("a");
-            e.add_with_inputs("c", |_| [a]);
-            e.evaluate_with_inputs(d, 1, "b", |_| [a]);
-        } => {
+        |e, d| e.evaluate_with_inputs(d, 1, "b", |graph| [graph.add("a")]) => {
             Start("a", None, vec![]),
         };
         |e, d| e.receive_completed(d, &"a", 'a') => {
@@ -804,7 +751,7 @@ mod tests {
         |e, d| e.receive_completed(d, &"b", 'b') => {
             Completed(1, "b", 'b'),
         };
-        |e, d| e.evaluate(d, 2, "c") => {
+        |e, d| e.evaluate_with_inputs(d, 2, "c", |graph| [graph.add("a")]) => {
             Start("c", None, vec!['a']),
         };
         |e, d| e.receive_completed(d, &"c", 'c') => {
