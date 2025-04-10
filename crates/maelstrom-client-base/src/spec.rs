@@ -1166,22 +1166,22 @@ macro_rules! shared_library_dependencies_layer_spec {
 #[serde(deny_unknown_fields)]
 #[serde(try_from = "CommandLayerSpecForTomlAndJson")]
 pub struct CommandLayerSpec {
-    pub command: Utf8PathBuf,
+    pub program: Utf8PathBuf,
     #[serde(default)]
     pub arguments: Vec<String>,
 }
 
 #[macro_export]
 macro_rules! command_layer_spec {
-    ($command:expr $(,)?) => {
+    ($program:expr $(,)?) => {
         $crate::spec::LayerSpec::Command($crate::spec::CommandLayerSpec {
-            command: $command.into(),
+            program: $program.into(),
             arguments: ::std::default::Default::default(),
         })
     };
-    ($command:expr, $($arguments:tt)+) => {
+    ($program:expr, $($arguments:tt)+) => {
         $crate::spec::LayerSpec::Command($crate::spec::CommandLayerSpec {
-            command: $command.into(),
+            program: $program.into(),
             arguments: [$($arguments)+].into_iter().map(Into::into).collect(),
         })
     };
@@ -1208,7 +1208,7 @@ impl TryFrom<CommandLayerSpecForTomlAndJson> for CommandLayerSpec {
             StringOrStringVec::AsString(command) => {
                 let command = command.into();
                 Ok(CommandLayerSpec {
-                    command,
+                    program: command,
                     arguments: vec![],
                 })
             }
@@ -1217,7 +1217,7 @@ impl TryFrom<CommandLayerSpecForTomlAndJson> for CommandLayerSpec {
                     Err("command layer must at least specify the program".into())
                 } else {
                     let command = arguments.remove(0).into();
-                    Ok(CommandLayerSpec { command, arguments })
+                    Ok(CommandLayerSpec { program: command, arguments })
                 }
             }
         }

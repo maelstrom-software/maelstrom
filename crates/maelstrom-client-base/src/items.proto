@@ -69,7 +69,7 @@ message SharedLibraryDependenciesLayer {
 }
 
 message CommandLayer {
-    string command = 1;
+    string program = 1;
     repeated string arguments = 2;
 }
 
