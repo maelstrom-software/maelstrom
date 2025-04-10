@@ -1164,6 +1164,7 @@ macro_rules! shared_library_dependencies_layer_spec {
 )]
 #[proto(proto_buf_type = proto::CommandLayer)]
 #[serde(deny_unknown_fields)]
+#[serde(try_from = "CommandLayerSpecForTomlAndJson")]
 pub struct CommandLayerSpec {
     pub command: Utf8PathBuf,
     #[serde(default)]
@@ -1184,6 +1185,43 @@ macro_rules! command_layer_spec {
             arguments: [$($arguments)+].into_iter().map(Into::into).collect(),
         })
     };
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandLayerSpecForTomlAndJson {
+    command: StringOrStringVec,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum StringOrStringVec {
+    AsString(String),
+    AsVec(Vec<String>),
+}
+
+impl TryFrom<CommandLayerSpecForTomlAndJson> for CommandLayerSpec {
+    type Error = String;
+
+    fn try_from(spec: CommandLayerSpecForTomlAndJson) -> Result<Self, Self::Error> {
+        match spec.command {
+            StringOrStringVec::AsString(command) => {
+                let command = command.into();
+                Ok(CommandLayerSpec {
+                    command,
+                    arguments: vec![],
+                })
+            }
+            StringOrStringVec::AsVec(mut arguments) => {
+                if arguments.is_empty() {
+                    Err("command layer must at least specify the program".into())
+                } else {
+                    let command = arguments.remove(0).into();
+                    Ok(CommandLayerSpec { command, arguments })
+                }
+            }
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for LayerSpec {
@@ -3220,7 +3258,7 @@ mod tests {
             use super::*;
 
             #[test]
-            fn command_without_arguments() {
+            fn command_as_string() {
                 assert_eq!(
                     parse_toml::<LayerSpec>(indoc! {r#"
                         command = "touch"
@@ -3230,14 +3268,31 @@ mod tests {
             }
 
             #[test]
-            fn command_with_arguments() {
+            fn command_as_vector_1() {
                 assert_eq!(
                     parse_toml::<LayerSpec>(indoc! {r#"
-                        command = "cp"
-                        arguments = ["foo", "bar"]
+                        command = ["touch"]
+                    "#}),
+                    command_layer_spec!("touch"),
+                );
+            }
+
+            #[test]
+            fn command_as_vector_3() {
+                assert_eq!(
+                    parse_toml::<LayerSpec>(indoc! {r#"
+                        command = ["cp", "foo", "bar"]
                     "#}),
                     command_layer_spec!("cp", "foo", "bar"),
                 );
+            }
+
+            #[test]
+            fn command_as_vector_0() {
+                assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
+                    command = []
+                "#})
+                .contains("command layer must at least specify the program"));
             }
 
             #[test]
@@ -3333,8 +3388,7 @@ mod tests {
             fn command() {
                 replace_template_variables_test(
                     indoc! {r#"
-                        command = "cp"
-                        arguments = ["foo", "bar"]
+                        command = ["cp", "foo", "bar"]
                     "#},
                     command_layer_spec!("cp", "foo", "bar"),
                 );
