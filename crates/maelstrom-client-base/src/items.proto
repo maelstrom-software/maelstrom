@@ -68,8 +68,8 @@ message SharedLibraryDependenciesLayer {
     PrefixOptions prefix_options = 2;
 }
 
-message ProgramLayer {
-    string program = 1;
+message CommandLayer {
+    string command = 1;
     repeated string arguments = 2;
 }
 
@@ -81,7 +81,7 @@ message LayerSpec {
         StubsLayer stubs = 4;
         SymlinksLayer symlinks = 5;
         SharedLibraryDependenciesLayer shared_library_dependencies = 6;
-        ProgramLayer program = 7;
+        CommandLayer command = 7;
     }
 }
 

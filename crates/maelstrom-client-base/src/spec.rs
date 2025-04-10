@@ -956,7 +956,7 @@ pub enum LayerSpec {
     Stubs(StubsLayerSpec),
     Symlinks(SymlinksLayerSpec),
     SharedLibraryDependencies(SharedLibraryDependenciesLayerSpec),
-    Program(ProgramLayerSpec),
+    Command(CommandLayerSpec),
 }
 
 enum LayerSpecType {
@@ -966,7 +966,7 @@ enum LayerSpecType {
     Stubs,
     Symlinks,
     SharedLibraryDependencies,
-    Program,
+    Command,
 }
 
 #[derive(
@@ -1162,25 +1162,25 @@ macro_rules! shared_library_dependencies_layer_spec {
     Serialize,
     TryFromProtoBuf,
 )]
-#[proto(proto_buf_type = proto::ProgramLayer)]
+#[proto(proto_buf_type = proto::CommandLayer)]
 #[serde(deny_unknown_fields)]
-pub struct ProgramLayerSpec {
-    pub program: Utf8PathBuf,
+pub struct CommandLayerSpec {
+    pub command: Utf8PathBuf,
     #[serde(default)]
     pub arguments: Vec<String>,
 }
 
 #[macro_export]
-macro_rules! program_layer_spec {
-    ($program:expr $(,)?) => {
-        $crate::spec::LayerSpec::Program($crate::spec::ProgramLayerSpec {
-            program: $program.into(),
+macro_rules! command_layer_spec {
+    ($command:expr $(,)?) => {
+        $crate::spec::LayerSpec::Command($crate::spec::CommandLayerSpec {
+            command: $command.into(),
             arguments: ::std::default::Default::default(),
         })
     };
-    ($program:expr, $($arguments:tt)+) => {
-        $crate::spec::LayerSpec::Program($crate::spec::ProgramLayerSpec {
-            program: $program.into(),
+    ($command:expr, $($arguments:tt)+) => {
+        $crate::spec::LayerSpec::Command($crate::spec::CommandLayerSpec {
+            command: $command.into(),
             arguments: [$($arguments)+].into_iter().map(Into::into).collect(),
         })
     };
@@ -1202,7 +1202,7 @@ impl<'de> Deserialize<'de> for LayerSpec {
                 "stubs" => Some(LayerSpecType::Stubs),
                 "symlinks" => Some(LayerSpecType::Symlinks),
                 "shared_library_dependencies" => Some(LayerSpecType::SharedLibraryDependencies),
-                "program" => Some(LayerSpecType::Program),
+                "command" => Some(LayerSpecType::Command),
                 _ => None,
             })
         }) else {
@@ -1221,8 +1221,8 @@ impl<'de> Deserialize<'de> for LayerSpec {
                 SharedLibraryDependenciesLayerSpec::deserialize(deserializer)
                     .map(Self::SharedLibraryDependencies)
             }
-            LayerSpecType::Program => {
-                ProgramLayerSpec::deserialize(deserializer).map(Self::Program)
+            LayerSpecType::Command => {
+                CommandLayerSpec::deserialize(deserializer).map(Self::Command)
             }
         }
     }
@@ -1257,7 +1257,7 @@ impl LayerSpec {
                     *path = vars.replace(path)?.into();
                 }
             }
-            Self::Program(_) => {}
+            Self::Command(_) => {}
         }
         Ok(())
     }
@@ -3216,34 +3216,34 @@ mod tests {
             }
         }
 
-        mod program {
+        mod command {
             use super::*;
 
             #[test]
-            fn program_without_arguments() {
+            fn command_without_arguments() {
                 assert_eq!(
                     parse_toml::<LayerSpec>(indoc! {r#"
-                        program = "touch"
+                        command = "touch"
                     "#}),
-                    program_layer_spec!("touch"),
+                    command_layer_spec!("touch"),
                 );
             }
 
             #[test]
-            fn program_with_arguments() {
+            fn command_with_arguments() {
                 assert_eq!(
                     parse_toml::<LayerSpec>(indoc! {r#"
-                        program = "cp"
+                        command = "cp"
                         arguments = ["foo", "bar"]
                     "#}),
-                    program_layer_spec!("cp", "foo", "bar"),
+                    command_layer_spec!("cp", "foo", "bar"),
                 );
             }
 
             #[test]
             fn unknown_field() {
                 assert!(parse_error_toml::<LayerSpec>(indoc! {r#"
-                    program = "touch"
+                    command = "touch"
                     foo_bar_baz = 3
                 "#})
                 .contains("unknown field `foo_bar_baz`"));
@@ -3330,13 +3330,13 @@ mod tests {
             }
 
             #[test]
-            fn program() {
+            fn command() {
                 replace_template_variables_test(
                     indoc! {r#"
-                        program = "cp"
+                        command = "cp"
                         arguments = ["foo", "bar"]
                     "#},
-                    program_layer_spec!("cp", "foo", "bar"),
+                    command_layer_spec!("cp", "foo", "bar"),
                 );
             }
         }
