@@ -1217,7 +1217,10 @@ impl TryFrom<CommandLayerSpecForTomlAndJson> for CommandLayerSpec {
                     Err("command layer must at least specify the program".into())
                 } else {
                     let command = arguments.remove(0).into();
-                    Ok(CommandLayerSpec { program: command, arguments })
+                    Ok(CommandLayerSpec {
+                        program: command,
+                        arguments,
+                    })
                 }
             }
         }
