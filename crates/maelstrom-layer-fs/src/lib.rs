@@ -12,7 +12,7 @@
 //! - `file_table.bin` contains a listing of all the files in the layer
 //! - `attributes_table.bin` contains the attributes for all the files in the layer
 //! - `<offset>.dir_data.bin` contains directory contents for the directory found at `<offset>` in
-//!    the file table.
+//!   the file table.
 //!
 //! Notice that none of the above bullets mention containing file-data. Most file-data is instead
 //! read from files outside of the layer. This what the `cache_dir` in [`LayerFs::from_path`] is
@@ -126,6 +126,7 @@ use maelstrom_util::{
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsStr,
+    io::Write,
     path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
@@ -140,7 +141,7 @@ fn fixint_bincode() -> impl Options {
     bincode::options().with_big_endian().with_fixint_encoding()
 }
 
-fn fixint_serialize_into<W: std::io::Write, T: ?Sized + Serialize>(
+fn fixint_serialize_into<W: Write, T: ?Sized + Serialize>(
     writer: W,
     value: &T,
 ) -> bincode::Result<()> {
@@ -952,7 +953,7 @@ mod tests {
             data_dir
         }
 
-        async fn bottom_layer_builder(&self, data_dir: &Path) -> BottomLayerBuilder {
+        async fn bottom_layer_builder(&self, data_dir: &Path) -> BottomLayerBuilder<'_> {
             BottomLayerBuilder::new(
                 self.log.clone(),
                 &self.fs,

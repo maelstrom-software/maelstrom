@@ -48,7 +48,7 @@ impl ConfigStructField {
             .ok_or_else(|| syn::Error::new(self.ident().span(), "no value_name attribute found"))
     }
 
-    fn default(&self) -> DefaultValue {
+    fn default(&self) -> DefaultValue<'_> {
         match &self.default {
             Some(expr @ Expr::Closure(_)) => DefaultValue::Closure(expr),
             Some(expr) => DefaultValue::Expression(expr),

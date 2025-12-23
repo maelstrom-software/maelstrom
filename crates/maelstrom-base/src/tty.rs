@@ -113,7 +113,7 @@ impl<'a> Iterator for DecodeInputIterator<'a> {
     }
 }
 
-pub fn decode_input(input: &[u8]) -> DecodeInputIterator {
+pub fn decode_input(input: &[u8]) -> DecodeInputIterator<'_> {
     DecodeInputIterator(input)
 }
 

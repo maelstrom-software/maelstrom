@@ -855,7 +855,7 @@ impl Entry {
 
     /// Treating `self` as the root of the file system, resolve `path`. If `path` resolves to a
     /// symlink, follow symlinks until a non-symlink is found.
-    fn lookup_leaf(&self, path: &Path) -> Result<FollowSymlinks> {
+    fn lookup_leaf(&self, path: &Path) -> Result<FollowSymlinks<'_>> {
         match self.lookup(path) {
             Lookup::FoundParent(_) | Lookup::NotFound | Lookup::DanglingSymlink => {
                 Err(Error::NoEnt)

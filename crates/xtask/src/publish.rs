@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use cargo_metadata::{camino::Utf8Path, semver::Version, Metadata, MetadataCommand};
 use clap::{ArgAction::Count, Parser};
 use reqwest::blocking::Client;
-use std::{collections::HashMap, process::Command};
+use std::{collections::HashMap, process::Command, slice};
 
 #[derive(Debug, Eq, PartialEq)]
 struct PackageInfo<'a> {
@@ -22,7 +22,7 @@ type Packages<'a> = HashMap<&'a str, PackageInfo<'a>>;
 
 /// Return a map from all of the packages in the workspace to some relevant information about them.
 /// Only intra-workspace dependencies are included.
-fn extract_workspace_packages(metadata: &Metadata) -> Packages {
+fn extract_workspace_packages(metadata: &Metadata) -> Packages<'_> {
     let packages = Packages::from_iter(metadata.workspace_packages().iter().map(|pkg| {
         (
             pkg.name.as_str(),
@@ -137,7 +137,8 @@ where
                 emitted.push(entry.item);
             }
             Some(dependency) => {
-                let dependency_path = [entry.path.as_slice(), &[dependency.clone()]].concat();
+                let dependency_path =
+                    [entry.path.as_slice(), slice::from_ref(&dependency)].concat();
 
                 // Make sure we don't have a cycle.
                 let dependency_first_pos_in_path = dependency_path

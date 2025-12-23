@@ -25,6 +25,7 @@ use ratatui::{
 };
 use slog::Drain as _;
 use std::{
+    borrow::Cow,
     cell::RefCell,
     io::{self, stdout, Write as _},
     sync::mpsc::{Receiver, RecvTimeoutError},
@@ -273,6 +274,7 @@ fn format_failed_test(t: &CompletedJob) -> Row<'static> {
 }
 
 #[derive(From)]
+#[allow(clippy::large_enum_variant)]
 enum PrintAbove {
     #[from]
     StatusLine(Row<'static>, Vec<Constraint>),
@@ -563,9 +565,11 @@ impl FancyUi {
             .jobs
             .running()
             .saturating_sub((area.height as u64).saturating_sub(2));
-        let omitted_trailer = (omitted_tests > 0)
-            .then(|| format!(" ({omitted_tests} tests not shown)"))
-            .unwrap_or_default();
+        let omitted_trailer = if omitted_tests > 0 {
+            Cow::from(format!(" ({omitted_tests} tests not shown)"))
+        } else {
+            Cow::from("")
+        };
         let mut running_tests: Vec<_> = self.jobs.running_tests().collect();
         running_tests.sort_by_key(|a| a.1);
         Widget::render(
@@ -591,9 +595,11 @@ impl FancyUi {
             .jobs
             .failed()
             .saturating_sub((area.height as u64).saturating_sub(2));
-        let omitted_trailer = (omitted_tests > 0)
-            .then(|| format!(" ({omitted_tests} tests not shown)"))
-            .unwrap_or_default();
+        let omitted_trailer = if omitted_tests > 0 {
+            Cow::from(format!(" ({omitted_tests} tests not shown)"))
+        } else {
+            Cow::from("")
+        };
         let mut failed_tests: Vec<_> = self.jobs.failed_tests().collect();
         failed_tests.sort_by_key(|j| &j.name);
         Widget::render(
@@ -632,9 +638,11 @@ impl FancyUi {
         let d = self.expected_total_jobs;
 
         let num_failed = self.jobs.failed();
-        let failure_trailer = (num_failed > 0)
-            .then(|| format!(" ({num_failed}f)"))
-            .unwrap_or_default();
+        let failure_trailer = if num_failed > 0 {
+            Cow::from(format!(" ({num_failed}f)"))
+        } else {
+            Cow::from("")
+        };
 
         MultiGauge::default()
             .gauge(build_gauge(tailwind::GREEN.c800, self.jobs.completed(), d))
@@ -738,7 +746,7 @@ impl FancyUi {
                 .use_unicode(true)
         };
         let len = self.remote_progress.len();
-        let layout = Layout::vertical(std::iter::repeat(Constraint::Length(1)).take(len));
+        let layout = Layout::vertical(std::iter::repeat_n(Constraint::Length(1), len));
         for (p, area) in self.remote_progress.iter().zip(layout.split(area).iter()) {
             gauge_f(&p.name, p.size, p.progress).render(*area, buf);
         }

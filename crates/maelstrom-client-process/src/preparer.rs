@@ -71,6 +71,7 @@ struct ExecutorAdapter<DepsT: Deps> {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::large_enum_variant)]
 enum Tag {
     JobSpec(CollapsedJobSpec),
     Image(String),

@@ -403,7 +403,7 @@ impl GitHubClient {
             .ok_or_else(|| anyhow!("missing response"))??;
         Ok(single_page
             .data
-            .map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+            .map_err(std::io::Error::other)
             .into_async_read()
             .compat())
     }

@@ -618,7 +618,7 @@ impl ImageDownloader {
             prog,
             tar_stream
                 .bytes_stream()
-                .map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+                .map_err(io::Error::other)
                 .into_async_read()
                 .compat(),
         )));

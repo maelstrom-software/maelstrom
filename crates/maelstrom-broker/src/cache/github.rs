@@ -47,7 +47,7 @@ impl remote::RemoteArtifactReader for GitHubArtifactReader {
         LazyRead::new(Box::pin(async move {
             download_artifact(client, digest)
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                .map_err(io::Error::other)
         }))
     }
 }

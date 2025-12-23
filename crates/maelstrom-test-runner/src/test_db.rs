@@ -664,7 +664,6 @@ mod tests {
     use super::*;
     use crate::{NoCaseMetadata, SimpleFilter, StringArtifactKey};
     use indoc::indoc;
-    use maelstrom_test::millis;
     use maelstrom_util::ext::OptionExt as _;
     use pretty_assertions::assert_eq;
     use std::{cell::RefCell, rc::Rc, str};

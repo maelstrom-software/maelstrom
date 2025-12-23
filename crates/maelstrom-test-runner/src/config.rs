@@ -1,5 +1,5 @@
 use crate::ui::UiKind;
-use clap::{command, Args};
+use clap::Args;
 use derive_more::From;
 use maelstrom_client::config::Config as ClientConfig;
 use maelstrom_macro::Config;

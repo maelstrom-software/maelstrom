@@ -139,9 +139,8 @@ impl<T> FromStr for RootBuf<T> {
     }
 }
 
-impl<T> TryFrom<String> for RootBuf<T> {
-    type Error = <RootBuf<T> as FromStr>::Err;
-    fn try_from(from: String) -> Result<Self, Self::Error> {
-        Self::from_str(from.as_str())
+impl<T> From<String> for RootBuf<T> {
+    fn from(from: String) -> Self {
+        Self::from_str(from.as_str()).unwrap()
     }
 }

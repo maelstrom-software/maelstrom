@@ -158,7 +158,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
 
     fn sift_up_internal(&mut self, deps: &mut DepsT, HeapIndex(mut idx): HeapIndex) -> HeapIndex {
         while idx != 0 {
-            let parent_idx = (idx + 1) / 2 - 1;
+            let parent_idx = idx.div_ceil(2) - 1;
 
             if !deps.is_element_less_than(&self.0[idx], &self.0[parent_idx]) {
                 break;

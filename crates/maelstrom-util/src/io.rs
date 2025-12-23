@@ -863,7 +863,7 @@ pub struct ErrorReader;
 
 impl std::io::Read for ErrorReader {
     fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-        Err(std::io::Error::new(std::io::ErrorKind::Other, "test error"))
+        Err(std::io::Error::other("test error"))
     }
 }
 
@@ -873,10 +873,7 @@ impl AsyncRead for ErrorReader {
         _: &mut Context<'_>,
         _: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        Poll::Ready(Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "test error",
-        )))
+        Poll::Ready(Err(std::io::Error::other("test error")))
     }
 }
 

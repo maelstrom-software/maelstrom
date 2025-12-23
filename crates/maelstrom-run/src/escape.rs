@@ -87,7 +87,7 @@ impl<'a> Iterator for EscapeIterator<'a> {
 /// `escape_char`-`escape_char`. The first two are dealt with by the callers, while the last gets
 /// sent as a single `escape_char`. It lets everthing else pass untouched, including `escape_char`
 /// followed by any other character.
-pub fn decode_escapes(bytes: &[u8], escape_char: u8) -> EscapeIterator {
+pub fn decode_escapes(bytes: &[u8], escape_char: u8) -> EscapeIterator<'_> {
     EscapeIterator { bytes, escape_char }
 }
 

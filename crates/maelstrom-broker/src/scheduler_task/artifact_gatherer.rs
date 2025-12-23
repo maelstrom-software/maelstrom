@@ -925,7 +925,7 @@ mod tests {
             self
         }
 
-        fn expect(&mut self) -> Expect {
+        fn expect(&mut self) -> Expect<'_> {
             Expect { fixture: self }
         }
 

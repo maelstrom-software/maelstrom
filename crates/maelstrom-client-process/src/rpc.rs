@@ -51,6 +51,7 @@ impl Handler {
     }
 }
 
+#[allow(clippy::result_large_err)]
 trait ResultExt<T> {
     fn map_to_tonic(self) -> TonicResponse<T>;
 }

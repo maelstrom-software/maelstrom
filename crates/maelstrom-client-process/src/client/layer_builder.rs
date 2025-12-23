@@ -143,7 +143,7 @@ impl LayerBuilder {
 
     async fn build_manifest(
         &self,
-        mut paths: impl futures::stream::Stream<Item = Result<impl AsRef<Path>>>,
+        paths: impl futures::stream::Stream<Item = Result<impl AsRef<Path>>>,
         prefix_options: PrefixOptions,
         data_upload: impl DataUpload,
     ) -> Result<PathBuf> {

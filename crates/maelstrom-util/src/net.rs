@@ -97,7 +97,7 @@ where
 /// that is logged as well.
 pub async fn async_socket_writer<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
-    mut socket: (impl AsyncWrite + Unpin),
+    mut socket: impl AsyncWrite + Unpin,
     log: Logger,
     context: &'static str,
 ) -> Result<()>
@@ -116,7 +116,7 @@ where
 /// parameter is used to log the messages and wrap them in any necessary structure for internal use
 /// by the program.
 pub async fn async_socket_reader<MessageT, TransformedT>(
-    mut socket: (impl AsyncRead + Unpin),
+    mut socket: impl AsyncRead + Unpin,
     channel: UnboundedSender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
     log: Logger,

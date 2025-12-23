@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 type TermDrain = slog::Fuse<slog_async::Async>;
 
+#[allow(clippy::large_enum_variant)]
 enum LogDestinationInner {
     Ui(UiSlogDrain),
     Term(TermDrain),

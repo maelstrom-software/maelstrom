@@ -382,7 +382,7 @@ impl Fs {
         path.as_ref().exists()
     }
 
-    pub fn walk<P: AsRef<Path>>(&self, path: P) -> Walker {
+    pub fn walk<P: AsRef<Path>>(&self, path: P) -> Walker<'_> {
         Walker::new(self, path.as_ref())
     }
 

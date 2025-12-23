@@ -107,9 +107,7 @@ impl<FsT: Fs> SchedulerCache for Cache<FsT, BrokerKey, BrokerGetStrategy> {
         let cache_path = self.cache_path(key).into_path_buf();
         LazyRead::new(Box::pin(async move {
             let fs = maelstrom_util::async_fs::Fs::new();
-            fs.open_file(cache_path)
-                .await
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+            fs.open_file(cache_path).await.map_err(io::Error::other)
         }))
     }
 }

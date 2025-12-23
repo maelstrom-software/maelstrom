@@ -20,7 +20,7 @@ pub async fn decode_async<T: DeserializeOwned>(
     let len = stream.read_u64().await?;
     let mut buffer = vec![0; len as usize];
     stream.read_exact(&mut buffer).await?;
-    proto::deserialize(&buffer).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    proto::deserialize(&buffer).map_err(io::Error::other)
 }
 
 pub async fn encode_async<T: Serialize>(
@@ -44,7 +44,7 @@ pub fn decode<T: DeserializeOwned>(mut stream: impl io::Read) -> io::Result<T> {
     let len = stream.read_u64::<BigEndian>()?;
     let mut buffer = vec![0; len as usize];
     stream.read_exact(&mut buffer)?;
-    proto::deserialize(&buffer).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    proto::deserialize(&buffer).map_err(io::Error::other)
 }
 
 pub fn encode<T: Serialize>(mut stream: impl io::Write, t: &T) -> io::Result<()> {
@@ -64,7 +64,7 @@ impl<ReadT: io::Read> ManifestReader<ReadT> {
     pub fn new(mut r: ReadT) -> io::Result<Self> {
         let version: ManifestVersion = decode(&mut r)?;
         if version != ManifestVersion::default() {
-            return Err(io::Error::new(io::ErrorKind::Other, "bad manifest version"));
+            return Err(io::Error::other("bad manifest version"));
         }
 
         Ok(Self(r))
@@ -76,10 +76,7 @@ impl<ReadT: io::Read> ManifestReader<ReadT> {
             Ok(entry) => Ok(Some(entry)),
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
                 if counter.reader_bytes() > 0 {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "truncated manifest entry",
-                    ))
+                    Err(io::Error::other("truncated manifest entry"))
                 } else {
                     Ok(None)
                 }
@@ -103,7 +100,7 @@ impl<ReadT: AsyncRead + Unpin> AsyncManifestReader<ReadT> {
     pub async fn new(mut r: ReadT) -> io::Result<Self> {
         let version: ManifestVersion = decode_async(&mut r).await?;
         if version != ManifestVersion::default() {
-            return Err(io::Error::new(io::ErrorKind::Other, "bad manifest version"));
+            return Err(io::Error::other("bad manifest version"));
         }
 
         Ok(Self(r))
@@ -115,10 +112,7 @@ impl<ReadT: AsyncRead + Unpin> AsyncManifestReader<ReadT> {
             Ok(entry) => Ok(Some(entry)),
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
                 if counter.reader_bytes() > 0 {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "truncated manifest entry",
-                    ))
+                    Err(io::Error::other("truncated manifest entry"))
                 } else {
                     Ok(None)
                 }
@@ -186,7 +180,7 @@ fn to_utf8_path(path: impl AsRef<Path>) -> Utf8PathBuf {
 
 fn convert_metadata(meta: &async_fs::Metadata) -> ManifestEntryMetadata {
     ManifestEntryMetadata {
-        size: meta.is_file().then(|| meta.size()).unwrap_or(0),
+        size: if meta.is_file() { meta.size() } else { 0 },
         mode: Mode(meta.mode()),
         mtime: UnixTimestamp(meta.mtime()),
     }

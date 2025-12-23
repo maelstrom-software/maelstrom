@@ -122,12 +122,7 @@ impl<StreamT: io::Read> GenericTestArtifactStream<StreamT> {
     }
 
     fn receive_built_artifact(&mut self, artifact: CargoArtifact) -> Result<()> {
-        if artifact
-            .target
-            .kind
-            .iter()
-            .any(|kind| *kind == CargoTargetKind::ProcMacro)
-        {
+        if artifact.target.kind.contains(&CargoTargetKind::ProcMacro) {
             return Ok(());
         }
         let Some(pkg) = self.packages.get_mut(&artifact.package_id) else {

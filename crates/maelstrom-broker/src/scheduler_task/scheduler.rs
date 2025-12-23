@@ -875,7 +875,7 @@ mod tests {
             assert_eq!(actual, expected);
         }
 
-        fn expect(&mut self) -> Expect {
+        fn expect(&mut self) -> Expect<'_> {
             Expect { fixture: self }
         }
 
