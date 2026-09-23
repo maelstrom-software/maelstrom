@@ -248,7 +248,7 @@ mod tests {
 
         fn validate_heap_property(&self) {
             for idx in 1..self.heap.0.len() {
-                let parent_idx = (idx + 1) / 2 - 1;
+                let parent_idx = idx.div_ceil(2) - 1;
                 let parent_id = self.heap.0[parent_idx];
                 let id = self.heap.0[idx];
                 assert!(

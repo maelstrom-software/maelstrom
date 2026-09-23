@@ -2834,8 +2834,8 @@ mod tests {
                     actual,
                     expected_prefix,
                     r#"got output that started with "{}" while expecting "{}""#,
-                    &escaped_string(actual),
-                    &escaped_string(expected),
+                    escaped_string(actual),
+                    escaped_string(expected),
                 );
                 time::timeout(Duration::from_secs(60), socket.read_buf(&mut bytes))
                     .await
@@ -2846,8 +2846,8 @@ mod tests {
                     actual,
                     expected,
                     r#"got output "{}" while expecting "{}""#,
-                    &escaped_string(actual),
-                    &escaped_string(expected),
+                    escaped_string(actual),
+                    escaped_string(expected),
                 );
                 break;
             }

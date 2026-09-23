@@ -425,7 +425,7 @@ mod tests {
 
     impl From<&LazyRegex> for RegexMatcherParameter {
         fn from(r: &LazyRegex) -> Self {
-            Self((&**r).clone())
+            Self((**r).clone())
         }
     }
 

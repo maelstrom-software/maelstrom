@@ -103,7 +103,7 @@ impl TwirpClient {
             .header("User-Agent", "@actions/artifact-2.1.11")
             .header(
                 "Authorization",
-                &format!("Bearer {token}", token = &self.token),
+                &format!("Bearer {token}", token = self.token),
             )
             .json(body);
 

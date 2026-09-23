@@ -273,11 +273,15 @@ impl Client {
         // Start the local worker.
         let router_sender_clone_1 = router_sender.clone();
         let router_sender_clone_2 = router_sender.clone();
+        #[allow(clippy::result_large_err)]
+        let start_artifact_fetch = move |digest| {
+            router_sender_clone_1.send(router::Message::LocalWorkerStartArtifactFetch(digest))
+        };
+        #[allow(clippy::result_large_err)]
+        let send_message = move |msg| router_sender_clone_2.send(router::Message::LocalWorker(msg));
         let tasks = local_worker::start_task(
-            move |digest| {
-                router_sender_clone_1.send(router::Message::LocalWorkerStartArtifactFetch(digest))
-            },
-            move |msg| router_sender_clone_2.send(router::Message::LocalWorker(msg)),
+            start_artifact_fetch,
+            send_message,
             cache_dir.join(LOCAL_WORKER_DIR),
             cache_size,
             done,

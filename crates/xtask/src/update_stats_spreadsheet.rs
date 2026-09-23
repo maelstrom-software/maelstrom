@@ -206,7 +206,7 @@ async fn merge_sheet_entries<EntryT: DeserializeOwned + Serialize + HasDay>(
 
     let combined: BTreeMap<_, _> = existing
         .into_iter()
-        .chain(data.into_iter())
+        .chain(data)
         .map(|e| (*e.day(), e))
         .collect();
     let combined: Vec<_> = combined.values().collect();

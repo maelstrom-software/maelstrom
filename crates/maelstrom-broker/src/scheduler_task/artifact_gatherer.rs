@@ -646,6 +646,7 @@ mod tests {
         client_sender_dropped: HashSet<ClientId>,
         // Cache.
         get_artifact: HashMap<(JobId, Sha256Digest), GetArtifact>,
+        #[allow(clippy::type_complexity)]
         got_artifact:
             HashMap<(Sha256Digest, Option<String>), Result<Vec<JobId>, (Error, Vec<JobId>)>>,
         decrement_refcount: Vec<Sha256Digest>,
@@ -774,10 +775,12 @@ mod tests {
             let index = vec
                 .iter()
                 .position(|e| e.0 == sender.cid && e.1 == digest)
-                .expect(&format!(
-                    "sending unexpected transfer_artifact to client {cid}: {digest}",
-                    cid = sender.cid,
-                ));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "sending unexpected transfer_artifact to client {cid}: {digest}",
+                        cid = sender.cid
+                    )
+                });
             vec.remove(index);
         }
 
@@ -786,19 +789,22 @@ mod tests {
             let index = vec
                 .iter()
                 .position(|e| e.0 == sender.cid && e.1 == error)
-                .expect(&format!(
-                    "sending unexpected general_error to client {cid}: {error}",
-                    cid = sender.cid,
-                ));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "sending unexpected general_error to client {cid}: {error}",
+                        cid = sender.cid
+                    )
+                });
             let _ = vec.remove(index);
         }
 
         fn send_jobs_ready_to_scheduler(&mut self, jobs: NonEmpty<JobId>) {
             let jobs = HashSet::from_iter(jobs);
             let vec = &mut self.borrow_mut().send_jobs_ready_to_scheduler;
-            let index = vec.iter().position(|e| e == &jobs).expect(&format!(
-                "sending unexpected jobs_ready to scheduler: {jobs:?}"
-            ));
+            let index = vec
+                .iter()
+                .position(|e| e == &jobs)
+                .unwrap_or_else(|| panic!("sending unexpected jobs_ready to scheduler: {jobs:?}"));
             let _ = vec.remove(index);
         }
 
@@ -808,9 +814,9 @@ mod tests {
             let index = vec
                 .iter()
                 .position(|e| e.0 == jobs && e.1 == err)
-                .expect(&format!(
-                    "sending unexpected jobs_failed to scheduler: {jobs:?} {err}"
-                ));
+                .unwrap_or_else(|| {
+                    panic!("sending unexpected jobs_failed to scheduler: {jobs:?} {err}")
+                });
             let _ = vec.remove(index);
         }
     }
@@ -823,9 +829,7 @@ mod tests {
             self.borrow_mut()
                 .get_artifact
                 .remove(&(jid, digest))
-                .expect(&format!(
-                    "sending unexpected get_artifact to cache for {jid}"
-                ))
+                .unwrap_or_else(|| panic!("sending unexpected get_artifact to cache for {jid}"))
         }
 
         fn got_artifact(
@@ -836,16 +840,14 @@ mod tests {
             self.borrow_mut()
                 .got_artifact
                 .remove(&(digest.clone(), file))
-                .expect(&format!(
-                    "sending unexpected got_artifact to cache: {digest}"
-                ))
+                .unwrap_or_else(|| panic!("sending unexpected got_artifact to cache: {digest}"))
         }
 
         fn decrement_refcount(&mut self, digest: &Sha256Digest) {
             let vec = &mut self.borrow_mut().decrement_refcount;
-            let index = vec.iter().position(|e| e == digest).expect(&format!(
-                "sending unexpected decrement_refcount to cache: {digest}"
-            ));
+            let index = vec.iter().position(|e| e == digest).unwrap_or_else(|| {
+                panic!("sending unexpected decrement_refcount to cache: {digest}")
+            });
             vec.remove(index);
         }
 
@@ -1190,13 +1192,13 @@ mod tests {
         type Target = Fixture;
 
         fn deref(&self) -> &Self::Target {
-            &self.expect.fixture
+            self.expect.fixture
         }
     }
 
     impl<'a> DerefMut for When<'a> {
         fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.expect.fixture
+            self.expect.fixture
         }
     }
 

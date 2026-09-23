@@ -1356,7 +1356,7 @@ mod tests {
     #[tokio::test]
     async fn lazy_async_read_error() {
         let mut read = LazyRead::new(Box::pin(async move {
-            io::Result::<&[u8]>::Err(io::Error::new(io::ErrorKind::Other, "test error"))
+            io::Result::<&[u8]>::Err(io::Error::other("test error"))
         }));
         let mut buf = vec![0u8; 4];
         read.read_exact(&mut buf).await.unwrap_err();

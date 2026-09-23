@@ -3,9 +3,9 @@
 use anyhow::Result;
 use maelstrom_client::spec::{ContainerSpec, JobSpec};
 use serde::{
+    __private::de::{Content, ContentRefDeserializer},
     de::Deserializer,
     Deserialize,
-    __private::de::{Content, ContentRefDeserializer},
 };
 use std::{collections::HashMap, io::Read};
 

@@ -15,9 +15,9 @@ use maelstrom_base::{
 };
 use maelstrom_util::template::TemplateVariables;
 use serde::{
+    __private::de::{Content, ContentRefDeserializer},
     de::{Deserializer, Error as _},
     Deserialize, Serialize,
-    __private::de::{Content, ContentRefDeserializer},
 };
 use std::{
     collections::BTreeMap,

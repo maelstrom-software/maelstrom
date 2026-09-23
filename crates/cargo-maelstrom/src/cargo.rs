@@ -372,7 +372,7 @@ pub fn run_cargo_test(
 
     for p in &packages {
         args.push("--package".into());
-        args.push(format!("{}@{}", &p.name, &p.version).into());
+        args.push(format!("{}@{}", p.name, p.version).into());
     }
 
     let mut child = spawn_cargo(args)?;
@@ -677,7 +677,7 @@ mod tests {
     ) {
         for _ in 0..num_reads {
             stream.read_next_artifact().unwrap();
-            assert_eq!(stream.ready.len(), expected_ready, "{:?}", &stream.ready);
+            assert_eq!(stream.ready.len(), expected_ready, "{:?}", stream.ready);
             assert!(!stream.build_done);
         }
     }
@@ -784,7 +784,7 @@ mod tests {
         // we get them when the build finishes
         stream.read_next_artifact().unwrap();
         assert!(stream.build_done);
-        assert_eq!(stream.ready.len(), 2, "{:?}", &stream.ready);
+        assert_eq!(stream.ready.len(), 2, "{:?}", stream.ready);
     }
 
     #[test]

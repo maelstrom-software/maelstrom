@@ -23,7 +23,7 @@ pub fn list_packages(
     let filter = pattern::compile_filter(include, exclude)?;
     for package in workspace_packages {
         if filter_package(package, &filter) {
-            writeln!(out, "{}", &package.name)?;
+            writeln!(out, "{}", package.name)?;
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -54,7 +54,7 @@ pub fn list_binaries(
                     binary_name += " ";
                     binary_name += &target.name;
                 }
-                writeln!(out, "{}{} ({})", &package.name, binary_name, target_kind)?;
+                writeln!(out, "{}{} ({})", package.name, binary_name, target_kind)?;
             }
         }
     }

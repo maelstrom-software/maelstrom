@@ -109,7 +109,7 @@ impl Line {
     pub fn new(series: impl Into<PlotPoints>) -> Self {
         Self {
             series: series.into(),
-            stroke: Stroke::new(1.0, Color32::TRANSPARENT),
+            stroke: Stroke::new(1.0_f32, Color32::TRANSPARENT),
             name: Default::default(),
             highlight: false,
             fill: None,
@@ -276,7 +276,7 @@ impl StackedLine {
     pub fn new(series: impl Into<PlotPoints>) -> Self {
         Self {
             series: series.into(),
-            stroke: Stroke::new(1.0, Color32::TRANSPARENT),
+            stroke: Stroke::new(1.0_f32, Color32::TRANSPARENT),
             name: Default::default(),
             highlight: false,
             stacked_on: None,
@@ -453,7 +453,7 @@ impl Polygon {
     pub fn new(series: impl Into<PlotPoints>) -> Self {
         Self {
             series: series.into(),
-            stroke: Stroke::new(1.0, Color32::TRANSPARENT),
+            stroke: Stroke::new(1.0_f32, Color32::TRANSPARENT),
             name: Default::default(),
             highlight: false,
             fill_color: None,
@@ -651,7 +651,7 @@ impl PlotItem for Text {
             shapes.push(Shape::rect_stroke(
                 rect.expand(2.0),
                 1.0,
-                Stroke::new(0.5, color),
+                Stroke::new(0.5_f32, color),
                 StrokeKind::Middle,
             ));
         }

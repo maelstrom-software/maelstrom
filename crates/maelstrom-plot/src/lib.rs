@@ -998,13 +998,13 @@ impl Plot {
                         epaint::RectShape::stroke(
                             rect,
                             0.0,
-                            epaint::Stroke::new(4., Color32::DARK_BLUE),
+                            epaint::Stroke::new(4_f32, Color32::DARK_BLUE),
                             StrokeKind::Middle,
                         ), // Outer stroke
                         epaint::RectShape::stroke(
                             rect,
                             0.0,
-                            epaint::Stroke::new(2., Color32::WHITE),
+                            epaint::Stroke::new(2_f32, Color32::WHITE),
                             StrokeKind::Middle,
                         ), // Inner stroke
                     ));
@@ -1673,7 +1673,7 @@ impl PreparedPlot {
                 }
 
                 shapes.push((
-                    Shape::line_segment([p0, p1], Stroke::new(1.0, line_color)),
+                    Shape::line_segment([p0, p1], Stroke::new(1.0_f32, line_color)),
                     line_strength,
                 ));
             }

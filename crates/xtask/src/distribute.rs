@@ -358,9 +358,9 @@ impl fmt::Display for BinaryPatchReport {
         writeln!(
             f,
             "glibc versions removed: {:?}",
-            &self.glibc_versions_removed
+            self.glibc_versions_removed
         )?;
-        write!(f, "symbols made global: {:?}", &self.symbols_made_global)?;
+        write!(f, "symbols made global: {:?}", self.symbols_made_global)?;
         Ok(())
     }
 }

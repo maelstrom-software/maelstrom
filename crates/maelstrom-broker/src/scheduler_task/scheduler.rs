@@ -456,7 +456,7 @@ impl<DepsT: Deps> Scheduler<DepsT> {
 
     #[cfg(test)]
     fn get_job_state_counts_for_client(&self, cid: ClientId) -> JobStateCounts {
-        self.clients.get(&cid).unwrap().counts.clone()
+        self.clients.get(&cid).unwrap().counts
     }
 }
 
@@ -531,6 +531,7 @@ mod tests {
         // ArtifactGatherer
         client_connected: HashSet<ClientId>,
         client_disconnected: HashSet<ClientId>,
+        #[allow(clippy::type_complexity)]
         start_job: Vec<(JobId, NonEmpty<(Sha256Digest, ArtifactType)>, StartJob)>,
         complete_job: HashSet<JobId>,
         // Deps
@@ -645,9 +646,7 @@ mod tests {
             let index = start_job
                 .iter()
                 .position(|e| e.0 == jid && e.1 == layers)
-                .expect(&format!(
-                    "sending unexpected start_job to artifact gatherer for job {jid}: {layers:#?}"
-                ));
+                .unwrap_or_else(|| panic!("sending unexpected start_job to artifact gatherer for job {jid}: {layers:#?}"));
             start_job.remove(index).2
         }
 
@@ -674,9 +673,11 @@ mod tests {
             let index = send_job_response_to_client
                 .iter()
                 .position(|e| e.0 == sender.cid && e.1 == cjid && e.2 == result)
-                .expect(&format!(
-                    "sending unexpected job_response to client {sender:?}: {cjid} {result:?}"
-                ));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "sending unexpected job_response to client {sender:?}: {cjid} {result:?}"
+                    )
+                });
             let _ = send_job_response_to_client.remove(index);
         }
 
@@ -691,9 +692,7 @@ mod tests {
             let index = send_job_status_update_to_client
                 .iter()
                 .position(|e| e.0 == sender.cid && e.1 == cjid && e.2 == status)
-                .expect(&format!(
-                    "sending unexpected job_status_update to client {sender:?}: {cjid} {status:?}"
-                ));
+                .unwrap_or_else(|| panic!("sending unexpected job_status_update to client {sender:?}: {cjid} {status:?}"));
             send_job_status_update_to_client.remove(index);
         }
 
@@ -709,9 +708,9 @@ mod tests {
             let index = vec
                 .iter()
                 .position(move |e| e == &(wid, jid, spec_clone.clone()))
-                .expect(&format!(
-                    "sending unexpected enqueue_job to worker {wid}: {jid} {spec:?}"
-                ));
+                .unwrap_or_else(|| {
+                    panic!("sending unexpected enqueue_job to worker {wid}: {jid} {spec:?}")
+                });
             vec.remove(index);
         }
 
@@ -736,9 +735,9 @@ mod tests {
             let index = vec
                 .iter()
                 .position(move |e| e == &(mid, statistics_clone.clone()))
-                .expect(&format!(
-                    "sending unexpected message to monitor {sender:?}: {statistics:#?}"
-                ));
+                .unwrap_or_else(|| {
+                    panic!("sending unexpected message to monitor {sender:?}: {statistics:#?}")
+                });
             vec.remove(index);
         }
     }
@@ -1163,13 +1162,13 @@ mod tests {
         type Target = Fixture;
 
         fn deref(&self) -> &Self::Target {
-            &self.expect.fixture
+            self.expect.fixture
         }
     }
 
     impl<'a> DerefMut for When<'a> {
         fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.expect.fixture
+            self.expect.fixture
         }
     }
 

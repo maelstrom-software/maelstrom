@@ -211,7 +211,7 @@ pub struct DockerReference {
 
 impl fmt::Display for DockerReference {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", &self.host, &self.name)?;
+        write!(f, "{}{}", self.host, self.name)?;
         if let Some(tag) = &self.tag {
             write!(f, ":{tag}")?
         }
@@ -593,7 +593,7 @@ pub struct LocalPath {
 
 impl fmt::Display for LocalPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", &self.path)?;
+        write!(f, "{}", self.path)?;
         if let Some(ref_) = &self.reference {
             write!(f, ":{ref_}")?;
         }

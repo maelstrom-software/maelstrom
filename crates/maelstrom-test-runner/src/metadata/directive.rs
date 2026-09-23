@@ -365,6 +365,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
     fn augment_container_container_fields() {
         directive_parse_test(
             indoc! {r#"

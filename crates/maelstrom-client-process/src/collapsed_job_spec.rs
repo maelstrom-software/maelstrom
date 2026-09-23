@@ -240,7 +240,7 @@ impl CollapsedJobSpec {
                         break;
                     }
                     let parent = container_resolver(&container_ref.name).ok_or_else(|| {
-                        format!("couldn't find parent container {:?}", &container_ref.name)
+                        format!("couldn't find parent container {:?}", container_ref.name)
                     })?;
                     if !ancestors.insert(container_ref.name.clone()) {
                         return Err(ancestors.iter().chain(Some(&container_ref.name)).fold(

@@ -71,6 +71,7 @@ impl ClientProcess for ArcHandler {
     type StreamLogMessagesStream =
         Pin<Box<dyn Stream<Item = TonicResult<proto::LogMessage>> + Send>>;
 
+    #[allow(clippy::result_large_err)]
     async fn stream_log_messages(
         &self,
         _request: Request<proto::Void>,
@@ -110,6 +111,7 @@ impl ClientProcess for ArcHandler {
 
     type RunJobStream = Pin<Box<dyn Stream<Item = TonicResult<proto::JobStatus>> + Send>>;
 
+    #[allow(clippy::result_large_err)]
     async fn run_job(
         &self,
         request: Request<proto::RunJobRequest>,
