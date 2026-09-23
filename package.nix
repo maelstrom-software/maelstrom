@@ -10,7 +10,7 @@
   openssl,
   libiconv,
   python3,
-  python311Packages,
+  python3Packages,
   mypy,
   black,
   zola,
@@ -59,18 +59,18 @@ let
       mypy
       protobuf
       python3
-      python311Packages.grpcio-tools
-      python311Packages.pytest
-      python311Packages.tqdm
-      python311Packages.types-protobuf
-      python311Packages.xdg-base-dirs
+      python3Packages.grpcio-tools
+      python3Packages.pytest
+      python3Packages.tqdm
+      python3Packages.types-protobuf
+      python3Packages.xdg-base-dirs
       mdbook
       zola
       go
       git
     ];
 
-    buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];
+    buildInputs = [ openssl ] ++ optionals stdenv.hostPlatform.isDarwin [ libiconv ];
 
     # Don't run the unit tests inside Nix build.
     doCheck = false;

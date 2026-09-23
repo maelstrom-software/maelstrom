@@ -13,7 +13,7 @@
   rust-analyzer,
   stgit,
   maelstrom,
-  python311,
+  python3,
 }:
 
 craneLib.devShell {
@@ -34,7 +34,7 @@ craneLib.devShell {
     ripgrep
     rust-analyzer
     stgit
-    (python311.withPackages (ps: [ ps.grpcio-tools ]))
+    (python3.withPackages (ps: [ ps.grpcio-tools ]))
   ];
 
   env.CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "lld";
