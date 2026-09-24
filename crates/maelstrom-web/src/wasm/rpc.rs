@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use futures::{
-    channel::mpsc::{self, Receiver, Sender},
+    channel::mpsc::{self, Receiver, Sender, TryRecvError},
     SinkExt as _, StreamExt as _,
 };
 use gloo_net::websocket::{futures::WebSocket, Message};
@@ -59,11 +59,11 @@ impl MonitorConnection for RpcConnection {
     }
 
     fn try_recv(&self) -> Result<Option<BrokerToMonitor>> {
-        match self.recv.borrow_mut().try_next() {
-            Ok(Some(Message::Bytes(b))) => Ok(Some(proto::deserialize(&b)?)),
-            Ok(Some(Message::Text(_))) => Err(anyhow!("Unexpected Message::Text")),
-            Ok(None) => Err(anyhow!("websocket closed")),
-            Err(_) => Ok(None),
+        match self.recv.borrow_mut().try_recv() {
+            Ok(Message::Bytes(b)) => Ok(Some(proto::deserialize(&b)?)),
+            Ok(Message::Text(_)) => Err(anyhow!("Unexpected Message::Text")),
+            Err(TryRecvError::Closed) => Err(anyhow!("websocket closed")),
+            Err(TryRecvError::Empty) => Ok(None),
         }
     }
 }
