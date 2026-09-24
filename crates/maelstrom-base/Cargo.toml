@@ -10,7 +10,6 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-bincode.workspace = true
 camino.workspace = true
 derive_more.workspace = true
 enum-map.workspace = true
@@ -19,6 +18,7 @@ get-size.workspace = true
 hex.workspace = true
 indoc.workspace = true
 maelstrom-macro.workspace = true
+postcard.workspace = true
 serde.workspace = true
 serde_repr.workspace = true
 strum.workspace = true

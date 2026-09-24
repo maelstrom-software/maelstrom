@@ -28,7 +28,11 @@ use std::{
 };
 
 const CACHEDIR_TAG: &str = "CACHEDIR.TAG";
-const CACHEDIR_TAG_CONTENTS: [u8; 43] = *b"Signature: 8a477f597d28d172789f06886806bc55";
+// The contents of this file are also used for cache versioning: an existing cache is only reused
+// if its CACHEDIR.TAG matches these contents exactly. Change the version whenever the cache's
+// layout or the format of its entries changes.
+const CACHEDIR_TAG_CONTENTS: [u8; 55] =
+    *b"Signature: 8a477f597d28d172789f06886806bc55\nVersion: 2\n";
 const CACHEDIR_TAG_CONTENTS_LEN: usize = CACHEDIR_TAG_CONTENTS.len();
 const CACHEDIR_TAG_CONTENTS_LEN_U64: u64 = CACHEDIR_TAG_CONTENTS_LEN as u64;
 const LOCK_FILE: &str = "lock";

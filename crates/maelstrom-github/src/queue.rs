@@ -183,7 +183,8 @@ where
             if let Some(res) = self.maybe_read_msg().await? {
                 let mut r = &res[..];
                 while !r.is_empty() {
-                    let header: MessageHeader = bincode::deserialize_from(&mut r)?;
+                    let (header, rest): (MessageHeader, _) = postcard::take_from_bytes(r)?;
+                    r = rest;
                     match header {
                         MessageHeader::KeepAlive => {
                             read_start = Instant::now();
@@ -215,7 +216,7 @@ async fn send_keep_alive(duration: Duration, blob: Arc<impl QueueBlob>) {
     loop {
         tokio::time::sleep(duration).await;
         let _ = blob
-            .write(bincode::serialize(&MessageHeader::KeepAlive).unwrap())
+            .write(postcard::to_stdvec(&MessageHeader::KeepAlive).unwrap())
             .await;
     }
 }
@@ -242,7 +243,8 @@ impl<BlobT: QueueBlob> GitHubWriteQueue<BlobT> {
     }
 
     pub async fn write_msg(&mut self, data: &[u8]) -> Result<()> {
-        let mut to_send = bincode::serialize(&MessageHeader::Payload { size: data.len() }).unwrap();
+        let mut to_send =
+            postcard::to_stdvec(&MessageHeader::Payload { size: data.len() }).unwrap();
         to_send.extend(data);
         self.blob.write(to_send).await?;
 
@@ -258,7 +260,7 @@ impl<BlobT: QueueBlob> GitHubWriteQueue<BlobT> {
         let mut to_send = vec![];
         for data in messages {
             to_send
-                .extend(bincode::serialize(&MessageHeader::Payload { size: data.len() }).unwrap());
+                .extend(postcard::to_stdvec(&MessageHeader::Payload { size: data.len() }).unwrap());
             to_send.extend(data);
         }
         self.blob.write(to_send).await?;
@@ -274,7 +276,7 @@ impl<BlobT: QueueBlob> GitHubWriteQueue<BlobT> {
     pub async fn shut_down(&mut self) -> Result<()> {
         self.keep_alive.abort();
         self.blob
-            .write(bincode::serialize(&MessageHeader::Shutdown).unwrap())
+            .write(postcard::to_stdvec(&MessageHeader::Shutdown).unwrap())
             .await?;
         Ok(())
     }
@@ -545,7 +547,7 @@ mod tests {
             .await
             .unwrap();
 
-        b.write(bincode::serialize(&MessageHeader::Payload { size: 5 }).unwrap())
+        b.write(postcard::to_stdvec(&MessageHeader::Payload { size: 5 }).unwrap())
             .await
             .unwrap();
         let sent_msg = vec![1, 2, 3, 4, 5];
@@ -567,7 +569,7 @@ mod tests {
 
         let sent_msg = vec![1, 2, 3, 4, 5];
         for _ in 0..3 {
-            b.write(bincode::serialize(&MessageHeader::Payload { size: 5 }).unwrap())
+            b.write(postcard::to_stdvec(&MessageHeader::Payload { size: 5 }).unwrap())
                 .await
                 .unwrap();
             b.write(sent_msg.clone()).await.unwrap();
@@ -589,7 +591,7 @@ mod tests {
 
         let sent_msg = vec![1, 2, 3, 4, 5];
         for _ in 0..3 {
-            b.write(bincode::serialize(&MessageHeader::Payload { size: 5 }).unwrap())
+            b.write(postcard::to_stdvec(&MessageHeader::Payload { size: 5 }).unwrap())
                 .await
                 .unwrap();
             b.write(sent_msg.clone()).await.unwrap();
@@ -609,10 +611,10 @@ mod tests {
 
         let sent_msg = vec![1, 2, 3, 4, 5];
         for _ in 0..3 {
-            b.write(bincode::serialize(&MessageHeader::KeepAlive).unwrap())
+            b.write(postcard::to_stdvec(&MessageHeader::KeepAlive).unwrap())
                 .await
                 .unwrap();
-            b.write(bincode::serialize(&MessageHeader::Payload { size: 5 }).unwrap())
+            b.write(postcard::to_stdvec(&MessageHeader::Payload { size: 5 }).unwrap())
                 .await
                 .unwrap();
             b.write(sent_msg.clone()).await.unwrap();
@@ -633,11 +635,11 @@ mod tests {
             .unwrap();
 
         let sent_msg = vec![1, 2, 3, 4, 5];
-        b.write(bincode::serialize(&MessageHeader::Payload { size: 5 }).unwrap())
+        b.write(postcard::to_stdvec(&MessageHeader::Payload { size: 5 }).unwrap())
             .await
             .unwrap();
         b.write(sent_msg.clone()).await.unwrap();
-        b.write(bincode::serialize(&MessageHeader::Shutdown).unwrap())
+        b.write(postcard::to_stdvec(&MessageHeader::Shutdown).unwrap())
             .await
             .unwrap();
 
@@ -664,7 +666,7 @@ mod tests {
         let sent = [1, 2, 3, 4, 5];
         queue.write_msg(&sent[..]).await.unwrap();
 
-        let mut expected = bincode::serialize(&MessageHeader::Payload { size: 5 }).unwrap();
+        let mut expected = postcard::to_stdvec(&MessageHeader::Payload { size: 5 }).unwrap();
         expected.extend(sent);
 
         let b = conn.get_blob(b_ids(), "foo").await.unwrap();
@@ -680,7 +682,7 @@ mod tests {
 
         let mut expected = vec![];
         for _ in 0..3 {
-            expected.extend(bincode::serialize(&MessageHeader::Payload { size: 5 }).unwrap());
+            expected.extend(postcard::to_stdvec(&MessageHeader::Payload { size: 5 }).unwrap());
             expected.extend(sent.clone());
         }
 
@@ -694,7 +696,7 @@ mod tests {
         let mut queue = GitHubWriteQueue::new(&conn, FOREVER, "foo").await.unwrap();
         queue.shut_down().await.unwrap();
 
-        let expected = bincode::serialize(&MessageHeader::Shutdown).unwrap();
+        let expected = postcard::to_stdvec(&MessageHeader::Shutdown).unwrap();
 
         let b = conn.get_blob(b_ids(), "foo").await.unwrap();
         assert_eq!(b.data(), expected);
@@ -715,7 +717,8 @@ mod tests {
 
         let mut keep_alive_count = 0;
         while !cursor.is_empty() {
-            let header: MessageHeader = bincode::deserialize_from(&mut cursor).unwrap();
+            let (header, rest): (MessageHeader, _) = postcard::take_from_bytes(cursor).unwrap();
+            cursor = rest;
             assert_eq!(header, MessageHeader::KeepAlive);
             keep_alive_count += 1;
         }

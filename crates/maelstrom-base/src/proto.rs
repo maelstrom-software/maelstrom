@@ -4,7 +4,7 @@ use crate::{
     stats::BrokerStatistics, ArtifactUploadLocation, ClientJobId, JobBrokerStatus, JobId,
     JobOutcomeResult, JobSpec, JobWorkerStatus, Sha256Digest,
 };
-use bincode::Options;
+use postcard::ser_flavors::Size;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 
@@ -102,25 +102,21 @@ pub struct BrokerToArtifactPusher(pub Result<(), String>);
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ArtifactPusherToBroker(pub Sha256Digest, pub u64);
 
-fn bincode() -> impl Options {
-    bincode::options().with_big_endian()
-}
-
-pub fn serialize<T: ?Sized + Serialize>(value: &T) -> bincode::Result<Vec<u8>> {
-    bincode().serialize(value)
+pub fn serialize<T: ?Sized + Serialize>(value: &T) -> postcard::Result<Vec<u8>> {
+    postcard::to_stdvec(value)
 }
 
 pub fn serialize_into<W: Write, T: ?Sized + Serialize>(
     writer: W,
     value: &T,
-) -> bincode::Result<()> {
-    bincode().serialize_into(writer, value)
+) -> postcard::Result<()> {
+    postcard::to_io(value, writer).map(drop)
 }
 
-pub fn serialized_size<T: ?Sized + Serialize>(value: &T) -> bincode::Result<u64> {
-    bincode().serialized_size(value)
+pub fn serialized_size<T: ?Sized + Serialize>(value: &T) -> postcard::Result<u64> {
+    postcard::serialize_with_flavor(value, Size::default()).map(|size: usize| size as u64)
 }
 
-pub fn deserialize<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> bincode::Result<T> {
-    bincode().deserialize(bytes)
+pub fn deserialize<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> postcard::Result<T> {
+    postcard::from_bytes(bytes)
 }
