@@ -1,6 +1,6 @@
 pub mod common;
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use clap::{Arg, ArgAction, ArgMatches, Args, Command, FromArgMatches, Subcommand};
 use heck::{ToKebabCase as _, ToShoutySnakeCase as _};
 use serde::Deserialize;
@@ -27,10 +27,11 @@ pub struct BaseDirectories {
 
 impl BaseDirectories {
     pub fn new(prefix: &str) -> Result<Self> {
-        let xdg =
-            xdg::BaseDirectories::with_prefix(prefix).context("searching for config files")?;
-        let cache_home = xdg.get_cache_home();
-        let config_home = xdg.get_config_home();
+        let xdg = xdg::BaseDirectories::with_prefix(prefix);
+        let (Some(cache_home), Some(config_home)) = (xdg.get_cache_home(), xdg.get_config_home())
+        else {
+            bail!("searching for config files: couldn't determine the home directory");
+        };
         Ok(Self {
             xdg,
             cache_home,

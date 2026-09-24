@@ -183,5 +183,5 @@ wasm-bindgen-cli-support = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-logger = "0.2"
 web-sys = { version = "0.3", features = [ "Document", "Location", "WebSocket", "Window" ] }
-xdg = "2"
+xdg = "3"
 zerocopy = { version = "0.8", features = ["derive"] }
