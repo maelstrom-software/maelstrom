@@ -26,8 +26,8 @@ fn main() {
         std::env::set_var("PROTOC", protoc_path);
     }
 
-    tonic_build::configure()
-        .btree_map(["EnvironmentSpec.vars"])
+    tonic_prost_build::configure()
+        .btree_map("EnvironmentSpec.vars")
         .type_attribute(".", "#[derive(maelstrom_macro::ProtoBufExt)]")
         .compile_protos(&["src/items.proto"], &["src/"])
         .unwrap();

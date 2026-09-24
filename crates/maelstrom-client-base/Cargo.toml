@@ -25,6 +25,7 @@ serde.workspace = true
 serde_content_ref.workspace = true
 slog.workspace = true
 tonic.workspace = true
+tonic-prost.workspace = true
 tuple.workspace = true
 url.workspace = true
 
@@ -37,5 +38,5 @@ toml.workspace = true
 
 [build-dependencies]
 protoc-bin-vendored.workspace = true
-tonic-build.workspace = true
+tonic-prost-build.workspace = true
 versions.workspace = true
