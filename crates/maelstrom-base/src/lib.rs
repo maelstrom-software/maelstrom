@@ -983,12 +983,14 @@ mod tests {
 
     #[track_caller]
     fn deserialize_value<T: for<'a> Deserialize<'a>>(file: &str) -> T {
-        T::deserialize(toml::de::ValueDeserializer::new(file)).unwrap()
+        toml::de::ValueDeserializer::parse(file)
+            .and_then(T::deserialize)
+            .unwrap()
     }
 
     #[track_caller]
     fn deserialize_value_error<T: for<'a> Deserialize<'a> + Debug>(file: &str) -> toml::de::Error {
-        match T::deserialize(toml::de::ValueDeserializer::new(file)) {
+        match toml::de::ValueDeserializer::parse(file).and_then(T::deserialize) {
             Err(err) => err,
             Ok(val) => panic!("expected a toml error but instead got value: {val:?}"),
         }

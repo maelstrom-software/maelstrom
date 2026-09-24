@@ -390,7 +390,9 @@ fn ui_kind_parsing_and_fmt() {
         assert_eq!(&toml_str, &format!("\"{s}\""));
 
         // TOML value deserialization matches original value
-        let toml_v = UiKind::deserialize(toml::de::ValueDeserializer::new(&toml_str)).unwrap();
+        let toml_v = toml::de::ValueDeserializer::parse(&toml_str)
+            .and_then(UiKind::deserialize)
+            .unwrap();
         assert_eq!(toml_v, k);
     }
 }

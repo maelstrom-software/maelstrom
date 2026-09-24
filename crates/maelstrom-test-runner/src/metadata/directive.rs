@@ -352,7 +352,7 @@ mod tests {
                 filter = "all"
                 filter = "any"
             "#},
-            "duplicate key `filter`",
+            "duplicate key",
         );
     }
 
