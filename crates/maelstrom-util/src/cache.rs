@@ -328,10 +328,11 @@ impl<FsT: Fs, KeyT: Key, GetStrategyT: GetStrategy> Cache<FsT, KeyT, GetStrategy
             bail!("lock file {lock_file_path:?} is held by a different process");
         };
 
-        // Next, see if the `CACHEDIR.TAG` file exists and is correctly formed. We use this to
-        // decide if this is a "new style" cache directory that can be re-used across invocations.
-        // In the future, if we change the layout of the cache directory, we may need a proper
-        // version file, but for now, we can just use `CACHEDIR.TAG`.
+        // Next, see if the `CACHEDIR.TAG` file exists and has exactly the contents we expect. We
+        // use this to decide if this cache directory can be re-used across invocations. The file
+        // doubles as our cache version file: when the layout of the cache directory or the format
+        // of its entries changes, we change `CACHEDIR_TAG_CONTENTS`, and any existing cache with
+        // different contents gets cleared.
         let preserve_directory_contents = match fs.metadata(&cachedir_tag)? {
             Some(Metadata {
                 type_: FileType::File,
@@ -2198,6 +2199,42 @@ mod tests {
             "/z/removing/0000000000000001",
             "/z/removing/0000000000000002",
         ]);
+    }
+
+    #[test]
+    fn new_with_cachedir_tag_with_different_contents_clears_contents() {
+        let fixture = Fixture::new(
+            1000,
+            fs! {
+                z {
+                    "CACHEDIR.TAG"(b"Signature: 8a477f597d28d172789f06886806bc55\nVersion: 0\n"),
+                    sha256 {
+                        apple {
+                            old_apple(b"old apple contents"),
+                        },
+                    },
+                },
+            },
+        );
+        fixture.assert_fs(fs! {
+            z {
+                "CACHEDIR.TAG"(&CACHEDIR_TAG_CONTENTS),
+                "lock"(b""),
+                removing {
+                    "0000000000000001" {
+                        apple {
+                            old_apple(b"old apple contents"),
+                        },
+                    },
+                },
+                sha256 {
+                    apple {},
+                    orange {},
+                },
+                tmp {},
+            },
+        });
+        fixture.assert_pending_recursive_rmdirs(["/z/removing/0000000000000001"]);
     }
 
     #[test]
