@@ -1,7 +1,7 @@
 use crate::wasm::rpc::MonitorConnection;
 use anyhow::Result;
 use eframe::{App, CreationContext, Frame};
-use egui::{Align2, CentralPanel, CollapsingHeader, Color32, Context, ScrollArea, Ui};
+use egui::{Align2, CentralPanel, CollapsingHeader, Color32, ScrollArea, Ui};
 use egui_gauge::Gauge;
 use egui_toast::{Toast, ToastKind, Toasts};
 use maelstrom_base::{
@@ -246,8 +246,8 @@ impl<RpcConnectionT: MonitorConnection> UiHandler<RpcConnectionT> {
 }
 
 impl<RpcConnectionT: MonitorConnection> App for UiHandler<RpcConnectionT> {
-    fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
-        CentralPanel::default().show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
+        CentralPanel::default().show(ui, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
                 ui.heading("Maelstrom UI");
                 let mut toasts = Toasts::new()
@@ -261,9 +261,9 @@ impl<RpcConnectionT: MonitorConnection> App for UiHandler<RpcConnectionT> {
                     );
                     self.rpc = None;
                 }
-                toasts.show(ctx);
+                toasts.show(ui);
 
-                ctx.request_repaint_after(REFRESH_INTERVAL / 2);
+                ui.ctx().request_repaint_after(REFRESH_INTERVAL / 2);
             });
         });
     }

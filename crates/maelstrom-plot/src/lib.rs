@@ -10,9 +10,9 @@ pub use items::{
 pub use legend::{Corner, Legend};
 pub use transform::{PlotBounds, PlotTransform};
 
+use ahash::HashMap;
 use axis::AxisWidget;
 use egui::{
-    ahash::{self, HashMap},
     emath::{Float as _, GuiRounding as _},
     epaint::{self, Hsva},
     lerp, remap_clamp, vec2, Align2, Color32, Context, CornerRadius, CursorIcon, Id, Layout,
@@ -217,7 +217,7 @@ pub struct Plot {
 
 impl Plot {
     /// Give a unique id for each plot within the same [`Ui`].
-    pub fn new(id_source: impl std::hash::Hash) -> Self {
+    pub fn new(id_source: impl egui::AsId) -> Self {
         Self {
             id_source: Id::new(id_source),
 
@@ -1053,7 +1053,7 @@ impl Plot {
                 }
             }
             if allow_scroll {
-                let scroll_delta = ui.input(|i| i.raw_scroll_delta);
+                let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
                 if scroll_delta != Vec2::ZERO {
                     transform.translate_bounds(-scroll_delta);
                     bounds_modified = true.into();

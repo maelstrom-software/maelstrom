@@ -1016,7 +1016,7 @@ pub(super) fn rulers_at_value(
     };
 
     let font_id = TextStyle::Body.resolve(plot.ui.style());
-    plot.ui.fonts(|f| {
+    plot.ui.fonts_mut(|f| {
         shapes.push(Shape::text(
             f,
             pointer + vec2(3.0, -2.0),

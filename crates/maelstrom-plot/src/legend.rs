@@ -1,7 +1,7 @@
 use super::items::PlotItem;
 use egui::{
-    ahash, epaint, pos2, vec2, Align, Color32, Direction, Frame, Layout, PointerButton, Rect,
-    Response, Sense, TextStyle, Ui, UiBuilder, Widget, WidgetInfo, WidgetType,
+    epaint, pos2, vec2, Align, Color32, Direction, Frame, Layout, PointerButton, Rect, Response,
+    Sense, TextStyle, Ui, UiBuilder, Widget, WidgetInfo, WidgetType,
 };
 use std::{collections::BTreeMap, string::String};
 
@@ -90,7 +90,7 @@ impl LegendEntry {
 
         let font_id = text_style.resolve(ui.style());
 
-        let galley = ui.fonts(|f| f.layout_delayed_color(text, font_id, f32::INFINITY));
+        let galley = ui.fonts_mut(|f| f.layout_delayed_color(text, font_id, f32::INFINITY));
 
         let icon_size = galley.size().y;
         let icon_spacing = icon_size / 5.0;

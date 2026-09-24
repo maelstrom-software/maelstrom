@@ -30,6 +30,7 @@ rust-version = "1.98.1"
 version = "0.15.0-dev"
 
 [workspace.dependencies]
+ahash = { version = "0.8", default-features = false, features = ["no-rng", "std"] }
 anstyle = "1"
 anyhow = "1"
 anyhow_trace = "0.1"
@@ -64,12 +65,12 @@ crossterm = { version = "0.29", default-features = false }
 darling = "0.24"
 derivative = "2"
 derive_more = { version = "2", features = ["add", "add_assign", "constructor", "debug", "deref", "deref_mut", "display", "error", "from", "into", "into_iterator"] }
-eframe = "0.31"
-egui = "0.31"
-egui-toast = "0.17"
-# egui_gauge 0.1.6 requires egui 0.33, so it isn't compatible with 0.1.5 despite the version
-# number. Pin it until we upgrade egui.
-egui_gauge = "=0.1.5"
+eframe = "0.36"
+egui = "0.36"
+egui-toast = "0.22"
+# Each egui_gauge 0.1.x release targets a different egui version (0.1.5 is egui 0.31, 0.1.6 is
+# 0.33, 0.1.7 is 0.36), so pin the one that matches our egui.
+egui_gauge = "=0.1.7"
 elf = "0.8"
 enum-map = { version = "3", features = ["serde"] }
 enumset = { version = "1", features = ["serde"] }
