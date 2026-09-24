@@ -1001,7 +1001,6 @@ dependencies = [
  "slog",
  "strum 0.28.0",
  "tempfile",
- "xdg",
 ]
 
 [[package]]
@@ -3750,7 +3749,6 @@ dependencies = [
  "slog",
  "tokio",
  "url 2.5.8",
- "xdg",
 ]
 
 [[package]]
@@ -3812,7 +3810,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "url 2.5.8",
- "xdg",
 ]
 
 [[package]]
@@ -3848,7 +3845,6 @@ dependencies = [
  "tonic",
  "tower",
  "url 2.5.8",
- "xdg",
 ]
 
 [[package]]
@@ -4034,7 +4030,6 @@ dependencies = [
  "slog",
  "strum 0.28.0",
  "tempfile",
- "xdg",
 ]
 
 [[package]]
@@ -4122,7 +4117,6 @@ dependencies = [
  "slog",
  "strum 0.28.0",
  "tempfile",
- "xdg",
 ]
 
 [[package]]
@@ -4150,7 +4144,6 @@ dependencies = [
  "serde_json",
  "serde_with",
  "slog",
- "xdg",
 ]
 
 [[package]]
@@ -4215,7 +4208,6 @@ dependencies = [
  "unicode-truncate 2.0.1",
  "unicode-width 0.2.0",
  "vt100",
- "xdg",
 ]
 
 [[package]]
@@ -4334,7 +4326,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "url 2.5.8",
- "xdg",
 ]
 
 [[package]]

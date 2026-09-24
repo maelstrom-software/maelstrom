@@ -42,7 +42,6 @@ tar.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 url.workspace = true
-xdg.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

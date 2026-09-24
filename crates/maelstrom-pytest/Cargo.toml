@@ -32,7 +32,6 @@ serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
 strum.workspace = true
-xdg.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

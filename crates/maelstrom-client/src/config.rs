@@ -2,11 +2,13 @@ use crate::AcceptInvalidRemoteContainerTlsCerts;
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_macro::Config;
 use maelstrom_util::{
-    config::common::{BrokerAddr, CacheSize, ClusterCommunicationStrategy, InlineLimit, Slots},
+    config::{
+        common::{BrokerAddr, CacheSize, ClusterCommunicationStrategy, InlineLimit, Slots},
+        BaseDirectories,
+    },
     root::RootBuf,
 };
 use url::Url;
-use xdg::BaseDirectories;
 
 #[derive(Config, Debug)]
 pub struct Config {
@@ -68,7 +70,7 @@ pub struct Config {
     #[config(
         value_name = "PATH",
         default = r#"|bd: &BaseDirectories| {
-            bd.get_cache_home()
+            bd.cache_home()
                 .parent()
                 .unwrap()
                 .join("container/")

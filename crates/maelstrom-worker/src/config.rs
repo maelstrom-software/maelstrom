@@ -1,12 +1,14 @@
 use maelstrom_macro::Config;
 use maelstrom_util::{
-    config::common::{
-        BrokerAddr, CacheSize, ClusterCommunicationStrategy, InlineLimit, LogLevel, Slots,
+    config::{
+        common::{
+            BrokerAddr, CacheSize, ClusterCommunicationStrategy, InlineLimit, LogLevel, Slots,
+        },
+        BaseDirectories,
     },
     root::RootBuf,
 };
 use url::Url;
-use xdg::BaseDirectories;
 
 pub struct CacheDir;
 
@@ -29,7 +31,8 @@ pub struct Config {
     #[config(
         value_name = "PATH",
         default = r#"|bd: &BaseDirectories| {
-            bd.get_cache_home()
+            bd.cache_home()
+                .to_owned()
                 .into_os_string()
                 .into_string()
                 .unwrap()

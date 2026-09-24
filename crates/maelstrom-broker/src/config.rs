@@ -2,13 +2,15 @@ use derive_more::{Debug, From};
 use maelstrom_macro::Config;
 use maelstrom_util::{
     cache::CacheDir,
-    config::common::{CacheSize, ClusterCommunicationStrategy, LogLevel},
+    config::{
+        common::{CacheSize, ClusterCommunicationStrategy, LogLevel},
+        BaseDirectories,
+    },
     root::RootBuf,
 };
 use serde::Deserialize;
 use std::{result, str::FromStr};
 use url::Url;
-use xdg::BaseDirectories;
 
 #[derive(Deserialize, Debug, From)]
 #[serde(from = "u16")]
@@ -72,7 +74,8 @@ pub struct Config {
     #[config(
         value_name = "PATH",
         default = r#"|bd: &BaseDirectories| {
-            bd.get_cache_home()
+            bd.cache_home()
+                .to_owned()
                 .into_os_string()
                 .into_string()
                 .unwrap()

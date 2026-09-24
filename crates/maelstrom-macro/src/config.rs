@@ -335,7 +335,7 @@ impl ConfigInput {
         Ok(parse_quote! {
             fn add_command_line_options(
                 builder: ::maelstrom_util::config::CommandBuilder,
-                base_directories: &::xdg::BaseDirectories
+                base_directories: &::maelstrom_util::config::BaseDirectories
             ) -> ::maelstrom_util::config::CommandBuilder {
                 #(#builder_value_calls;)*
                 builder
@@ -364,7 +364,7 @@ impl ConfigInput {
         Ok(parse_quote! {
             fn from_config_bag(
                 config_bag: &mut ::maelstrom_util::config::ConfigBag,
-                base_directories: &::xdg::BaseDirectories
+                base_directories: &::maelstrom_util::config::BaseDirectories
             ) -> ::anyhow::Result<Self> {
                 Ok(Self {
                     #(#field_names: #field_exprs,)*

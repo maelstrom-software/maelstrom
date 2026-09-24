@@ -46,7 +46,6 @@ toml.workspace = true
 unicode-truncate.workspace = true
 unicode-width.workspace = true
 vt100.workspace = true
-xdg.workspace = true
 
 [dev-dependencies]
 colored-diff.workspace = true

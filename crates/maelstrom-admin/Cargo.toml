@@ -20,4 +20,3 @@ maelstrom-util.workspace = true
 slog.workspace = true
 tokio.workspace = true
 url.workspace = true
-xdg.workspace = true

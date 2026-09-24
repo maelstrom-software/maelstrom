@@ -5,11 +5,55 @@ use clap::{Arg, ArgAction, ArgMatches, Args, Command, FromArgMatches, Subcommand
 use heck::{ToKebabCase as _, ToShoutySnakeCase as _};
 use serde::Deserialize;
 use std::{
-    collections::HashMap, env, ffi::OsString, fmt::Debug, fs, iter, path::PathBuf, process, result,
+    collections::HashMap,
+    env,
+    ffi::OsString,
+    fmt::Debug,
+    fs, iter,
+    path::{Path, PathBuf},
+    process, result,
     str::FromStr,
 };
 use toml::Table;
-use xdg::BaseDirectories;
+use xdg::FileFindIterator;
+
+/// The XDG base directories for a program. The directories are resolved when this is constructed,
+/// which fails if they can't be determined, so they are always available afterward.
+pub struct BaseDirectories {
+    xdg: xdg::BaseDirectories,
+    cache_home: PathBuf,
+    config_home: PathBuf,
+}
+
+impl BaseDirectories {
+    pub fn new(prefix: &str) -> Result<Self> {
+        let xdg =
+            xdg::BaseDirectories::with_prefix(prefix).context("searching for config files")?;
+        let cache_home = xdg.get_cache_home();
+        let config_home = xdg.get_config_home();
+        Ok(Self {
+            xdg,
+            cache_home,
+            config_home,
+        })
+    }
+
+    pub fn cache_home(&self) -> &Path {
+        &self.cache_home
+    }
+
+    pub fn config_home(&self) -> &Path {
+        &self.config_home
+    }
+
+    pub fn config_dirs(&self) -> Vec<PathBuf> {
+        self.xdg.get_config_dirs()
+    }
+
+    pub fn find_config_files(&self, path: impl AsRef<Path>) -> FileFindIterator {
+        self.xdg.find_config_files(path)
+    }
+}
 
 pub struct ConfigBag {
     args: ArgMatches,
@@ -303,8 +347,8 @@ impl CommandBuilder {
         base_directories: &BaseDirectories,
         env_var_prefixes: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        let config_files = iter::once(base_directories.get_config_home())
-            .chain(base_directories.get_config_dirs())
+        let config_files = iter::once(base_directories.config_home().to_owned())
+            .chain(base_directories.config_dirs())
             .map(|pb| pb.join("config.toml").to_string_lossy().to_string())
             .collect::<Vec<_>>()
             .join(", ");
@@ -551,8 +595,7 @@ where
     U: FromArgMatches,
 {
     let env_var_prefixes = Vec::from_iter(env_var_prefixes.into_iter().map(Into::into));
-    let base_directories = BaseDirectories::with_prefix(base_directories_prefix)
-        .context("searching for config files")?;
+    let base_directories = BaseDirectories::new(base_directories_prefix)?;
     let builder = CommandBuilder::new(command, &base_directories, &env_var_prefixes);
     let builder = T::add_command_line_options(builder, &base_directories);
     let command = augment(builder.build());

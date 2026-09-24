@@ -30,7 +30,6 @@ serde_with.workspace = true
 serde.workspace = true
 serde_content_ref.workspace = true
 slog.workspace = true
-xdg.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

@@ -15,7 +15,7 @@ use maelstrom_run::{
     job_spec_or_containers::JobSpecOrContainers,
 };
 use maelstrom_util::{
-    config::common::LogLevel,
+    config::{common::LogLevel, BaseDirectories},
     fs::Fs,
     log,
     process::{ExitCode, ExitCodeAccumulator},
@@ -38,7 +38,6 @@ use std::{
     thread,
     time::Duration,
 };
-use xdg::BaseDirectories;
 
 #[derive(Config, Debug)]
 pub struct Config {
@@ -50,7 +49,8 @@ pub struct Config {
     #[config(
         value_name = "PATH",
         default = r#"|bd: &BaseDirectories| {
-            bd.get_cache_home()
+            bd.cache_home()
+                .to_owned()
                 .into_os_string()
                 .into_string()
                 .unwrap()
