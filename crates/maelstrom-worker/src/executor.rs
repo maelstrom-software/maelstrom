@@ -27,7 +27,10 @@ use maelstrom_util::{
 };
 use maelstrom_worker_child::{FdSlot, Syscall};
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
-use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
+use netlink_packet_route::{
+    link::{LinkFlags, LinkMessage},
+    RouteNetlinkMessage,
+};
 use std::{
     cell::UnsafeCell,
     ffi::{CStr, CString},
@@ -158,12 +161,13 @@ impl<'clock, ClockT> Executor<'clock, ClockT> {
         let netlink_socket_addr = SockaddrNetlink::default();
         let mut netlink_message = LinkMessage::default();
         netlink_message.header.index = 1;
-        netlink_message.header.flags |= IFF_UP;
-        netlink_message.header.change_mask |= IFF_UP;
-        let mut netlink_message = NetlinkMessage::from(RtnlMessage::SetLink(netlink_message));
+        netlink_message.header.flags |= LinkFlags::Up;
+        netlink_message.header.change_mask |= LinkFlags::Up;
+        let mut netlink_message =
+            NetlinkMessage::from(RouteNetlinkMessage::SetLink(netlink_message));
         netlink_message.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
-        netlink_message.header.length = netlink_message.buffer_len() as u32;
-        netlink_message.header.message_type = RTM_SETLINK;
+        // Sets the header's length and message type (RTM_SETLINK) from the payload.
+        netlink_message.finalize();
         let mut buffer = vec![0; netlink_message.buffer_len()].into_boxed_slice();
         netlink_message.serialize(&mut buffer[..]);
 
