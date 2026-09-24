@@ -1,17 +1,19 @@
-use crate::ty::{
-    decode_with_rich_error, encode_with_rich_error, AttributesId, FileAttributes, FileData, FileId,
-    FileTableEntry, FileType, LayerFsVersion, LayerId,
+use crate::{
+    ty::{
+        decode_with_rich_error, encode_with_rich_error, AttributesId, FileAttributes, FileData,
+        FileId, FileTableEntry, FileType, LayerFsVersion, LayerId,
+    },
+    LayerFs,
 };
-use crate::LayerFs;
 use anyhow::Result;
 use anyhow_trace::anyhow_trace;
 use maelstrom_base::Sha256Digest;
-use maelstrom_util::async_fs::{File, Fs};
-use maelstrom_util::io::BufferedStream;
+use maelstrom_util::{
+    async_fs::{File, Fs},
+    io::BufferedStream,
+};
 use serde::{Deserialize, Serialize};
-use std::io::SeekFrom;
-use std::num::NonZeroU32;
-use std::path::Path;
+use std::{io::SeekFrom, num::NonZeroU32, path::Path};
 use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _};
 
 /// Reads LayerFS file metadata from file_table.bin and attributes_table.bin

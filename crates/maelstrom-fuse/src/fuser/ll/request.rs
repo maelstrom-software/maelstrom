@@ -3,10 +3,12 @@
 //! A request represents information about a filesystem operation the kernel driver wants us to
 //! perform.
 
-use super::fuse_abi::{fuse_in_header, fuse_opcode, InvalidOpcodeError};
-use super::{fuse_abi as abi, Errno, Response};
-use std::{convert::TryFrom, fmt::Display, path::Path};
-use std::{error, fmt, mem};
+use super::{
+    fuse_abi as abi,
+    fuse_abi::{fuse_in_header, fuse_opcode, InvalidOpcodeError},
+    Errno, Response,
+};
+use std::{convert::TryFrom, error, fmt, fmt::Display, mem, path::Path};
 
 use super::argument::ArgumentIterator;
 
@@ -261,10 +263,8 @@ mod op {
 
     use super::{
         super::{argument::ArgumentIterator, TimeOrNow},
-        FilenameInDir, Request,
-    };
-    use super::{
-        abi::consts::*, abi::*, FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId,
+        abi::{consts::*, *},
+        FileHandle, FilenameInDir, INodeNo, Lock, LockOwner, Operation, Request, RequestId,
     };
     use std::{
         ffi::OsStr,
@@ -1867,8 +1867,7 @@ impl<'a> TryFrom<&'a [u8]> for AnyRequest<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test::AlignedData;
-    use super::*;
+    use super::{super::test::AlignedData, *};
     use std::ffi::OsStr;
 
     #[cfg(target_endian = "big")]

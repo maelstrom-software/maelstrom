@@ -1,5 +1,4 @@
-use crate::client::Client;
-use crate::log::RpcLogSink;
+use crate::{client::Client, log::RpcLogSink};
 use anyhow::{bail, Result};
 use futures::{Stream, StreamExt as _};
 use maelstrom_client_base::{
@@ -8,8 +7,8 @@ use maelstrom_client_base::{
 };
 use maelstrom_util::{config::common::LogLevel, sync::EventSender};
 use slog::Drain as _;
-use std::pin::Pin;
 use std::{
+    pin::Pin,
     result,
     sync::{Arc, Mutex},
 };

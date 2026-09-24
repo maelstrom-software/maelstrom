@@ -1,19 +1,21 @@
-use crate::avl::{AvlNode, AvlPtr, AvlStorage, AvlTree, FlatAvlPtrOption};
-use crate::ty::{
-    decode_with_rich_error, encode_with_rich_error, DirectoryEntryData, DirectoryOffset, FileId,
-    FileType, LayerFsVersion,
+use crate::{
+    avl::{AvlNode, AvlPtr, AvlStorage, AvlTree, FlatAvlPtrOption},
+    ty::{
+        decode_with_rich_error, encode_with_rich_error, DirectoryEntryData, DirectoryOffset,
+        FileId, FileType, LayerFsVersion,
+    },
+    LayerFs,
 };
-use crate::LayerFs;
 use anyhow::{anyhow, bail, Result};
 use anyhow_trace::anyhow_trace;
-use maelstrom_util::async_fs::{File, Fs};
-use maelstrom_util::ext::BoolExt as _;
-use maelstrom_util::io::BufferedStream;
+use maelstrom_util::{
+    async_fs::{File, Fs},
+    ext::BoolExt as _,
+    io::BufferedStream,
+};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
-use std::borrow::BorrowMut;
-use std::io::SeekFrom;
-use std::pin::Pin;
+use std::{borrow::BorrowMut, io::SeekFrom, pin::Pin};
 use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _};
 
 /// Reads data from a LayerFS directory contents file (`<offset>.dir_data.bin`)

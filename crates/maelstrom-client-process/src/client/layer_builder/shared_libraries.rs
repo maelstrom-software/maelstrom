@@ -1,11 +1,12 @@
 use anyhow::{bail, Result};
 use maelstrom_base::{Sha256Digest, Utf8PathBuf};
-use maelstrom_util::async_fs::Fs;
-use maelstrom_util::elf::read_shared_libraries;
-use std::collections::BTreeSet;
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStringExt as _;
-use std::path::{Path, PathBuf};
+use maelstrom_util::{async_fs::Fs, elf::read_shared_libraries};
+use std::{
+    collections::BTreeSet,
+    ffi::OsString,
+    os::unix::ffi::OsStringExt as _,
+    path::{Path, PathBuf},
+};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 fn so_listing_path_from_binary_path(so_listings_path: &Path, digest: &Sha256Digest) -> PathBuf {

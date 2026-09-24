@@ -7,12 +7,12 @@
 #![allow(missing_docs)]
 
 use super::mount_options::{option_to_string, MountOption};
-use std::ffi::{CString, OsStr};
-use std::fs::{File, OpenOptions};
-use std::io::Error;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::io::AsRawFd;
+use std::{
+    ffi::{CString, OsStr},
+    fs::{File, OpenOptions},
+    io::Error,
+    os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd},
+};
 
 // If returned option is none. Then fusermount binary should be tried
 pub fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<File, Error> {

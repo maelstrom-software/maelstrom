@@ -8,8 +8,10 @@ use maelstrom_linux::Errno;
 use slog::{o, Drain, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
-use std::ffi::OsStr;
-use std::time::{Duration, UNIX_EPOCH};
+use std::{
+    ffi::OsStr,
+    time::{Duration, UNIX_EPOCH},
+};
 use tokio::io::AsyncBufReadExt as _;
 
 const TTL: Duration = Duration::from_secs(1); // 1 second

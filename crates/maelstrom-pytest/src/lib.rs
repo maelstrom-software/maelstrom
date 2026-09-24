@@ -29,10 +29,7 @@ use maelstrom_util::{fs::Fs, root::RootBuf};
 use regex_macro::regex;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{
-        HashSet,
-        {hash_map::Entry, HashMap},
-    },
+    collections::{hash_map::Entry, HashMap, HashSet},
     fmt,
     os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},

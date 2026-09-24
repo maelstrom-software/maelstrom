@@ -18,10 +18,7 @@ use maelstrom_util::{
     time::SystemMonotonicClock,
 };
 use slog::{debug, o, Logger};
-use std::{
-    sync::Arc,
-    {path::PathBuf, time::Duration},
-};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     task::{self, JoinHandle},
     time,

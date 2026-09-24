@@ -3,8 +3,7 @@
 //! Helper to decompose a slice of binary data (incoming FUSE request) into multiple data
 //! structures (request arguments).
 
-use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 
 /// An iterator that can be used to fetch typed arguments from a byte slice.
 pub struct ArgumentIterator<'a> {
@@ -90,8 +89,7 @@ impl<'a> ArgumentIterator<'a> {
 pub mod tests {
     use std::ops::Deref;
 
-    use super::super::test::AlignedData;
-    use super::*;
+    use super::{super::test::AlignedData, *};
     use zerocopy::{FromBytes, Immutable, KnownLayout};
 
     const TEST_DATA: AlignedData<[u8; 10]> =

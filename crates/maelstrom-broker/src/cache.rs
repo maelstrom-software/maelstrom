@@ -7,10 +7,7 @@ use anyhow::{Error, Result};
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::GetArtifact;
 use slog::Logger;
-use std::future::Future;
-use std::io;
-use std::path::PathBuf;
-use std::pin::Pin;
+use std::{future::Future, io, path::PathBuf, pin::Pin};
 
 /// The required interface for the cache that is provided to the [`Scheduler`].
 ///

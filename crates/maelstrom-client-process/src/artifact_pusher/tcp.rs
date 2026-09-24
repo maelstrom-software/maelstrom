@@ -1,5 +1,7 @@
-use crate::artifact_pusher::{construct_upload_name, start_task_inner, Receiver, SuccessCb};
-use crate::progress::{ProgressTracker, UploadProgressReader};
+use crate::{
+    artifact_pusher::{construct_upload_name, start_task_inner, Receiver, SuccessCb},
+    progress::{ProgressTracker, UploadProgressReader},
+};
 use anyhow::{anyhow, Context as _, Result};
 use maelstrom_base::{
     proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},

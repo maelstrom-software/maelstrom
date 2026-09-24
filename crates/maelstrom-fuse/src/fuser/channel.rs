@@ -1,17 +1,17 @@
-use crate::fuser::ll::fuse_abi as abi;
-use crate::fuser::reply::ReplySender;
+use crate::fuser::{ll::fuse_abi as abi, reply::ReplySender};
 use async_trait::async_trait;
 use maelstrom_linux::Fd;
 use maelstrom_util::io::MaybeFastWriter;
-use std::os::fd::AsRawFd as _;
 use std::{
     fs::File,
     io::{self, Read as _, Write as _},
+    os::fd::AsRawFd as _,
     sync::Arc,
 };
-use tokio::io::unix::AsyncFd;
-use tokio::io::Interest;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    io::{unix::AsyncFd, Interest},
+    sync::{mpsc, oneshot},
+};
 use zerocopy::IntoBytes as _;
 
 /// A raw communication channel to the FUSE kernel driver

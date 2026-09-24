@@ -5,9 +5,9 @@ use maelstrom_client::config::Config as ClientConfig;
 use maelstrom_macro::Config;
 use maelstrom_util::config::common::LogLevel;
 use serde::Deserialize;
-use std::num::NonZeroUsize;
 use std::{
     fmt::{self, Debug, Formatter},
+    num::NonZeroUsize,
     result, str,
 };
 

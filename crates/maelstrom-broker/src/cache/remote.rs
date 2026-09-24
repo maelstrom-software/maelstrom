@@ -2,9 +2,11 @@ use crate::cache::{SchedulerCache, TempFileFactory};
 use anyhow::{anyhow, bail, Error, Result};
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::{fs::TempFile, GetArtifact};
-use std::collections::{hash_map::Entry as HashEntry, HashMap, HashSet};
-use std::mem;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{hash_map::Entry as HashEntry, HashMap, HashSet},
+    mem,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug)]
 pub struct PanicTempFile;

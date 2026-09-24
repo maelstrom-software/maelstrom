@@ -6,17 +6,19 @@
 //! TODO: This module is meant to go away soon in favor of `ll::Request`.
 
 use crate::fuser::ll::{Errno, Response};
-use std::convert::TryFrom;
-use std::convert::TryInto;
-use std::path::Path;
+use std::{
+    convert::{TryFrom, TryInto},
+    path::Path,
+};
 
-use crate::fuser::channel::ChannelSender;
-use crate::fuser::ll::Request as _;
-use crate::fuser::reply::ReplyDirectoryPlus;
-use crate::fuser::reply::{Reply, ReplyDirectory};
-use crate::fuser::session::{Session, SessionACL};
-use crate::fuser::Filesystem;
-use crate::fuser::{ll, KernelConfig};
+use crate::fuser::{
+    channel::ChannelSender,
+    ll,
+    ll::Request as _,
+    reply::{Reply, ReplyDirectory, ReplyDirectoryPlus},
+    session::{Session, SessionACL},
+    Filesystem, KernelConfig,
+};
 
 /// Request data structure
 #[derive(Debug)]

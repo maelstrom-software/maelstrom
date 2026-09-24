@@ -39,8 +39,7 @@ use std::{
     task::Poll,
 };
 use tokio::{
-    io::AsyncWrite,
-    io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _},
+    io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _},
     sync::{Mutex, MutexGuard},
     task,
 };

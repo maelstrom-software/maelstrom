@@ -1,5 +1,7 @@
-use crate::ui::{UiJobId as JobId, UiJobResult, UiJobStatus};
-use crate::TestCollector;
+use crate::{
+    ui::{UiJobId as JobId, UiJobResult, UiJobStatus},
+    TestCollector,
+};
 use anyhow::Result;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,

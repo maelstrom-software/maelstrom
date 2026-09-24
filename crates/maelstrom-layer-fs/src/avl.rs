@@ -2,10 +2,12 @@ use anyhow::Result;
 use anyhow_trace::anyhow_trace;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
-use std::borrow::BorrowMut;
-use std::cmp::{self, Ordering};
-use std::marker::PhantomData;
-use std::num::NonZeroU64;
+use std::{
+    borrow::BorrowMut,
+    cmp::{self, Ordering},
+    marker::PhantomData,
+    num::NonZeroU64,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AvlPtr(NonZeroU64);

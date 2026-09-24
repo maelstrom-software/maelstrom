@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-use std::process::Command;
-use std::str::from_utf8;
+use std::{path::PathBuf, process::Command, str::from_utf8};
 
 fn test_for_protoc() -> Option<PathBuf> {
     if let Ok(o) = Command::new("protoc").arg("--version").output() {

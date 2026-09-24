@@ -7,10 +7,12 @@ use azure_core::Etag;
 use azure_storage_blobs::prelude::BlobClient;
 use futures::stream::StreamExt as _;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
-use std::future::Future;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    collections::{HashSet, VecDeque},
+    future::Future,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 #[allow(async_fn_in_trait)]
 pub trait QueueConnection {
@@ -419,8 +421,7 @@ where
 mod tests {
     use super::*;
     use anyhow::bail;
-    use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::{collections::HashMap, sync::Mutex};
 
     #[derive(Clone, Default)]
     struct FakeConnection {

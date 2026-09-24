@@ -1,5 +1,7 @@
-use std::cell::Cell;
-use std::time::{Duration, Instant};
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
 
 pub trait ClockInstant {
     fn elapsed(&self) -> Duration;

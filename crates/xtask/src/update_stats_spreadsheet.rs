@@ -3,8 +3,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 use clap::Parser;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_sheets::{get_sheets, service_account_from_env};
-use std::collections::BTreeMap;
-use std::process::{Command, Stdio};
+use std::{
+    collections::BTreeMap,
+    process::{Command, Stdio},
+};
 
 fn cmd(cmd: &str, args: &[&str], description: &str) -> Result<String> {
     let mut child = Command::new(cmd)

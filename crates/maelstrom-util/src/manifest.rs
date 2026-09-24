@@ -9,9 +9,7 @@ use maelstrom_base::{
     proto, Sha256Digest, Utf8PathBuf,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::io;
-use std::os::unix::fs::MetadataExt as _;
-use std::path::Path;
+use std::{io, os::unix::fs::MetadataExt as _, path::Path};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 pub async fn decode_async<T: DeserializeOwned>(
@@ -274,9 +272,7 @@ mod tests {
     use crate::io::ErrorReader;
     use maelstrom_base::digest;
     use maelstrom_test::utf8_path_buf;
-    use std::future::Future;
-    use std::path::PathBuf;
-    use std::pin::Pin;
+    use std::{future::Future, path::PathBuf, pin::Pin};
     use tempfile::{tempdir, TempDir};
     use tokio::io::AsyncReadExt;
 

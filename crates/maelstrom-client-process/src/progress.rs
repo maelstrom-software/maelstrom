@@ -5,10 +5,9 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::{pin, Pin},
-    sync::OnceLock,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
     task::{ready, Poll},
 };

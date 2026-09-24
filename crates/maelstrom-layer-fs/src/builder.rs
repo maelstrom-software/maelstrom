@@ -1,12 +1,13 @@
-use crate::dir::{DirectoryDataReader, DirectoryDataWriter, OrderedDirectoryStream};
-use crate::file::{FileDataInput, FileMetadataWriter};
-use crate::ty::{
-    DirectoryEntryData, DirectoryEntryFileData, FileAttributes, FileId, FileType, LayerId,
-    LayerSuper,
+use crate::{
+    dir::{DirectoryDataReader, DirectoryDataWriter, OrderedDirectoryStream},
+    file::{FileDataInput, FileMetadataWriter},
+    ty::{
+        DirectoryEntryData, DirectoryEntryFileData, FileAttributes, FileId, FileType, LayerId,
+        LayerSuper,
+    },
+    BlobDir, LayerFs,
 };
-use crate::{BlobDir, LayerFs};
-use anyhow::bail;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use anyhow_trace::anyhow_trace;
 use futures::stream::{Peekable, StreamExt as _};
 use lru::LruCache;
@@ -15,9 +16,7 @@ use maelstrom_base::{
     Sha256Digest, Utf8Component, Utf8Path,
 };
 use maelstrom_util::{async_fs::Fs, ext::BoolExt as _, manifest::AsyncManifestReader, root::Root};
-use std::cmp::Ordering;
-use std::path::Path;
-use std::pin::Pin;
+use std::{cmp::Ordering, path::Path, pin::Pin};
 use tokio::io::{AsyncRead, AsyncSeek};
 use tokio_tar::{Archive, EntryType};
 

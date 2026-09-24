@@ -1271,9 +1271,10 @@ mod tests {
     }
 
     fn maybe_fast_writer_test(mut writer: MaybeFastWriter, len1: usize, len2: usize) {
-        use std::io::Write as _;
-        use std::io::{Seek as _, SeekFrom};
-        use std::os::fd::AsRawFd as _;
+        use std::{
+            io::{Seek as _, SeekFrom, Write as _},
+            os::fd::AsRawFd as _,
+        };
 
         let buf1 = Vec::from_iter((0u8..0xFFu8).cycle().take(len1));
         let buf2 = Vec::from_iter((0u8..0xFFu8).cycle().take(len2));

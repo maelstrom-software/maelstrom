@@ -7,8 +7,7 @@ use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::cache::{fs::Fs, Cache, GetArtifact, GetStrategy, GotArtifact, Key};
 use ref_cast::RefCast;
 use slog::Logger;
-use std::io;
-use std::path::PathBuf;
+use std::{io, path::PathBuf};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, RefCast)]
 #[repr(transparent)]

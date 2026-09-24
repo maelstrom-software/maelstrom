@@ -666,18 +666,15 @@ impl FuseFileSystem for LayerFsFuseAdapter {
 mod tests {
     use super::*;
     use crate::file::FileDataInput;
-    use maelstrom_base::manifest::UnixTimestamp;
     use maelstrom_base::{
         manifest::{
             ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestFileData, Mode,
+            UnixTimestamp,
         },
         Utf8PathBuf,
     };
     use maelstrom_util::manifest::AsyncManifestWriter;
-    use std::collections::HashMap;
-    use std::future::Future;
-    use std::os::unix::fs::MetadataExt as _;
-    use std::pin::Pin;
+    use std::{collections::HashMap, future::Future, os::unix::fs::MetadataExt as _, pin::Pin};
 
     const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 

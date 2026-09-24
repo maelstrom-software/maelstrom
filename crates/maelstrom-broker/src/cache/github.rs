@@ -1,7 +1,4 @@
-use crate::{
-    cache::LazyRead,
-    cache::{remote, BrokerCache},
-};
+use crate::cache::{remote, BrokerCache, LazyRead};
 use anyhow::{anyhow, Result};
 use maelstrom_base::Sha256Digest;
 use maelstrom_github::GitHubClient;

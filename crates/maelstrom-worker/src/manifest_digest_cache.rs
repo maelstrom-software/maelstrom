@@ -10,8 +10,7 @@ use slog::debug;
 use std::{
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
-    path::Path,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::task;

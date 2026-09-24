@@ -6,11 +6,11 @@ use maelstrom_github::{GitHubReadQueue, GitHubWriteQueue};
 use maelstrom_linux::{self as linux, Fd};
 use serde::{de::DeserializeOwned, Serialize};
 use slog::{debug, Logger};
-use std::time::Duration;
 use std::{
     fmt::Debug,
     io::{Read, Write},
     os::fd::AsRawFd,
+    time::Duration,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _},

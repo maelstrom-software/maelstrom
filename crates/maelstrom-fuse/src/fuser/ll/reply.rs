@@ -9,8 +9,7 @@ use std::{
 
 use crate::FileType;
 
-use super::{fuse_abi as abi, Errno, FileHandle, Generation, INodeNo};
-use super::{Lock, RequestId};
+use super::{fuse_abi as abi, Errno, FileHandle, Generation, INodeNo, Lock, RequestId};
 use maelstrom_linux::Fd;
 use smallvec::{smallvec, SmallVec};
 use zerocopy::{Immutable, IntoBytes};
@@ -502,8 +501,7 @@ impl DirEntPlusList {
 mod tests {
     use std::num::NonZeroI32;
 
-    use super::super::test::ioslice_to_vec;
-    use super::*;
+    use super::{super::test::ioslice_to_vec, *};
 
     #[test]
     fn reply_empty() {

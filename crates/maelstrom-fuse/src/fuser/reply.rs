@@ -6,25 +6,19 @@
 //! data without cloning the data. A reply *must always* be used (by calling either ok() or
 //! error() exactly once).
 
-use crate::fuser::ll::fuse_abi as abi;
-use crate::fuser::ll::{
-    self,
-    reply::{DirEntPlusList, DirEntryPlus},
-    Generation,
+use crate::fuser::{
+    ll::{
+        self, fuse_abi as abi,
+        reply::{DirEntList, DirEntOffset, DirEntPlusList, DirEntry, DirEntryPlus},
+        Generation, INodeNo,
+    },
+    FileAttr, FileType,
 };
-use crate::fuser::ll::{
-    reply::{DirEntList, DirEntOffset, DirEntry},
-    INodeNo,
-};
-use crate::fuser::{FileAttr, FileType};
 use async_trait::async_trait;
 use derive_more::Debug;
 use libc::c_int;
 use maelstrom_linux::Fd;
-use std::convert::AsRef;
-use std::ffi::OsStr;
-use std::io::IoSlice;
-use std::time::Duration;
+use std::{convert::AsRef, ffi::OsStr, io::IoSlice, time::Duration};
 
 /// Generic reply callback to send data
 #[async_trait]
@@ -661,8 +655,10 @@ impl ReplyLseek {
 mod tests {
     use super::{Debug, *};
     use crate::fuser::{FileAttr, FileType};
-    use std::io::IoSlice;
-    use std::time::{Duration, UNIX_EPOCH};
+    use std::{
+        io::IoSlice,
+        time::{Duration, UNIX_EPOCH},
+    };
     use tokio::sync::mpsc::{channel, Sender};
     use zerocopy::{Immutable, IntoBytes};
 

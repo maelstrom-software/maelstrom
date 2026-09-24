@@ -1,14 +1,14 @@
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
-use elf::endian::AnyEndian;
-use elf::parse::ParseError;
-use elf::string_table::StringTable;
-use elf::ElfBytes;
-use std::collections::BTreeSet;
-use std::io::{Read as _, Seek as _, Write as _};
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::{fmt, mem};
+use elf::{endian::AnyEndian, parse::ParseError, string_table::StringTable, ElfBytes};
+use std::{
+    collections::BTreeSet,
+    fmt,
+    io::{Read as _, Seek as _, Write as _},
+    mem,
+    path::{Path, PathBuf},
+    process::Command,
+};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 #[derive(Clone, Debug, Default, PartialEq, FromBytes, IntoBytes, KnownLayout, Immutable)]

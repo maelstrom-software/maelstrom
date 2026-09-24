@@ -1,5 +1,7 @@
-use std::collections::{BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeSet, HashMap},
+    path::{Path, PathBuf},
+};
 
 pub fn read_shared_libraries(path: &Path) -> Result<Vec<PathBuf>, lddtree::Error> {
     let dep_tree = lddtree::DependencyAnalyzer::new("/".into());

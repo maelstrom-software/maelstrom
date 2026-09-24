@@ -12,13 +12,12 @@ use maelstrom_util::{
     root::{Root, RootBuf},
 };
 use serde::Deserialize;
-use std::collections::HashSet;
-use std::os::unix::process::ExitStatusExt as _;
 use std::{
+    collections::HashSet,
     fmt,
     io::{BufRead, BufReader},
-    path::Path,
-    path::PathBuf,
+    os::unix::process::ExitStatusExt as _,
+    path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     str,
     sync::{mpsc, Arc, Mutex},
