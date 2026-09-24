@@ -3,7 +3,7 @@
 set -ex
 
 cargo-fmt --check
-cargo-clippy clippy -- -Dwarnings
+cargo-clippy clippy --all-targets -- -Dwarnings
 cargo xtask publish --lint
 cargo check --all-targets
 #(cd doc/book && mdbook test)
