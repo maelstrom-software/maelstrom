@@ -1,6 +1,6 @@
 use std::{
     convert::TryInto,
-    io::IoSlice,
+    io::{self, IoSlice},
     mem::size_of,
     os::unix::prelude::OsStrExt,
     path::Path,
@@ -61,7 +61,7 @@ impl<'a> Response<'a> {
         &self,
         unique: RequestId,
         sender: &(impl crate::fuser::reply::ReplySender + ?Sized),
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         let header = self.header(unique);
 
         if let Self::Splice { fd, offset, length } = self {

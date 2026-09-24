@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result};
 use derive_more::Debug;
 use fs2::FileExt as _;
 use std::{
-    io::{self},
+    io,
     os::fd::{AsRawFd, RawFd},
     path::{Path, PathBuf},
 };
@@ -236,8 +236,8 @@ impl std::os::unix::fs::MetadataExt for Metadata {
 }
 
 fn is_not_found_err(err: &anyhow::Error) -> bool {
-    let std_err = err.root_cause().downcast_ref::<std::io::Error>();
-    matches!(std_err, Some(e) if e.kind() == std::io::ErrorKind::NotFound)
+    let std_err = err.root_cause().downcast_ref::<io::Error>();
+    matches!(std_err, Some(e) if e.kind() == io::ErrorKind::NotFound)
 }
 
 impl Fs {

@@ -13,6 +13,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     collections::HashMap,
+    io::Cursor,
     num::{NonZeroU32, NonZeroU64},
     path::{Path, PathBuf},
 };
@@ -260,10 +261,7 @@ pub async fn encode<T: Serialize>(mut stream: impl AsyncWrite + Unpin, t: &T) ->
     if len > MAX_ENCODE_SIZE {
         bail!("item to encode too large {len} > {MAX_ENCODE_SIZE}");
     }
-    std::io::Cursor::new(&mut buffer[..8])
-        .write_u64(len)
-        .await
-        .unwrap();
+    Cursor::new(&mut buffer[..8]).write_u64(len).await.unwrap();
     stream.write_all(&buffer).await?;
     Ok(())
 }

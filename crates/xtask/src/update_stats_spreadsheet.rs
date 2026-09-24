@@ -5,6 +5,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_sheets::{get_sheets, service_account_from_env};
 use std::{
     collections::BTreeMap,
+    io,
     process::{Command, Stdio},
 };
 
@@ -18,14 +19,14 @@ fn cmd(cmd: &str, args: &[&str], description: &str) -> Result<String> {
     let mut stdout = child.stdout.take().unwrap();
     let stdout_handle = std::thread::spawn(move || -> String {
         let mut stdout_buffer = vec![];
-        let _ = std::io::copy(&mut stdout, &mut stdout_buffer);
+        let _ = io::copy(&mut stdout, &mut stdout_buffer);
         String::from_utf8_lossy(&stdout_buffer).into()
     });
 
     let mut stderr = child.stderr.take().unwrap();
     let stderr_handle = std::thread::spawn(move || -> String {
         let mut stderr_buffer = vec![];
-        let _ = std::io::copy(&mut stderr, &mut stderr_buffer);
+        let _ = io::copy(&mut stderr, &mut stderr_buffer);
         String::from_utf8_lossy(&stderr_buffer).into()
     });
 

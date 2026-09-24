@@ -9,7 +9,11 @@ use maelstrom_base::{
     proto, Sha256Digest, Utf8PathBuf,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::{io, os::unix::fs::MetadataExt as _, path::Path};
+use std::{
+    io::{self, Cursor},
+    os::unix::fs::MetadataExt as _,
+    path::Path,
+};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 pub async fn decode_async<T: DeserializeOwned>(
@@ -28,10 +32,7 @@ pub async fn encode_async<T: Serialize>(
     let mut buffer = vec![0; 8];
     proto::serialize_into(&mut buffer, t).unwrap();
     let len = buffer.len() as u64 - 8;
-    std::io::Cursor::new(&mut buffer[..8])
-        .write_u64(len)
-        .await
-        .unwrap();
+    Cursor::new(&mut buffer[..8]).write_u64(len).await.unwrap();
     stream.write_all(&buffer).await?;
     Ok(())
 }

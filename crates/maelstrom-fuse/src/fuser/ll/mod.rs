@@ -8,7 +8,7 @@ mod request;
 pub use reply::Response;
 pub use request::{AnyRequest, FileHandle, INodeNo, Lock, Operation, Request, RequestId, Version};
 
-use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
+use std::{convert::TryInto, io, num::NonZeroI32, time::SystemTime};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Possible input arguments for atime & mtime, which can either be set to a specified time,
@@ -220,8 +220,8 @@ impl Errno {
         err.try_into().ok().map(Errno).unwrap_or(Errno::EIO)
     }
 }
-impl From<std::io::Error> for Errno {
-    fn from(err: std::io::Error) -> Self {
+impl From<io::Error> for Errno {
+    fn from(err: io::Error) -> Self {
         let errno = err.raw_os_error().unwrap_or(0);
         match errno.try_into() {
             Ok(i) => Errno(i),
@@ -229,9 +229,9 @@ impl From<std::io::Error> for Errno {
         }
     }
 }
-impl From<std::io::ErrorKind> for Errno {
-    fn from(x: std::io::ErrorKind) -> Self {
-        let err: std::io::Error = x.into();
+impl From<io::ErrorKind> for Errno {
+    fn from(x: io::ErrorKind) -> Self {
+        let err: io::Error = x.into();
         err.into()
     }
 }
@@ -258,8 +258,9 @@ impl From<Generation> for u64 {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use derive_more::{Deref, DerefMut};
-    use std::io::IoSlice;
+    use io::IoSlice;
 
     /// If we want to be able to cast bytes to our fuse C struct types we need it
     /// to be aligned.  This struct helps getting &[u8]s which are 8 byte aligned.

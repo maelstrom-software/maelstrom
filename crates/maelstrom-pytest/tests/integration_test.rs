@@ -9,7 +9,10 @@ use maelstrom_util::{
     process::ExitCode,
     root::RootBuf,
 };
-use std::process::{Command, Stdio};
+use std::{
+    io,
+    process::{Command, Stdio},
+};
 use tempfile::tempdir;
 
 fn sh(script: &str, description: &str) -> Result<()> {
@@ -22,7 +25,7 @@ fn sh(script: &str, description: &str) -> Result<()> {
     let mut stderr = child.stderr.take().unwrap();
     let stderr_handle = std::thread::spawn(move || -> String {
         let mut stderr_buffer = vec![];
-        let _ = std::io::copy(&mut stderr, &mut stderr_buffer);
+        let _ = io::copy(&mut stderr, &mut stderr_buffer);
         String::from_utf8_lossy(&stderr_buffer).into()
     });
 

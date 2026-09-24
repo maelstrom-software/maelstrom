@@ -12,7 +12,7 @@ use std::{
     cmp,
     fs::File,
     future::Future,
-    io::{self, Chain, Read, Repeat, Take, Write},
+    io::{self, Chain, Read, Repeat, SeekFrom, Take, Write},
     num::NonZeroUsize,
     os::fd::{self, AsRawFd},
     pin::{pin, Pin},
@@ -214,7 +214,7 @@ impl<WriterT: io::Write> ChunkedWriter<WriterT> {
     }
 
     pub fn finish(mut self) -> io::Result<()> {
-        use std::io::Write as _;
+        use io::Write as _;
 
         self.flush()?;
         self.writer.write_u32::<BigEndian>(0)?;
@@ -225,8 +225,8 @@ impl<WriterT: io::Write> ChunkedWriter<WriterT> {
 impl<WriterT: io::Write> io::Write for ChunkedWriter<WriterT> {
     fn write(&mut self, mut input: &[u8]) -> io::Result<usize> {
         let to_read = std::cmp::min(self.remaining_chunk_space(), input.len()) as u64;
-        let written = std::io::copy(&mut io::Read::take(&mut input, to_read), &mut self.chunk)
-            .unwrap() as usize;
+        let written =
+            io::copy(&mut io::Read::take(&mut input, to_read), &mut self.chunk).unwrap() as usize;
 
         if self.remaining_chunk_space() == 0 {
             self.send_chunk()?;
@@ -299,9 +299,9 @@ impl<StreamT: AsyncSeek + Unpin> BufferedStream<StreamT> {
         capacity: NonZeroUsize,
         mut stream: StreamT,
     ) -> io::Result<Self> {
-        stream.seek(std::io::SeekFrom::End(0)).await?;
+        stream.seek(SeekFrom::End(0)).await?;
         let length = stream.stream_position().await?;
-        stream.seek(std::io::SeekFrom::Start(0)).await?;
+        stream.seek(SeekFrom::Start(0)).await?;
         Ok(Self {
             chunk_size,
             chunks: LruCache::new(capacity),
@@ -427,7 +427,7 @@ impl<StreamT: AsyncRead + AsyncWrite + AsyncSeek + Unpin> BufferedStream<StreamT
             match &mut self.state {
                 BufferedStreamState::Idle => {
                     ready!(pin!(&mut self.stream).poll_complete(cx))?;
-                    pin!(&mut self.stream).start_seek(std::io::SeekFrom::Start(chunk_start))?;
+                    pin!(&mut self.stream).start_seek(SeekFrom::Start(chunk_start))?;
                     self.state = BufferedStreamState::Seeking { chunk_index };
                 }
                 BufferedStreamState::Seeking {
@@ -543,15 +543,15 @@ impl<StreamT: AsyncRead + AsyncWrite + AsyncSeek + Unpin> AsyncWrite for Buffere
 }
 
 impl<StreamT: Unpin> AsyncSeek for BufferedStream<StreamT> {
-    fn start_seek(self: Pin<&mut Self>, position: std::io::SeekFrom) -> io::Result<()> {
+    fn start_seek(self: Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
         let me = self.get_mut();
 
         match position {
-            std::io::SeekFrom::Start(pos) => me.position = pos,
-            std::io::SeekFrom::End(offset) => {
+            SeekFrom::Start(pos) => me.position = pos,
+            SeekFrom::End(offset) => {
                 me.position = (me.length as i64 + offset) as u64;
             }
-            std::io::SeekFrom::Current(offset) => {
+            SeekFrom::Current(offset) => {
                 me.position = (me.position as i64 + offset) as u64;
             }
         }
@@ -861,9 +861,9 @@ impl AsyncWrite for AsyncFile {
 
 pub struct ErrorReader;
 
-impl std::io::Read for ErrorReader {
+impl Read for ErrorReader {
     fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-        Err(std::io::Error::other("test error"))
+        Err(io::Error::other("test error"))
     }
 }
 
@@ -873,7 +873,7 @@ impl AsyncRead for ErrorReader {
         _: &mut Context<'_>,
         _: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        Poll::Ready(Err(std::io::Error::other("test error")))
+        Poll::Ready(Err(io::Error::other("test error")))
     }
 }
 
@@ -935,17 +935,18 @@ impl<InitT: Future<Output = io::Result<ReadT>>, ReadT: AsyncRead> AsyncRead
 #[cfg(test)]
 mod tests {
     use super::*;
+    use io::Cursor;
     use tokio::io::AsyncReadExt as _;
 
     fn calculate_read_hash(mut input: &[u8]) -> Sha256Digest {
         let mut reader = Sha256Stream::new(&mut input);
-        std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
+        io::copy(&mut reader, &mut io::sink()).unwrap();
         reader.finalize().1
     }
 
     fn calculate_write_hash(mut input: &[u8]) -> Sha256Digest {
-        let mut writer = Sha256Stream::new(std::io::sink());
-        std::io::copy(&mut input, &mut writer).unwrap();
+        let mut writer = Sha256Stream::new(io::sink());
+        io::copy(&mut input, &mut writer).unwrap();
         writer.finalize().1
     }
 
@@ -1019,8 +1020,6 @@ mod tests {
     }
 
     fn test_chunk_writer(input: &[&[u8]], expected: &[u8]) {
-        use std::io::Write as _;
-
         let mut written = vec![];
         let mut writer = ChunkedWriter::new(&mut written, 5);
         for i in input {
@@ -1052,8 +1051,6 @@ mod tests {
 
     #[test]
     fn chunk_reader_and_writer() {
-        use std::io::{Read as _, Write as _};
-
         let test_data = Vec::from_iter((0u8..=255).cycle().take(1000));
         let mut encoded = vec![];
         let mut writer = ChunkedWriter::new(&mut encoded, 7);
@@ -1073,13 +1070,10 @@ mod tests {
 
         for chunk_size in 1..10 {
             let underlying: Vec<_> = (0..10).collect();
-            let mut stream = BufferedStream::new(
-                chunk_size,
-                10.try_into().unwrap(),
-                std::io::Cursor::new(underlying),
-            )
-            .await
-            .unwrap();
+            let mut stream =
+                BufferedStream::new(chunk_size, 10.try_into().unwrap(), Cursor::new(underlying))
+                    .await
+                    .unwrap();
 
             let mut buf = [0; 5];
 
@@ -1106,7 +1100,7 @@ mod tests {
         f2.write_all(&(0..10).collect::<Vec<_>>()).await.unwrap();
         f2.flush().await.unwrap();
 
-        f1.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        f1.seek(SeekFrom::Start(0)).await.unwrap();
         let mut stream = BufferedStream::new(4, 10.try_into().unwrap(), f1)
             .await
             .unwrap();
@@ -1116,11 +1110,11 @@ mod tests {
         assert_eq!(&buf[..], &[0, 1, 2]);
 
         // Write zeros to the underlying stream
-        f2.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        f2.seek(SeekFrom::Start(0)).await.unwrap();
         f2.write_all(&[0; 10]).await.unwrap();
 
         // We should still get the same thing
-        stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        stream.seek(SeekFrom::Start(0)).await.unwrap();
         stream.read_exact(&mut buf).await.unwrap();
         assert_eq!(&buf[..], &[0, 1, 2]);
     }
@@ -1131,17 +1125,14 @@ mod tests {
 
         for chunk_size in 1..10 {
             let underlying = vec![0; 10];
-            let mut stream = BufferedStream::new(
-                chunk_size,
-                10.try_into().unwrap(),
-                std::io::Cursor::new(underlying),
-            )
-            .await
-            .unwrap();
+            let mut stream =
+                BufferedStream::new(chunk_size, 10.try_into().unwrap(), Cursor::new(underlying))
+                    .await
+                    .unwrap();
 
             stream.write_all(&[0, 1, 2, 3, 4]).await.unwrap();
             stream.write_all(&[5, 6, 7, 8, 9]).await.unwrap();
-            stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+            stream.seek(SeekFrom::Start(0)).await.unwrap();
 
             let mut buf = [0; 5];
 
@@ -1166,7 +1157,7 @@ mod tests {
 
         let mut f2 = f1.try_clone().await.unwrap();
 
-        f1.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        f1.seek(SeekFrom::Start(0)).await.unwrap();
         let mut stream = BufferedStream::new(4, 10.try_into().unwrap(), f1)
             .await
             .unwrap();
@@ -1181,7 +1172,7 @@ mod tests {
 
         let mut buf = [0; 5];
 
-        f2.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        f2.seek(SeekFrom::Start(0)).await.unwrap();
         f2.read_exact(&mut buf).await.unwrap();
         assert_eq!(&buf[..], &[0, 1, 2, 3, 4]);
     }
@@ -1208,7 +1199,7 @@ mod tests {
         let mut shadow: Vec<_> = (1..(u8::try_from(file_size).unwrap())).collect();
 
         stream.write_all(&shadow[..]).await.unwrap();
-        stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        stream.seek(SeekFrom::Start(0)).await.unwrap();
 
         const ITERATIONS: u8 = 5;
         for i in 0..ITERATIONS {
@@ -1234,7 +1225,7 @@ mod tests {
                 }
                 "seek" => {
                     let pos = ((shadow.len() as u64) / (ITERATIONS - 1) as u64) * i as u64;
-                    stream.seek(std::io::SeekFrom::Start(pos)).await.unwrap();
+                    stream.seek(SeekFrom::Start(pos)).await.unwrap();
                 }
                 "flush" => {
                     stream.flush().await.unwrap();
@@ -1243,14 +1234,14 @@ mod tests {
             }
         }
 
-        stream.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        stream.seek(SeekFrom::Start(0)).await.unwrap();
         let mut verify = vec![0; shadow.len()];
         stream.read_exact(&mut verify).await.unwrap();
         assert_eq!(shadow, verify);
 
         stream.flush().await.unwrap();
         let mut file = stream.into_inner();
-        file.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        file.seek(SeekFrom::Start(0)).await.unwrap();
         file.read_exact(&mut verify).await.unwrap();
 
         assert_eq!(shadow, verify);
@@ -1271,10 +1262,7 @@ mod tests {
     }
 
     fn maybe_fast_writer_test(mut writer: MaybeFastWriter, len1: usize, len2: usize) {
-        use std::{
-            io::{Seek as _, SeekFrom, Write as _},
-            os::fd::AsRawFd as _,
-        };
+        use io::Seek as _;
 
         let buf1 = Vec::from_iter((0u8..0xFFu8).cycle().take(len1));
         let buf2 = Vec::from_iter((0u8..0xFFu8).cycle().take(len2));

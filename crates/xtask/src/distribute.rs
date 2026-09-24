@@ -4,7 +4,7 @@ use elf::{endian::AnyEndian, parse::ParseError, string_table::StringTable, ElfBy
 use std::{
     collections::BTreeSet,
     fmt,
-    io::{Read as _, Seek as _, Write as _},
+    io::{self, Read as _, Seek as _, SeekFrom, Write as _},
     mem,
     path::{Path, PathBuf},
     process::Command,
@@ -289,7 +289,7 @@ fn remove_glibc_versions_from_version_r(
     encoded.resize(gnu_version_header.sh_size as usize, 0);
 
     // Rewrite that section of the file
-    file.seek(std::io::SeekFrom::Start(gnu_version_header.sh_offset))?;
+    file.seek(SeekFrom::Start(gnu_version_header.sh_offset))?;
     file.write_all(&encoded)?;
 
     Ok(removed)
@@ -322,7 +322,7 @@ fn remove_symbol_versions(
 
         if versions_to_remove.contains(&version_index) {
             let offset = symbol_versions.sh_offset + (symbol_index * 2) as u64;
-            file.seek(std::io::SeekFrom::Start(offset))?;
+            file.seek(SeekFrom::Start(offset))?;
             // 1 means a global symbol
             file.write_all(&1u16.to_le_bytes())?;
             report
@@ -487,9 +487,9 @@ fn package_artifacts(
 fn prompt(msg: &str, yes: &str, no: &str) -> Result<bool> {
     loop {
         print!("{}", msg);
-        std::io::stdout().flush()?;
+        io::stdout().flush()?;
         let mut line = String::new();
-        std::io::stdin().read_line(&mut line)?;
+        io::stdin().read_line(&mut line)?;
         if line.trim() == yes {
             return Ok(true);
         }

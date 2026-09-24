@@ -18,13 +18,18 @@ use async_trait::async_trait;
 use derive_more::Debug;
 use libc::c_int;
 use maelstrom_linux::Fd;
-use std::{convert::AsRef, ffi::OsStr, io::IoSlice, time::Duration};
+use std::{
+    convert::AsRef,
+    ffi::OsStr,
+    io::{self, IoSlice},
+    time::Duration,
+};
 
 /// Generic reply callback to send data
 #[async_trait]
 pub trait ReplySender: Send + Sync + Unpin + 'static {
     /// Send data.
-    async fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()>;
+    async fn send(&self, data: &[IoSlice<'_>]) -> io::Result<()>;
 
     /// Send data using splice
     async fn send_splice(
@@ -33,7 +38,7 @@ pub trait ReplySender: Send + Sync + Unpin + 'static {
         header: abi::fuse_out_header,
         offset: u64,
         length: usize,
-    ) -> std::io::Result<()>;
+    ) -> io::Result<()>;
 }
 
 /// Generic reply trait
@@ -654,11 +659,7 @@ impl ReplyLseek {
 #[cfg(test)]
 mod tests {
     use super::{Debug, *};
-    use crate::fuser::{FileAttr, FileType};
-    use std::{
-        io::IoSlice,
-        time::{Duration, UNIX_EPOCH},
-    };
+    use std::time::UNIX_EPOCH;
     use tokio::sync::mpsc::{channel, Sender};
     use zerocopy::{Immutable, IntoBytes};
 
@@ -697,7 +698,7 @@ mod tests {
 
     #[async_trait]
     impl super::ReplySender for AssertSender {
-        async fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()> {
+        async fn send(&self, data: &[IoSlice<'_>]) -> io::Result<()> {
             let mut v = vec![];
             for x in data {
                 v.extend_from_slice(x)
@@ -712,7 +713,7 @@ mod tests {
             _header: abi::fuse_out_header,
             _offset: u64,
             _length: usize,
-        ) -> std::io::Result<()> {
+        ) -> io::Result<()> {
             Ok(())
         }
     }
@@ -1008,7 +1009,7 @@ mod tests {
 
     #[async_trait]
     impl super::ReplySender for Sender<()> {
-        async fn send(&self, _: &[IoSlice<'_>]) -> std::io::Result<()> {
+        async fn send(&self, _: &[IoSlice<'_>]) -> io::Result<()> {
             self.send(()).await.unwrap();
             Ok(())
         }
@@ -1019,7 +1020,7 @@ mod tests {
             _header: abi::fuse_out_header,
             _offset: u64,
             _length: usize,
-        ) -> std::io::Result<()> {
+        ) -> io::Result<()> {
             Ok(())
         }
     }

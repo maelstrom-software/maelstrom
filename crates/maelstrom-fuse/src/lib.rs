@@ -14,6 +14,7 @@ use std::{
     ffi::OsStr,
     fs::File,
     future::Future,
+    io,
     os::fd::AsRawFd as _,
     path::{Path, PathBuf},
     pin::pin,
@@ -36,7 +37,7 @@ pub const MAX_PENDING: usize = 20;
 /// removing the mount) also it provides a way to get the path to the mount (via `/proc/`)
 pub struct FuseNamespaceHandle {
     stream: linux::UnixStream,
-    handle: JoinHandle<std::io::Result<()>>,
+    handle: JoinHandle<io::Result<()>>,
     log: slog::Logger,
     child: linux::Pid,
     mount_path: PathBuf,

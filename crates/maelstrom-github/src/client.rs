@@ -23,7 +23,7 @@ use derive_more::From;
 use futures::{stream::TryStreamExt as _, StreamExt as _};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
-use std::str::FromStr;
+use std::{io, str::FromStr};
 use tokio::io::AsyncRead;
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 use url::Url;
@@ -403,7 +403,7 @@ impl GitHubClient {
             .ok_or_else(|| anyhow!("missing response"))??;
         Ok(single_page
             .data
-            .map_err(std::io::Error::other)
+            .map_err(io::Error::other)
             .into_async_read()
             .compat())
     }

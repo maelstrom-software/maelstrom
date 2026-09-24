@@ -27,7 +27,7 @@ use slog::Drain as _;
 use std::{
     borrow::Cow,
     cell::RefCell,
-    io::{self, stdout, Write as _},
+    io::{self, stdout, Stdout, Write as _},
     sync::mpsc::{Receiver, RecvTimeoutError},
     time::{Duration, Instant},
 };
@@ -805,9 +805,9 @@ impl Widget for &mut FancyUi {
 }
 
 fn init_terminal(
-    backend: CrosstermBackend<std::io::Stdout>,
+    backend: CrosstermBackend<Stdout>,
     height: u16,
-) -> Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
+) -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
     let terminal = Terminal::with_options(
         backend,

@@ -6,6 +6,7 @@ use crate::{
 };
 use bincode::Options;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 
 /// The first message sent by a connector to the broker. It identifies what the connector is, and
 /// provides any relevant information.
@@ -109,7 +110,7 @@ pub fn serialize<T: ?Sized + Serialize>(value: &T) -> bincode::Result<Vec<u8>> {
     bincode().serialize(value)
 }
 
-pub fn serialize_into<W: std::io::Write, T: ?Sized + Serialize>(
+pub fn serialize_into<W: Write, T: ?Sized + Serialize>(
     writer: W,
     value: &T,
 ) -> bincode::Result<()> {
