@@ -151,7 +151,7 @@ serde_repr = "0.1"
 serde_test = "1"
 serde_with = { version = "3", features = ["chrono"] }
 serde_sheets = "0.1"
-sha2 = "0.10"
+sha2 = "0.11"
 slog = { version = "2", features = ["dynamic-keys", "max_level_debug", "release_max_level_debug"] }
 slog-async = "2"
 slog-json = "2"
