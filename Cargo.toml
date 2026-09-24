@@ -42,7 +42,7 @@ async-walkdir = "2"
 atomicbox = "0.4"
 azure_core = { version = "0.21", features = ["tokio-fs"] }
 azure_storage_blobs = "0.21"
-base64 = "0.22"
+base64 = "0.23"
 bincode = "1"
 bracoxide = "0.1"
 bumpalo = { version = "3", features = ["collections"] }

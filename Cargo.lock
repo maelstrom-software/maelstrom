@@ -3985,7 +3985,7 @@ dependencies = [
  "anyhow",
  "azure_core",
  "azure_storage_blobs",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bincode",
  "chrono",
  "derive_more",
