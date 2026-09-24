@@ -70,7 +70,7 @@ egui-toast = "0.17"
 # egui_gauge 0.1.6 requires egui 0.33, so it isn't compatible with 0.1.5 despite the version
 # number. Pin it until we upgrade egui.
 egui_gauge = "=0.1.5"
-elf = "0.7"
+elf = "0.8"
 enum-map = { version = "2", features = ["serde"] }
 enumset = { version = "1", features = ["serde"] }
 fs2 = "0.4"
