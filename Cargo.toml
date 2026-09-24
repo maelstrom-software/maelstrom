@@ -35,6 +35,7 @@ anyhow = "1"
 anyhow_trace = "0.1"
 ascii = "1"
 assert_matches = "1"
+astral-tokio-tar = "0.7"
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 async-trait = "0.1"
 async-walkdir = "2"
@@ -163,7 +164,6 @@ tar = "0.4"
 tempfile = "3.20"
 tokio = { version = "1", features = [ "fs", "io-std", "io-util", "macros", "net", "process", "rt","rt-multi-thread", "signal", "sync", "time" ] }
 tokio-native-tls = "0.3"
-tokio-tar = "0.3"
 tokio-util = { version = "0.7", features = [ "compat" ] }
 toml = "0.8"
 tonic = "0.13"

@@ -49,7 +49,7 @@ async fn get_from_tar_stream(
     while let Some(entry) = entries.next().await {
         let entry = entry?;
         if entry.path()? == tar_path.as_ref() {
-            let size = entry.header().entry_size()?;
+            let size = entry.effective_size();
             let file_pos = entry.raw_file_position();
             found = Some(file_pos..(file_pos + size));
         }

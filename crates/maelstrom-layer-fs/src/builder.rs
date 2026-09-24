@@ -448,14 +448,14 @@ impl<'fs> BottomLayerBuilder<'fs> {
                     self.add_file_path(
                         &path,
                         FileAttributes {
-                            size: header.size()?,
+                            size: entry.effective_size(),
                             mode: Mode(header.mode()?),
                             mtime: UnixTimestamp(header.mtime()?.try_into()?),
                         },
                         FileDataInput::Digest {
                             digest: digest.clone(),
                             offset: entry.raw_file_position(),
-                            length: header.entry_size()?,
+                            length: entry.effective_size(),
                         },
                     )
                     .await?;
@@ -464,7 +464,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
                     self.add_dir_path(
                         &path,
                         FileAttributes {
-                            size: header.size()?,
+                            size: entry.effective_size(),
                             mode: Mode(header.mode()?),
                             mtime: UnixTimestamp(header.mtime()?.try_into()?),
                         },

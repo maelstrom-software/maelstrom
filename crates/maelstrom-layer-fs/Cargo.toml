@@ -12,6 +12,7 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 anyhow_trace.workspace = true
+astral-tokio-tar.workspace = true
 async-trait.workspace = true
 bincode.workspace = true
 derive_more.workspace = true
@@ -26,7 +27,6 @@ serde_repr.workspace = true
 serde_with.workspace = true
 slog.workspace = true
 tokio.workspace = true
-tokio-tar.workspace = true
 
 [dev-dependencies]
 clap.workspace = true

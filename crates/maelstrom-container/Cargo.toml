@@ -12,6 +12,7 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 anyhow_trace.workspace = true
+astral-tokio-tar.workspace = true
 async-compression.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
@@ -35,7 +36,6 @@ serde_json.workspace = true
 serde_repr.workspace = true
 slog.workspace = true
 tokio-native-tls.workspace = true
-tokio-tar.workspace = true
 tokio-util.workspace = true
 tokio.workspace = true
 toml.workspace = true
