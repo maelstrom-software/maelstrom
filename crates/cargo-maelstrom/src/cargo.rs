@@ -134,9 +134,9 @@ impl<StreamT: io::Read> GenericTestArtifactStream<StreamT> {
             if !pkg.unbuilt_non_test_binaries.remove(&artifact.target.name) {
                 bail!(
                     "unexpected binary {} built for package {}. expected {:?}",
-                    &artifact.target.name,
-                    &artifact.package_id,
-                    &pkg.unbuilt_non_test_binaries
+                    artifact.target.name,
+                    artifact.package_id,
+                    pkg.unbuilt_non_test_binaries
                 )
             }
         } else if artifact.executable.is_some() && artifact.profile.test {

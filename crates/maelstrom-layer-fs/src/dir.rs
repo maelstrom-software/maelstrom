@@ -223,7 +223,7 @@ impl DirectoryDataWriter {
             bail!("set_opaque_dir on whiteout entry");
         };
         if data.kind != FileType::Directory {
-            bail!("set_opaque_dir on entry of kind {:?}", &data.kind);
+            bail!("set_opaque_dir on entry of kind {:?}", data.kind);
         }
         data.opaque_dir = opaque;
         self.tree
