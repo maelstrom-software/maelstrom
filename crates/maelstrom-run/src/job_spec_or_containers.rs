@@ -2,11 +2,8 @@
 
 use anyhow::Result;
 use maelstrom_client::spec::{ContainerSpec, JobSpec};
-use serde::{
-    __private::de::{Content, ContentRefDeserializer},
-    de::Deserializer,
-    Deserialize,
-};
+use serde::{de::Deserializer, Deserialize};
+use serde_content_ref::{Content, ContentRefDeserializer};
 use std::{collections::HashMap, io::Read};
 
 /// These are the objects that we read from stdin or the file specified on the command-line. We
@@ -54,13 +51,16 @@ impl<'de> Deserialize<'de> for JobSpecOrContainers {
         let content = Content::deserialize(deserializer)?;
         if let Content::Map(fields) = &content {
             if let [(key, value)] = fields.as_slice() {
-                if let Some(key) = key.as_str() {
-                    if key == "containers" {
-                        return HashMap::<String, ContainerSpec>::deserialize(
-                            ContentRefDeserializer::<D::Error>::new(value),
-                        )
-                        .map(Self::Containers);
-                    }
+                let key = match key {
+                    Content::String(key) => Some(key.as_str()),
+                    Content::Str(key) => Some(*key),
+                    _ => None,
+                };
+                if key == Some("containers") {
+                    return HashMap::<String, ContainerSpec>::deserialize(
+                        ContentRefDeserializer::<D::Error>::new(value),
+                    )
+                    .map(Self::Containers);
                 }
             }
         }

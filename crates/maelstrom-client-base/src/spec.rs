@@ -15,10 +15,10 @@ use maelstrom_base::{
 };
 use maelstrom_util::template::TemplateVariables;
 use serde::{
-    __private::de::{Content, ContentRefDeserializer},
     de::{Deserializer, Error as _},
     Deserialize, Serialize,
 };
+use serde_content_ref::{Content, ContentRefDeserializer};
 use std::{
     collections::BTreeMap,
     env::{self, VarError},
@@ -1236,7 +1236,12 @@ impl<'de> Deserialize<'de> for LayerSpec {
             ));
         };
         let Some(kind) = fields.iter().find_map(|(key, _)| {
-            key.as_str().and_then(|field| match field {
+            let field = match key {
+                Content::String(field) => field.as_str(),
+                Content::Str(field) => field,
+                _ => return None,
+            };
+            match field {
                 "tar" => Some(LayerSpecType::Tar),
                 "glob" => Some(LayerSpecType::Glob),
                 "paths" => Some(LayerSpecType::Paths),
@@ -1245,7 +1250,7 @@ impl<'de> Deserialize<'de> for LayerSpec {
                 "shared_library_dependencies" => Some(LayerSpecType::SharedLibraryDependencies),
                 "command" => Some(LayerSpecType::Command),
                 _ => None,
-            })
+            }
         }) else {
             return Err(D::Error::custom("couldn't determine layer type"));
         };
