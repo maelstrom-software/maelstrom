@@ -9,9 +9,7 @@ pub fn read_shared_libraries(path: &Path) -> Result<Vec<PathBuf>, lddtree::Error
 
     let mut paths = BTreeSet::new();
     if let Some(p) = deps.interpreter {
-        if let Some(lib) = deps.libraries.get(&p) {
-            paths.insert(lib.path.clone());
-        }
+        paths.insert(p.into());
     }
 
     fn walk_deps(

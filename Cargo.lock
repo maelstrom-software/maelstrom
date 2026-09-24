@@ -3622,13 +3622,14 @@ dependencies = [
 
 [[package]]
 name = "lddtree"
-version = "0.3.8"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "547a362ad16dead8837d5b30402a81b05bb57c352044389f8748f4f2dbd51914"
+checksum = "62b602caaaa7782b416e6f819fe721822045a9163aa03083e6309c260f1ce9b3"
 dependencies = [
  "fs-err",
  "glob",
  "goblin",
+ "memmap2",
 ]
 
 [[package]]
