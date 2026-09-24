@@ -82,23 +82,25 @@ impl CloneArgs {
 }
 
 #[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
-pub struct CloneFlags(c_int);
+pub struct CloneFlags(u64);
 
 impl CloneFlags {
-    pub const CLEAR_SIGHAND: Self = Self(libc::CLONE_CLEAR_SIGHAND);
-    pub const FILES: Self = Self(libc::CLONE_FILES);
-    pub const FS: Self = Self(libc::CLONE_FS);
-    pub const NEWCGROUP: Self = Self(libc::CLONE_NEWCGROUP);
-    pub const NEWIPC: Self = Self(libc::CLONE_NEWIPC);
-    pub const NEWNET: Self = Self(libc::CLONE_NEWNET);
-    pub const NEWNS: Self = Self(libc::CLONE_NEWNS);
-    pub const NEWPID: Self = Self(libc::CLONE_NEWPID);
-    pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER);
-    pub const VM: Self = Self(libc::CLONE_VM);
-    pub const VFORK: Self = Self(libc::CLONE_VFORK);
+    // This flag doesn't fit in a c_int, so libc's c_int constant is truncated to 0. It's only
+    // usable with clone3, which takes 64-bit flags. See libc issue #3584.
+    pub const CLEAR_SIGHAND: Self = Self(0x100000000);
+    pub const FILES: Self = Self(libc::CLONE_FILES as u64);
+    pub const FS: Self = Self(libc::CLONE_FS as u64);
+    pub const NEWCGROUP: Self = Self(libc::CLONE_NEWCGROUP as u64);
+    pub const NEWIPC: Self = Self(libc::CLONE_NEWIPC as u64);
+    pub const NEWNET: Self = Self(libc::CLONE_NEWNET as u64);
+    pub const NEWNS: Self = Self(libc::CLONE_NEWNS as u64);
+    pub const NEWPID: Self = Self(libc::CLONE_NEWPID as u64);
+    pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER as u64);
+    pub const VM: Self = Self(libc::CLONE_VM as u64);
+    pub const VFORK: Self = Self(libc::CLONE_VFORK as u64);
 
     fn as_u64(&self) -> u64 {
-        self.0.try_into().unwrap()
+        self.0
     }
 }
 
