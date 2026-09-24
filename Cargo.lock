@@ -2805,6 +2805,9 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "heck"
@@ -3701,11 +3704,11 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.14.0"
+version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f8cc7106155f10bdf99a6f379688f543ad6596a415375b36a59a054ceda1198"
+checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
 dependencies = [
- "hashbrown 0.15.5",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -3765,7 +3768,7 @@ dependencies = [
  "hyper-tungstenite",
  "hyper-util",
  "itertools 0.14.0",
- "lru 0.14.0",
+ "lru 0.18.5",
  "maelstrom-base",
  "maelstrom-github",
  "maelstrom-macro",
@@ -4018,7 +4021,7 @@ dependencies = [
  "clap",
  "derive_more",
  "futures",
- "lru 0.14.0",
+ "lru 0.18.5",
  "maelstrom-base",
  "maelstrom-fuse",
  "maelstrom-linux",
@@ -4214,7 +4217,7 @@ dependencies = [
  "indoc",
  "itertools 0.14.0",
  "lddtree",
- "lru 0.14.0",
+ "lru 0.18.5",
  "maelstrom-base",
  "maelstrom-github",
  "maelstrom-linux",
@@ -4280,7 +4283,7 @@ dependencies = [
  "futures",
  "indoc",
  "itertools 0.14.0",
- "lru 0.14.0",
+ "lru 0.18.5",
  "maelstrom-base",
  "maelstrom-fuse",
  "maelstrom-github",

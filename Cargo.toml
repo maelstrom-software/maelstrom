@@ -94,7 +94,7 @@ indoc = "2"
 itertools = "0.14"
 lddtree = "0.3"
 libc = "0.2"
-lru = "0.14"
+lru = "0.18"
 maelstrom-admin = { version = "0.15.0-dev", path = "crates/maelstrom-admin" }
 maelstrom-base = { version = "0.15.0-dev", path = "crates/maelstrom-base" }
 maelstrom-broker = { version = "0.15.0-dev", path = "crates/maelstrom-broker" }
