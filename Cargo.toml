@@ -71,7 +71,7 @@ egui-toast = "0.17"
 # number. Pin it until we upgrade egui.
 egui_gauge = "=0.1.5"
 elf = "0.8"
-enum-map = { version = "2", features = ["serde"] }
+enum-map = { version = "3", features = ["serde"] }
 enumset = { version = "1", features = ["serde"] }
 fs2 = "0.4"
 futures = "0.3"
