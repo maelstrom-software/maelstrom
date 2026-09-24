@@ -1686,8 +1686,8 @@ mod tests {
         let (_kill_event_sender, kill_event_receiver) = sync::event();
         task::spawn_blocking(move || {
             Executor::new(
-                RootBuf::new(tempfile::tempdir().unwrap().into_path()),
-                RootBuf::new(tempfile::tempdir().unwrap().into_path()),
+                RootBuf::new(tempfile::tempdir().unwrap().keep()),
+                RootBuf::new(tempfile::tempdir().unwrap().keep()),
                 &clock,
             )
             .unwrap()

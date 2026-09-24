@@ -123,7 +123,7 @@ impl super::Fs for Fs {
     }
 
     fn persist_temp_dir(&self, temp_dir: Self::TempDir, target: &Path) -> io::Result<()> {
-        fs::rename(temp_dir.0.into_path(), target)
+        fs::rename(temp_dir.0.keep(), target)
     }
 }
 
