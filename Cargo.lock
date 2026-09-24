@@ -3421,6 +3421,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3784,7 +3793,7 @@ dependencies = [
  "hyper 1.11.1",
  "hyper-tungstenite",
  "hyper-util",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lru 0.18.5",
  "maelstrom-base",
  "maelstrom-github",
@@ -3884,7 +3893,7 @@ dependencies = [
  "futures",
  "globset",
  "indexmap 2.14.2",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "maelstrom-base",
  "maelstrom-client-base",
  "maelstrom-container",
@@ -4171,7 +4180,7 @@ dependencies = [
  "globset",
  "indicatif",
  "indoc",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "maelstrom-base",
  "maelstrom-client",
  "maelstrom-client-process",
@@ -4232,7 +4241,7 @@ dependencies = [
  "heck",
  "indexmap 2.14.2",
  "indoc",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lddtree",
  "lru 0.18.5",
  "maelstrom-base",
@@ -4299,7 +4308,7 @@ dependencies = [
  "derive_more",
  "futures",
  "indoc",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lru 0.18.5",
  "maelstrom-base",
  "maelstrom-fuse",

@@ -2,7 +2,7 @@ use crate::{
     cache::{self, fs::Metadata},
     ext::{BoolExt as _, OptionExt as _},
 };
-use itertools::{Itertools, Position};
+use itertools::Itertools;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashSet},
@@ -763,7 +763,6 @@ impl Entry {
         mut component_path: ComponentPath,
     ) -> Lookup<'state> {
         for (position, component) in path.components().with_position() {
-            let is_last_component = matches!(position, Position::Last | Position::Only);
             (cur, component_path) = match component {
                 Component::Prefix(_) => {
                     unimplemented!("prefix components don't occur in Unix")
@@ -780,7 +779,7 @@ impl Entry {
                         match entries.get(name) {
                             Some(entry) => (entry, component_path.push(name)),
                             None => {
-                                if is_last_component {
+                                if position.is_last {
                                     return Lookup::FoundParent(component_path);
                                 } else {
                                     return Lookup::NotFound;
