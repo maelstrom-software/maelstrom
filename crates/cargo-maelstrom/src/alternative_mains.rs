@@ -7,7 +7,7 @@ use std::io::Write;
 /// Returns `true` if the given `CargoPackage` matches the given pattern
 pub fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
     let c = pattern::Context {
-        package: package.name.clone(),
+        package: package.name.to_string(),
         artifact: None,
         case: None,
     };
@@ -40,7 +40,7 @@ pub fn list_binaries(
         for target in &package.targets {
             let artifact_key = CargoArtifactKey::from(target);
             let c = pattern::Context {
-                package: package.name.clone(),
+                package: package.name.to_string(),
                 artifact: Some(pattern::Artifact {
                     name: artifact_key.name,
                     kind: artifact_key.kind,
@@ -50,7 +50,7 @@ pub fn list_binaries(
             if pattern::interpret_pattern(&filter, &c).unwrap_or(true) && target.test {
                 let target_kind = pattern::ArtifactKind::from_target(target);
                 let mut binary_name = String::new();
-                if target.name != package.name {
+                if package.name != target.name {
                     binary_name += " ";
                     binary_name += &target.name;
                 }
