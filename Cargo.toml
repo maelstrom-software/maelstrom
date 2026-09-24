@@ -59,7 +59,7 @@ combine = "4"
 concat-idents = "1"
 console = "0.15"
 console_error_panic_hook = "0.1"
-countio = { version = "0.2", features = ["tokio"] }
+countio = { version = "0.3", features = ["tokio"] }
 crossterm = { version = "0.29", default-features = false }
 darling = "0.20"
 derivative = "2"
