@@ -4277,11 +4277,11 @@ dependencies = [
 name = "maelstrom-macro"
 version = "0.15.0-dev"
 dependencies = [
- "darling 0.20.11",
+ "darling 0.24.1",
  "heck",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.6",
 ]
 
 [[package]]

@@ -88,6 +88,9 @@ impl FromField for ProtoBufExtField {
                         }
                         _ => {}
                     },
+                    // A `name = value` item whose value isn't an expression. `oneof` always has a
+                    // string value, so this is some other attribute, which we ignore.
+                    NestedMeta::NameValueInvalidExpr(_) => {}
                     NestedMeta::Lit(ref inner) => {
                         return Err(darling::Error::unsupported_format("literal").with_span(inner));
                     }
