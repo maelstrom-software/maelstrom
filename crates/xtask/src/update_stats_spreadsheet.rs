@@ -295,6 +295,12 @@ async fn upload_to_sheets(gh_data: GithubStats) -> Result<()> {
 // |_| |_| |_|\__,_|_|_| |_|
 //
 
+/// Add the latest GitHub statistics (clones, views, downloads, and forks) to the Maelstrom
+/// statistics Google spreadsheet.
+///
+/// GitHub is queried with the gh CLI, which must be able to read the repository's traffic (for
+/// example, by setting GH_TOKEN). SERVICE_ACCOUNT_JSON must contain the key of a Google service
+/// account that can edit the spreadsheet.
 #[derive(Debug, Parser)]
 pub struct CliArgs {}
 

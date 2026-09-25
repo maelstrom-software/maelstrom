@@ -5,10 +5,12 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Parser)]
 pub struct BenchmarkCliArgs {
+    /// How many times to spawn a child for each measurement.
     #[clap(long, default_value_t = 1_000)]
     iterations: u32,
 }
 
+/// Benchmark ways of spawning a child process.
 #[derive(Debug, Parser)]
 pub struct CliArgs {
     #[clap(subcommand)]
@@ -18,8 +20,12 @@ pub struct CliArgs {
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Compare std::process::Command, fork, posix_spawn, and clone with and without CLONE_VFORK.
     ComparisonBenchmark(BenchmarkCliArgs),
+    /// Measure how the time of clone(CLONE_VM | CLONE_VFORK) grows with the number of mappings in
+    /// the parent.
     CloneMappingBenchmark(BenchmarkCliArgs),
+    /// Measure how the time of fork grows with the number of mappings in the parent.
     ForkMappingBenchmark(BenchmarkCliArgs),
 }
 

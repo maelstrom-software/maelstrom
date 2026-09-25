@@ -395,6 +395,10 @@ fn patch_binary(path: &Path, report: &mut BinaryPatchReport) -> Result<()> {
     Ok(())
 }
 
+/// Make release binaries that run outside of Nix, and optionally upload them to a GitHub release.
+///
+/// Binaries are taken from target/release. The Nix dynamic loader and rpath are replaced with the
+/// system's, and requirements on glibc versions newer than 2.35 (Ubuntu 22.04) are removed.
 #[derive(Debug, Parser)]
 pub struct CliArgs {
     #[clap(subcommand)]
@@ -407,22 +411,22 @@ enum CliCommand {
     Install(InstallCliArgs),
 }
 
-/// Package and upload artifacts to github.
+/// Package all of the release binaries and upload them to a GitHub release.
 #[derive(Debug, Parser)]
 pub struct PublishCliArgs {
-    /// Version to add artifacts to
+    /// Tag of the GitHub release to add the packaged binaries to.
     version: String,
-    /// Just print the upload command instead of actually uploading
+    /// Just print the upload command instead of actually uploading.
     #[clap(long)]
     dry_run: bool,
 }
 
-/// Install a program to a local path
+/// Patch one release binary and install it to a local path.
 #[derive(Debug, Parser)]
 pub struct InstallCliArgs {
-    /// The name of the artifact to install
+    /// The name of the binary to install.
     artifact_name: String,
-    /// Where to install the artifact
+    /// Where to install the binary. If this is a directory, the binary is put in it.
     destination: PathBuf,
 }
 
