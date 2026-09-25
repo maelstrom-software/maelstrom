@@ -123,6 +123,16 @@ impl FakeAzure {
     }
 }
 
+/// A client for talking to a [`FakeAzure`]. The server only speaks plain HTTP, so the client
+/// trusts no certificates. That way, it doesn't need to load the system's CA certificates, which
+/// don't exist in the containers we run tests in.
+pub fn client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .tls_certs_only([])
+        .build()
+        .unwrap()
+}
+
 fn response(status: StatusCode) -> hyper::http::response::Builder {
     Response::builder().status(status)
 }

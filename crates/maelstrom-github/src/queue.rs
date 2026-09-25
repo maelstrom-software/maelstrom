@@ -389,7 +389,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fake_azure::FakeAzure;
+    use crate::fake_azure::{self, FakeAzure};
     use anyhow::bail;
     use std::{collections::HashMap, sync::Mutex};
 
@@ -718,11 +718,11 @@ mod tests {
 
         async fn get_blob(&self, backend_ids: BackendIds, key: &str) -> Result<Self::Blob> {
             assert_eq!(backend_ids, b_ids());
-            Ok(BlobClient::new(reqwest::Client::new(), self.0.url(key)))
+            Ok(BlobClient::new(fake_azure::client(), self.0.url(key)))
         }
 
         async fn create_blob(&self, key: &str) -> Result<Self::Blob> {
-            let blob = BlobClient::new(reqwest::Client::new(), self.0.url(key));
+            let blob = BlobClient::new(fake_azure::client(), self.0.url(key));
             blob.put_append_blob().await?;
             Ok(blob)
         }

@@ -234,12 +234,15 @@ fn retry_after(response: &Response) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{fake_azure::FakeAzure, QueueBlob as _, ReadResponse};
+    use crate::{
+        fake_azure::{self, FakeAzure},
+        QueueBlob as _, ReadResponse,
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::AsyncReadExt as _;
 
     fn client(fake: &FakeAzure, name: &str) -> BlobClient {
-        BlobClient::new(reqwest::Client::new(), fake.url(name))
+        BlobClient::new(fake_azure::client(), fake.url(name))
     }
 
     async fn put_block_blob(blob: &BlobClient, data: &'static [u8]) -> Result<()> {
@@ -383,7 +386,7 @@ mod tests {
         ));
 
         // The SAS URL is no longer accepted.
-        let expired = BlobClient::new(reqwest::Client::new(), fake.unauthorized_url("queue"));
+        let expired = BlobClient::new(fake_azure::client(), fake.unauthorized_url("queue"));
         assert!(matches!(
             expired.read(0, &None).await.unwrap(),
             ReadResponse::AuthenticationFailed
@@ -411,7 +414,7 @@ mod tests {
     #[tokio::test]
     async fn non_transient_failures_are_not_retried() {
         let fake = FakeAzure::start().await;
-        let blob = BlobClient::new(reqwest::Client::new(), fake.unauthorized_url("artifact"));
+        let blob = BlobClient::new(fake_azure::client(), fake.unauthorized_url("artifact"));
         let calls = AtomicUsize::new(0);
 
         let err = blob

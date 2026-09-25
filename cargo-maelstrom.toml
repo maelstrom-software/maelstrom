@@ -97,6 +97,10 @@ layers = [{ stubs = ["/tmp/"] }, { paths = ["crates/maelstrom-container/src/busy
 mounts = [{ type = "tmp", mount_point = "/tmp" }]
 
 [[directives]]
+filter = "package.equals(maelstrom-github)"
+network = "loopback"
+
+[[directives]]
 filter = "package.equals(maelstrom-util) && name.starts_with(signal::)"
 added_layers = [
     { stubs = ["/proc/", "/dev/null"] }
