@@ -1,8 +1,10 @@
+mod sheets;
+
 use anyhow::{bail, Result};
 use chrono::{DateTime, NaiveDate, Utc};
 use clap::Parser;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_sheets::{get_sheets, service_account_from_env};
+use sheets::Sheets;
 use std::{
     collections::BTreeMap,
     io,
@@ -201,11 +203,11 @@ impl HasDay for ForksSheetsEntry {
 const DOCUMENT_ID: &str = "1AW1EMyKAK4wsGEuRBIU7Yh21k0H6SXopvqpOSv5RCvA";
 
 async fn merge_sheet_entries<EntryT: DeserializeOwned + Serialize + HasDay>(
-    sheets: &mut google_sheets4::Sheets,
+    sheets: &Sheets,
     tab_name: &str,
     data: Vec<EntryT>,
 ) -> Result<()> {
-    let existing: Vec<EntryT> = serde_sheets::read_all(sheets, DOCUMENT_ID, tab_name).await?;
+    let existing: Vec<EntryT> = sheets.read_all(DOCUMENT_ID, tab_name).await?;
 
     let combined: BTreeMap<_, _> = existing
         .into_iter()
@@ -214,7 +216,7 @@ async fn merge_sheet_entries<EntryT: DeserializeOwned + Serialize + HasDay>(
         .collect();
     let combined: Vec<_> = combined.values().collect();
 
-    serde_sheets::write_page(sheets, DOCUMENT_ID, tab_name, &combined).await?;
+    sheets.write_page(DOCUMENT_ID, tab_name, &combined).await?;
     Ok(())
 }
 
@@ -276,13 +278,12 @@ fn fork_count_data(forks: Vec<Repo>) -> Vec<ForksSheetsEntry> {
 
 #[tokio::main]
 async fn upload_to_sheets(gh_data: GithubStats) -> Result<()> {
-    let service_account = service_account_from_env().unwrap();
-    let mut sheets = get_sheets(service_account, Some("target/gsheets_token_cache.json")).await?;
+    let sheets = Sheets::from_env().await?;
 
-    merge_sheet_entries(&mut sheets, "Clones", clone_data(gh_data.clones)).await?;
-    merge_sheet_entries(&mut sheets, "Views", view_data(gh_data.views)).await?;
-    merge_sheet_entries(&mut sheets, "Downloads", downloads_data(gh_data.releases)?).await?;
-    merge_sheet_entries(&mut sheets, "Forks", fork_count_data(gh_data.forks)).await?;
+    merge_sheet_entries(&sheets, "Clones", clone_data(gh_data.clones)).await?;
+    merge_sheet_entries(&sheets, "Views", view_data(gh_data.views)).await?;
+    merge_sheet_entries(&sheets, "Downloads", downloads_data(gh_data.releases)?).await?;
+    merge_sheet_entries(&sheets, "Forks", fork_count_data(gh_data.forks)).await?;
 
     Ok(())
 }

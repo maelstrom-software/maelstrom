@@ -60,6 +60,7 @@ console = "0.16"
 console_error_panic_hook = "0.1"
 countio = { version = "0.3", features = ["tokio"] }
 crossterm = { version = "0.29", default-features = false }
+csv = "1"
 darling = "0.24"
 derivative = "2"
 derive_more = { version = "2", features = ["add", "add_assign", "constructor", "debug", "deref", "deref_mut", "display", "error", "from", "into", "into_iterator"] }
@@ -76,7 +77,6 @@ fs2 = "0.4"
 futures = "0.3"
 futures-lite = "2"
 get-size = { version = "0.1", features = ["derive"] }
-google-sheets4 = "3"
 globset = "0.4"
 gloo-net = "0.7"
 gloo-utils = "0.3"
@@ -92,6 +92,7 @@ indexmap = "2"
 indicatif = { version = "0.18", features = ["in_memory", "tokio"] }
 indoc = "2"
 itertools = "0.15"
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 lddtree = "0.5"
 libc = "0.2"
 lru = "0.18"
@@ -150,7 +151,6 @@ serde_json = { version = "1" }
 serde_repr = "0.1"
 serde_test = "1"
 serde_with = { version = "3", features = ["chrono"] }
-serde_sheets = "0.1"
 sha2 = "0.11"
 slog = { version = "2", features = ["dynamic-keys", "max_level_debug", "release_max_level_debug"] }
 slog-async = "2"

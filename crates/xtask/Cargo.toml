@@ -13,17 +13,18 @@ camino.workspace = true
 cargo_metadata.workspace = true
 chrono.workspace = true
 clap.workspace = true
+csv.workspace = true
 elf.workspace = true
-google-sheets4.workspace = true
+jsonwebtoken.workspace = true
 maelstrom-linux.workspace = true
 maelstrom-util.workspace = true
 regex.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["form"] }
 serde.workspace = true
 serde_json.workspace = true
-serde_sheets.workspace = true
 tokio.workspace = true
 tempfile.workspace = true
+url.workspace = true
 versions.workspace = true
 zerocopy.workspace = true
 
