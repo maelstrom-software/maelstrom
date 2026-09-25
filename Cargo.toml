@@ -117,7 +117,6 @@ maelstrom-worker-child = { version = "0.15.0-dev", path = "crates/maelstrom-work
 maelstrom-github = { version = "0.15.0-dev", path = "crates/maelstrom-github" }
 maplit = "1"
 memchr = "2"
-native-tls = "0.2"
 netlink-packet-core = "0.9"
 netlink-packet-route = "0.33"
 notify = "8"
@@ -144,6 +143,7 @@ regex = "1"
 regex-macro = "0.3"
 reqwest = { version = "0.13", features = [ "blocking", "json", "stream" ] }
 rstest = "0.27"
+rustls = "0.23"
 serde = { version = "1", features = ["derive"] }
 serde_content_ref = "0.1"
 serde_json = { version = "1" }
@@ -163,7 +163,7 @@ syn = { version = "3", features = ["full"] }
 tar = "0.4"
 tempfile = "3.20"
 tokio = { version = "1", features = [ "fs", "io-std", "io-util", "macros", "net", "process", "rt","rt-multi-thread", "signal", "sync", "time" ] }
-tokio-native-tls = "0.3"
+tokio-rustls = "0.26"
 tokio-util = { version = "0.7", features = [ "compat", "io" ] }
 toml = "1.1"
 tonic = "0.14"

@@ -6,6 +6,7 @@ use http_body_util::{combinators::BoxBody, BodyExt as _, Empty, Full, StreamBody
 use hyper::{body::Incoming, server::conn::http1, service::Service, Request, Response};
 use hyper_util::rt::tokio::TokioIo;
 use maelstrom_util::async_fs::Fs;
+use rustls::pki_types::{pem::PemObject as _, CertificateDer, PrivateKeyDer};
 use std::{
     future::Future,
     net::SocketAddr,
@@ -152,9 +153,12 @@ impl LocalRegistry {
     pub async fn run_until_error(self) -> Result<()> {
         let self_ = Arc::new(self);
 
-        let identity = native_tls::Identity::from_pkcs8(canned_cert(), canned_key())?;
-        let tls_acceptor =
-            tokio_native_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity)?);
+        let certs = CertificateDer::pem_slice_iter(canned_cert()).collect::<Result<_, _>>()?;
+        let key = PrivateKeyDer::from_pem_slice(canned_key())?;
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)?;
+        let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
 
         loop {
             let (stream, _) = self_.listener.accept().await?;
