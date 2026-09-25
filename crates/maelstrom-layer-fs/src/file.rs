@@ -1,5 +1,5 @@
 use crate::{
-    ty::{
+    types::{
         decode_with_rich_error, encode_with_rich_error, AttributesId, FileAttributes, FileData,
         FileId, FileTableEntry, FileType, LayerFsVersion, LayerId,
     },

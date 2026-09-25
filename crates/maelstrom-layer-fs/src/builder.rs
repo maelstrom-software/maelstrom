@@ -1,7 +1,7 @@
 use crate::{
     dir::{DirectoryDataReader, DirectoryDataWriter, OrderedDirectoryStream},
     file::{FileDataInput, FileMetadataWriter},
-    ty::{
+    types::{
         DirectoryEntryData, DirectoryEntryFileData, FileAttributes, FileId, FileType, LayerId,
         LayerSuper,
     },

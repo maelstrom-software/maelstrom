@@ -1,6 +1,6 @@
 use crate::{
     avl::{AvlNode, AvlPtr, AvlStorage, AvlTree, FlatAvlPtrOption},
-    ty::{
+    types::{
         decode_with_rich_error, encode_with_rich_error, DirectoryEntryData, DirectoryOffset,
         FileId, FileType, LayerFsVersion,
     },

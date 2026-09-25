@@ -101,12 +101,12 @@ mod avl;
 mod builder;
 mod dir;
 mod file;
-mod ty;
+mod types;
 
 pub use builder::*;
 pub use dir::DirectoryDataReader;
 pub use file::FileMetadataReader;
-pub use ty::{FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper};
+pub use types::{FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper};
 
 use anyhow::{anyhow, Result};
 use anyhow_trace::anyhow_trace;
@@ -1004,7 +1004,7 @@ mod tests {
                             builder
                                 .add_file_path(
                                     path.as_ref(),
-                                    ty::FileAttributes {
+                                    types::FileAttributes {
                                         size,
                                         mode: Mode(mode),
                                         mtime: ARBITRARY_TIME,
@@ -1018,7 +1018,7 @@ mod tests {
                             builder
                                 .add_dir_path(
                                     path.as_ref(),
-                                    ty::FileAttributes {
+                                    types::FileAttributes {
                                         size,
                                         mode: Mode(mode),
                                         mtime: ARBITRARY_TIME,
