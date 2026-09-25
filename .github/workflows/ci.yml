@@ -175,18 +175,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install Latest mdBook
-        run: |
-          tag=$(curl 'https://api.github.com/repos/rust-lang/mdbook/releases/latest' | jq -r '.tag_name')
-          url="https://github.com/rust-lang/mdbook/releases/download/${tag}/mdbook-${tag}-x86_64-unknown-linux-gnu.tar.gz"
-          mkdir mdbook
-          curl -sSL $url | tar -xz --directory=./mdbook
-          echo `pwd`/mdbook >> $GITHUB_PATH
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Set up Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      # Use the mdBook from the nixpkgs locked in our flake, so its version only changes when
+      # flake.lock does.
       - name: Build Documentation
         run: |
           mkdir -p website/static/doc/book
           cd doc/book
-          ./build-all-versions.sh ../../website/static/doc/book
+          nix shell --inputs-from ../.. nixpkgs#mdbook --command \
+            ./build-all-versions.sh ../../website/static/doc/book
       - name: Install Zola
         uses: taiki-e/install-action@v2
         with:
