@@ -389,6 +389,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fake_azure::FakeAzure;
     use anyhow::bail;
     use std::{collections::HashMap, sync::Mutex};
 
@@ -707,6 +708,72 @@ mod tests {
         let mut queue_a = GitHubQueue::connect(conn, "foo").await.unwrap();
         let msg = queue_a.read_msg().await.unwrap().unwrap();
         assert_eq!(msg, b"hello");
+    }
+
+    /// A connection whose blobs are real [`BlobClient`]s, talking HTTP to a fake Azure server.
+    struct FakeAzureConnection(FakeAzure);
+
+    impl QueueConnection for FakeAzureConnection {
+        type Blob = BlobClient;
+
+        async fn get_blob(&self, backend_ids: BackendIds, key: &str) -> Result<Self::Blob> {
+            assert_eq!(backend_ids, b_ids());
+            Ok(BlobClient::new(reqwest::Client::new(), self.0.url(key)))
+        }
+
+        async fn create_blob(&self, key: &str) -> Result<Self::Blob> {
+            let blob = BlobClient::new(reqwest::Client::new(), self.0.url(key));
+            blob.put_append_blob().await?;
+            Ok(blob)
+        }
+
+        async fn list(&self) -> Result<Vec<Artifact>> {
+            // This doesn't otherwise await, and callers poll it in a loop.
+            tokio::task::yield_now().await;
+
+            Ok(self
+                .0
+                .blob_names()
+                .into_iter()
+                .map(|name| Artifact {
+                    size: self.0.blob_len(&name).try_into().unwrap(),
+                    name,
+                    backend_ids: b_ids(),
+                    database_id: 1.into(),
+                })
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn ping_pong_over_http() {
+        let fake = FakeAzure::start().await;
+
+        let acceptor_conn = FakeAzureConnection(fake.clone());
+        let acceptor = tokio::task::spawn(async move {
+            let mut acceptor = GitHubQueueAcceptor::new(acceptor_conn, "foo")
+                .await
+                .unwrap();
+            let mut queue = acceptor.accept_one().await.unwrap();
+            for _ in 0..3 {
+                queue.write_msg(&b"ping"[..]).await.unwrap();
+                let msg = queue.read_msg().await.unwrap().unwrap();
+                assert_eq!(msg, b"pong");
+            }
+            queue.shut_down().await.unwrap();
+        });
+
+        let mut queue = GitHubQueue::connect(FakeAzureConnection(fake), "foo")
+            .await
+            .unwrap();
+        let mut pings = 0;
+        while let Some(msg) = queue.read_msg().await.unwrap() {
+            assert_eq!(msg, b"ping");
+            queue.write_msg(&b"pong"[..]).await.unwrap();
+            pings += 1;
+        }
+        assert_eq!(pings, 3);
+        acceptor.await.unwrap();
     }
 
     async fn acceptor(client: GitHubClient) {

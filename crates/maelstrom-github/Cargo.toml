@@ -27,6 +27,9 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util = { workspace = true, features = ["tokio"] }
 tokio.workspace = true
 sha2.workspace = true
 maelstrom-base.workspace = true

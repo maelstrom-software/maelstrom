@@ -3,6 +3,8 @@
 
 mod blob;
 mod client;
+#[cfg(test)]
+mod fake_azure;
 mod queue;
 
 use chrono::{DateTime, Utc};

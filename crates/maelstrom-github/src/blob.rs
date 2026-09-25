@@ -230,3 +230,202 @@ fn retry_after(response: &Response) -> Option<Duration> {
     let seconds = response.headers().get(RETRY_AFTER)?.to_str().ok()?;
     Some(Duration::from_secs(seconds.parse().ok()?))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{fake_azure::FakeAzure, QueueBlob as _, ReadResponse};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::AsyncReadExt as _;
+
+    fn client(fake: &FakeAzure, name: &str) -> BlobClient {
+        BlobClient::new(reqwest::Client::new(), fake.url(name))
+    }
+
+    async fn put_block_blob(blob: &BlobClient, data: &'static [u8]) -> Result<()> {
+        blob.put_block_blob(data.len() as u64, || async { Ok(data.into()) })
+            .await
+    }
+
+    async fn read_all(blob: &BlobClient) -> Vec<u8> {
+        let mut data = vec![];
+        blob.get()
+            .await
+            .unwrap()
+            .read_to_end(&mut data)
+            .await
+            .unwrap();
+        data
+    }
+
+    fn blob_error(err: anyhow::Error) -> (StatusCode, Option<String>) {
+        let BlobError { status, error_code } = err.downcast().unwrap();
+        (status, error_code)
+    }
+
+    #[tokio::test]
+    async fn block_blob_round_trip() {
+        let fake = FakeAzure::start().await;
+        let blob = client(&fake, "artifact");
+        let data: Vec<u8> = (0..1_000_000).map(|i| i as u8).collect();
+        let data: &'static [u8] = data.leak();
+
+        put_block_blob(&blob, data).await.unwrap();
+
+        assert_eq!(read_all(&blob).await, data);
+        for request in fake.requests() {
+            assert_eq!(request.ms_version.as_deref(), Some(API_VERSION));
+        }
+    }
+
+    #[tokio::test]
+    async fn get_missing_blob() {
+        let fake = FakeAzure::start().await;
+        let err = client(&fake, "missing").get().await.err().unwrap();
+        assert_eq!(
+            blob_error(err),
+            (StatusCode::NOT_FOUND, Some("BlobNotFound".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn append_blob() {
+        let fake = FakeAzure::start().await;
+        let blob = client(&fake, "queue");
+
+        blob.put_append_blob().await.unwrap();
+        blob.append_block(&b"hello, "[..]).await.unwrap();
+        blob.append_block(&b"world"[..]).await.unwrap();
+
+        assert_eq!(read_all(&blob).await, b"hello, world");
+        let appends: Vec<_> = fake
+            .requests()
+            .into_iter()
+            .filter(|r| {
+                r.query
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("comp=appendblock")
+            })
+            .collect();
+        assert_eq!(appends.len(), 2);
+        for append in appends {
+            assert_eq!(append.method, Method::PUT);
+            assert_eq!(append.path, "/container/queue");
+        }
+    }
+
+    #[tokio::test]
+    async fn append_to_block_blob_fails() {
+        let fake = FakeAzure::start().await;
+        let blob = client(&fake, "artifact");
+        put_block_blob(&blob, b"data").await.unwrap();
+        let err = blob.append_block(&b"more"[..]).await.unwrap_err();
+        assert_eq!(
+            blob_error(err),
+            (StatusCode::CONFLICT, Some("InvalidBlobType".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn get_from_and_etags() {
+        let fake = FakeAzure::start().await;
+        let blob = client(&fake, "queue");
+        blob.put_append_blob().await.unwrap();
+        blob.append_block(&b"abc"[..]).await.unwrap();
+
+        let (data, etag1) = blob.get_from(0, None).await.unwrap();
+        assert_eq!(data, b"abc");
+        let (data, etag2) = blob.get_from(1, None).await.unwrap();
+        assert_eq!(data, b"bc");
+        assert_eq!(etag1, etag2);
+
+        let err = blob.get_from(0, Some(&etag1)).await.unwrap_err();
+        assert_eq!(blob_error(err).0, StatusCode::NOT_MODIFIED);
+
+        let err = blob.get_from(3, None).await.unwrap_err();
+        assert_eq!(
+            blob_error(err),
+            (
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                Some("InvalidRange".into())
+            )
+        );
+
+        blob.append_block(&b"def"[..]).await.unwrap();
+        let (data, etag3) = blob.get_from(3, Some(&etag1)).await.unwrap();
+        assert_eq!(data, b"def");
+        assert_ne!(etag3, etag1);
+    }
+
+    #[tokio::test]
+    async fn queue_read_responses() {
+        let fake = FakeAzure::start().await;
+        let blob = client(&fake, "queue");
+        blob.put_append_blob().await.unwrap();
+
+        // Nothing has been written yet: Azure says the range is invalid.
+        assert!(matches!(
+            blob.read(0, &None).await.unwrap(),
+            ReadResponse::NoData
+        ));
+
+        blob.write(b"abc".to_vec()).await.unwrap();
+        let ReadResponse::Data { data, etag } = blob.read(0, &None).await.unwrap() else {
+            panic!("expected data");
+        };
+        assert_eq!(data, b"abc");
+
+        // Nothing new since we last read.
+        assert!(matches!(
+            blob.read(3, &Some(etag)).await.unwrap(),
+            ReadResponse::NoData
+        ));
+
+        // The SAS URL is no longer accepted.
+        let expired = BlobClient::new(reqwest::Client::new(), fake.unauthorized_url("queue"));
+        assert!(matches!(
+            expired.read(0, &None).await.unwrap(),
+            ReadResponse::AuthenticationFailed
+        ));
+    }
+
+    #[tokio::test]
+    async fn transient_failures_are_retried_with_a_fresh_body() {
+        let fake = FakeAzure::start().await;
+        let blob = client(&fake, "artifact");
+        let calls = AtomicUsize::new(0);
+
+        fake.fail_next(2);
+        blob.put_block_blob(4, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Ok(Body::from(&b"data"[..])) }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert_eq!(read_all(&blob).await, b"data");
+    }
+
+    #[tokio::test]
+    async fn non_transient_failures_are_not_retried() {
+        let fake = FakeAzure::start().await;
+        let blob = BlobClient::new(reqwest::Client::new(), fake.unauthorized_url("artifact"));
+        let calls = AtomicUsize::new(0);
+
+        let err = blob
+            .put_block_blob(4, || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async { Ok(Body::from(&b"data"[..])) }
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            blob_error(err),
+            (StatusCode::FORBIDDEN, Some("AuthenticationFailed".into()))
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+}
