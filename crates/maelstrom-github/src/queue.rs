@@ -1,11 +1,9 @@
 //! This module contains a message queue that is backed by GitHub artifacts. It allows for
 //! communication between jobs within the same workflow run.
 
-use crate::{two_hours_from_now, Artifact, BackendIds, GitHubClient};
+use crate::{two_hours_from_now, Artifact, BackendIds, BlobClient, BlobError, Etag, GitHubClient};
 use anyhow::{anyhow, Result};
-use azure_core::Etag;
-use azure_storage_blobs::prelude::BlobClient;
-use futures::stream::StreamExt as _;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
@@ -56,59 +54,28 @@ impl QueueConnection for GitHubClient {
 
 impl QueueBlob for BlobClient {
     async fn read(&self, index: usize, etag: &Option<Etag>) -> Result<ReadResponse> {
-        let mut builder = self.get().range(index..);
-
-        if let Some(etag) = etag {
-            builder = builder.if_match(azure_core::request_options::IfMatchCondition::NotMatch(
-                etag.to_string(),
-            ));
-        }
-
-        let mut stream = builder.into_stream();
-        let resp = stream
-            .next()
-            .await
-            .ok_or_else(|| anyhow!("missing read response"))?;
-        match resp {
-            Ok(resp) => {
-                let msg = resp.data.collect().await?;
-                Ok(ReadResponse::Data {
-                    data: msg.to_vec(),
-                    etag: resp.blob.properties.etag,
-                })
-            }
+        match self.get_from(index, etag.as_ref()).await {
+            Ok((data, etag)) => Ok(ReadResponse::Data { data, etag }),
             Err(err) => {
-                use azure_core::{error::ErrorKind, StatusCode};
-
-                match err.kind() {
-                    ErrorKind::HttpResponse {
-                        status: StatusCode::NotModified,
-                        error_code: Some(error_code),
-                    } if error_code == "ConditionNotMet" => {
-                        return Ok(ReadResponse::NoData);
+                if let Some(BlobError { status, error_code }) = err.downcast_ref() {
+                    match (*status, error_code.as_deref()) {
+                        (StatusCode::NOT_MODIFIED, _) => return Ok(ReadResponse::NoData),
+                        (StatusCode::RANGE_NOT_SATISFIABLE, Some("InvalidRange")) => {
+                            return Ok(ReadResponse::NoData);
+                        }
+                        (StatusCode::FORBIDDEN, Some("AuthenticationFailed")) => {
+                            return Ok(ReadResponse::AuthenticationFailed);
+                        }
+                        _ => {}
                     }
-                    ErrorKind::HttpResponse {
-                        status: StatusCode::RequestedRangeNotSatisfiable,
-                        error_code: Some(error_code),
-                    } if error_code == "InvalidRange" => {
-                        return Ok(ReadResponse::NoData);
-                    }
-                    ErrorKind::HttpResponse {
-                        status: StatusCode::Forbidden,
-                        error_code: Some(error_code),
-                    } if error_code == "AuthenticationFailed" => {
-                        return Ok(ReadResponse::AuthenticationFailed);
-                    }
-                    _ => {}
                 }
-                Err(err.into())
+                Err(err)
             }
         }
     }
 
     async fn write(&self, to_send: Vec<u8>) -> Result<()> {
-        self.append_block(to_send).await?;
-        Ok(())
+        self.append_block(to_send).await
     }
 }
 

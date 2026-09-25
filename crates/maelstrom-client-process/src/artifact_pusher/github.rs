@@ -5,10 +5,11 @@ use crate::{
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use maelstrom_base::{ArtifactUploadLocation, Sha256Digest};
-use maelstrom_github::{FileStreamBuilder, GitHubClient, SeekableStream};
+use maelstrom_github::{Body, GitHubClient};
 use maelstrom_util::async_fs::Fs;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::task::JoinSet;
+use tokio_util::io::ReaderStream;
 
 fn two_hours_from_now() -> DateTime<Utc> {
     Utc::now() + Duration::from_secs(60 * 60 * 2)
@@ -22,17 +23,24 @@ pub async fn push_one_artifact(
     success_callback: SuccessCb,
 ) -> Result<()> {
     let fs = Fs::new();
-    let file = fs.open_file(&path).await?;
-    let size = file.metadata().await?.len();
+    let size = fs.metadata(&path).await?.len();
 
     let upload_name = construct_upload_name(&digest, &path);
-    let prog = upload_tracker.new_task(&upload_name, size);
+    let prog = Arc::new(upload_tracker.new_task(&upload_name, size));
 
     let artifact_name = format!("maelstrom-cache-sha256-{digest}");
-    let file_stream = FileStreamBuilder::new(file.into_inner()).build().await?;
-    let stream = Box::new(UploadProgressReader::new(prog, file_stream)) as Box<dyn SeekableStream>;
     github_client
-        .upload(&artifact_name, Some(two_hours_from_now()), stream)
+        .upload_with(&artifact_name, Some(two_hours_from_now()), size, || {
+            // This is called again if the upload is retried, so start over each time.
+            let prog = prog.clone();
+            let path = path.clone();
+            async move {
+                prog.reset();
+                let file = Fs::new().open_file(&path).await?.into_inner();
+                let reader = UploadProgressReader::new(prog, file);
+                Ok(Body::wrap_stream(ReaderStream::new(reader)))
+            }
+        })
         .await?;
 
     success_callback(ArtifactUploadLocation::Remote);

@@ -41,8 +41,6 @@ async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 async-trait = "0.1"
 async-walkdir = "2"
 atomicbox = "0.4"
-azure_core = { version = "0.21", features = ["tokio-fs"] }
-azure_storage_blobs = "0.21"
 base64 = "0.23"
 bincode = "1"
 bracoxide = "0.1"
@@ -166,7 +164,7 @@ tar = "0.4"
 tempfile = "3.20"
 tokio = { version = "1", features = [ "fs", "io-std", "io-util", "macros", "net", "process", "rt","rt-multi-thread", "signal", "sync", "time" ] }
 tokio-native-tls = "0.3"
-tokio-util = { version = "0.7", features = [ "compat" ] }
+tokio-util = { version = "0.7", features = [ "compat", "io" ] }
 toml = "1.1"
 tonic = "0.14"
 tonic-prost = "0.14"
@@ -174,11 +172,11 @@ tonic-prost-build = "0.14"
 tower = { version = "0.5", features = ["util"] }
 tuple = "0.5"
 tui-term = "0.3"
-url = "2"
+url = { version = "2", features = ["serde"] }
 unicode-truncate = "3"
 unicode-width = "0.2"
 versions = "8"
-uuid = "1"
+uuid = { version = "1", features = ["v4"] }
 vt100 =  "0.16"
 walkdir = "2"
 wasm-bindgen = "0.2"

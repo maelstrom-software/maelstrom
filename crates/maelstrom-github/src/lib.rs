@@ -1,12 +1,14 @@
 //! This crate contains code that can communicate with GitHub's artifact API.
 //! See the documentation in the `client` module for more information.
 
+mod blob;
 mod client;
 mod queue;
 
 use chrono::{DateTime, Utc};
 use std::time::Duration;
 
+pub use blob::*;
 pub use client::*;
 pub use queue::*;
 

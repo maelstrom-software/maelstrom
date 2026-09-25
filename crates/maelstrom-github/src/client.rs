@@ -10,22 +10,17 @@
 //! generated from them, which can be found here:
 //! <https://github.com/actions/toolkit/blob/main/packages/artifact/src/generated/results/api/v1/artifact.ts>
 
-pub use azure_core::{
-    error::Result as AzureResult,
-    tokio::fs::{FileStream, FileStreamBuilder},
-    Body, SeekableStream,
-};
+pub use reqwest::Body;
 
+use crate::BlobClient;
 use anyhow::{anyhow, bail, Result};
-use azure_storage_blobs::prelude::BlobClient;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use derive_more::From;
-use futures::{stream::TryStreamExt as _, StreamExt as _};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
-use std::{io, str::FromStr};
+use std::{future::Future, str::FromStr};
 use tokio::io::AsyncRead;
-use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -270,7 +265,7 @@ impl GitHubClient {
             .await?;
 
         let upload_url = url::Url::parse(&resp.signed_upload_url)?;
-        Ok(BlobClient::from_sas_url(&upload_url)?)
+        Ok(BlobClient::new(self.client.client.clone(), upload_url))
     }
 
     /// Meant to be called on an upload which was started via [`Self::start_upload`] which has had
@@ -293,23 +288,39 @@ impl GitHubClient {
         Ok(())
     }
 
-    /// Upload the given content as an artifact. Once it returns success, the artifact should be
-    /// immediately available for download. The given content can be an in-memory buffer or a
-    /// [`FileStream`] created using [`FileStreamBuilder`].
+    /// Upload the given in-memory content as an artifact. Once it returns success, the artifact
+    /// should be immediately available for download.
     pub async fn upload(
         &self,
         name: &str,
         expires_at: Option<DateTime<Utc>>,
-        content: impl Into<Body>,
+        content: impl Into<Bytes>,
     ) -> Result<()> {
+        let content = content.into();
+        self.upload_with(name, expires_at, content.len().try_into()?, || {
+            let content = content.clone();
+            async move { Ok(content.into()) }
+        })
+        .await
+    }
+
+    /// Upload content of the given length as an artifact. The content is obtained by calling
+    /// `body`, which may be called more than once if the upload needs to be retried. Once it
+    /// returns success, the artifact should be immediately available for download.
+    pub async fn upload_with<BodyFnT, BodyFutT>(
+        &self,
+        name: &str,
+        expires_at: Option<DateTime<Utc>>,
+        content_length: u64,
+        body: BodyFnT,
+    ) -> Result<()>
+    where
+        BodyFnT: FnMut() -> BodyFutT,
+        BodyFutT: Future<Output = Result<Body>>,
+    {
         let blob_client = self.start_upload(name, expires_at).await?;
-        let body: Body = content.into();
-        let size = body.len();
-        blob_client
-            .put_block_blob(body)
-            .content_type("application/octet-stream")
-            .await?;
-        self.finish_upload(name, size).await?;
+        blob_client.put_block_blob(content_length, body).await?;
+        self.finish_upload(name, content_length.try_into()?).await?;
         Ok(())
     }
 
@@ -382,7 +393,7 @@ impl GitHubClient {
             )
             .await?;
         let url = Url::parse(&resp.signed_url)?;
-        Ok(BlobClient::from_sas_url(&url)?)
+        Ok(BlobClient::new(self.client.client.clone(), url))
     }
 
     /// Return a stream that downloads all the contents of the artifacts represented by the given
@@ -394,18 +405,8 @@ impl GitHubClient {
         &self,
         backend_ids: BackendIds,
         name: &str,
-    ) -> Result<impl AsyncRead + Unpin + Send + Sync + 'static> {
-        let blob_client = self.start_download(backend_ids, name).await?;
-        let mut page_stream = blob_client.get().chunk_size(u64::MAX).into_stream();
-        let single_page = page_stream
-            .next()
-            .await
-            .ok_or_else(|| anyhow!("missing response"))??;
-        Ok(single_page
-            .data
-            .map_err(io::Error::other)
-            .into_async_read()
-            .compat())
+    ) -> Result<impl AsyncRead + Unpin + Send + 'static> {
+        self.start_download(backend_ids, name).await?.get().await
     }
 }
 
