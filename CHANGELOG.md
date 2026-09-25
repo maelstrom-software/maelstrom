@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### General
+- Removed Maelstrom's dependency on OpenSSL. We now use rustls for all TLS, so
+  the binaries no longer link against libssl or libcrypto.
+  \[[480](https://github.com/maelstrom-software/maelstrom/issues/480)\]
+
 ## [0.14.0] - 2025-03-21
 
 ### General

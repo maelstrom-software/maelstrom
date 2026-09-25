@@ -42,7 +42,7 @@ wget -q -O - https://github.com/maelstrom-software/maelstrom/releases/latest/dow
 This will download and extract the latest release of `cargo-maelstrom` for
 Linux on the x86-64 architecture.
 
-The pre-built binaries have shared-library dependencies on libc and OpenSSL.
+The pre-built binaries have a shared-library dependency on libc.
 
 ## Installing on Arch Linux
 

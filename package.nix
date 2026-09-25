@@ -4,10 +4,8 @@
   craneLib,
   binaryen,
   mdbook,
-  pkg-config,
   protobuf,
   llvmPackages,
-  openssl,
   libiconv,
   python3,
   python3Packages,
@@ -54,7 +52,6 @@ let
     nativeBuildInputs = [
       binaryen
       black
-      pkg-config
       llvmPackages.bintools
       mypy
       protobuf
@@ -70,7 +67,7 @@ let
       git
     ];
 
-    buildInputs = [ openssl ] ++ optionals stdenv.hostPlatform.isDarwin [ libiconv ];
+    buildInputs = optionals stdenv.hostPlatform.isDarwin [ libiconv ];
 
     # Don't run the unit tests inside Nix build.
     doCheck = false;
